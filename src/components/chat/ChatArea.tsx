@@ -108,15 +108,44 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     }
   };
 
+  const fetchKnowledgeContext = async (): Promise<{ rules: string[]; fileUrls: string[] }> => {
+    if (!user) return { rules: [], fileUrls: [] };
+    const { data } = await supabase
+      .from("agent_knowledge" as any)
+      .select("*")
+      .eq("user_id", user.id);
+
+    if (!data || data.length === 0) return { rules: [], fileUrls: [] };
+
+    const rules: string[] = [];
+    const knowledgeFileUrls: string[] = [];
+
+    for (const item of data as any[]) {
+      if (item.type === "rule" && item.content) {
+        rules.push(item.title ? `[${item.title}]: ${item.content}` : item.content);
+      } else if (item.type === "file" && item.file_path) {
+        const { data: signedData } = await supabase.storage
+          .from("blueprints")
+          .createSignedUrl(item.file_path, 3600);
+        if (signedData?.signedUrl) knowledgeFileUrls.push(signedData.signedUrl);
+      }
+    }
+
+    return { rules, fileUrls: knowledgeFileUrls };
+  };
+
   const streamAIResponse = useCallback(
     async (chatMessages: { role: string; content: string }[], mode: "smart" | "step-by-step", fileUrls: string[]) => {
+      // Fetch user knowledge context
+      const knowledgeContext = await fetchKnowledgeContext();
+
       const resp = await fetch(CHAT_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ messages: chatMessages, mode, fileUrls }),
+        body: JSON.stringify({ messages: chatMessages, mode, fileUrls, knowledgeContext }),
       });
 
       if (!resp.ok) {

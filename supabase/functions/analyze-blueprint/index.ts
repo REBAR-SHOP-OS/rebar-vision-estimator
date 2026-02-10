@@ -235,12 +235,18 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, mode, fileUrls } = await req.json();
+    const { messages, mode, fileUrls, knowledgeContext } = await req.json();
     
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
-    const systemPrompt = mode === "step-by-step" ? STEP_BY_STEP_SYSTEM_PROMPT : SMART_SYSTEM_PROMPT;
+    let systemPrompt = mode === "step-by-step" ? STEP_BY_STEP_SYSTEM_PROMPT : SMART_SYSTEM_PROMPT;
+
+    // Prepend user knowledge context if available
+    if (knowledgeContext && knowledgeContext.rules && knowledgeContext.rules.length > 0) {
+      const rulesBlock = knowledgeContext.rules.join("\n\n");
+      systemPrompt = `## USER-DEFINED RULES & KNOWLEDGE (MUST follow these)\n${rulesBlock}\n\n---\n\n${systemPrompt}`;
+    }
 
     // Build messages array with file context
     const aiMessages: any[] = [
@@ -248,9 +254,14 @@ serve(async (req) => {
     ];
 
     // Process file URLs - convert PDFs to base64 data URLs, keep images as direct URLs
+    // Also include knowledge files
+    const allFileUrls = [...(fileUrls || [])];
+    if (knowledgeContext && knowledgeContext.fileUrls) {
+      allFileUrls.push(...knowledgeContext.fileUrls);
+    }
     const fileContentParts: any[] = [];
-    if (fileUrls && fileUrls.length > 0) {
-      for (const url of fileUrls) {
+    if (allFileUrls.length > 0) {
+      for (const url of allFileUrls) {
         const urlLower = url.toLowerCase().split('?')[0]; // remove query params for extension check
         if (urlLower.endsWith('.pdf')) {
           // Download PDF and convert to base64 data URL
