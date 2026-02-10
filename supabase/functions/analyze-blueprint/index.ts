@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -261,15 +262,19 @@ serve(async (req) => {
               continue;
             }
             const pdfBuffer = await pdfResponse.arrayBuffer();
-            const uint8Array = new Uint8Array(pdfBuffer);
-            // Convert to base64
-            let binary = '';
-            for (let i = 0; i < uint8Array.length; i++) {
-              binary += String.fromCharCode(uint8Array[i]);
+            const sizeMB = pdfBuffer.byteLength / (1024 * 1024);
+            console.log("PDF downloaded, size:", sizeMB.toFixed(2), "MB");
+            
+            // Skip PDFs larger than 15MB to avoid memory issues
+            if (sizeMB > 15) {
+              console.error("PDF too large for base64 conversion:", sizeMB.toFixed(2), "MB. Skipping.");
+              continue;
             }
-            const base64 = btoa(binary);
+            
+            // Use Deno std encodeBase64 - much more memory efficient than manual loop
+            const base64 = encodeBase64(pdfBuffer);
             const dataUrl = `data:application/pdf;base64,${base64}`;
-            console.log("PDF converted to base64, size:", Math.round(base64.length / 1024), "KB");
+            console.log("PDF converted to base64, base64 size:", Math.round(base64.length / 1024), "KB");
             fileContentParts.push({ type: "image_url", image_url: { url: dataUrl } });
           } catch (err) {
             console.error("Error converting PDF to base64:", err);
