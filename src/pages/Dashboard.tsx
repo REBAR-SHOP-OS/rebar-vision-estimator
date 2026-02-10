@@ -1,13 +1,20 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useLanguage, LANGUAGES, type Language } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X } from "lucide-react";
+import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe } from "lucide-react";
 import { toast } from "sonner";
 import ChatArea from "@/components/chat/ChatArea";
 import StepProgress from "@/components/chat/StepProgress";
 import logoBg from "@/assets/logo-bg.png";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface Project {
   id: string;
@@ -19,6 +26,7 @@ interface Project {
 const Dashboard: React.FC = () => {
   const { user, signOut } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { t, language, setLanguage, dir, currentLanguageInfo } = useLanguage();
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -134,7 +142,7 @@ const Dashboard: React.FC = () => {
   };
 
   return (
-    <div className="relative flex h-screen w-full overflow-hidden bg-background">
+    <div className="relative flex h-screen w-full overflow-hidden bg-background" dir={dir}>
       {/* Blurred background logo */}
       <div
         className="pointer-events-none fixed inset-0 z-0 flex items-center justify-center opacity-[0.07]"
@@ -169,7 +177,7 @@ const Dashboard: React.FC = () => {
             className="w-full justify-start gap-2 border-border text-sidebar-foreground hover:bg-sidebar-accent"
           >
             <Plus className="h-4 w-4" />
-            New Estimation
+            {t("newEstimation")}
           </Button>
         </div>
 
@@ -183,7 +191,7 @@ const Dashboard: React.FC = () => {
         {/* Project List */}
         <div className="flex-1 overflow-y-auto px-2 pt-1">
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1 px-3 pt-2">
-            Projects
+            {t("projects")}
           </p>
           {projects.map((project) => (
             <div
@@ -244,6 +252,31 @@ const Dashboard: React.FC = () => {
 
         {/* Bottom section */}
         <div className="border-t border-border p-3 space-y-1">
+          {/* Language Switcher */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start gap-2 text-sidebar-foreground"
+              >
+                <Globe className="h-4 w-4" />
+                {currentLanguageInfo.nativeName}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
+              {LANGUAGES.map((lang) => (
+                <DropdownMenuItem
+                  key={lang.code}
+                  onClick={() => setLanguage(lang.code)}
+                  className={language === lang.code ? "bg-accent" : ""}
+                >
+                  <span className="mr-2">{lang.nativeName}</span>
+                  <span className="text-muted-foreground text-xs">({lang.name})</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             variant="ghost"
             size="sm"
@@ -251,7 +284,7 @@ const Dashboard: React.FC = () => {
             className="w-full justify-start gap-2 text-sidebar-foreground"
           >
             {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            {theme === "dark" ? "Light Mode" : "Dark Mode"}
+            {theme === "dark" ? t("lightMode") : t("darkMode")}
           </Button>
           <Button
             variant="ghost"
@@ -260,7 +293,7 @@ const Dashboard: React.FC = () => {
             className="w-full justify-start gap-2 text-sidebar-foreground hover:text-destructive"
           >
             <LogOut className="h-4 w-4" />
-            Sign Out
+            {t("signOut")}
           </Button>
         </div>
       </aside>
@@ -277,11 +310,21 @@ const Dashboard: React.FC = () => {
           >
             <Menu className="h-5 w-5" />
           </Button>
-          <h1 className="ml-3 text-sm font-medium text-foreground truncate">
+          <h1 className="ml-3 text-sm font-medium text-foreground truncate flex-1">
             {activeProjectId
-              ? projects.find((p) => p.id === activeProjectId)?.name || "Estimation"
-              : "Rebar Estimator Pro"}
+              ? projects.find((p) => p.id === activeProjectId)?.name || t("estimation")
+              : t("appTitle")}
           </h1>
+          {/* Refresh Button */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => window.location.reload()}
+            className="h-8 w-8 text-muted-foreground"
+            title={t("refresh")}
+          >
+            <RefreshCw className="h-4 w-4" />
+          </Button>
         </header>
 
         {/* Chat or Welcome */}
@@ -302,14 +345,14 @@ const Dashboard: React.FC = () => {
           <div className="flex flex-1 items-center justify-center bg-background/50">
             <div className="text-center space-y-4">
               <h2 className="text-2xl font-semibold text-foreground">
-                Rebar Estimator Pro
+                {t("welcomeMessage")}
               </h2>
               <p className="text-muted-foreground max-w-md">
-                Upload your construction blueprints and get accurate rebar weight and wire mesh estimates powered by AI.
+                {t("uploadBlueprints")}
               </p>
               <Button onClick={handleNewEstimationClick} disabled={creatingProject} className="gap-2">
                 <Plus className="h-4 w-4" />
-                Start New Estimation
+                {t("startNewEstimation")}
               </Button>
             </div>
           </div>
