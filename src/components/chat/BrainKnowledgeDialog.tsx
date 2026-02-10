@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Brain, Upload, Trash2, FileText, Plus, Loader2, GraduationCap } from "lucide-react";
+import { Brain, Upload, Trash2, FileText, Plus, Loader2, GraduationCap, Lightbulb } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -306,6 +306,7 @@ const BrainKnowledgeDialog: React.FC = () => {
 
   const ruleCount = items.filter((i) => i.type === "rule").length;
   const fileCount = items.filter((i) => i.type === "file").length;
+  const learnedItems = items.filter((i) => i.type === "learned");
   const totalCount = items.length + trainingExamples.length;
 
   return (
@@ -346,6 +347,10 @@ const BrainKnowledgeDialog: React.FC = () => {
             <TabsTrigger value="training" className="flex-1 gap-1">
               <GraduationCap className="h-3.5 w-3.5" />
               Training ({trainingExamples.length})
+            </TabsTrigger>
+            <TabsTrigger value="learned" className="flex-1 gap-1">
+              <Lightbulb className="h-3.5 w-3.5" />
+              Learned ({learnedItems.length})
             </TabsTrigger>
           </TabsList>
 
@@ -415,7 +420,7 @@ const BrainKnowledgeDialog: React.FC = () => {
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept="image/*,.pdf,.txt,.csv"
+                accept="*"
                 onChange={handleFileUpload}
                 className="hidden"
               />
@@ -473,7 +478,7 @@ const BrainKnowledgeDialog: React.FC = () => {
                   ref={blueprintInputRef}
                   type="file"
                   multiple
-                  accept="image/*,.pdf"
+                  accept="*"
                   onChange={(e) => {
                     const files = Array.from(e.target.files || []).slice(0, 3);
                     setTrainingBlueprintFiles(files);
@@ -494,7 +499,7 @@ const BrainKnowledgeDialog: React.FC = () => {
                 <input
                   ref={answerInputRef}
                   type="file"
-                  accept=".xlsx,.xls,.pdf,.csv,.txt"
+                  accept="*"
                   onChange={handleAnswerFileSelect}
                   className="hidden"
                 />
@@ -546,6 +551,35 @@ const BrainKnowledgeDialog: React.FC = () => {
                     </p>
                   </div>
                   <button onClick={() => deleteTrainingExample(ex)} className="opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive/80 transition-opacity">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))
+            )}
+          </TabsContent>
+
+          {/* Learned Tab */}
+          <TabsContent value="learned" className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Knowledge automatically extracted from your conversations with the AI.
+            </p>
+            {learnedItems.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                No learnings yet. The agent will learn from your conversations automatically.
+              </p>
+            ) : (
+              learnedItems.map((item) => (
+                <div key={item.id} className="flex items-start gap-2 rounded-md border p-2 text-sm group">
+                  <Lightbulb className="h-4 w-4 text-yellow-500 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    {item.content && (
+                      <p className="text-xs text-muted-foreground line-clamp-4">{item.content}</p>
+                    )}
+                    <p className="text-[10px] text-muted-foreground/60 mt-1">
+                      {new Date(item.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <button onClick={() => deleteItem(item)} className="opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive/80 transition-opacity">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>

@@ -161,7 +161,7 @@ const Dashboard: React.FC = () => {
             ref={newProjectFileInputRef}
             type="file"
             multiple
-            accept="image/*,.pdf,.dwg,.dxf"
+            accept="*"
             onChange={handleNewProjectFileSelect}
             className="hidden"
           />
