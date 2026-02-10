@@ -248,6 +248,12 @@ serve(async (req) => {
       systemPrompt = `## USER-DEFINED RULES & KNOWLEDGE (MUST follow these)\n${rulesBlock}\n\n---\n\n${systemPrompt}`;
     }
 
+    // Prepend learned knowledge if available
+    if (knowledgeContext && knowledgeContext.learnedRules && knowledgeContext.learnedRules.length > 0) {
+      const learnedBlock = knowledgeContext.learnedRules.join("\n\n");
+      systemPrompt = `## LEARNED FROM PREVIOUS CONVERSATIONS (Apply these insights)\n${learnedBlock}\n\n---\n\n${systemPrompt}`;
+    }
+
     // Inject training examples into system prompt
     if (knowledgeContext && knowledgeContext.trainingExamples && knowledgeContext.trainingExamples.length > 0) {
       let trainingBlock = `\n\n## TRAINING EXAMPLES — REFERENCE CALCULATIONS (MUST study and follow this methodology)\n\n`;

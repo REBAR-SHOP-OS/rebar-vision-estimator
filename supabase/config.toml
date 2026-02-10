@@ -2,3 +2,6 @@ project_id = "ylfvyurpqplbijjfuuns"
 
 [functions.analyze-blueprint]
 verify_jwt = false
+
+[functions.extract-learning]
+verify_jwt = false

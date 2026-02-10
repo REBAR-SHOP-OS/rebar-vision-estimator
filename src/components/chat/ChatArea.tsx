@@ -27,6 +27,7 @@ interface ChatAreaProps {
 }
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-blueprint`;
+const LEARN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-learning`;
 
 const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialFilesConsumed, onProjectNameChange, onStepChange, onModeChange }) => {
   const { user } = useAuth();
@@ -41,6 +42,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadProgress, setUploadProgress] = useState<{ fileName: string; progress: number } | null>(null);
+  const messageCountSinceLastLearn = useRef(0);
 
   useEffect(() => {
     // Reset state when switching projects
@@ -117,8 +119,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     }
   };
 
-  const fetchKnowledgeContext = async (): Promise<{ rules: string[]; fileUrls: string[]; trainingExamples: { title: string; answerText: string }[] }> => {
-    if (!user) return { rules: [], fileUrls: [], trainingExamples: [] };
+  const fetchKnowledgeContext = async (): Promise<{ rules: string[]; fileUrls: string[]; trainingExamples: { title: string; answerText: string }[]; learnedRules: string[] }> => {
+    if (!user) return { rules: [], fileUrls: [], trainingExamples: [], learnedRules: [] };
     
     // Fetch knowledge items
     const { data } = await supabase
@@ -128,11 +130,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
     const rules: string[] = [];
     const knowledgeFileUrls: string[] = [];
+    const learnedRules: string[] = [];
 
     if (data && data.length > 0) {
       for (const item of data as any[]) {
         if (item.type === "rule" && item.content) {
           rules.push(item.title ? `[${item.title}]: ${item.content}` : item.content);
+        } else if (item.type === "learned" && item.content) {
+          learnedRules.push(item.content);
         } else if (item.type === "file" && item.file_path) {
           const { data: signedData } = await supabase.storage
             .from("blueprints")
@@ -157,7 +162,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       }
     }
 
-    return { rules, fileUrls: knowledgeFileUrls, trainingExamples };
+    return { rules, fileUrls: knowledgeFileUrls, trainingExamples, learnedRules };
   };
 
   const streamAIResponse = useCallback(
@@ -259,6 +264,27 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     []
   );
 
+  // Fire-and-forget: extract learnings from chat
+  const triggerLearning = useCallback((allMessages: { role: string; content: string }[]) => {
+    if (!user) return;
+    messageCountSinceLastLearn.current++;
+    if (messageCountSinceLastLearn.current < 5) return;
+    if (allMessages.length < 3) return;
+    messageCountSinceLastLearn.current = 0;
+    
+    fetch(LEARN_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+      },
+      body: JSON.stringify({
+        messages: allMessages.slice(-10), // last 10 messages for context
+        userId: user.id,
+      }),
+    }).catch(() => {}); // fire-and-forget
+  }, [user]);
+
   const handleModeSelect = async (mode: "smart" | "step-by-step") => {
     if (!user) return;
     setShowModePicker(false);
@@ -290,6 +316,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       const chatHistory = [{ role: "user", content: `I've uploaded my blueprint files. Please begin the ${mode === "smart" ? "complete automatic" : "step-by-step"} estimation process.` }];
 
       const fullContent = await streamAIResponse(chatHistory, mode, uploadedFiles);
+
+      // Trigger learning extraction
+      triggerLearning([...chatHistory, { role: "assistant", content: fullContent }]);
 
       // Save assistant response to DB
       await supabase.from("messages").insert({
@@ -347,6 +376,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         chatHistory.push({ role: "user", content: msgContent });
 
         const fullContent = await streamAIResponse(chatHistory, calculationMode, uploadedFiles);
+
+        // Trigger learning extraction
+        triggerLearning([...chatHistory, { role: "assistant", content: fullContent }]);
 
         await supabase.from("messages").insert({
           project_id: projectId,
@@ -530,7 +562,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               ref={fileInputRef}
               type="file"
               multiple
-              accept="image/*,.pdf,.dwg,.dxf"
+              accept="*"
               onChange={handleFileUpload}
               className="hidden"
             />
