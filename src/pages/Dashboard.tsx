@@ -144,17 +144,11 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="relative flex h-screen w-full overflow-hidden bg-background" dir={dir}>
-      {/* Blurred background logo */}
+      {/* Blueprint background pattern */}
       <div
-        className="pointer-events-none fixed inset-0 z-0 flex items-center justify-center opacity-[0.07]"
+        className="pointer-events-none fixed inset-0 z-0 blueprint-bg"
         aria-hidden="true"
-      >
-        <img
-          src={logoBg}
-          alt=""
-          className="w-[600px] h-[600px] object-contain blur-3xl"
-        />
-      </div>
+      />
       {/* Sidebar */}
       <aside
         className={`${
@@ -346,7 +340,7 @@ const Dashboard: React.FC = () => {
             onModeChange={(mode) => setCalculationMode(mode)}
           />
         ) : (
-          <div className="flex flex-1 items-center justify-center bg-background/50">
+          <div className="flex flex-1 items-center justify-center blueprint-bg-major">
             <div className="text-center space-y-4">
               <h2 className="text-2xl font-semibold text-foreground">
                 {t("welcomeMessage")}
