@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Ruler, Building2 } from "lucide-react";
+import authLogo from "@/assets/auth-logo.png";
 
 const AuthPage: React.FC = () => {
   const { signIn, signUp } = useAuth();
@@ -41,7 +42,8 @@ const AuthPage: React.FC = () => {
       <Building2 className="absolute top-16 right-16 h-12 w-12 text-primary/[0.07] rotate-12" />
 
       <div className="glass-card rounded-xl w-full max-w-md">
-        <div className="flex flex-col space-y-1.5 p-6 text-center">
+        <div className="flex flex-col items-center space-y-1.5 p-6 text-center">
+          <img src={authLogo} alt="Rebar Estimator Pro" className="h-20 w-20 mb-2" />
           <h3 className="text-2xl font-bold text-foreground">
             Rebar Estimator Pro
           </h3>
