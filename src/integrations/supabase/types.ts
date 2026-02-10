@@ -47,6 +47,45 @@ export type Database = {
         }
         Relationships: []
       }
+      agent_training_examples: {
+        Row: {
+          answer_file_name: string | null
+          answer_file_path: string | null
+          answer_text: string | null
+          blueprint_file_names: string[] | null
+          blueprint_file_paths: string[] | null
+          created_at: string
+          description: string | null
+          id: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          answer_file_name?: string | null
+          answer_file_path?: string | null
+          answer_text?: string | null
+          blueprint_file_names?: string[] | null
+          blueprint_file_paths?: string[] | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          title: string
+          user_id: string
+        }
+        Update: {
+          answer_file_name?: string | null
+          answer_file_path?: string | null
+          answer_text?: string | null
+          blueprint_file_names?: string[] | null
+          blueprint_file_paths?: string[] | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       messages: {
         Row: {
           content: string
