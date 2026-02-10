@@ -394,7 +394,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange, onS
   };
 
   return (
-    <div className="flex flex-1 flex-col min-h-0">
+    <div className="flex flex-1 flex-col min-h-0 bg-background/50">
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-4 py-6 space-y-1">
@@ -450,7 +450,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange, onS
       </div>
 
       {/* Input Bar */}
-      <div className="border-t border-border bg-background p-4">
+      <div className="border-t border-border bg-background/80 backdrop-blur-sm p-4">
         <div className="mx-auto max-w-3xl">
           <div className="flex items-end gap-2 rounded-xl border border-border bg-chat-input p-2">
             <input
