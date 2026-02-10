@@ -7,6 +7,7 @@ import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X 
 import { toast } from "sonner";
 import ChatArea from "@/components/chat/ChatArea";
 import StepProgress from "@/components/chat/StepProgress";
+import logoBg from "@/assets/logo-bg.png";
 
 interface Project {
   id: string;
@@ -120,12 +121,23 @@ const Dashboard: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background">
+    <div className="relative flex h-screen w-full overflow-hidden bg-background">
+      {/* Blurred background logo */}
+      <div
+        className="pointer-events-none fixed inset-0 z-0 flex items-center justify-center opacity-[0.07]"
+        aria-hidden="true"
+      >
+        <img
+          src={logoBg}
+          alt=""
+          className="w-[600px] h-[600px] object-contain blur-3xl"
+        />
+      </div>
       {/* Sidebar */}
       <aside
         className={`${
           sidebarOpen ? "w-64" : "w-0"
-        } flex flex-col border-r border-border bg-sidebar transition-all duration-200 overflow-hidden flex-shrink-0`}
+        } relative z-10 flex flex-col border-r border-border bg-sidebar transition-all duration-200 overflow-hidden flex-shrink-0`}
       >
         {/* New Project Button */}
         <div className="p-3">
@@ -233,7 +245,7 @@ const Dashboard: React.FC = () => {
       </aside>
 
       {/* Main Area */}
-      <div className="flex flex-1 flex-col min-w-0">
+      <div className="relative z-10 flex flex-1 flex-col min-w-0">
         {/* Header */}
         <header className="flex h-12 items-center border-b border-border px-3 bg-background flex-shrink-0">
           <Button
