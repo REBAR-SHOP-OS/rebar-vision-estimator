@@ -19,11 +19,13 @@ interface Message {
 interface ChatAreaProps {
   projectId: string;
   onProjectNameChange?: (name: string) => void;
+  onStepChange?: (step: number | null) => void;
+  onModeChange?: (mode: "smart" | "step-by-step" | null) => void;
 }
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-blueprint`;
 
-const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange }) => {
+const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange, onStepChange, onModeChange }) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -58,7 +60,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange }) =
       // Check if mode was already selected
       const modeMsg = data.find((m: any) => m.metadata && (m.metadata as any).calculationMode);
       if (modeMsg) {
-        setCalculationMode((modeMsg.metadata as any).calculationMode);
+        const mode = (modeMsg.metadata as any).calculationMode;
+        setCalculationMode(mode);
+        onModeChange?.(mode);
+        onStepChange?.(1);
       }
     }
     setLoadingMessages(false);
@@ -183,6 +188,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange }) =
     if (!user) return;
     setShowModePicker(false);
     setCalculationMode(mode);
+    onModeChange?.(mode);
+    onStepChange?.(1);
     setLoading(true);
 
     const modeLabel = mode === "smart" ? "⚡ Smart Calculation" : "📋 Step-by-Step Calculation";
@@ -333,6 +340,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange }) =
 
     if (fileInputRef.current) fileInputRef.current.value = "";
     toast.success("Files uploaded successfully!");
+
+    // Auto-rename project to first uploaded file name (without extension)
+    if (files.length > 0) {
+      const firstName = files[0].name.replace(/\.[^/.]+$/, "");
+      await supabase.from("projects").update({ name: firstName }).eq("id", projectId);
+      onProjectNameChange?.(firstName);
+    }
 
     // Show mode picker after upload if not already selected
     if (!calculationMode && (uploadedFiles.length + newUrls.length) > 0) {
