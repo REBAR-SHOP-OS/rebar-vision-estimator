@@ -270,13 +270,25 @@ serve(async (req) => {
       allFileUrls.push(...knowledgeContext.fileUrls);
     }
     const fileContentParts: any[] = [];
+    const MAX_PDF_SIZE_MB = 8;
+    const MAX_TOTAL_FILES = 4;
+    let totalBase64Bytes = 0;
+    const MAX_TOTAL_BASE64_BYTES = 20 * 1024 * 1024; // 20MB total base64 budget
+
     if (allFileUrls.length > 0) {
-      for (const url of allFileUrls) {
-        const urlLower = url.toLowerCase().split('?')[0]; // remove query params for extension check
+      const urlsToProcess = allFileUrls.slice(0, MAX_TOTAL_FILES);
+      if (allFileUrls.length > MAX_TOTAL_FILES) {
+        console.log(`Limiting files from ${allFileUrls.length} to ${MAX_TOTAL_FILES}`);
+      }
+      for (const url of urlsToProcess) {
+        if (totalBase64Bytes >= MAX_TOTAL_BASE64_BYTES) {
+          console.log("Total base64 budget exceeded, skipping remaining files");
+          break;
+        }
+        const urlLower = url.toLowerCase().split('?')[0];
         if (urlLower.endsWith('.pdf')) {
-          // Download PDF and convert to base64 data URL
           try {
-            console.log("Downloading PDF for base64 conversion:", url.substring(0, 80) + "...");
+            console.log("Downloading PDF:", url.substring(0, 80) + "...");
             const pdfResponse = await fetch(url);
             if (!pdfResponse.ok) {
               console.error("Failed to download PDF:", pdfResponse.status);
@@ -284,24 +296,22 @@ serve(async (req) => {
             }
             const pdfBuffer = await pdfResponse.arrayBuffer();
             const sizeMB = pdfBuffer.byteLength / (1024 * 1024);
-            console.log("PDF downloaded, size:", sizeMB.toFixed(2), "MB");
+            console.log("PDF size:", sizeMB.toFixed(2), "MB");
             
-            // Skip PDFs larger than 15MB to avoid memory issues
-            if (sizeMB > 15) {
-              console.error("PDF too large for base64 conversion:", sizeMB.toFixed(2), "MB. Skipping.");
+            if (sizeMB > MAX_PDF_SIZE_MB) {
+              console.error(`PDF too large (${sizeMB.toFixed(2)}MB > ${MAX_PDF_SIZE_MB}MB). Skipping.`);
               continue;
             }
             
-            // Use Deno std encodeBase64 - much more memory efficient than manual loop
             const base64 = encodeBase64(pdfBuffer);
+            totalBase64Bytes += base64.length;
             const dataUrl = `data:application/pdf;base64,${base64}`;
-            console.log("PDF converted to base64, base64 size:", Math.round(base64.length / 1024), "KB");
+            console.log("PDF converted, base64:", Math.round(base64.length / 1024), "KB, total:", Math.round(totalBase64Bytes / 1024), "KB");
             fileContentParts.push({ type: "image_url", image_url: { url: dataUrl } });
           } catch (err) {
-            console.error("Error converting PDF to base64:", err);
+            console.error("Error converting PDF:", err);
           }
         } else {
-          // Image files (PNG, JPEG, WebP, GIF) - pass URL directly
           fileContentParts.push({ type: "image_url", image_url: { url } });
         }
       }
