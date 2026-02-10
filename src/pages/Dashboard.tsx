@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Plus, MessageSquare, Settings, LogOut, Sun, Moon, Menu, Trash2 } from "lucide-react";
+import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import ChatArea from "@/components/chat/ChatArea";
+import StepProgress from "@/components/chat/StepProgress";
 
 interface Project {
   id: string;
@@ -21,10 +22,22 @@ const Dashboard: React.FC = () => {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [creatingProject, setCreatingProject] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [currentStep, setCurrentStep] = useState<number | null>(null);
+  const [calculationMode, setCalculationMode] = useState<"smart" | "step-by-step" | null>(null);
+  const editInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadProjects();
   }, []);
+
+  useEffect(() => {
+    if (editingProjectId && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.select();
+    }
+  }, [editingProjectId]);
 
   const loadProjects = async () => {
     const { data, error } = await supabase
@@ -58,6 +71,8 @@ const Dashboard: React.FC = () => {
     setProjects((prev) => [data, ...prev]);
     setActiveProjectId(data.id);
     setCreatingProject(false);
+    setCurrentStep(null);
+    setCalculationMode(null);
   };
 
   const deleteProject = async (id: string, e: React.MouseEvent) => {
@@ -68,7 +83,40 @@ const Dashboard: React.FC = () => {
       return;
     }
     setProjects((prev) => prev.filter((p) => p.id !== id));
-    if (activeProjectId === id) setActiveProjectId(null);
+    if (activeProjectId === id) {
+      setActiveProjectId(null);
+      setCurrentStep(null);
+      setCalculationMode(null);
+    }
+  };
+
+  const startEditing = (id: string, name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingProjectId(id);
+    setEditName(name);
+  };
+
+  const saveProjectName = async () => {
+    if (!editingProjectId || !editName.trim()) {
+      setEditingProjectId(null);
+      return;
+    }
+    const { error } = await supabase
+      .from("projects")
+      .update({ name: editName.trim() })
+      .eq("id", editingProjectId);
+
+    if (!error) {
+      setProjects((prev) =>
+        prev.map((p) => (p.id === editingProjectId ? { ...p, name: editName.trim() } : p))
+      );
+    }
+    setEditingProjectId(null);
+  };
+
+  const cancelEditing = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingProjectId(null);
   };
 
   return (
@@ -92,27 +140,72 @@ const Dashboard: React.FC = () => {
           </Button>
         </div>
 
+        {/* Step Progress - shown when a project is active */}
+        {activeProjectId && (
+          <div className="border-b border-border">
+            <StepProgress currentStep={currentStep} mode={calculationMode} />
+          </div>
+        )}
+
         {/* Project List */}
-        <div className="flex-1 overflow-y-auto px-2">
+        <div className="flex-1 overflow-y-auto px-2 pt-1">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1 px-3 pt-2">
+            Projects
+          </p>
           {projects.map((project) => (
-            <button
+            <div
               key={project.id}
-              onClick={() => setActiveProjectId(project.id)}
-              className={`group flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
+              onClick={() => {
+                setActiveProjectId(project.id);
+                setCurrentStep(null);
+                setCalculationMode(null);
+              }}
+              className={`group flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm transition-colors cursor-pointer ${
                 activeProjectId === project.id
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                   : "text-sidebar-foreground hover:bg-sidebar-accent/50"
               }`}
             >
               <MessageSquare className="h-4 w-4 flex-shrink-0" />
-              <span className="truncate flex-1">{project.name}</span>
-              <button
-                onClick={(e) => deleteProject(project.id, e)}
-                className="opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </button>
+              {editingProjectId === project.id ? (
+                <div className="flex items-center gap-1 flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    ref={editInputRef}
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveProjectName();
+                      if (e.key === "Escape") setEditingProjectId(null);
+                    }}
+                    className="flex-1 min-w-0 bg-background border border-border rounded px-1.5 py-0.5 text-xs text-foreground outline-none"
+                  />
+                  <button onClick={() => saveProjectName()} className="text-primary">
+                    <Check className="h-3.5 w-3.5" />
+                  </button>
+                  <button onClick={cancelEditing} className="text-muted-foreground">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <span className="truncate flex-1">{project.name}</span>
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => startEditing(project.id, project.name, e)}
+                      className="hover:text-primary"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                    <button
+                      onClick={(e) => deleteProject(project.id, e)}
+                      className="hover:text-destructive"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           ))}
         </div>
 
@@ -167,6 +260,8 @@ const Dashboard: React.FC = () => {
                 prev.map((p) => (p.id === activeProjectId ? { ...p, name } : p))
               );
             }}
+            onStepChange={(step) => setCurrentStep(step)}
+            onModeChange={(mode) => setCalculationMode(mode)}
           />
         ) : (
           <div className="flex flex-1 items-center justify-center">
