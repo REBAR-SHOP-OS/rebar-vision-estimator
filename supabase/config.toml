@@ -1,1 +1,4 @@
 project_id = "ylfvyurpqplbijjfuuns"
+
+[functions.analyze-blueprint]
+verify_jwt = false

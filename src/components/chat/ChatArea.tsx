@@ -1,10 +1,11 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Paperclip, Send, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import ChatMessage from "./ChatMessage";
+import CalculationModePicker from "./CalculationModePicker";
 
 interface Message {
   id: string;
@@ -20,18 +21,24 @@ interface ChatAreaProps {
   onProjectNameChange?: (name: string) => void;
 }
 
+const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-blueprint`;
+
 const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange }) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(true);
+  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
+  const [showModePicker, setShowModePicker] = useState(false);
+  const [calculationMode, setCalculationMode] = useState<"smart" | "step-by-step" | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadMessages();
+    loadUploadedFiles();
   }, [projectId]);
 
   useEffect(() => {
@@ -46,10 +53,175 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange }) =
       .eq("project_id", projectId)
       .order("created_at", { ascending: true });
 
-    if (!error) {
-      setMessages((data as Message[]) || []);
+    if (!error && data) {
+      setMessages(data as Message[]);
+      // Check if mode was already selected
+      const modeMsg = data.find((m: any) => m.metadata && (m.metadata as any).calculationMode);
+      if (modeMsg) {
+        setCalculationMode((modeMsg.metadata as any).calculationMode);
+      }
     }
     setLoadingMessages(false);
+  };
+
+  const loadUploadedFiles = async () => {
+    const { data } = await supabase
+      .from("project_files")
+      .select("file_path, file_type")
+      .eq("project_id", projectId);
+
+    if (data && data.length > 0) {
+      const urls = await Promise.all(
+        data.map(async (f) => {
+          const { data: signedData } = await supabase.storage
+            .from("blueprints")
+            .createSignedUrl(f.file_path, 3600);
+          return signedData?.signedUrl || "";
+        })
+      );
+      setUploadedFiles(urls.filter(Boolean));
+    }
+  };
+
+  const streamAIResponse = useCallback(
+    async (chatMessages: { role: string; content: string }[], mode: "smart" | "step-by-step", fileUrls: string[]) => {
+      const resp = await fetch(CHAT_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({ messages: chatMessages, mode, fileUrls }),
+      });
+
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({ error: "AI request failed" }));
+        throw new Error(errData.error || `Request failed (${resp.status})`);
+      }
+
+      if (!resp.body) throw new Error("No response body");
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let textBuffer = "";
+      let fullContent = "";
+
+      const assistantId = crypto.randomUUID();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        textBuffer += decoder.decode(value, { stream: true });
+
+        let newlineIndex: number;
+        while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
+          let line = textBuffer.slice(0, newlineIndex);
+          textBuffer = textBuffer.slice(newlineIndex + 1);
+
+          if (line.endsWith("\r")) line = line.slice(0, -1);
+          if (line.startsWith(":") || line.trim() === "") continue;
+          if (!line.startsWith("data: ")) continue;
+
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === "[DONE]") break;
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+            if (content) {
+              fullContent += content;
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.id === assistantId) {
+                  return prev.map((m) => (m.id === assistantId ? { ...m, content: fullContent } : m));
+                }
+                return [
+                  ...prev,
+                  {
+                    id: assistantId,
+                    role: "assistant" as const,
+                    content: fullContent,
+                    created_at: new Date().toISOString(),
+                  },
+                ];
+              });
+            }
+          } catch {
+            textBuffer = line + "\n" + textBuffer;
+            break;
+          }
+        }
+      }
+
+      // Flush remaining
+      if (textBuffer.trim()) {
+        for (let raw of textBuffer.split("\n")) {
+          if (!raw) continue;
+          if (raw.endsWith("\r")) raw = raw.slice(0, -1);
+          if (!raw.startsWith("data: ")) continue;
+          const jsonStr = raw.slice(6).trim();
+          if (jsonStr === "[DONE]") continue;
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+            if (content) {
+              fullContent += content;
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, content: fullContent } : m))
+              );
+            }
+          } catch {}
+        }
+      }
+
+      return fullContent;
+    },
+    []
+  );
+
+  const handleModeSelect = async (mode: "smart" | "step-by-step") => {
+    if (!user) return;
+    setShowModePicker(false);
+    setCalculationMode(mode);
+    setLoading(true);
+
+    const modeLabel = mode === "smart" ? "⚡ Smart Calculation" : "📋 Step-by-Step Calculation";
+    const modeMsg: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: `Selected: **${modeLabel}**`,
+      metadata: { calculationMode: mode },
+      created_at: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, modeMsg]);
+
+    await supabase.from("messages").insert({
+      project_id: projectId,
+      user_id: user.id,
+      role: "user",
+      content: modeMsg.content,
+      metadata: { calculationMode: mode },
+    });
+
+    try {
+      const chatHistory = [{ role: "user", content: `I've uploaded my blueprint files. Please begin the ${mode === "smart" ? "complete automatic" : "step-by-step"} estimation process.` }];
+
+      const fullContent = await streamAIResponse(chatHistory, mode, uploadedFiles);
+
+      // Save assistant response to DB
+      await supabase.from("messages").insert({
+        project_id: projectId,
+        user_id: user.id,
+        role: "assistant",
+        content: fullContent,
+        metadata: { calculationMode: mode, step: 1 },
+      });
+    } catch (err: any) {
+      toast.error(err.message || "AI analysis failed");
+    }
+
+    setLoading(false);
   };
 
   const sendMessage = async () => {
@@ -63,46 +235,47 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange }) =
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    const msgContent = input.trim();
     setInput("");
     setLoading(true);
 
-    // Auto-resize textarea back
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
 
-    // Save user message to DB
-    const { error: saveError } = await supabase.from("messages").insert({
+    await supabase.from("messages").insert({
       project_id: projectId,
       user_id: user.id,
       role: "user",
-      content: userMessage.content,
+      content: msgContent,
     });
 
-    if (saveError) {
-      toast.error("Failed to save message");
+    // If no mode selected yet and files exist, show mode picker
+    if (!calculationMode && uploadedFiles.length > 0) {
+      setShowModePicker(true);
       setLoading(false);
       return;
     }
 
-    // Placeholder: AI response (will be replaced with edge function later)
-    const assistantMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "assistant",
-      content:
-        "Welcome to Rebar Estimator Pro! To get started, please upload your construction blueprint files (PDF or images). I'll analyze them and guide you through the estimation process step by step.\n\n**What I can do:**\n- 🔍 Scan and identify rebar scopes from blueprints\n- 📐 Extract dimensions and scales\n- ⚖️ Calculate rebar weight by size\n- 📊 Estimate welded wire mesh sheets\n- 📄 Generate PDF reports\n\nUpload your files using the 📎 button below to begin!",
-      created_at: new Date().toISOString(),
-    };
+    // If mode is selected, continue conversation with AI
+    if (calculationMode) {
+      try {
+        // Build chat history from messages
+        const chatHistory = messages
+          .filter((m) => m.role === "user" || m.role === "assistant")
+          .map((m) => ({ role: m.role, content: m.content }));
+        chatHistory.push({ role: "user", content: msgContent });
 
-    setMessages((prev) => [...prev, assistantMessage]);
+        const fullContent = await streamAIResponse(chatHistory, calculationMode, uploadedFiles);
 
-    // Save assistant message
-    await supabase.from("messages").insert({
-      project_id: projectId,
-      user_id: user.id,
-      role: "assistant",
-      content: assistantMessage.content,
-    });
+        await supabase.from("messages").insert({
+          project_id: projectId,
+          user_id: user.id,
+          role: "assistant",
+          content: fullContent,
+        });
+      } catch (err: any) {
+        toast.error(err.message || "AI analysis failed");
+      }
+    }
 
     setLoading(false);
   };
@@ -110,6 +283,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange }) =
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || !user) return;
+
+    const newUrls: string[] = [];
 
     for (const file of Array.from(files)) {
       const filePath = `${user.id}/${projectId}/${Date.now()}_${file.name}`;
@@ -122,7 +297,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange }) =
         continue;
       }
 
-      // Save file metadata
       await supabase.from("project_files").insert({
         project_id: projectId,
         user_id: user.id,
@@ -132,7 +306,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange }) =
         file_size: file.size,
       });
 
-      // Add message about file upload
+      // Get signed URL
+      const { data: signedData } = await supabase.storage
+        .from("blueprints")
+        .createSignedUrl(filePath, 3600);
+
+      if (signedData?.signedUrl) newUrls.push(signedData.signedUrl);
+
       const msg: Message = {
         id: crypto.randomUUID(),
         role: "user",
@@ -149,9 +329,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange }) =
       });
     }
 
-    // Reset file input
+    setUploadedFiles((prev) => [...prev, ...newUrls]);
+
     if (fileInputRef.current) fileInputRef.current.value = "";
     toast.success("Files uploaded successfully!");
+
+    // Show mode picker after upload if not already selected
+    if (!calculationMode && (uploadedFiles.length + newUrls.length) > 0) {
+      setShowModePicker(true);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -163,7 +349,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange }) =
 
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
-    // Auto-resize
     const el = e.target;
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 200) + "px";
@@ -184,12 +369,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange }) =
                 Start your estimation
               </h3>
               <p className="text-muted-foreground text-sm max-w-sm">
-                Upload blueprint files or describe your project to begin the rebar and wire mesh estimation process.
+                Upload blueprint files to begin the rebar and wire mesh estimation process.
               </p>
             </div>
           ) : (
             messages.map((msg) => <ChatMessage key={msg.id} message={msg} />)
           )}
+
+          {/* Mode Picker */}
+          {showModePicker && !calculationMode && (
+            <div className="py-2">
+              <CalculationModePicker onSelect={handleModeSelect} disabled={loading} />
+            </div>
+          )}
+
           <div ref={messagesEndRef} />
         </div>
       </div>
@@ -225,7 +418,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange }) =
             />
             <Button
               onClick={sendMessage}
-              disabled={!input.trim() || loading}
+              disabled={(!input.trim() && !showModePicker) || loading}
               size="icon"
               className="h-9 w-9 flex-shrink-0 rounded-lg"
             >
