@@ -108,30 +108,47 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     }
   };
 
-  const fetchKnowledgeContext = async (): Promise<{ rules: string[]; fileUrls: string[] }> => {
-    if (!user) return { rules: [], fileUrls: [] };
+  const fetchKnowledgeContext = async (): Promise<{ rules: string[]; fileUrls: string[]; trainingExamples: { title: string; answerText: string }[] }> => {
+    if (!user) return { rules: [], fileUrls: [], trainingExamples: [] };
+    
+    // Fetch knowledge items
     const { data } = await supabase
       .from("agent_knowledge" as any)
       .select("*")
       .eq("user_id", user.id);
 
-    if (!data || data.length === 0) return { rules: [], fileUrls: [] };
-
     const rules: string[] = [];
     const knowledgeFileUrls: string[] = [];
 
-    for (const item of data as any[]) {
-      if (item.type === "rule" && item.content) {
-        rules.push(item.title ? `[${item.title}]: ${item.content}` : item.content);
-      } else if (item.type === "file" && item.file_path) {
-        const { data: signedData } = await supabase.storage
-          .from("blueprints")
-          .createSignedUrl(item.file_path, 3600);
-        if (signedData?.signedUrl) knowledgeFileUrls.push(signedData.signedUrl);
+    if (data && data.length > 0) {
+      for (const item of data as any[]) {
+        if (item.type === "rule" && item.content) {
+          rules.push(item.title ? `[${item.title}]: ${item.content}` : item.content);
+        } else if (item.type === "file" && item.file_path) {
+          const { data: signedData } = await supabase.storage
+            .from("blueprints")
+            .createSignedUrl(item.file_path, 3600);
+          if (signedData?.signedUrl) knowledgeFileUrls.push(signedData.signedUrl);
+        }
       }
     }
 
-    return { rules, fileUrls: knowledgeFileUrls };
+    // Fetch training examples
+    const { data: trainingData } = await supabase
+      .from("agent_training_examples" as any)
+      .select("*")
+      .eq("user_id", user.id);
+
+    const trainingExamples: { title: string; answerText: string }[] = [];
+    if (trainingData && trainingData.length > 0) {
+      for (const ex of trainingData as any[]) {
+        if (ex.answer_text) {
+          trainingExamples.push({ title: ex.title, answerText: ex.answer_text });
+        }
+      }
+    }
+
+    return { rules, fileUrls: knowledgeFileUrls, trainingExamples };
   };
 
   const streamAIResponse = useCallback(

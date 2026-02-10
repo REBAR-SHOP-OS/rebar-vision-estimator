@@ -248,6 +248,16 @@ serve(async (req) => {
       systemPrompt = `## USER-DEFINED RULES & KNOWLEDGE (MUST follow these)\n${rulesBlock}\n\n---\n\n${systemPrompt}`;
     }
 
+    // Inject training examples into system prompt
+    if (knowledgeContext && knowledgeContext.trainingExamples && knowledgeContext.trainingExamples.length > 0) {
+      let trainingBlock = `\n\n## TRAINING EXAMPLES — REFERENCE CALCULATIONS (MUST study and follow this methodology)\n\n`;
+      knowledgeContext.trainingExamples.forEach((ex: { title: string; answerText: string }, idx: number) => {
+        trainingBlock += `### Example ${idx + 1}: ${ex.title}\nThe following is the CORRECT rebar estimation for a real project.\nStudy this carefully and use the SAME methodology, format, and calculation logic for the current project:\n\n${ex.answerText}\n\n---\n\n`;
+      });
+      trainingBlock += `Use the above examples as your PRIMARY reference for calculation methodology.\n`;
+      systemPrompt = systemPrompt + trainingBlock;
+    }
+
     // Build messages array with file context
     const aiMessages: any[] = [
       { role: "system", content: systemPrompt },
