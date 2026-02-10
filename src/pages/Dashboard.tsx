@@ -5,6 +5,7 @@ import { useLanguage, LANGUAGES, type Language } from "@/contexts/LanguageContex
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe } from "lucide-react";
+import BrainKnowledgeDialog from "@/components/chat/BrainKnowledgeDialog";
 import { toast } from "sonner";
 import ChatArea from "@/components/chat/ChatArea";
 import StepProgress from "@/components/chat/StepProgress";
@@ -316,6 +317,8 @@ const Dashboard: React.FC = () => {
               ? projects.find((p) => p.id === activeProjectId)?.name || t("estimation")
               : t("appTitle")}
           </h1>
+          {/* Brain Knowledge Button */}
+          <BrainKnowledgeDialog />
           {/* Refresh Button */}
           <Button
             variant="ghost"
