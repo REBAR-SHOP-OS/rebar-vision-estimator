@@ -246,11 +246,38 @@ serve(async (req) => {
       { role: "system", content: systemPrompt },
     ];
 
-    // Pass file URLs directly to the AI model (avoid downloading to save memory)
+    // Process file URLs - convert PDFs to base64 data URLs, keep images as direct URLs
     const fileContentParts: any[] = [];
     if (fileUrls && fileUrls.length > 0) {
       for (const url of fileUrls) {
-        fileContentParts.push({ type: "image_url", image_url: { url } });
+        const urlLower = url.toLowerCase().split('?')[0]; // remove query params for extension check
+        if (urlLower.endsWith('.pdf')) {
+          // Download PDF and convert to base64 data URL
+          try {
+            console.log("Downloading PDF for base64 conversion:", url.substring(0, 80) + "...");
+            const pdfResponse = await fetch(url);
+            if (!pdfResponse.ok) {
+              console.error("Failed to download PDF:", pdfResponse.status);
+              continue;
+            }
+            const pdfBuffer = await pdfResponse.arrayBuffer();
+            const uint8Array = new Uint8Array(pdfBuffer);
+            // Convert to base64
+            let binary = '';
+            for (let i = 0; i < uint8Array.length; i++) {
+              binary += String.fromCharCode(uint8Array[i]);
+            }
+            const base64 = btoa(binary);
+            const dataUrl = `data:application/pdf;base64,${base64}`;
+            console.log("PDF converted to base64, size:", Math.round(base64.length / 1024), "KB");
+            fileContentParts.push({ type: "image_url", image_url: { url: dataUrl } });
+          } catch (err) {
+            console.error("Error converting PDF to base64:", err);
+          }
+        } else {
+          // Image files (PNG, JPEG, WebP, GIF) - pass URL directly
+          fileContentParts.push({ type: "image_url", image_url: { url } });
+        }
       }
     }
 
