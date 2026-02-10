@@ -27,7 +27,9 @@ const Dashboard: React.FC = () => {
   const [editName, setEditName] = useState("");
   const [currentStep, setCurrentStep] = useState<number | null>(null);
   const [calculationMode, setCalculationMode] = useState<"smart" | "step-by-step" | null>(null);
+  const [initialFiles, setInitialFiles] = useState<File[] | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
+  const newProjectFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadProjects();
@@ -53,13 +55,20 @@ const Dashboard: React.FC = () => {
     setProjects(data || []);
   };
 
-  const createProject = async () => {
-    if (!user) return;
+  const handleNewEstimationClick = () => {
+    newProjectFileInputRef.current?.click();
+  };
+
+  const handleNewProjectFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !user) return;
+
     setCreatingProject(true);
+    const projectName = files[0].name.replace(/\.[^/.]+$/, "");
 
     const { data, error } = await supabase
       .from("projects")
-      .insert({ user_id: user.id, name: "New Estimation" })
+      .insert({ user_id: user.id, name: projectName })
       .select()
       .single();
 
@@ -71,9 +80,13 @@ const Dashboard: React.FC = () => {
 
     setProjects((prev) => [data, ...prev]);
     setActiveProjectId(data.id);
+    setInitialFiles(Array.from(files));
     setCreatingProject(false);
     setCurrentStep(null);
     setCalculationMode(null);
+
+    // Reset file input
+    if (newProjectFileInputRef.current) newProjectFileInputRef.current.value = "";
   };
 
   const deleteProject = async (id: string, e: React.MouseEvent) => {
@@ -141,8 +154,16 @@ const Dashboard: React.FC = () => {
       >
         {/* New Project Button */}
         <div className="p-3">
+          <input
+            ref={newProjectFileInputRef}
+            type="file"
+            multiple
+            accept="image/*,.pdf,.dwg,.dxf"
+            onChange={handleNewProjectFileSelect}
+            className="hidden"
+          />
           <Button
-            onClick={createProject}
+            onClick={handleNewEstimationClick}
             disabled={creatingProject}
             variant="outline"
             className="w-full justify-start gap-2 border-border text-sidebar-foreground hover:bg-sidebar-accent"
@@ -267,6 +288,8 @@ const Dashboard: React.FC = () => {
         {activeProjectId ? (
           <ChatArea
             projectId={activeProjectId}
+            initialFiles={initialFiles}
+            onInitialFilesConsumed={() => setInitialFiles(null)}
             onProjectNameChange={(name) => {
               setProjects((prev) =>
                 prev.map((p) => (p.id === activeProjectId ? { ...p, name } : p))
@@ -284,7 +307,7 @@ const Dashboard: React.FC = () => {
               <p className="text-muted-foreground max-w-md">
                 Upload your construction blueprints and get accurate rebar weight and wire mesh estimates powered by AI.
               </p>
-              <Button onClick={createProject} disabled={creatingProject} className="gap-2">
+              <Button onClick={handleNewEstimationClick} disabled={creatingProject} className="gap-2">
                 <Plus className="h-4 w-4" />
                 Start New Estimation
               </Button>

@@ -19,6 +19,8 @@ interface Message {
 
 interface ChatAreaProps {
   projectId: string;
+  initialFiles?: File[] | null;
+  onInitialFilesConsumed?: () => void;
   onProjectNameChange?: (name: string) => void;
   onStepChange?: (step: number | null) => void;
   onModeChange?: (mode: "smart" | "step-by-step" | null) => void;
@@ -26,7 +28,7 @@ interface ChatAreaProps {
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-blueprint`;
 
-const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange, onStepChange, onModeChange }) => {
+const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialFilesConsumed, onProjectNameChange, onStepChange, onModeChange }) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -48,6 +50,22 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange, onS
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Auto-upload initial files passed from Dashboard
+  const initialFilesProcessed = useRef(false);
+  useEffect(() => {
+    if (initialFiles && initialFiles.length > 0 && !initialFilesProcessed.current) {
+      initialFilesProcessed.current = true;
+      // Create a synthetic event-like object to reuse handleFileUpload logic
+      const dataTransfer = new DataTransfer();
+      initialFiles.forEach((f) => dataTransfer.items.add(f));
+      const syntheticEvent = {
+        target: { files: dataTransfer.files },
+      } as React.ChangeEvent<HTMLInputElement>;
+      handleFileUpload(syntheticEvent);
+      onInitialFilesConsumed?.();
+    }
+  }, [initialFiles]);
 
   const loadMessages = async () => {
     setLoadingMessages(true);
