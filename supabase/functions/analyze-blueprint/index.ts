@@ -96,47 +96,26 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
-    const systemPrompt = mode === "smart" ? SMART_SYSTEM_PROMPT : STEP_BY_STEP_SYSTEM_PROMPT;
-
-    // Download files and convert to base64 data URLs
-    const fileContents: { type: string; image_url: { url: string } }[] = [];
-    if (fileUrls && fileUrls.length > 0) {
-      for (const url of fileUrls) {
-        try {
-          const fileResp = await fetch(url);
-          if (!fileResp.ok) {
-            console.error("Failed to fetch file:", url, fileResp.status);
-            continue;
-          }
-          const contentType = fileResp.headers.get("content-type") || "application/octet-stream";
-          const arrayBuf = await fileResp.arrayBuffer();
-          const uint8 = new Uint8Array(arrayBuf);
-          let binary = "";
-          for (let i = 0; i < uint8.length; i++) {
-            binary += String.fromCharCode(uint8[i]);
-          }
-          const b64 = btoa(binary);
-          const mimeType = contentType.split(";")[0].trim();
-          const dataUrl = `data:${mimeType};base64,${b64}`;
-          fileContents.push({ type: "image_url", image_url: { url: dataUrl } });
-        } catch (err) {
-          console.error("Error downloading file:", url, err);
-        }
-      }
-    }
-
     // Build messages array with file context
     const aiMessages: any[] = [
       { role: "system", content: systemPrompt },
     ];
 
-    if (fileContents.length > 0 && messages.length > 0) {
+    // Pass file URLs directly to the AI model (avoid downloading to save memory)
+    const fileContentParts: any[] = [];
+    if (fileUrls && fileUrls.length > 0) {
+      for (const url of fileUrls) {
+        fileContentParts.push({ type: "image_url", image_url: { url } });
+      }
+    }
+
+    if (fileContentParts.length > 0 && messages.length > 0) {
       const firstUserMsgIndex = messages.findIndex((m: any) => m.role === "user");
       for (let i = 0; i < messages.length; i++) {
         if (i === firstUserMsgIndex) {
           const content: any[] = [
             { type: "text", text: messages[i].content || "Please analyze these blueprints." },
-            ...fileContents,
+            ...fileContentParts,
           ];
           aiMessages.push({ role: messages[i].role, content });
         } else {
