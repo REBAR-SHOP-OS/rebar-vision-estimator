@@ -1,5 +1,4 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -270,51 +269,12 @@ serve(async (req) => {
       allFileUrls.push(...knowledgeContext.fileUrls);
     }
     const fileContentParts: any[] = [];
-    const MAX_PDF_SIZE_MB = 8;
-    const MAX_TOTAL_FILES = 4;
-    let totalBase64Bytes = 0;
-    const MAX_TOTAL_BASE64_BYTES = 20 * 1024 * 1024; // 20MB total base64 budget
-
     if (allFileUrls.length > 0) {
-      const urlsToProcess = allFileUrls.slice(0, MAX_TOTAL_FILES);
-      if (allFileUrls.length > MAX_TOTAL_FILES) {
-        console.log(`Limiting files from ${allFileUrls.length} to ${MAX_TOTAL_FILES}`);
+      // Pass URLs directly to AI — no downloading/base64 needed, saves memory
+      for (const url of allFileUrls) {
+        fileContentParts.push({ type: "image_url", image_url: { url } });
       }
-      for (const url of urlsToProcess) {
-        if (totalBase64Bytes >= MAX_TOTAL_BASE64_BYTES) {
-          console.log("Total base64 budget exceeded, skipping remaining files");
-          break;
-        }
-        const urlLower = url.toLowerCase().split('?')[0];
-        if (urlLower.endsWith('.pdf')) {
-          try {
-            console.log("Downloading PDF:", url.substring(0, 80) + "...");
-            const pdfResponse = await fetch(url);
-            if (!pdfResponse.ok) {
-              console.error("Failed to download PDF:", pdfResponse.status);
-              continue;
-            }
-            const pdfBuffer = await pdfResponse.arrayBuffer();
-            const sizeMB = pdfBuffer.byteLength / (1024 * 1024);
-            console.log("PDF size:", sizeMB.toFixed(2), "MB");
-            
-            if (sizeMB > MAX_PDF_SIZE_MB) {
-              console.error(`PDF too large (${sizeMB.toFixed(2)}MB > ${MAX_PDF_SIZE_MB}MB). Skipping.`);
-              continue;
-            }
-            
-            const base64 = encodeBase64(pdfBuffer);
-            totalBase64Bytes += base64.length;
-            const dataUrl = `data:application/pdf;base64,${base64}`;
-            console.log("PDF converted, base64:", Math.round(base64.length / 1024), "KB, total:", Math.round(totalBase64Bytes / 1024), "KB");
-            fileContentParts.push({ type: "image_url", image_url: { url: dataUrl } });
-          } catch (err) {
-            console.error("Error converting PDF:", err);
-          }
-        } else {
-          fileContentParts.push({ type: "image_url", image_url: { url } });
-        }
-      }
+      console.log(`Passing ${fileContentParts.length} file URLs directly to AI`);
     }
 
     if (fileContentParts.length > 0 && messages.length > 0) {
