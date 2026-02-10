@@ -43,6 +43,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const [uploadProgress, setUploadProgress] = useState<{ fileName: string; progress: number } | null>(null);
 
   useEffect(() => {
+    // Reset state when switching projects
+    setMessages([]);
+    setUploadedFiles([]);
+    setShowModePicker(false);
+    setCalculationMode(null);
+    setUploadProgress(null);
+    initialFilesProcessed.current = false;
+    onModeChange?.(null);
+    onStepChange?.(null);
     loadMessages();
     loadUploadedFiles();
   }, [projectId]);
@@ -502,7 +511,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             <div className="py-2 px-1">
               <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                <span>در حال آپلود: {uploadProgress.fileName}</span>
+                <span>Uploading: {uploadProgress.fileName}</span>
                 <span className="ml-auto font-medium">{uploadProgress.progress}%</span>
               </div>
               <Progress value={uploadProgress.progress} className="h-2" />
