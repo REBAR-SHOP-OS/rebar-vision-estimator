@@ -8,7 +8,7 @@ import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X,
 import { toast } from "sonner";
 import ChatArea from "@/components/chat/ChatArea";
 import StepProgress from "@/components/chat/StepProgress";
-import logoBg from "@/assets/logo-bg.png";
+import logoBg from "@/assets/logo.png";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -310,7 +310,8 @@ const Dashboard: React.FC = () => {
           >
             <Menu className="h-5 w-5" />
           </Button>
-          <h1 className="ml-3 text-sm font-medium text-foreground truncate flex-1">
+          <img src={logoBg} alt="Logo" className="h-7 w-7 rounded-full object-contain ml-2" />
+          <h1 className="ml-2 text-sm font-medium text-foreground truncate flex-1">
             {activeProjectId
               ? projects.find((p) => p.id === activeProjectId)?.name || t("estimation")
               : t("appTitle")}
