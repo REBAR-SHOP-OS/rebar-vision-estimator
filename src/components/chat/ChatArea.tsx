@@ -364,13 +364,24 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange }) =
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <h3 className="text-lg font-medium text-foreground mb-2">
-                Start your estimation
+            <div className="flex flex-col items-center justify-center py-16 text-center max-w-lg mx-auto">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-primary mb-5">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>
+              </div>
+              <h3 className="text-xl font-semibold text-foreground mb-2">
+                Welcome to Rebar Estimator Pro
               </h3>
-              <p className="text-muted-foreground text-sm max-w-sm">
-                Upload blueprint files to begin the rebar and wire mesh estimation process.
+              <p className="text-muted-foreground text-sm mb-4">
+                Upload your construction blueprint files (PDF or images) using the 📎 button below to get started with rebar weight and wire mesh estimation.
               </p>
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-left">
+                <p className="text-xs text-destructive flex items-start gap-2">
+                  <span className="text-base leading-none mt-0.5">⚠️</span>
+                  <span>
+                    <strong>Important:</strong> This app is an AI-powered estimation tool and may produce errors or inaccurate results. Always double-check and verify the calculations against your original blueprints before using them in any project.
+                  </span>
+                </p>
+              </div>
             </div>
           ) : (
             messages.map((msg) => <ChatMessage key={msg.id} message={msg} />)
