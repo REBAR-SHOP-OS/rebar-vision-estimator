@@ -247,7 +247,7 @@ const Dashboard: React.FC = () => {
       {/* Main Area */}
       <div className="relative z-10 flex flex-1 flex-col min-w-0">
         {/* Header */}
-        <header className="flex h-12 items-center border-b border-border px-3 bg-background flex-shrink-0">
+        <header className="flex h-12 items-center border-b border-border px-3 bg-background/80 backdrop-blur-sm flex-shrink-0">
           <Button
             variant="ghost"
             size="icon"
@@ -276,7 +276,7 @@ const Dashboard: React.FC = () => {
             onModeChange={(mode) => setCalculationMode(mode)}
           />
         ) : (
-          <div className="flex flex-1 items-center justify-center">
+          <div className="flex flex-1 items-center justify-center bg-background/50">
             <div className="text-center space-y-4">
               <h2 className="text-2xl font-semibold text-foreground">
                 Rebar Estimator Pro
