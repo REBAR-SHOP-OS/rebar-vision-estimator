@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Paperclip, Send, Loader2 } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import ChatMessage from "./ChatMessage";
 import CalculationModePicker from "./CalculationModePicker";
@@ -37,6 +38,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange, onS
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ fileName: string; progress: number } | null>(null);
 
   useEffect(() => {
     loadMessages();
@@ -295,11 +297,34 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange, onS
 
     for (const file of Array.from(files)) {
       const filePath = `${user.id}/${projectId}/${Date.now()}_${file.name}`;
-      const { error: uploadError } = await supabase.storage
-        .from("blueprints")
-        .upload(filePath, file);
+      setUploadProgress({ fileName: file.name, progress: 0 });
 
-      if (uploadError) {
+      // Get current session token for auth
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+      // Upload with progress tracking via XHR
+      const uploadSuccess = await new Promise<boolean>((resolve) => {
+        const xhr = new XMLHttpRequest();
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            setUploadProgress({ fileName: file.name, progress: pct });
+          }
+        };
+        xhr.onload = () => resolve(xhr.status >= 200 && xhr.status < 300);
+        xhr.onerror = () => resolve(false);
+        const url = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/blueprints/${filePath}`;
+        xhr.open("POST", url);
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+        xhr.setRequestHeader("apikey", import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY);
+        xhr.setRequestHeader("x-upsert", "true");
+        xhr.send(file);
+      });
+
+      setUploadProgress(null);
+
+      if (!uploadSuccess) {
         toast.error(`Failed to upload ${file.name}`);
         continue;
       }
@@ -405,6 +430,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, onProjectNameChange, onS
           {showModePicker && !calculationMode && (
             <div className="py-2">
               <CalculationModePicker onSelect={handleModeSelect} disabled={loading} />
+            </div>
+          )}
+
+          {/* Upload Progress */}
+          {uploadProgress && (
+            <div className="py-2 px-1">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>در حال آپلود: {uploadProgress.fileName}</span>
+                <span className="ml-auto font-medium">{uploadProgress.progress}%</span>
+              </div>
+              <Progress value={uploadProgress.progress} className="h-2" />
             </div>
           )}
 
