@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -269,12 +270,39 @@ serve(async (req) => {
       allFileUrls.push(...knowledgeContext.fileUrls);
     }
     const fileContentParts: any[] = [];
+    const MAX_PDF_SIZE_MB = 4;
+    const MAX_PDF_COUNT = 2;
+    let pdfCount = 0;
+
     if (allFileUrls.length > 0) {
-      // Pass URLs directly to AI — no downloading/base64 needed, saves memory
       for (const url of allFileUrls) {
-        fileContentParts.push({ type: "image_url", image_url: { url } });
+        const urlLower = url.toLowerCase().split('?')[0];
+        if (urlLower.endsWith('.pdf')) {
+          if (pdfCount >= MAX_PDF_COUNT) {
+            console.log(`Skipping PDF (max ${MAX_PDF_COUNT} reached)`);
+            continue;
+          }
+          try {
+            console.log("Downloading PDF for base64:", url.substring(0, 80) + "...");
+            const pdfResponse = await fetch(url);
+            if (!pdfResponse.ok) { console.error("PDF download failed:", pdfResponse.status); continue; }
+            const pdfBuffer = await pdfResponse.arrayBuffer();
+            const sizeMB = pdfBuffer.byteLength / (1024 * 1024);
+            console.log("PDF size:", sizeMB.toFixed(2), "MB");
+            if (sizeMB > MAX_PDF_SIZE_MB) {
+              console.log(`PDF too large (${sizeMB.toFixed(1)}MB > ${MAX_PDF_SIZE_MB}MB), skipping`);
+              continue;
+            }
+            const base64 = encodeBase64(pdfBuffer);
+            fileContentParts.push({ type: "image_url", image_url: { url: `data:application/pdf;base64,${base64}` } });
+            pdfCount++;
+            console.log("PDF converted, base64:", Math.round(base64.length / 1024), "KB");
+          } catch (err) { console.error("PDF convert error:", err); }
+        } else {
+          fileContentParts.push({ type: "image_url", image_url: { url } });
+        }
       }
-      console.log(`Passing ${fileContentParts.length} file URLs directly to AI`);
+      console.log(`Total file parts: ${fileContentParts.length} (${pdfCount} PDFs)`);
     }
 
     if (fileContentParts.length > 0 && messages.length > 0) {
