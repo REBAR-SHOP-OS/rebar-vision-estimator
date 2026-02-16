@@ -109,11 +109,11 @@ const ElementCard: React.FC<ElementCardProps> = ({ el, weightInfo, onShowOnDrawi
         )}
       </div>
       <div className="flex items-center gap-1">
-        {hasBbox && onShowOnDrawing && (
+        {onShowOnDrawing && (
           <button
             onClick={() => onShowOnDrawing(el.element_id)}
             className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg bg-accent hover:bg-accent/80 text-foreground font-medium transition-colors"
-            title="Show on Drawing"
+            title={hasBbox ? "Show on Drawing" : "View Document"}
           >
             <MapPin className="h-3 w-3" />
           </button>
@@ -191,7 +191,7 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
           size="sm"
         >
           <Map className="h-4 w-4" />
-          {showViewer ? "Hide Drawing Viewer" : "View on Drawing"}
+          {showViewer ? "Hide Document Viewer" : "View Document"}
         </Button>
       )}
 

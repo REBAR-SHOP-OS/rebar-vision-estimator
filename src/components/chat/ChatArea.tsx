@@ -670,10 +670,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         bbox: el.regions.tag_region.bbox as [number, number, number, number],
         confidence: el.extraction?.confidence,
         weight_lbs: quoteResult?.quote?.elements?.find((qe: any) => qe.element_id === el.element_id)?.weight_lbs,
+        page_number: el.regions?.tag_region?.page_number,
       }));
   }, [validationData, quoteResult]);
 
-  const hasDrawingData = overlayElements.length > 0 && uploadedFiles.length > 0;
+  // Show viewer whenever uploaded files exist (supports PDF read-only mode too)
+  const hasDrawingData = uploadedFiles.length > 0;
 
   const handleShowOnDrawing = useCallback((elementId: string) => {
     setSelectedElementId(elementId);
