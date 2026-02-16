@@ -1,63 +1,50 @@
 
-## Add a Features Side Panel to the Blueprint Viewer
+## Show Element Markers on Drawing Even Without Spatial Data
 
-### What We're Building
-Inspired by the reference image, we'll add a **"Features" side panel** on the left side of the Blueprint Viewer that lists all detected element types with their colored dots, counts, individual elements, and toggle visibility -- similar to professional takeoff software like PlanSwift or Bluebeam.
+### Problem
+When the AI extracts elements from tabular data (schedules, notes) rather than from spatial regions on the drawing, the elements have no `bbox` coordinates. Currently this means:
+- The Features panel shows elements correctly (F1, F2, SF1, etc.)
+- But the drawing is completely raw -- no colored markers appear
+- A "No spatial data" banner shows instead
 
-### Layout Change
+### Solution
+When elements lack bbox data, automatically assign them visible positions on the drawing so colored dots and labels still appear. This gives the user a visual reference on the drawing itself.
 
-The current BlueprintViewer is a single column (toolbar + canvas). We'll restructure it to:
+### How It Works
 
-```text
-+------------------+-------------------------------+
-|  Features Panel  |        Drawing Canvas         |
-|  (collapsible)   |                               |
-|                  |                               |
-|  - COLUMN (3)    |     [blueprint image with     |
-|    * C1          |      overlay markers]          |
-|    * C2          |                               |
-|    * C3          |                               |
-|  - FOOTING (2)   |                               |
-|    * F1          |                               |
-|    * F2          |                               |
-|  - BEAM (4)      |                               |
-|    ...           |                               |
-+------------------+-------------------------------+
-```
+**File: `src/components/chat/ChatArea.tsx`**
+- In the `overlayElements` memo, stop filtering out elements that lack `bbox`
+- For elements without `tag_region.bbox`, generate fallback positions:
+  - Group elements by type
+  - Place them in a vertical list layout along the left margin of the drawing (offset ~80px from edge)
+  - Space them vertically with ~60px gaps per element, grouped by type
+  - Each gets a synthetic bbox of roughly [x, y, x+40, y+40] -- just enough to render a dot and label
 
-### Features Panel Details
+**File: `src/components/chat/BlueprintViewer.tsx`**
+- Remove the `hasOverlays` guard that hides the `DrawingOverlay` component when no valid bboxes exist
+- Always render `DrawingOverlay` if there are any elements (even with synthetic positions)
+- Update the "No spatial data" banner to say something like "Element positions are approximate -- parsed from tabular data" instead of hiding markers entirely
 
-1. **Header**: "Features" title with a close/collapse button
-2. **Group by element type**: Each type gets a collapsible section with:
-   - Colored dot matching the element's color from `ELEMENT_TYPE_COLORS`
-   - Type name (e.g., "COLUMN")
-   - Count badge
-   - Eye icon to toggle visibility of that type on the drawing
-3. **Individual elements listed under each type**:
-   - Small colored dot
-   - Element ID (e.g., "C1")
-   - Click to select and zoom to that element on the drawing
-   - Highlighted background when selected
-   - Review status indicator (green check, red X) if in review mode
-4. **Search/filter bar** at the top to quickly find elements by ID
+**File: `src/components/chat/DrawingOverlay.tsx`**
+- No changes needed -- it already renders based on whatever elements are passed in with valid bbox dimensions
 
-### Toolbar Cleanup
-- Remove the type filter chips from the toolbar (they move into the Features panel)
-- Remove the bottom-right Legend overlay (replaced by the panel)
-- Keep zoom controls and PDF navigation in the toolbar
-
-### Files Changed
+### Technical Details
 
 | File | Change |
 |---|---|
-| `src/components/chat/BlueprintViewer.tsx` | Restructure layout to include a left Features panel alongside the canvas. Move type filtering logic into the panel. Remove legend overlay and toolbar filter chips. Add collapsible element type groups with individual element rows. Add search input. Wire click-to-select and visibility toggles. |
+| `src/components/chat/ChatArea.tsx` | In `overlayElements` memo: include elements without bbox by generating synthetic fallback positions based on image dimensions. Group by type and lay out vertically along the left side of the drawing. |
+| `src/components/chat/BlueprintViewer.tsx` | Remove `hasOverlays` condition from DrawingOverlay rendering -- always show overlay if elements exist. Update the "No spatial data" banner text to indicate approximate positions. |
 
-### Technical Approach
+### Fallback Position Logic (in ChatArea.tsx)
 
-- The panel will be a `div` with fixed width (~260px) on the left side of the viewer, using flexbox
-- Each element type becomes a collapsible section using Radix Collapsible or simple state toggles
-- Clicking an element row calls `onSelectElement(id)` which triggers the existing zoom-to-element logic
-- The eye toggle per type reuses the existing `visibleTypes` state and `toggleType` function
-- Selected element gets a highlighted background in the list (using the element's color at low opacity)
-- ScrollArea component wraps the panel content for overflow handling
-- Panel is hidden on mobile (too narrow) -- mobile keeps the existing toolbar chips
+```text
+For each element without bbox:
+  1. Group by element_type
+  2. Starting position: x=80, y=80
+  3. Each type group starts a new row block
+  4. Within a group, elements are spaced 60px apart vertically
+  5. Synthetic bbox = [x, y, x+40, y+40]
+  6. If positions exceed image height, wrap to next column (x += 200)
+```
+
+This ensures every element in the Features panel also has a visible marker on the drawing, with colored dots and labels matching the panel.
