@@ -156,7 +156,7 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
   };
 
   const hoveredElement = elements.find((e) => e.element_id === hoveredId);
-  const hasOverlays = pageElements.some(el => el.bbox[2] > el.bbox[0] || el.bbox[3] > el.bbox[1]);
+  const hasOverlays = pageElements.some(el => (el.bbox[2] - el.bbox[0]) > 10 && (el.bbox[3] - el.bbox[1]) > 10);
   const displayImageUrl = isPdf ? pdfImageUrl : imageUrl;
 
   return (
