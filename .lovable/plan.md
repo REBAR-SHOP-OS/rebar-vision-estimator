@@ -1,51 +1,104 @@
 
-## Show Finder Pass Results on Drawing with Inline Editing and Confirmation
 
-### Problem
-The Finder Pass (Stage 2) outputs a table of OCR candidates with bounding boxes, but this data only appears as a markdown table in the chat. Users can't see where each candidate is on the actual drawing, can't edit values if the OCR got something wrong, and can't confirm each one before the pipeline proceeds.
+## Upgrade Shop Drawing: Options Modal, Progress, Preview, and History
 
-### Solution
-Intercept the Finder Pass candidates from the streamed AI response, display them as interactive overlays on the Blueprint Viewer, and present a structured review panel where users can point at each candidate, edit its OCR text/values, and confirm or reject it before the pipeline moves to the next stage.
+### What Changes
 
-### How It Works
+The current "Create Shop Drawing" button fires an API call and opens the result in a new tab with no configuration, no progress feedback, and no history. We'll upgrade this into a full-featured flow:
 
-1. **Parse Finder Pass candidates from AI response** -- The AI streams a markdown table with columns like Page, Type, OCR Text, Potential For, Bbox. We extract these into a structured array using a regex/parser (similar to how `extractAtomicTruthJSON` works but for the Finder Pass table format).
+1. **Options Modal** -- Clicking "Create Shop Drawing" opens a dialog with configuration fields before generating
+2. **Progress Tracking** -- A progress indicator with status text while the AI generates
+3. **Preview and Download** -- Show the generated HTML in an inline preview (iframe) with a proper download-as-PDF button
+4. **Job History** -- Save all generated shop drawings to the database so users can re-view and re-download past versions
 
-2. **Show candidates as overlays on the drawing** -- Use the existing `BlueprintViewer` + `DrawingOverlay` system. Each Finder Pass candidate has a bbox, so we create `OverlayElement` objects and auto-open the viewer.
+### Flow
 
-3. **Finder Pass Review Panel** -- A new component (`FinderPassReview`) that steps through each candidate one by one, showing:
-   - The OCR text that was detected (editable input field)
-   - The element type it maps to (editable dropdown)
-   - The bounding box location (highlighted on the drawing)
-   - Confirm / Edit / Reject buttons
-   - Progress bar showing how many reviewed
+```text
+[Create Shop Drawing] button click
+        |
+        v
+  +----------------------------+
+  | Options Modal              |
+  | - Scale: 1:1, 1:25, 1:50  |
+  | - Include Dimensions: Y/N  |
+  | - Layer Grouping: Y/N      |
+  | - Bar Marks: Y/N           |
+  | - Drawing Prefix: text     |
+  | - Notes: textarea          |
+  | [Generate]    [Cancel]     |
+  +----------------------------+
+        |
+        v
+  Progress overlay:
+  "Preparing data... 20%"
+  "Generating layout... 60%"
+  "Finalizing... 90%"
+        |
+        v
+  +----------------------------+
+  | Preview Panel              |
+  | [iframe with HTML preview] |
+  | [Print/Save PDF] [Close]   |
+  +----------------------------+
+        |
+  Auto-saved to history
+        |
+        v
+  History tab shows past drawings
+  with date, options, re-view/download
+```
 
-4. **Feed corrections back** -- Confirmed/edited candidates continue through the pipeline; rejected ones are excluded.
+### Database Changes
 
-### Visual Design
+A new `shop_drawings` table stores generated outputs:
 
-Each candidate card shows:
-- A colored header with the candidate type (e.g., "Detail Title", "Local Note")
-- The raw OCR text in a monospace editable field
-- The "Potential For" element in a badge (e.g., CAISSON-4.5M)
-- Page number and bbox coordinates (read-only, for reference)
-- Three action buttons: Confirm (green), Edit (amber), Reject (red)
+| Column | Type | Description |
+|---|---|---|
+| id | uuid PK | Auto-generated |
+| project_id | uuid | FK to projects |
+| user_id | uuid | Owner |
+| options | jsonb | Scale, toggles, notes |
+| html_content | text | Generated HTML |
+| created_at | timestamptz | When generated |
+| version | integer | Auto-incrementing per project |
 
-The Blueprint Viewer auto-pans to each candidate as the user steps through them.
+RLS: Users can only see/create/delete their own shop drawings.
 
-### Technical Details
+### Edge Function Changes
+
+Update `generate-shop-drawing` to accept the new options (scale, includeDims, layerGrouping, barMarks, drawingPrefix, notes) and incorporate them into the AI prompt so the output reflects the user's choices.
+
+### Frontend Changes
 
 | File | Change |
 |---|---|
-| `src/components/chat/FinderPassReview.tsx` | **New file.** A review panel component that receives parsed Finder Pass candidates. For each candidate, it renders: editable OCR text field, element type selector, confidence display, and Confirm/Edit/Reject buttons. Stepping through candidates triggers `onSelectElement` to sync with the drawing. On completion, emits the cleaned candidate list back to the parent. |
-| `src/components/chat/ChatArea.tsx` | Add state for `finderPassCandidates` (parsed from AI response). Add a `extractFinderPassCandidates(content)` parser that finds the markdown table in the Finder Pass stage and converts rows into structured objects with `{page, type, ocrText, potentialFor, bbox, id}`. When candidates are detected, auto-open the BlueprintViewer and show the FinderPassReview panel (similar to how ElementReviewPanel is shown). Build `OverlayElement[]` from the candidates' bboxes so they appear on the drawing. On review completion, store confirmed candidates and allow the pipeline to continue. |
-| `src/components/chat/DrawingOverlay.tsx` | Add a "FINDER_CANDIDATE" color entry to `ELEMENT_TYPE_COLORS` (e.g., cyan `#06B6D4`) so Finder Pass overlays have a distinct look before they're classified into element types. |
+| `src/components/chat/ShopDrawingModal.tsx` | **New file.** A Dialog component with: (1) Options form -- scale select, toggle switches for dimensions/layers/bar marks, text inputs for prefix and notes. (2) Progress state with animated bar and status messages. (3) Preview state with an iframe rendering the generated HTML. (4) History list fetched from `shop_drawings` table showing past versions with "View" and "Delete" actions. |
+| `src/components/chat/ExportButtons.tsx` | Replace the inline `handleShopDrawing` logic with opening the new `ShopDrawingModal`. Pass through `quoteResult`, `elements`, `scopeData` as props. Remove the old direct-call pattern. |
+| `supabase/functions/generate-shop-drawing/index.ts` | Accept `options` object in request body. Inject scale, dimension preferences, layer grouping, bar marks toggle, prefix, and notes into the AI prompt so the generated HTML respects user choices. |
 
-### Interaction Flow
+### Options Modal Fields
 
-1. User starts analysis, AI streams the Finder Pass
-2. When the Finder Pass table is detected in the stream, candidates are parsed and overlays appear on the drawing
-3. A "Review Finder Pass Results" panel appears below the chat message
-4. User steps through each candidate: the drawing pans/zooms to it
-5. User can edit the OCR text (fix misreads like O vs 0), change the element type, or reject false positives
-6. On completion, corrected candidates feed into the next pipeline stage
+- **Scale**: Dropdown -- `1:1`, `1:25`, `1:50`, `1:100`
+- **Include Dimensions**: Toggle (default ON) -- adds dimension lines and length annotations
+- **Layer Grouping**: Toggle (default ON) -- groups bars by element type with section headers
+- **Show Bar Marks**: Toggle (default ON) -- labels each bar with its mark ID
+- **Drawing Number Prefix**: Text input -- e.g. "SD-" prepended to the drawing number
+- **Special Notes**: Textarea -- any text the user wants on the notes section
+
+### Progress Simulation
+
+Since the edge function is a single synchronous call (not a real job queue), we simulate progress on the frontend:
+- 0-20%: "Preparing bar data..." (immediate)
+- 20-60%: "Generating shop drawing layout..." (after 2s)
+- 60-90%: "Adding dimensions and annotations..." (after 5s)
+- 90-100%: "Finalizing..." (on response received)
+
+This gives visual feedback during the ~10-15 second AI generation time.
+
+### History Panel
+
+Inside the modal, a "History" tab shows past shop drawings for the current project:
+- Each entry shows: version number, date, scale used, a "View" button (opens preview), and a "Delete" button
+- Fetched from `shop_drawings` table filtered by `project_id`
+- Latest version shown first
+
