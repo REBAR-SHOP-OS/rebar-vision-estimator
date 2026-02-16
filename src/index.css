@@ -200,3 +200,12 @@
 .blueprint-overlay-selected {
   animation: blueprint-pulse 1.5s ease-in-out infinite;
 }
+
+/* Review active element pulse */
+@keyframes review-pulse {
+  0%, 100% { stroke-opacity: 1; stroke-width: 4; }
+  50% { stroke-opacity: 0.5; stroke-width: 6; }
+}
+.review-active-element {
+  animation: review-pulse 1.2s ease-in-out infinite;
+}
