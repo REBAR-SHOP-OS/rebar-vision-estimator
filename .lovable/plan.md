@@ -1,77 +1,61 @@
 
 
-## Smart Project Type Detection and Adaptive Scope
+## Smarter Project Type Detection and Category-Specific Estimation
 
-Make the app intelligently detect the project type after file upload and automatically adapt the scope panel, workflow, and estimation approach.
+Enhance the detection edge function and analysis pipeline to be truly intelligent about project categories -- especially Cage projects -- and enforce Canadian RSIC standards when detected.
 
 ---
 
 ### Problem
 
-Currently, after uploading files, all 13 element types are pre-selected regardless of project type. For a **Cage** project, only Columns (and maybe Piers) are relevant. For a **Residential** project, Wire Mesh, Footings, and Walls dominate. The scope panel doesn't adapt, and "Cage" isn't even a project type option.
+The detection function exists but its prompt is generic. When a cage project is uploaded, the system needs to:
+1. Confidently detect "Cage" and pre-select only COLUMN + PIER scope items
+2. Adapt the entire estimation approach for cage assembly (verticals, ties, spirals, cage marks)
+3. Apply RSIC Canadian rules automatically when metric sizes are found
 
----
-
-### Solution: Two-Phase Smart Detection
-
-**Phase 1 -- Quick Pre-Analysis (new edge function)**
-
-After files are uploaded but BEFORE showing the scope panel, run a fast AI call to detect the project type from the blueprints. This returns:
-- Detected project category (Cage, Industrial, Residential, Commercial, Bar List, Infrastructure)
-- Recommended scope items (which element types are relevant)
-- Detected standard (Metric/Imperial, Canadian/US)
-- Confidence level
-
-**Phase 2 -- Adaptive Scope Panel**
-
-The scope panel pre-selects only the relevant items and shows the detected project type, with an info banner explaining what was detected and why.
+Currently the detection prompt is too brief and the analysis prompt treats all project types similarly.
 
 ---
 
 ### Changes
 
-**1. New Edge Function: `detect-project-type`**
+**1. Enhance `detect-project-type` edge function prompt**
 
-A lightweight, non-streaming edge function that:
-- Takes the uploaded file URLs
-- Runs a quick Vision OCR scan (reusing existing Google Vision logic)
-- Sends a focused prompt to Gemini Flash (fast, cheap) asking ONLY for project type detection
-- Returns structured JSON: `{ category, recommendedScope, detectedStandard, confidence }`
-- Uses tool calling for structured output (no JSON parsing issues)
+Make the detection prompt much more specific with clear indicators for each category:
+- **Cage**: Look for column cage schedules, "cage" labels, prefab marks (e.g., C1-CAGE), tied assemblies, cage height/diameter callouts, spiral details, shop drawing format
+- **Bar List**: No drawings -- just tables with bar marks, sizes, quantities, cut lengths
+- **Residential**: Strip footings, ICF, SOG, basement walls, light bars (10M-20M)
+- **Industrial**: Heavy footings, equipment pads, 25M+ bars, crane beams
+- **Commercial**: Multi-storey columns, flat slabs, parking, drop panels
+- **Infrastructure**: Bridges, abutments, retaining walls, MTO/OPSS references
 
-**2. Update `ScopeDefinitionPanel.tsx`**
+Add a secondary check: if OCR text contains "cage", "spiral", "tied assembly" keywords, boost cage confidence.
 
-- Accept new props: `detectedCategory`, `recommendedScope`, `detectedStandard`
-- Pre-select only recommended scope items (instead of all 13)
-- Show a detection banner: "Detected: **Cage Project** (Canadian Metric) -- scope adjusted automatically"
-- Add "Cage" and "Infrastructure" to the Project Type dropdown
-- If detected standard is metric, show a note about RSIC rules being applied
-- User can still override and select/deselect any items
+**2. Add cage-specific estimation rules to `analyze-blueprint`**
 
-**3. Update `ChatArea.tsx`**
+Add a new `CAGE_PROJECT_RULES` constant with detailed instructions:
+- Focus on cage assembly output: cage mark, vertical bar count/size, tie size/spacing, cage height, cage diameter/dimensions
+- Calculate tie quantity = (cage_height / tie_spacing) + 1
+- Calculate tie perimeter from column dimensions minus 80mm per RSIC
+- Include spiral calculations if present
+- Output format: one row per cage type (not per column instance)
+- Multiply cage weights by quantity of that cage type
+- Include shop bending details (offset bends for verticals, hooks for ties)
 
-- After file upload completes, call `detect-project-type` edge function
-- Show a brief loading state: "Analyzing project type..."
-- Pass detection results to `ScopeDefinitionPanel`
-- Include detected category in the scope data sent to the main analysis
+When `scope.detectedCategory === "cage"`, prepend these rules to the system prompt.
 
-**4. Update `analyze-blueprint` edge function**
+**3. Add category-specific prompt reinforcement blocks**
 
-- Accept `detectedCategory` in the scope object
-- Use it to reinforce the system prompt: "This project has been pre-classified as [CATEGORY]. Prioritize this classification unless blueprints clearly indicate otherwise."
+For each detected category, inject a focused instruction block into the system prompt:
+- **Cage**: "This is a CAGE project. Focus exclusively on cage assemblies..."
+- **Residential**: "This is a RESIDENTIAL project. Focus on footings, walls, SOG mesh..."
+- **Industrial**: "This is an INDUSTRIAL project. Focus on heavy foundations..."
+- **Bar List**: "This is a BAR LIST project. Parse the table directly, skip OCR element detection..."
+- **Infrastructure**: "This is an INFRASTRUCTURE project. Check for DOT specs..."
 
----
+**4. Improve scope panel feedback for cage detection**
 
-### Project Type Scope Mappings
-
-| Category | Pre-Selected Elements |
-|---|---|
-| Cage | Columns, Piers/Pedestals |
-| Residential | Footings, Walls, ICF Walls, Slabs, Wire Mesh |
-| Commercial | Footings, Beams, Columns, Slabs, Walls, Stairs |
-| Industrial | Footings, Grade Beams, Beams, Columns, Walls, Retaining Walls |
-| Infrastructure | Footings, Retaining Walls, Walls, Grade Beams, Slabs |
-| Bar List | All items (user picks from parsed list) |
+When cage is detected, show a specific note: "Cage project detected -- only Column and Pier elements are relevant. The estimator will focus on cage assembly details (verticals, ties, spirals)."
 
 ---
 
@@ -79,19 +63,17 @@ A lightweight, non-streaming edge function that:
 
 | File | Changes |
 |---|---|
-| `supabase/functions/detect-project-type/index.ts` | New edge function -- quick AI call with tool calling for structured project type detection |
-| `supabase/config.toml` | Add `[functions.detect-project-type]` with `verify_jwt = false` |
-| `src/components/chat/ScopeDefinitionPanel.tsx` | Accept detection props, pre-select recommended scope, show detection banner, add Cage/Infrastructure to Project Type dropdown |
-| `src/components/chat/ChatArea.tsx` | Call detect-project-type after upload, pass results to scope panel, include in scope data |
-| `supabase/functions/analyze-blueprint/index.ts` | Accept and use `detectedCategory` from scope to reinforce system prompt |
+| `supabase/functions/detect-project-type/index.ts` | Enhanced detection prompt with keyword boosting; more specific category indicators; add cage-specific OCR keyword search before AI call |
+| `supabase/functions/analyze-blueprint/index.ts` | New `CAGE_PROJECT_RULES` constant; category-specific prompt blocks injected based on `scope.detectedCategory`; cage output format (cage mark, qty, verticals, ties, height, weight per cage) |
+| `src/components/chat/ScopeDefinitionPanel.tsx` | Category-specific help text in detection banner (e.g., cage-specific note about assembly focus); show detected standard more prominently |
 
-### Flow
+### Flow for Cage Project
 
-1. User uploads blueprint files
-2. Files upload to storage, signed URLs generated
-3. App calls `detect-project-type` with file URLs (shows "Analyzing project type..." spinner)
-4. Edge function runs quick Vision OCR + Gemini Flash analysis (~5-10 seconds)
-5. Returns detected category + recommended scope
-6. Scope panel appears with only relevant items pre-checked and detection banner
-7. User confirms/adjusts scope, picks mode
-8. Main analysis runs with both user scope AND detected category for reinforcement
+1. User uploads cage blueprint PDF
+2. `detect-project-type` runs OCR, finds keywords like "cage", "spiral", "tied assembly", column schedules
+3. Returns `{ category: "cage", recommendedScope: ["COLUMN", "PIER"], detectedStandard: "canadian_metric", confidence: 0.95 }`
+4. Scope panel shows only COLUMN + PIER pre-checked, banner says "Cage Project (Canadian Metric)"
+5. User confirms, picks mode
+6. `analyze-blueprint` receives `detectedCategory: "cage"`, injects `CAGE_PROJECT_RULES` into prompt
+7. AI focuses on cage assemblies: cage marks, vertical counts, tie calculations, spiral data
+8. Output includes per-cage-type weight breakdown with RSIC rules applied
