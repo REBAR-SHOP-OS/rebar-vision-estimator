@@ -1,50 +1,55 @@
 
-## Show Element Markers on Drawing Even Without Spatial Data
+## Make the App Responsive for All Devices
 
-### Problem
-When the AI extracts elements from tabular data (schedules, notes) rather than from spatial regions on the drawing, the elements have no `bbox` coordinates. Currently this means:
-- The Features panel shows elements correctly (F1, F2, SF1, etc.)
-- But the drawing is completely raw -- no colored markers appear
-- A "No spatial data" banner shows instead
+### Overview
+Adjust the Dashboard layout, sidebar, chat area, tables, modals, and viewer to work properly on phones, tablets, and desktops. The app already uses a `useIsMobile` hook (768px breakpoint) and has some mobile handling, but several areas need fixes.
 
-### Solution
-When elements lack bbox data, automatically assign them visible positions on the drawing so colored dots and labels still appear. This gives the user a visual reference on the drawing itself.
+### Changes by File
 
-### How It Works
+**1. `src/pages/Dashboard.tsx` -- Mobile Sidebar as Overlay**
+- On mobile, convert the sidebar from a push layout to a slide-over overlay with a semi-transparent backdrop
+- Auto-close sidebar when a project is tapped on mobile
+- Reduce welcome section text sizes and padding on small screens
+- Make the 4-step guide grid `grid-cols-2` on all small screens (already partly done)
 
-**File: `src/components/chat/ChatArea.tsx`**
-- In the `overlayElements` memo, stop filtering out elements that lack `bbox`
-- For elements without `tag_region.bbox`, generate fallback positions:
-  - Group elements by type
-  - Place them in a vertical list layout along the left margin of the drawing (offset ~80px from edge)
-  - Space them vertically with ~60px gaps per element, grouped by type
-  - Each gets a synthetic bbox of roughly [x, y, x+40, y+40] -- just enough to render a dot and label
+**2. `src/components/chat/ChatArea.tsx` -- Input Bar and Suggestion Cards**
+- Make suggestion idea cards scroll horizontally with smaller min-width on mobile
+- Reduce input bar padding on small screens
+- Ensure the "Powered by AI" footer text doesn't overflow
 
-**File: `src/components/chat/BlueprintViewer.tsx`**
-- Remove the `hasOverlays` guard that hides the `DrawingOverlay` component when no valid bboxes exist
-- Always render `DrawingOverlay` if there are any elements (even with synthetic positions)
-- Update the "No spatial data" banner to say something like "Element positions are approximate -- parsed from tabular data" instead of hiding markers entirely
+**3. `src/components/chat/BarListTable.tsx` -- Horizontal Scroll for Table**
+- Wrap tables in a horizontal scroll container on small screens
+- Stack filter input and import button vertically on very small screens (below ~400px)
+- Reduce cell padding for compact display
 
-**File: `src/components/chat/DrawingOverlay.tsx`**
-- No changes needed -- it already renders based on whatever elements are passed in with valid bbox dimensions
+**4. `src/components/chat/ShopDrawingModal.tsx` -- Full-Screen on Mobile**
+- Change `max-w-3xl` to full width on mobile (`w-full sm:max-w-3xl`)
+- Make the options grid single-column on mobile (`grid-cols-1 sm:grid-cols-2`)
+- Ensure iframe preview takes available height
+
+**5. `src/components/chat/BlueprintViewer.tsx` -- Toolbar Wrapping**
+- Make toolbar buttons smaller on mobile and allow proper wrapping
+- Hide the zoom percentage text on very small screens
+- Ensure type filter chips in mobile toolbar don't overflow
+
+**6. `src/components/chat/BendingScheduleTable.tsx`**
+- Add horizontal scroll wrapper for the bending table on mobile
+
+**7. `src/hooks/use-mobile.tsx`**
+- No changes needed -- the existing 768px breakpoint is appropriate
 
 ### Technical Details
 
-| File | Change |
-|---|---|
-| `src/components/chat/ChatArea.tsx` | In `overlayElements` memo: include elements without bbox by generating synthetic fallback positions based on image dimensions. Group by type and lay out vertically along the left side of the drawing. |
-| `src/components/chat/BlueprintViewer.tsx` | Remove `hasOverlays` condition from DrawingOverlay rendering -- always show overlay if elements exist. Update the "No spatial data" banner text to indicate approximate positions. |
+| Component | Issue | Fix |
+|---|---|---|
+| Dashboard sidebar | Pushes content off-screen on mobile | Overlay with backdrop, auto-close on selection |
+| BarListTable | Table columns overflow on narrow screens | `overflow-x-auto` wrapper, reduced padding |
+| ShopDrawingModal | Dialog too wide for phones | Full-width on mobile, single-column form grid |
+| ChatArea input bar | Cards too wide, padding excessive | Smaller min-width cards, reduced padding |
+| BlueprintViewer toolbar | Buttons wrap awkwardly | Flex-wrap with tighter spacing, hide non-essential items |
+| Welcome screen | Text too large on small phones | Responsive text sizes (`text-2xl sm:text-3xl`) |
 
-### Fallback Position Logic (in ChatArea.tsx)
-
-```text
-For each element without bbox:
-  1. Group by element_type
-  2. Starting position: x=80, y=80
-  3. Each type group starts a new row block
-  4. Within a group, elements are spaced 60px apart vertically
-  5. Synthetic bbox = [x, y, x+40, y+40]
-  6. If positions exceed image height, wrap to next column (x += 200)
-```
-
-This ensures every element in the Features panel also has a visible marker on the drawing, with colored dots and labels matching the panel.
+### What Stays the Same
+- The split-panel (ResizablePanel) behavior already handles mobile by stacking vertically
+- The auth page is already responsive with `max-w-md` and `p-4`
+- Dark mode and RTL support remain unchanged
