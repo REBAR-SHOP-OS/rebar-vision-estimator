@@ -1,35 +1,63 @@
 
+## Add a Features Side Panel to the Blueprint Viewer
 
-## Make Drawing Markers Bigger, Labels Always Visible, and Auto-Open Element Panel
+### What We're Building
+Inspired by the reference image, we'll add a **"Features" side panel** on the left side of the Blueprint Viewer that lists all detected element types with their colored dots, counts, individual elements, and toggle visibility -- similar to professional takeoff software like PlanSwift or Bluebeam.
 
-### Problem
-The current markers on the drawing are still not obvious enough. Labels only appear on hover or selection, and clicking an element on the drawing doesn't clearly open its details.
+### Layout Change
 
-### Changes
+The current BlueprintViewer is a single column (toolbar + canvas). We'll restructure it to:
 
-#### 1. Bigger and Bolder Center Dots
-**File: `src/components/chat/DrawingOverlay.tsx`**
-- Increase default dot radius from 10 to 16px
-- Increase selected/hovered/active dot radius from 14 to 20px
-- Add a thicker white border (strokeWidth 3 instead of 2) for better contrast
+```text
++------------------+-------------------------------+
+|  Features Panel  |        Drawing Canvas         |
+|  (collapsible)   |                               |
+|                  |                               |
+|  - COLUMN (3)    |     [blueprint image with     |
+|    * C1          |      overlay markers]          |
+|    * C2          |                               |
+|    * C3          |                               |
+|  - FOOTING (2)   |                               |
+|    * F1          |                               |
+|    * F2          |                               |
+|  - BEAM (4)      |                               |
+|    ...           |                               |
++------------------+-------------------------------+
+```
 
-#### 2. Always-Visible Labels
-**File: `src/components/chat/DrawingOverlay.tsx`**
-- Remove the conditional `{(isSelected || isHovered || isActive) && ...}` wrapper around the label group
-- Labels will now always render for every visible element, showing the element ID and type
-- On hover/select, the label styling will get slightly bolder (increase opacity or size) to distinguish the active one
+### Features Panel Details
 
-#### 3. Auto-Open Element Details Panel on Click
-**File: `src/components/chat/ChatArea.tsx`**
-- In `handleSelectElementFromViewer`, when a user clicks an element on the drawing:
-  - Scroll to the corresponding element card in the results list (already works)
-  - Automatically open the element's collapsible group if it is collapsed
-  - Add a brief highlight animation on the card to draw attention
+1. **Header**: "Features" title with a close/collapse button
+2. **Group by element type**: Each type gets a collapsible section with:
+   - Colored dot matching the element's color from `ELEMENT_TYPE_COLORS`
+   - Type name (e.g., "COLUMN")
+   - Count badge
+   - Eye icon to toggle visibility of that type on the drawing
+3. **Individual elements listed under each type**:
+   - Small colored dot
+   - Element ID (e.g., "C1")
+   - Click to select and zoom to that element on the drawing
+   - Highlighted background when selected
+   - Review status indicator (green check, red X) if in review mode
+4. **Search/filter bar** at the top to quickly find elements by ID
 
-### Technical Details
+### Toolbar Cleanup
+- Remove the type filter chips from the toolbar (they move into the Features panel)
+- Remove the bottom-right Legend overlay (replaced by the panel)
+- Keep zoom controls and PDF navigation in the toolbar
+
+### Files Changed
 
 | File | Change |
 |---|---|
-| `src/components/chat/DrawingOverlay.tsx` | Increase dot radii (16/20px), make labels always visible, thicker white border on dots |
-| `src/components/chat/ChatArea.tsx` | Enhance `handleSelectElementFromViewer` to auto-expand collapsed groups and highlight the target card |
+| `src/components/chat/BlueprintViewer.tsx` | Restructure layout to include a left Features panel alongside the canvas. Move type filtering logic into the panel. Remove legend overlay and toolbar filter chips. Add collapsible element type groups with individual element rows. Add search input. Wire click-to-select and visibility toggles. |
 
+### Technical Approach
+
+- The panel will be a `div` with fixed width (~260px) on the left side of the viewer, using flexbox
+- Each element type becomes a collapsible section using Radix Collapsible or simple state toggles
+- Clicking an element row calls `onSelectElement(id)` which triggers the existing zoom-to-element logic
+- The eye toggle per type reuses the existing `visibleTypes` state and `toggleType` function
+- Selected element gets a highlighted background in the list (using the element's color at low opacity)
+- ScrollArea component wraps the panel content for overflow handling
+- Panel is hidden on mobile (too narrow) -- mobile keeps the existing toolbar chips
