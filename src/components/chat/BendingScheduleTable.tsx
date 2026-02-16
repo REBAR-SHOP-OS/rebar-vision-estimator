@@ -88,7 +88,7 @@ const BendingScheduleTable: React.FC<BendingScheduleTableProps> = ({ barList, on
         />
       </div>
 
-      <div className="rounded-xl border border-border overflow-hidden">
+      <div className="rounded-xl border border-border overflow-hidden overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/50">

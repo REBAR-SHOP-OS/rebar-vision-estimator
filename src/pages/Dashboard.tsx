@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useLanguage, LANGUAGES, type Language } from "@/contexts/LanguageContext";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe } from "lucide-react";
@@ -35,6 +36,7 @@ const Dashboard: React.FC = () => {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [currentStep, setCurrentStep] = useState<number | null>(null);
+  const isMobile = useIsMobile();
   const [calculationMode, setCalculationMode] = useState<"smart" | "step-by-step" | null>(null);
   const [processingPhase, setProcessingPhase] = useState<string | null>(null);
   const [initialFiles, setInitialFiles] = useState<File[] | null>(null);
@@ -150,11 +152,22 @@ const Dashboard: React.FC = () => {
         className="pointer-events-none fixed inset-0 z-0 blueprint-bg"
         aria-hidden="true"
       />
+
+      {/* Mobile backdrop */}
+      {isMobile && sidebarOpen && (
+        <div
+          className="fixed inset-0 z-20 bg-black/50 backdrop-blur-sm"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
       <aside
         className={`${
-          sidebarOpen ? "w-64" : "w-0"
-        } relative z-10 flex flex-col border-r border-sidebar-border bg-sidebar transition-all duration-300 overflow-hidden flex-shrink-0`}
+          isMobile
+            ? `fixed inset-y-0 left-0 z-30 w-64 transform transition-transform duration-300 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`
+            : `${sidebarOpen ? "w-64" : "w-0"} relative z-10 transition-all duration-300 overflow-hidden`
+        } flex flex-col border-r border-sidebar-border bg-sidebar flex-shrink-0`}
       >
         {/* Branded Header */}
         <div className="flex items-center gap-2 px-3 pt-3 pb-2">
@@ -202,6 +215,7 @@ const Dashboard: React.FC = () => {
                 setActiveProjectId(project.id);
                 setCurrentStep(null);
                 setCalculationMode(null);
+                if (isMobile) setSidebarOpen(false);
               }}
               className={`group flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm transition-colors cursor-pointer ${
                 activeProjectId === project.id
@@ -354,7 +368,7 @@ const Dashboard: React.FC = () => {
             <div className="max-w-xl mx-auto text-center space-y-8 px-4">
               <div className="space-y-3">
                 <img src={logoBg} alt="Logo" className="h-16 w-16 rounded-2xl mx-auto" />
-                <h2 className="text-3xl font-bold text-foreground tracking-tight">
+                <h2 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">
                   {t("welcomeMessage")}
                 </h2>
                 <p className="text-muted-foreground text-sm max-w-md mx-auto">

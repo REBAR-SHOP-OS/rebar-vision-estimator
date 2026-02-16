@@ -1073,7 +1073,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       </div>
 
       {/* Input Bar */}
-      <div className="border-t border-border bg-background/80 backdrop-blur-sm p-3">
+      <div className="border-t border-border bg-background/80 backdrop-blur-sm p-2 sm:p-3">
         <div className="mx-auto max-w-none">
           {/* Suggestion Idea Cards */}
           {!input.trim() && !loading && (
@@ -1131,7 +1131,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                           sendMessage(card.sendText);
                         }
                       }}
-                      className="flex-shrink-0 flex flex-col items-start gap-1 rounded-xl border border-border p-3 min-w-[130px] max-w-[160px] text-left hover:border-primary/50 hover:bg-primary/5 transition-colors group"
+                      className="flex-shrink-0 flex flex-col items-start gap-1 rounded-xl border border-border p-3 min-w-[110px] sm:min-w-[130px] max-w-[140px] sm:max-w-[160px] text-left hover:border-primary/50 hover:bg-primary/5 transition-colors group"
                     >
                       {IconComp && <IconComp className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />}
                       <span className="text-xs font-semibold text-foreground">{card.title}</span>
