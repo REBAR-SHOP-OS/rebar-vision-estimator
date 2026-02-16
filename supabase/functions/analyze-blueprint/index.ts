@@ -428,7 +428,7 @@ IMPORTANT:
 `;
 
 const REBAR_WEIGHT_TABLE = `
-## Rebar Weight Reference Table (LOCKED)
+## Rebar Weight Reference Table — Imperial (LOCKED)
 | Size | Diameter | Weight |
 |------|----------|--------|
 | #3 | 3/8" | 0.376 lb/ft |
@@ -444,6 +444,124 @@ const REBAR_WEIGHT_TABLE = `
 | #18 | 2-1/4" | 13.600 lb/ft |
 `;
 
+const CANADIAN_METRIC_TABLE = `
+## Canadian Metric Rebar Table — CSA G30.18 (RSIC Manual of Standard Practice 2018)
+| Metric Size | Nominal Diameter (mm) | Area (mm²) | Mass (kg/m) | Imperial Equiv |
+|-------------|----------------------|------------|-------------|----------------|
+| 10M | 11.3 | 100 | 0.785 | #3 |
+| 15M | 16.0 | 200 | 1.570 | #5 |
+| 20M | 19.5 | 300 | 2.355 | #6 |
+| 25M | 25.2 | 500 | 3.925 | #8 |
+| 30M | 29.9 | 700 | 5.495 | #9 |
+| 35M | 35.7 | 1000 | 7.850 | #11 |
+| 45M | 43.7 | 1500 | 11.775 | #14 |
+| 55M | 56.4 | 2500 | 19.625 | #18 |
+
+### Standard Mill Lengths (CSA / RSIC)
+- 10M: 12 metres
+- 15M and larger: 18 metres
+- Bar lengths given to nearest 20 mm
+
+### Grades (CSA G30.18-M92 R2014)
+- Grade 400R, Grade 500R (standard)
+- Grade 400W, Grade 500W (weldable/ductile)
+- Common stock: Grade 400W — 10M, 15M, 20M, 25M, 30M, 35M
+
+### Hook Dimensions (RSIC Appendix Table 5)
+- Standard hooks: 90 degrees, 135 degrees, or 180 degree bend
+- If hook type not specified, assume 90 degrees
+- Estimate hook length = dimension A or G per RSIC Table 5
+
+### Splice Rules (RSIC Chapter 10)
+- Lap splices for bars 45M and 55M are NOT allowed — use mechanical splices or welding
+- Default splice class: Class B tension laps for horizontal/vertical bars in walls, slabs, beams
+- Column dowels: compression and embedment lengths
+- Other vertical bars: compression splices
+`;
+
+const SMART_PROJECT_DETECTION = `
+## Smart Project Type Detection (AUTO-DETECT from blueprints)
+
+You MUST auto-detect the project category from the blueprint content and adapt your estimation approach:
+
+### Category 1: CAGE (Prefab Rebar Cages)
+**Indicators**: Column schedules with cage marks, prefab cage details, "cage" labels, tied column assemblies
+**Approach**: Focus on cage assembly — count verticals, ties, tie spacing, cage height. Output bar marks for each cage type. Include spiral data if present.
+
+### Category 2: INDUSTRIAL
+**Indicators**: Large footings (>3m), heavy sections (25M+), equipment foundations, tank bases, industrial equipment pads, crane beams
+**Approach**: Heavy bar sizes dominate. Watch for special bending, radius bends, heavy bending per RSIC rules (bars 15M-55M bent at 6 points or fewer). Check for epoxy/galvanized coatings in corrosive environments.
+
+### Category 3: RESIDENTIAL
+**Indicators**: Strip footings, basement walls, SOG (slab-on-grade), ICF walls, small columns, residential garage
+**Approach**: Lighter bar sizes (10M-20M typical). Focus on footing bars (75mm from face per RSIC), wall verticals, SOG mesh. Simpler bending.
+
+### Category 4: COMMERCIAL
+**Indicators**: Multi-storey columns, flat slabs/plates, drop panels, parking structures, beams, slab bands
+**Approach**: Mixed bar sizes. Column splice tracking across floors. Flat slab reinforcement with column/middle strips. Post-tensioning support bars if applicable.
+
+### Category 5: BAR LIST ONLY
+**Indicators**: No blueprint drawings — just a bar list/schedule table (bar marks, sizes, quantities, lengths)
+**Approach**: Skip OCR/element detection. Parse the table directly. Calculate weights from quantities x lengths x unit weights. Output size summary and totals.
+
+### Category 6: INFRASTRUCTURE
+**Indicators**: Bridge decks, abutments, retaining walls >3m, culverts, highway barriers, MTO/OPSS references
+**Approach**: Heavy bars with epoxy coating common. Check for provincial DOT specs (MTO, MTQ, MTBC, etc.). Longer development lengths for bridge elements.
+
+Announce your detected category in Step 1 as: "**Project Category: [CATEGORY]**"
+Adapt ALL subsequent estimation steps to the detected category.
+`;
+
+const RSIC_ESTIMATING_RULES = `
+## RSIC Standard Practice — Estimating (Chapter 4, 2018 Edition)
+
+These rules are MANDATORY for Canadian projects. Apply them when metric bar sizes (10M, 15M, etc.) are detected OR when the project is located in Canada.
+
+### Footing Bars
+- Estimated as straight bars extending to within **75 mm** of each face of the footing.
+
+### Column Verticals
+- Bars extended the required length from column below to lap with bars above.
+- If bar arrangement changes between floors: bars may extend to lap OR cut off 75 mm below top of horizontal member.
+- ALL column verticals that are to be lap spliced shall be estimated as **shop offset bent**.
+
+### Column Ties
+- Out-to-out dimensions = **80 mm less** than column outside dimensions (unless specified otherwise).
+- Lowest tie: no more than half the designated spacing above top of footing/floor.
+- Top tie: same distance below lowest horizontal member above.
+- Extra ties where column verticals are offset bent (usually 1-2 below lower bend point).
+
+### Spirals
+- Diameter = **80 mm less** than outside diameter of column (unless noted).
+- Height: from top of footing/floor to level of lowest horizontal reinforcement in slab/drop panel/beam above.
+- 10M spiral spacers: 500mm core or less=2, 500-800mm=3, over 800mm=4
+- 15M spiral spacers: 600mm core or less=3, over 600mm=4
+
+### Construction Joints
+- No construction joints or dowels included unless specifically shown on structural drawings.
+- If no dowel length specified: use RSIC Appendix Tables 12-15 for splice/embedment.
+
+### Temperature / Shrinkage Reinforcement
+- Must be specified on design drawings in bar sizes and spacings.
+- May serve as top support bars.
+
+### Specialty Items (estimate separately)
+- Plain bars, threaded bars, caissons/piles, galvanized, stainless steel, epoxy-coated, FRP, mechanical devices, welded wire reinforcement.
+
+### Slab Bar Spacing
+- First bar at half the specified spacing from the support edge.
+- Remaining bars at specified spacing across slab.
+
+### Coating Designation (on drawings)
+- Epoxy Coated: "C" prefix (e.g., C15M@300)
+- Stainless Steel: "S" prefix (e.g., S20M@250)
+- Galvanized: "G" prefix (e.g., G15M@250)
+- FRP: "F" prefix (e.g., F20M@200)
+
+### Abbreviations (recognize in OCR)
+BOT=Bottom, BEW=Bottom Each Way, BLW=Bottom Long Way, BSW=Bottom Short Way, T and B=Top and Bottom, TEW=Top Each Way, NF=Near Face, FF=Far Face, O/C=On Centre, C/C=Centre to Centre, SOG=Slab On Grade, CJ=Construction Joint, FTG=Footing, COL=Column, BM=Beam, GB=Grade Beam, RW=Retaining Wall, SL=Slab, CMU=Concrete Masonry Unit
+`;
+
 const SMART_SYSTEM_PROMPT = `You are Rebar Estimator Pro — an expert structural estimator AI implementing the "Atomic Truth" pipeline.
 
 ${PIPELINE_INSTRUCTIONS}
@@ -451,6 +569,12 @@ ${PIPELINE_INSTRUCTIONS}
 ${ELEMENT_UNIT_SCHEMA}
 
 ${REBAR_WEIGHT_TABLE}
+
+${CANADIAN_METRIC_TABLE}
+
+${SMART_PROJECT_DETECTION}
+
+${RSIC_ESTIMATING_RULES}
 
 ## Mode: SMART (Automatic)
 Execute ALL 9 pipeline stages automatically without pausing for user input.
@@ -460,23 +584,23 @@ IMPORTANT: Google Vision OCR has already been performed on the uploaded images. 
 
 ### Estimation Steps (Human-Readable Section)
 
-Step 1 — OCR & Scope Detection: Use the provided Google Vision OCR results to identify ALL rebar and wire mesh scopes from ALL pages.
+Step 1 — OCR & Scope Detection: Use the provided Google Vision OCR results to identify ALL rebar and wire mesh scopes from ALL pages. **AUTO-DETECT project category** (Cage/Industrial/Residential/Commercial/Bar List/Infrastructure).
 Step 2 — Scope Classification: Classify as Existing/New/Proposed. Only New/Proposed proceed.
-Step 2.5 — Rebar Type Identification: Identify all rebar types (Black Steel, Deformed, Smooth, Plain, Galvanized, Epoxy-Coated, Stainless Steel).
-Step 3 — Structural Element Identification: ALL elements in 12 categories (Footings, Grade Beams, Raft Slabs, Walls, Retaining Walls, ICF Walls, CMU Walls, Piers/Pedestals, Slabs, Stairs, Wire Mesh).
-Step 4 — Dimensions & Scale: Extract ALL dimensions and scales.
+Step 2.5 — Rebar Type Identification: Identify all rebar types. Detect if metric (10M, 15M) or imperial (#3, #4). If metric, apply RSIC Canadian standards automatically.
+Step 3 — Structural Element Identification: ALL elements in 12 categories (Footings, Grade Beams, Raft Slabs, Beams, Walls, Retaining Walls, ICF Walls, CMU Walls, Piers/Pedestals, Columns, Slabs, Stairs, Wire Mesh).
+Step 4 — Dimensions & Scale: Extract ALL dimensions and scales (metric mm/m or imperial in/ft).
 Step 5 — Quantities & Arrangement: Count, rebar count, spacing, pattern per element.
-Step 5.5 — Rebar Length Optimization: Calculate lengths, compare to standard production lengths (20ft/40ft/60ft), add lap splices.
-Step 6 — Weight Calculation: Using the weight table above.
-Step 7 — Weight Summary: By size + grand total in lbs and tons.
-Step 8 — Welded Wire Mesh: Calculate area, sheet counts with 1ft overlap on TWO sides.
+Step 5.5 — Rebar Length Optimization: Calculate lengths. For Canadian metric: compare to 12m (10M) and 18m (15M+) mill lengths. For imperial: 20ft/40ft/60ft. Add lap splices per RSIC tables or standard practice.
+Step 6 — Weight Calculation: Use imperial weight table for # sizes, Canadian metric mass table for M sizes.
+Step 7 — Weight Summary: By size + grand total in lbs/tons AND kg/tonnes (dual units for Canadian projects).
+Step 8 — Welded Wire Mesh: Calculate area, sheet counts with overlap (1ft/300mm on TWO sides).
 
 ### Wire Mesh Rules
-- Area ≥ 5000 sqft: calculate BOTH 4×8ft AND 8×20ft sheet counts
-- Area < 5000 sqft: 4×8ft only
+- Area >= 5000 sqft (465 m2): calculate BOTH 4x8ft AND 8x20ft sheet counts
+- Area < 5000 sqft: 4x8ft only
 - Types: Normal Steel, Stainless Steel, Galvanized, Epoxy
 
-Flag ALL uncertain items with ⚠️.
+Flag ALL uncertain items with warning flags.
 
 ${OUTPUT_FORMAT_INSTRUCTIONS}`;
 
@@ -487,6 +611,12 @@ ${PIPELINE_INSTRUCTIONS}
 ${ELEMENT_UNIT_SCHEMA}
 
 ${REBAR_WEIGHT_TABLE}
+
+${CANADIAN_METRIC_TABLE}
+
+${SMART_PROJECT_DETECTION}
+
+${RSIC_ESTIMATING_RULES}
 
 ## Mode: STEP-BY-STEP (Interactive)
 Execute ONE step at a time and WAIT for user confirmation before proceeding.
