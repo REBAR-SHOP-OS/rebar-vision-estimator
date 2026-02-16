@@ -1,5 +1,4 @@
 import React from "react";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 interface SizeBreakdownTableProps {
   sizeBreakdown: Record<string, number>;
@@ -12,37 +11,54 @@ const SizeBreakdownTable: React.FC<SizeBreakdownTableProps> = ({ sizeBreakdown }
   const total = entries.reduce((sum, [, w]) => sum + (w as number), 0);
 
   return (
-    <div className="mt-3">
-      <p className="text-xs font-medium text-foreground mb-1.5">Weight by Rebar Size</p>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="text-xs h-8">Size</TableHead>
-            <TableHead className="text-xs h-8 text-right">Weight (lbs)</TableHead>
-            <TableHead className="text-xs h-8 text-right">%</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {entries.map(([size, weight]) => (
-            <TableRow key={size}>
-              <TableCell className="text-xs py-1.5 font-medium">{size}</TableCell>
-              <TableCell className="text-xs py-1.5 text-right">
-                {(weight as number).toLocaleString(undefined, { maximumFractionDigits: 1 })}
-              </TableCell>
-              <TableCell className="text-xs py-1.5 text-right text-muted-foreground">
-                {((weight as number / total) * 100).toFixed(1)}%
-              </TableCell>
-            </TableRow>
-          ))}
-          <TableRow className="border-t-2">
-            <TableCell className="text-xs py-1.5 font-semibold">Total</TableCell>
-            <TableCell className="text-xs py-1.5 text-right font-semibold">
-              {total.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-            </TableCell>
-            <TableCell className="text-xs py-1.5 text-right font-semibold">100%</TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
+    <div className="mt-4">
+      <p className="text-xs font-semibold text-foreground mb-2 uppercase tracking-wider">Weight by Rebar Size</p>
+      <div className="rounded-lg border border-border overflow-hidden">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="bg-secondary">
+              <th className="text-left px-3 py-2 font-semibold text-secondary-foreground">Size</th>
+              <th className="text-right px-3 py-2 font-semibold text-secondary-foreground">Weight (lbs)</th>
+              <th className="text-right px-3 py-2 font-semibold text-secondary-foreground">%</th>
+              <th className="px-3 py-2 w-24"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map(([size, weight], i) => {
+              const pct = (weight as number / total) * 100;
+              return (
+                <tr key={size} className={i % 2 === 0 ? "bg-card" : "bg-accent/30"}>
+                  <td className="px-3 py-2 font-semibold text-foreground">{size}</td>
+                  <td className="px-3 py-2 text-right text-foreground">
+                    {(weight as number).toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                  </td>
+                  <td className="px-3 py-2 text-right text-muted-foreground">
+                    {pct.toFixed(1)}%
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            <tr className="border-t-2 border-border bg-secondary">
+              <td className="px-3 py-2 font-bold text-foreground">Total</td>
+              <td className="px-3 py-2 text-right font-bold text-foreground">
+                {total.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+              </td>
+              <td className="px-3 py-2 text-right font-bold text-foreground">100%</td>
+              <td className="px-3 py-2">
+                <div className="h-1.5 rounded-full bg-primary" />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };

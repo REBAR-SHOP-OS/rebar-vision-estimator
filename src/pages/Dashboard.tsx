@@ -154,10 +154,16 @@ const Dashboard: React.FC = () => {
       <aside
         className={`${
           sidebarOpen ? "w-64" : "w-0"
-        } relative z-10 flex flex-col border-r border-border bg-sidebar transition-all duration-200 overflow-hidden flex-shrink-0`}
+        } relative z-10 flex flex-col border-r border-sidebar-border bg-sidebar transition-all duration-300 overflow-hidden flex-shrink-0`}
       >
+        {/* Branded Header */}
+        <div className="flex items-center gap-2 px-3 pt-3 pb-2">
+          <img src={logoBg} alt="Logo" className="h-7 w-7 rounded-lg" />
+          <span className="text-sm font-bold text-sidebar-foreground truncate">Rebar Estimator</span>
+        </div>
+
         {/* New Project Button */}
-        <div className="p-3">
+        <div className="px-3 pb-2">
           <input
             ref={newProjectFileInputRef}
             type="file"
@@ -203,7 +209,10 @@ const Dashboard: React.FC = () => {
                   : "text-sidebar-foreground hover:bg-sidebar-accent/50"
               }`}
             >
-              <MessageSquare className="h-4 w-4 flex-shrink-0" />
+              <div className={`h-2 w-2 rounded-full flex-shrink-0 ${
+                project.status === "complete" ? "bg-primary" : project.status === "in_progress" ? "bg-amber-500" : "bg-muted-foreground/30"
+              }`} />
+              <MessageSquare className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
               {editingProjectId === project.id ? (
                 <div className="flex items-center gap-1 flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
                   <input
@@ -342,15 +351,38 @@ const Dashboard: React.FC = () => {
           />
         ) : (
           <div className="flex flex-1 items-center justify-center blueprint-bg-major">
-            <div className="text-center space-y-4">
-              <h2 className="text-2xl font-semibold text-foreground">
-                {t("welcomeMessage")}
-              </h2>
-              <p className="text-muted-foreground max-w-md">
-                {t("uploadBlueprints")}
-              </p>
-              <Button onClick={handleNewEstimationClick} disabled={creatingProject} className="gap-2">
-                <Plus className="h-4 w-4" />
+            <div className="max-w-xl mx-auto text-center space-y-8 px-4">
+              <div className="space-y-3">
+                <img src={logoBg} alt="Logo" className="h-16 w-16 rounded-2xl mx-auto" />
+                <h2 className="text-3xl font-bold text-foreground tracking-tight">
+                  {t("welcomeMessage")}
+                </h2>
+                <p className="text-muted-foreground text-sm max-w-md mx-auto">
+                  {t("uploadBlueprints")}
+                </p>
+              </div>
+
+              {/* 4-Step Visual Guide */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { num: 1, icon: "📄", title: "Upload Plans", desc: "PDF or image files" },
+                  { num: 2, icon: "🎯", title: "Set Scope", desc: "Define element types" },
+                  { num: 3, icon: "⚡", title: "AI Takeoff", desc: "Automated estimation" },
+                  { num: 4, icon: "📊", title: "Get Results", desc: "Export & review" },
+                ].map((step) => (
+                  <div key={step.num} className="glass-card rounded-xl p-4 text-center space-y-2">
+                    <div className="flex items-center justify-center gap-2">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-bold">{step.num}</span>
+                    </div>
+                    <p className="text-lg">{step.icon}</p>
+                    <p className="text-xs font-semibold text-foreground">{step.title}</p>
+                    <p className="text-[10px] text-muted-foreground">{step.desc}</p>
+                  </div>
+                ))}
+              </div>
+
+              <Button onClick={handleNewEstimationClick} disabled={creatingProject} size="lg" className="gap-2 h-12 px-8 rounded-xl font-bold text-base">
+                <Plus className="h-5 w-5" />
                 {t("startNewEstimation")}
               </Button>
             </div>
