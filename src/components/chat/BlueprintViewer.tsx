@@ -214,7 +214,7 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
           </Tooltip>
         </TooltipProvider>
 
-        <span className="text-[10px] text-muted-foreground font-medium ml-1">{Math.round(zoom * 100)}%</span>
+        <span className="text-[10px] text-muted-foreground font-medium ml-1 hidden sm:inline">{Math.round(zoom * 100)}%</span>
 
         {/* PDF Page Navigation */}
         {isPdf && pdfPageCount > 1 && (

@@ -193,7 +193,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+      <DialogContent className="w-full sm:max-w-3xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Settings2 className="h-5 w-5" />
@@ -210,7 +210,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
           <TabsContent value="generate" className="flex-1 flex flex-col min-h-0 overflow-auto">
             {phase === "options" && (
               <div className="space-y-4 p-1">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Scale</Label>
                     <Select value={options.scale} onValueChange={v => setOptions(o => ({ ...o, scale: v }))}>

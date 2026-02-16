@@ -169,7 +169,7 @@ const BarListTable: React.FC<BarListTableProps> = ({ barList: initialBarList, on
   return (
     <div className="space-y-3">
       {/* Search/Filter + Import */}
-      <div className="flex gap-2">
+      <div className="flex flex-col xs:flex-row gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -203,7 +203,7 @@ const BarListTable: React.FC<BarListTableProps> = ({ barList: initialBarList, on
                 <span className="ml-auto text-xs font-semibold text-primary">{subtotal.toLocaleString()} lbs</span>
               </CollapsibleTrigger>
               <CollapsibleContent className="mt-1">
-                <div className="rounded-xl border border-border overflow-hidden">
+                <div className="rounded-xl border border-border overflow-hidden overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow className="bg-muted/50">
