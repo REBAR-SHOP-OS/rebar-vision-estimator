@@ -868,6 +868,16 @@ serve(async (req) => {
             console.log("PDF converted, base64:", Math.round(base64.length / 1024), "KB");
           } catch (err) { console.error("PDF convert error:", err); }
         } else {
+          // Check if this is a supported image format
+          const supportedImageExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif'];
+          const fileExt = urlLower.split('.').pop()?.split('?')[0] || '';
+          const isSupportedImage = supportedImageExts.some(ext => ext === `.${fileExt}`);
+          
+          if (!isSupportedImage) {
+            console.log(`Skipping unsupported file format: .${fileExt} — only images and PDFs are supported for visual analysis`);
+            continue;
+          }
+          
           // Image file - run Vision OCR if token available
           fileContentParts.push({ type: "image_url", image_url: { url } });
 
