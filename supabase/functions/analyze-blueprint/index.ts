@@ -29,10 +29,38 @@ async function importPrivateKey(pem: string): Promise<CryptoKey> {
 }
 
 async function getGoogleAccessToken(): Promise<string> {
-  const saKeyJson = Deno.env.get("GOOGLE_VISION_SA_KEY");
-  if (!saKeyJson) throw new Error("GOOGLE_VISION_SA_KEY not configured");
+  const saKeyRaw = Deno.env.get("GOOGLE_VISION_SA_KEY");
+  if (!saKeyRaw) throw new Error("GOOGLE_VISION_SA_KEY not configured");
   
-  const sa = JSON.parse(saKeyJson);
+  // Resilient parsing: try multiple decode strategies
+  let sa: any;
+  const cleanJson = saKeyRaw.replace(/^\uFEFF/, '').trim();
+  console.log("SA key first 20 chars:", JSON.stringify(cleanJson.substring(0, 20)));
+  
+  // Strategy 1: Direct JSON parse
+  try { sa = JSON.parse(cleanJson); } catch {}
+  
+  // Strategy 2: URL-decoded
+  if (!sa) {
+    try { sa = JSON.parse(decodeURIComponent(cleanJson)); } catch {}
+  }
+  
+  // Strategy 3: Base64-decoded
+  if (!sa) {
+    try {
+      const decoded = new TextDecoder().decode(decodeBase64(cleanJson));
+      sa = JSON.parse(decoded);
+    } catch {}
+  }
+  
+  // Strategy 4: Double-escaped JSON (extra backslashes)
+  if (!sa) {
+    try { sa = JSON.parse(cleanJson.replace(/\\n/g, '\n').replace(/\\"/g, '"')); } catch {}
+  }
+  
+  if (!sa || !sa.client_email || !sa.private_key) {
+    throw new Error("GOOGLE_VISION_SA_KEY could not be parsed. Ensure it is valid JSON with client_email and private_key fields.");
+  }
   const now = Math.floor(Date.now() / 1000);
   
   const header = { alg: "RS256", typ: "JWT" };
@@ -211,13 +239,17 @@ Each element you identify MUST be output as a JSON object following this schema:
       ]
     }
   ],
-  "extraction": {
+    "extraction": {
     "truth": {
       "vertical_bars": { "size": "#6", "qty": 8 },
       "ties": { "size": "#3", "spacing_mm": 300 },
       "laps": {},
       "grade": "60",
-      "coating": "none"
+      "coating": "none",
+      "bar_mark": "A1",
+      "shape_code": "straight",
+      "bend_details": { "leg1_in": 0, "leg2_in": 0, "hook_ext_in": 0 },
+      "splice_length_in": 0
     },
     "sources": {
       "identity_sources": ["TAG", "SCHEDULE_ROW", "DETAIL"],
@@ -534,6 +566,7 @@ serve(async (req) => {
         scopeBlock += `Only analyze these element types: ${scope.scopeItems.join(", ")}\n`;
         scopeBlock += `Ignore any elements NOT in this list.\n`;
       }
+      if (scope.rebarCoating) scopeBlock += `Rebar Coating Type: ${scope.rebarCoating}\n`;
       if (scope.clientName) scopeBlock += `Client: ${scope.clientName}\n`;
       if (scope.projectType) scopeBlock += `Project Type: ${scope.projectType}\n`;
       if (scope.deviations) scopeBlock += `Project-Specific Deviations: ${scope.deviations}\n`;

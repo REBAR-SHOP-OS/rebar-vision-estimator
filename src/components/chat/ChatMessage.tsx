@@ -12,11 +12,12 @@ interface ChatMessageProps {
 const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   const isUser = message.role === "user";
 
-  // Strip Atomic Truth JSON blocks from displayed content
-  const displayContent = message.content.replace(
-    /%%%ATOMIC_TRUTH_JSON_START%%%.+?%%%ATOMIC_TRUTH_JSON_END%%%/gs,
-    ""
-  ).trim();
+  // Strip Atomic Truth JSON blocks AND "Section 2" header from displayed content
+  const displayContent = message.content
+    .replace(/#{1,4}\s*Section\s*2[:\s]*Structured\s*JSON\s*Block[^\n]*/gi, "")
+    .replace(/%%%ATOMIC_TRUTH_JSON_START%%%.+?%%%ATOMIC_TRUTH_JSON_END%%%/gs, "")
+    .replace(/```\s*```/g, "")
+    .trim();
 
   return (
     <div className={`flex gap-4 py-4 px-2 rounded-xl ${isUser ? "bg-chat-user" : "bg-chat-assistant"}`}>

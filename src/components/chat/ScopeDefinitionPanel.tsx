@@ -12,6 +12,7 @@ const SCOPE_ITEMS = [
   { id: "FOOTING", label: "Footings" },
   { id: "GRADE_BEAM", label: "Grade Beams" },
   { id: "RAFT_SLAB", label: "Raft Slabs" },
+  { id: "BEAM", label: "Beams" },
   { id: "WALL", label: "Walls" },
   { id: "RETAINING_WALL", label: "Retaining Walls" },
   { id: "ICF_WALL", label: "ICF Walls" },
@@ -23,11 +24,19 @@ const SCOPE_ITEMS = [
   { id: "WIRE_MESH", label: "Wire Mesh" },
 ] as const;
 
+const REBAR_COATING_TYPES = [
+  { id: "black_steel", label: "Black Steel (Standard)" },
+  { id: "epoxy_coated", label: "Epoxy-Coated" },
+  { id: "galvanized", label: "Galvanized" },
+  { id: "stainless_steel", label: "Stainless Steel" },
+] as const;
+
 export interface ScopeData {
   scopeItems: string[];
   clientName: string;
   projectType: string;
   deviations: string;
+  rebarCoating: string;
 }
 
 interface ScopeDefinitionPanelProps {
@@ -40,6 +49,7 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
   const [clientName, setClientName] = useState("");
   const [projectType, setProjectType] = useState("");
   const [deviations, setDeviations] = useState("");
+  const [rebarCoating, setRebarCoating] = useState("black_steel");
 
   const toggleItem = (id: string) => {
     setSelectedItems((prev) =>
@@ -62,6 +72,7 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
       clientName,
       projectType,
       deviations,
+      rebarCoating,
     });
   };
 
@@ -97,6 +108,25 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
                   onCheckedChange={() => toggleItem(item.id)}
                 />
                 <span className="text-foreground">{item.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Rebar Coating Type */}
+        <div>
+          <Label className="text-xs text-muted-foreground">Rebar Coating Type</Label>
+          <div className="grid grid-cols-2 gap-2 mt-1">
+            {REBAR_COATING_TYPES.map((coating) => (
+              <label
+                key={coating.id}
+                className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-accent/50 transition-colors"
+              >
+                <Checkbox
+                  checked={rebarCoating === coating.id}
+                  onCheckedChange={() => setRebarCoating(coating.id)}
+                />
+                <span className="text-foreground">{coating.label}</span>
               </label>
             ))}
           </div>

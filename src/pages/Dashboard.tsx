@@ -36,6 +36,7 @@ const Dashboard: React.FC = () => {
   const [editName, setEditName] = useState("");
   const [currentStep, setCurrentStep] = useState<number | null>(null);
   const [calculationMode, setCalculationMode] = useState<"smart" | "step-by-step" | null>(null);
+  const [processingPhase, setProcessingPhase] = useState<string | null>(null);
   const [initialFiles, setInitialFiles] = useState<File[] | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const newProjectFileInputRef = useRef<HTMLInputElement>(null);
@@ -179,7 +180,7 @@ const Dashboard: React.FC = () => {
         {/* Step Progress - shown when a project is active */}
         {activeProjectId && (
           <div className="border-b border-border">
-            <StepProgress currentStep={currentStep} mode={calculationMode} />
+            <StepProgress currentStep={currentStep} mode={calculationMode} processingPhase={processingPhase} />
           </div>
         )}
 
