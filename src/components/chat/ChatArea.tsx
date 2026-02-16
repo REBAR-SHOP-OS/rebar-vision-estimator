@@ -9,6 +9,7 @@ import ChatMessage from "./ChatMessage";
 import CalculationModePicker from "./CalculationModePicker";
 import ValidationResults from "./ValidationResults";
 import ElementReviewPanel, { type ReviewAnswer } from "./ElementReviewPanel";
+import FinderPassReview, { type FinderCandidate, type ReviewedCandidate } from "./FinderPassReview";
 import { type ReviewStatus } from "./DrawingOverlay";
 import ScopeDefinitionPanel, { type ScopeData, type DetectionResult } from "./ScopeDefinitionPanel";
 import BlueprintViewer from "./BlueprintViewer";
@@ -69,6 +70,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const [reviewMode, setReviewMode] = useState(false);
   const [reviewStatuses, setReviewStatuses] = useState<Map<string, ReviewStatus>>(new Map());
   const [pdfPageCount, setPdfPageCount] = useState(1);
+  const [finderPassCandidates, setFinderPassCandidates] = useState<FinderCandidate[]>([]);
+  const [finderReviewMode, setFinderReviewMode] = useState(false);
+  const [confirmedFinderCandidates, setConfirmedFinderCandidates] = useState<ReviewedCandidate[]>([]);
   const isMobile = useIsMobile();
   useEffect(() => {
     // Reset state when switching projects
@@ -352,6 +356,48 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     }
   };
 
+  // ── Finder Pass parser ──
+  const extractFinderPassCandidates = (content: string): FinderCandidate[] => {
+    // Look for markdown table with columns: Page | Type | OCR Text | Potential For | Bbox
+    const tableRegex = /\|.*Page.*\|.*Type.*\|.*OCR.*\|.*Potential.*\|.*Bbox.*\|\n\|[-\s|]+\|\n((?:\|.*\|\n?)*)/gi;
+    const match = tableRegex.exec(content);
+    if (!match) return [];
+
+    const rows = match[1].trim().split("\n").filter((r) => r.trim());
+    const candidates: FinderCandidate[] = [];
+
+    for (const row of rows) {
+      const cells = row.split("|").map((c) => c.trim()).filter(Boolean);
+      if (cells.length < 5) continue;
+
+      const page = parseInt(cells[0]) || 1;
+      const type = cells[1];
+      const ocrText = cells[2];
+      const potentialFor = cells[3];
+      // Parse bbox like [x1, y1, x2, y2]
+      const bboxMatch = cells[4].match(/\[?\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]?/);
+      if (!bboxMatch) continue;
+
+      const bbox: [number, number, number, number] = [
+        parseInt(bboxMatch[1]),
+        parseInt(bboxMatch[2]),
+        parseInt(bboxMatch[3]),
+        parseInt(bboxMatch[4]),
+      ];
+
+      candidates.push({
+        id: `finder-${candidates.length}-${page}`,
+        page,
+        type,
+        ocrText,
+        potentialFor,
+        bbox,
+      });
+    }
+
+    return candidates;
+  };
+
   const runValidation = async (elements: any[], answers?: any[]) => {
     try {
       const resp = await fetch(VALIDATE_URL, {
@@ -473,6 +519,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
       // Process Atomic Truth pipeline
       await processAtomicTruth(fullContent);
+
+      // Check for Finder Pass candidates
+      const fpCandidates = extractFinderPassCandidates(fullContent);
+      if (fpCandidates.length > 0) {
+        setFinderPassCandidates(fpCandidates);
+        setFinderReviewMode(true);
+        setShowBlueprintViewer(true);
+      }
     } catch (err: any) {
       toast.error(err.message || "AI analysis failed");
     }
@@ -534,6 +588,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
         // Process Atomic Truth pipeline
         await processAtomicTruth(fullContent);
+
+        // Check for Finder Pass candidates
+        const fpCandidates = extractFinderPassCandidates(fullContent);
+        if (fpCandidates.length > 0) {
+          setFinderPassCandidates(fpCandidates);
+          setFinderReviewMode(true);
+          setShowBlueprintViewer(true);
+        }
       } catch (err: any) {
         toast.error(err.message || "AI analysis failed");
       }
@@ -667,7 +729,19 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   };
 
   // Build overlay elements from validation data
+  // Build overlay elements from validation data OR finder pass candidates
   const overlayElements: OverlayElement[] = useMemo(() => {
+    // If finder pass review is active, show those candidates as overlays
+    if (finderPassCandidates.length > 0 && finderReviewMode) {
+      return finderPassCandidates.map((c) => ({
+        element_id: c.id,
+        element_type: "FINDER_CANDIDATE",
+        status: "candidate",
+        bbox: c.bbox,
+        page_number: c.page,
+      }));
+    }
+
     if (!validationData?.elements) return [];
     return validationData.elements
       .filter((el: any) => el.regions?.tag_region?.bbox)
@@ -680,7 +754,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         weight_lbs: quoteResult?.quote?.elements?.find((qe: any) => qe.element_id === el.element_id)?.weight_lbs,
         page_number: el.regions?.tag_region?.page_number,
       }));
-  }, [validationData, quoteResult]);
+  }, [validationData, quoteResult, finderPassCandidates, finderReviewMode]);
 
   // Show viewer whenever uploaded files exist (supports PDF read-only mode too)
   const hasDrawingData = uploadedFiles.length > 0;
@@ -751,6 +825,30 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             </div>
           ) : (
             messages.map((msg) => <ChatMessage key={msg.id} message={msg} />)
+          )}
+
+          {/* Finder Pass Review */}
+          {finderReviewMode && finderPassCandidates.length > 0 && (
+            <div className="py-2">
+              <FinderPassReview
+                candidates={finderPassCandidates}
+                onComplete={(reviewed) => {
+                  setFinderReviewMode(false);
+                  setConfirmedFinderCandidates(reviewed);
+                  const confirmed = reviewed.filter((r) => r.status !== "rejected");
+                  const rejected = reviewed.filter((r) => r.status === "rejected");
+                  toast.success(`Finder Pass review complete! ${confirmed.length} confirmed, ${rejected.length} rejected.`);
+                }}
+                onCancel={() => {
+                  setFinderReviewMode(false);
+                  setFinderPassCandidates([]);
+                }}
+                onSelectElement={(id) => {
+                  setSelectedElementId(id);
+                  if (!showBlueprintViewer) setShowBlueprintViewer(true);
+                }}
+              />
+            </div>
           )}
 
           {/* Review Mode or Validation Results */}

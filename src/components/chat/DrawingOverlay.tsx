@@ -17,6 +17,7 @@ export const ELEMENT_TYPE_COLORS: Record<string, string> = {
   WIRE_MESH: "#6B7280",
   CAGE: "#F97316",
   OTHER: "#6B7280",
+  FINDER_CANDIDATE: "#06B6D4",
 };
 
 export interface OverlayElement {
