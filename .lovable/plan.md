@@ -1,45 +1,38 @@
 
 
-## Make the UI Foolproof with Visual Guidance
+## Fix Misleading "Click any box" Guidance
 
 ### Problem
-The current interface shows elements like "LEGEND: PIER" without explaining what to do. Users shouldn't need to guess what things mean or what action to take.
+The blueprint viewer says "Click any box to see details" and shows a legend with "PIER -- 2 found", but no colored boxes are actually visible on the drawing. This happens because the elements were extracted from a tabular bar list, where bounding boxes are rough row-position estimates (often just thin horizontal lines with near-zero height). The current `hasOverlays` check uses OR logic (`bbox[2] > bbox[0] || bbox[3] > bbox[1]`), so these thin bands pass the check even though they're not meaningfully visible.
 
 ### Changes
 
-**1. Blueprint Viewer Legend - Add counts and action hints**
+**1. Fix the `hasOverlays` check to require meaningful boxes**
 
-In `BlueprintViewer.tsx`, enhance the bottom-right legend box to show:
-- Element type name with count (e.g., "PIER - 2 found")
-- A subtle hint: "Click any box to see details"
+Change the OR to AND, and add a minimum size threshold so only boxes with real width AND height count as visible overlays:
 
-**2. Element Cards - Add "What is this?" context**
+```
+// Before (too lenient)
+el.bbox[2] > el.bbox[0] || el.bbox[3] > el.bbox[1]
 
-In `ValidationResults.tsx`, add a one-line plain-English description under each element card header explaining what the element is:
-- PIER: "A deep foundation element (caisson)"
-- COLUMN: "A vertical structural member"
-- BEAM: "A horizontal structural member"
-- FOOTING: "A base that transfers load to ground"
-- CAGE: "A pre-assembled rebar cage"
-- etc.
+// After (requires real rectangles)
+(el.bbox[2] - el.bbox[0]) > 10 && (el.bbox[3] - el.bbox[1]) > 10
+```
 
-**3. Drawing Overlay Labels - Make them readable**
+This means thin row-bands from tabular extraction won't trigger the "click any box" messaging.
 
-In `DrawingOverlay.tsx`, increase the label font size slightly and add the element type after the ID (e.g., "CAISSON-4.5M | PIER") so users instantly know what each box represents without hovering.
+**2. When boxes aren't meaningful, show the "No spatial data" notice instead**
 
-**4. First-time guidance banner on Blueprint Viewer**
+The existing "No spatial data -- elements were parsed from tabular data" notice already exists for the `!hasOverlays` case. With the stricter check, tabular-only elements will correctly show this notice instead of the misleading "click any box" banner.
 
-In `BlueprintViewer.tsx`, show a dismissible tip banner at the top when the viewer opens:
-> "Colored boxes highlight detected elements. Click any box to select it, or use the filter chips above to show/hide types."
+**3. Also fix the same OR condition in `DrawingOverlay.tsx` filter**
 
-This disappears after first interaction.
+The DrawingOverlay component filters elements using the same lenient OR check. Update it to match the stricter AND logic so it doesn't try to render invisible rectangles.
 
 ### Technical Details
 
 | File | Change |
 |---|---|
-| `src/components/chat/BlueprintViewer.tsx` | Add dismissible guidance banner; enhance legend with counts and "click to select" hint |
-| `src/components/chat/DrawingOverlay.tsx` | Append element type to label text (e.g., "CAISSON-4.5M | PIER"); widen label background accordingly |
-| `src/components/chat/ValidationResults.tsx` | Add plain-English element type descriptions under each card header |
-| `src/components/chat/ElementReviewPanel.tsx` | Add a one-line instruction at top: "Verify each element below. Click Confirm, Edit, or Reject, then move to Next." |
+| `src/components/chat/BlueprintViewer.tsx` (line 159) | Change `hasOverlays` to require both width AND height > 10px minimum |
+| `src/components/chat/DrawingOverlay.tsx` (line 64) | Update the filter to also require both width AND height > 10px |
 
