@@ -1,0 +1,2 @@
+ALTER TABLE public.agent_knowledge DROP CONSTRAINT IF EXISTS agent_knowledge_type_check;
+ALTER TABLE public.agent_knowledge ADD CONSTRAINT agent_knowledge_type_check CHECK (type IN ('rule', 'file', 'learned'));
