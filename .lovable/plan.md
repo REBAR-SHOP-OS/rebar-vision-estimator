@@ -1,29 +1,39 @@
 
-## Fix: Quick-Action Buttons Send Immediately Without Waiting
+
+## Make Element Overlays More Visible and Clear on the Drawing
 
 ### Problem
-When clicking a quick-action card (e.g. "Yes, Proceed", "Adjust Scope"), the code calls `setInput(card.sendText)` then `setTimeout(() => sendMessage(), 0)`. But `sendMessage` reads from the `input` state variable, which hasn't updated yet because React state updates are asynchronous. This causes the message to either not send or send the old input value.
+The current overlay rectangles are nearly invisible -- thin, low-opacity strokes that blend into the blueprint. Users can't easily tell what's being highlighted or where to look.
 
-### Solution
-Add an optional `overrideText` parameter to `sendMessage` so it can accept text directly, bypassing the state. The quick-action buttons will call `sendMessage(card.sendText)` immediately -- no `setInput`, no `setTimeout`.
+### Changes to `src/components/chat/DrawingOverlay.tsx`
 
-### Technical Details
+**1. Bolder boxes with higher contrast**
+- Increase default stroke width from 2 to 3, and selected/hovered even thicker (4-5)
+- Increase fill opacity from 0.08 to 0.15 (default), 0.25 (hovered), 0.3 (selected)
+- Add a white outer stroke (glow effect) behind the colored stroke for contrast against dark blueprints
+
+**2. Add corner bracket markers instead of plain rectangles**
+- Draw L-shaped corner brackets at each corner of the bounding box (like a camera viewfinder / targeting reticle)
+- These are universally understood as "pointing at this area" markers
+- Each corner gets a short line pair (e.g., 20px long) in the element's color with thicker stroke
+
+**3. Improve the label tag**
+- Make the label pill larger with more padding and bigger font (14px instead of 12px)
+- Add a small downward-pointing triangle/arrow connecting the label to the box so it clearly "points" to the element
+- Add a subtle drop shadow via SVG filter for readability on any background
+
+**4. Add a pulsing dot at the center of selected/active elements**
+- A small filled circle at the center of the bounding box that pulses, drawing the eye to the target
+
+### Visual comparison
+
+Before: Thin transparent rectangle, tiny label floating above
+After: Bold corner brackets with glow, larger label with pointer arrow, pulsing center dot on selection
+
+### Files Changed
 
 | File | Change |
 |---|---|
-| `src/components/chat/ChatArea.tsx` | 1. Change `sendMessage` signature from `async ()` to `async (overrideText?: string)`. Use `const text = (overrideText ?? input).trim()` instead of `input.trim()` throughout the function. 2. In the card click handler, replace the `setInput` + `setTimeout` + `sendMessage()` pattern with a single direct call: `sendMessage(card.sendText)`. Remove the `autoSend` property entirely since all cards with `sendText` will just call `sendMessage` directly. |
+| `src/components/chat/DrawingOverlay.tsx` | Replace plain rect with corner-bracket markers, add glow filter, pointer arrow on label, pulsing center dot, increase all opacities and stroke widths |
+| `src/index.css` | Add keyframe animation for the pulsing center dot (`@keyframes overlay-pulse`) |
 
-### Before (broken)
-```typescript
-setInput(card.sendText);
-if (card.autoSend) {
-  setTimeout(() => {
-    sendMessage(); // reads stale `input` state
-  }, 0);
-}
-```
-
-### After (fixed)
-```typescript
-sendMessage(card.sendText); // sends immediately with the correct text
-```
