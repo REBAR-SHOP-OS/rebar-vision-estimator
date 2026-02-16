@@ -165,6 +165,19 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
                 </div>
               </div>
             </div>
+            {/* Category-specific guidance */}
+            {detectionResult.category === "cage" && (
+              <div className="flex items-start gap-2 rounded-md bg-accent/50 p-2 mt-1">
+                <Info className="h-3.5 w-3.5 text-primary flex-shrink-0 mt-0.5" />
+                <p className="text-[11px] text-muted-foreground">Cage project — estimator will focus on cage assemblies (verticals, ties, spirals, cage marks).</p>
+              </div>
+            )}
+            {detectionResult.category === "bar_list" && (
+              <div className="flex items-start gap-2 rounded-md bg-accent/50 p-2 mt-1">
+                <Info className="h-3.5 w-3.5 text-primary flex-shrink-0 mt-0.5" />
+                <p className="text-[11px] text-muted-foreground">Bar list detected — will parse schedule tables directly for bar marks, sizes, quantities, and lengths.</p>
+              </div>
+            )}
             {detectionResult.detectedStandard === "canadian_metric" && (
               <div className="flex items-start gap-2 rounded-md bg-accent/50 p-2 mt-1">
                 <AlertTriangle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0 mt-0.5" />

@@ -113,10 +113,53 @@ serve(async (req) => {
       }
     }
 
+    // Keyword-based confidence boosting
+    const ocrLower = ocrText.toLowerCase();
+    const cageKeywords = ["cage", "spiral", "tied assembly", "cage mark", "prefab", "column cage", "cage schedule", "cage height", "cage dia"];
+    const barListKeywords = ["bar list", "bar schedule", "bar mark", "cut length", "qty", "bending schedule"];
+    const infraKeywords = ["bridge", "abutment", "culvert", "mto", "opss", "highway", "barrier"];
+    const residentialKeywords = ["icf", "basement", "garage", "sog", "slab on grade", "strip footing"];
+    const industrialKeywords = ["equipment pad", "tank", "crane beam", "industrial", "process area"];
+    
+    const keywordHints: string[] = [];
+    if (cageKeywords.some(k => ocrLower.includes(k))) keywordHints.push("STRONG cage indicators found in OCR text (keywords: cage, spiral, tied assembly)");
+    if (barListKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Bar list/schedule indicators found in OCR text");
+    if (infraKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Infrastructure indicators found (bridge, MTO, highway)");
+    if (residentialKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Residential indicators found (ICF, basement, SOG)");
+    if (industrialKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Industrial indicators found (equipment pad, tank, crane)");
+
     // Build the detection prompt
     const detectionPrompt = `Analyze these blueprint files and determine the project type.
 
 ${ocrText ? `## OCR Text Extracted:\n${ocrText}` : "No OCR text available - analyze the images directly."}
+
+${keywordHints.length > 0 ? `## Keyword Analysis Hints:\n${keywordHints.map(h => `- ${h}`).join("\n")}\n` : ""}
+
+## Category Detection Guide
+
+### CAGE (Prefab Rebar Cages / Column Cages)
+**Strong indicators**: Column cage schedules, "cage" labels anywhere, prefab marks (e.g., C1-CAGE, CAGE-A), tied column assemblies, cage height/diameter callouts, spiral pitch details, shop drawing format showing cage assembly views, cage weight tables.
+**Typical content**: Individual cage detail drawings showing verticals + ties/spirals, cage mark numbers, assembly instructions.
+
+### BAR LIST (Schedule Only — No Drawings)
+**Strong indicators**: No blueprint drawings — just tables with bar marks, sizes (10M, #4), quantities, cut lengths, total weights. May have "Bending Schedule", "Bar List", "Bar Schedule" as title.
+**Typical content**: Tabular data only, no plan/section views.
+
+### RESIDENTIAL
+**Strong indicators**: Strip footings, ICF wall details, basement walls, SOG (slab-on-grade), small residential columns, garage foundations, house plans, light bar sizes (10M-20M predominant).
+**Typical content**: Simple foundation plans, wall sections, small scale.
+
+### COMMERCIAL
+**Strong indicators**: Multi-storey column schedules, flat slab/plate details, drop panels, parking structures, elevator shafts, slab bands, post-tensioning.
+**Typical content**: Floor plans with column grids, beam schedules, multiple levels.
+
+### INDUSTRIAL
+**Strong indicators**: Large footings (>3m), heavy bar sizes (25M-55M, #8+), equipment foundations, tank bases/rings, crane beams, process equipment pads, turbine/generator foundations.
+**Typical content**: Heavy isolated footings, massive pile caps, equipment anchor bolt patterns.
+
+### INFRASTRUCTURE
+**Strong indicators**: Bridge decks, abutments, retaining walls >3m, culverts, highway barriers, MTO/OPSS/DOT references, wingwalls, pier caps (bridge piers).
+**Typical content**: Bridge cross-sections, retaining wall elevations, DOT standard details.
 
 Classify this project into one of these categories based on what you see in the blueprints.`;
 
