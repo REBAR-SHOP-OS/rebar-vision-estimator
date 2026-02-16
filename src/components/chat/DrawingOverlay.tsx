@@ -63,7 +63,7 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
   if (!imageWidth || !imageHeight) return null;
 
   const filtered = elements.filter(
-    (el) => visibleTypes.has(el.element_type) && el.bbox[2] > el.bbox[0] && el.bbox[3] > el.bbox[1]
+    (el) => visibleTypes.has(el.element_type) && (el.bbox[2] - el.bbox[0]) > 10 && (el.bbox[3] - el.bbox[1]) > 10
   );
 
   return (
