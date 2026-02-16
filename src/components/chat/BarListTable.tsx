@@ -1,9 +1,12 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell, TableFooter } from "@/components/ui/table";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { ChevronDown, ChevronRight, Search, Pencil } from "lucide-react";
+import { ChevronDown, ChevronRight, Search, Pencil, Upload } from "lucide-react";
+import { toast } from "sonner";
+import * as XLSX from "xlsx";
 
 const REBAR_UNIT_WEIGHT: Record<string, number> = {
   "#3": 0.376, "#4": 0.668, "#5": 1.043, "#6": 1.502, "#7": 2.044,
@@ -28,6 +31,7 @@ interface BarListTableProps {
   barList: BarItem[];
   onShowOnDrawing?: (elementId: string) => void;
   selectedElementId?: string | null;
+  onImport?: (data: BarItem[]) => void;
 }
 
 interface EditingCell {
@@ -35,7 +39,30 @@ interface EditingCell {
   field: "qty" | "length_ft" | "size";
 }
 
-const BarListTable: React.FC<BarListTableProps> = ({ barList: initialBarList, onShowOnDrawing, selectedElementId }) => {
+function parseXlsxToBarItems(data: any[]): BarItem[] {
+  return data.map((row, i) => {
+    const size = String(row["SIZE"] || row["size"] || "").trim();
+    const qty = parseInt(row["QUANTITY"] || row["quantity"] || row["QTY"] || row["qty"] || "1") || 1;
+    const totalLengthMm = parseFloat(row["TOTAL LENGTH"] || row["total_length"] || row["LENGTH"] || "0") || 0;
+    const lengthFt = Math.round((totalLengthMm / 304.8) * 100) / 100; // mm to ft
+    const unitWt = REBAR_UNIT_WEIGHT[size] || 0;
+    const weight = Math.round(qty * lengthFt * unitWt * 100) / 100;
+    const shapeType = String(row["TYPE"] || row["type"] || row["SHAPE"] || row["shape_code"] || "").trim();
+
+    return {
+      element_id: String(row["DWG #"] || row["DWG"] || row["dwg"] || `ROW-${i + 1}`).trim(),
+      element_type: String(row["ADD"] || row["DESCRIPTION"] || row["ITEM"] || "REBAR").trim(),
+      bar_mark: String(row["MARK"] || row["mark"] || row["BAR MARK"] || `M${i + 1}`).trim(),
+      size,
+      shape_code: shapeType || "straight",
+      qty,
+      length_ft: lengthFt,
+      weight_lbs: weight,
+    };
+  });
+}
+
+const BarListTable: React.FC<BarListTableProps> = ({ barList: initialBarList, onShowOnDrawing, selectedElementId, onImport }) => {
   const [barList, setBarList] = useState<BarItem[]>(initialBarList);
   const [filter, setFilter] = useState("");
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
@@ -115,17 +142,48 @@ const BarListTable: React.FC<BarListTableProps> = ({ barList: initialBarList, on
     }
   };
 
+  const xlsxInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const wb = XLSX.read(evt.target?.result, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const raw = XLSX.utils.sheet_to_json(ws);
+        if (!raw.length) { toast.error("No data found in the file"); return; }
+        const items = parseXlsxToBarItems(raw);
+        setBarList(items);
+        onImport?.(items);
+        toast.success(`Imported ${items.length} bar items`);
+      } catch {
+        toast.error("Failed to parse the Excel file");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = "";
+  };
+
   return (
     <div className="space-y-3">
-      {/* Search/Filter */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Filter by bar mark, size, or element type..."
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className="pl-9 h-9 rounded-xl text-xs"
-        />
+      {/* Search/Filter + Import */}
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Filter by bar mark, size, or element type..."
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="pl-9 h-9 rounded-xl text-xs"
+          />
+        </div>
+        <input ref={xlsxInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileImport} />
+        <Button variant="outline" size="sm" className="h-9 rounded-xl text-xs gap-1.5" onClick={() => xlsxInputRef.current?.click()}>
+          <Upload className="h-3.5 w-3.5" />
+          Import
+        </Button>
       </div>
 
       {/* Grouped Tables */}
