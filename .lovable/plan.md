@@ -1,90 +1,42 @@
 
 
-## پیاده‌سازی Google Vision API برای OCR واقعی
+## ذخیره Service Account و پیاده‌سازی Google Vision API
 
-Service Account شما دریافت شد. این پلن Google Vision API را به عنوان موتور OCR اصلی در pipeline جایگزین OCR شبیه‌سازی‌شده Gemini می‌کند.
+### مرحله 1: ذخیره Secret
 
----
+محتوای کامل JSON سرویس اکانت (شامل `private_key`، `client_email`، و سایر فیلدها) به عنوان secret با نام `GOOGLE_VISION_SA_KEY` ذخیره می‌شود.
 
-### تغییرات
+### مرحله 2: بازنویسی `supabase/functions/analyze-blueprint/index.ts`
 
-#### 1. ذخیره Service Account به عنوان Secret
+توابع جدید اضافه می‌شوند:
 
-کل محتوای فایل JSON سرویس اکانت به عنوان یک secret با نام `GOOGLE_VISION_SA_KEY` ذخیره می‌شود. Edge Function این secret را می‌خواند، JWT تولید می‌کند، و access token از Google دریافت می‌کند.
+1. **`getGoogleAccessToken()`** -- JWT با RS256 از private_key ساخته، با Google OAuth2 تبادل، و access token دریافت می‌شود
+2. **`callVisionAPI(imageBase64, features, imageContext?)`** -- فراخوانی واقعی Vision API با access token
+3. **`tripleOCR(imageBase64)`** -- سه پاس OCR:
+   - Pass 1: `TEXT_DETECTION` (عمومی)
+   - Pass 2: `DOCUMENT_TEXT_DETECTION` (سند)
+   - Pass 3: `TEXT_DETECTION` + `languageHints: ["en"]`
+4. **تزریق نتایج OCR به Gemini** -- نتایج واقعی Vision API (متن + confidence + bbox) به پیام کاربر اضافه شده و Gemini فقط تحلیل ساختاری انجام می‌دهد
 
-#### 2. بازنویسی `supabase/functions/analyze-blueprint/index.ts`
+### مرحله 3: به‌روزرسانی System Prompt
 
-تغییرات اصلی:
-- اضافه شدن تابع `getGoogleAccessToken()` که از service account یک JWT می‌سازد و آن را با Google OAuth2 تبادل کرده و access token دریافت می‌کند
-- اضافه شدن تابع `callVisionAPI(imageBase64, features)` که با access token واقعی Google Vision API را فراخوانی می‌کند
-- اضافه شدن تابع `tripleOCR(imageBase64)` که 3 پاس OCR واقعی اجرا می‌کند:
-  - **Pass 1 (STANDARD)**: `TEXT_DETECTION` - تشخیص متن عمومی
-  - **Pass 2 (ENHANCED)**: `DOCUMENT_TEXT_DETECTION` - تشخیص متن سند (دقت بالاتر برای اعداد کوچک)
-  - **Pass 3 (ALT_CROP)**: `TEXT_DETECTION` با `imageContext.languageHints` برای تمرکز روی اعداد و نشانه‌های فنی
-- هر پاس confidence و bbox واقعی از Vision API برمی‌گرداند
-- نتایج OCR واقعی به system prompt اضافه می‌شوند تا Gemini از داده‌های دقیق‌تر استفاده کند
+- engine در `ocr_passes` از `"gemini-vision"` به `"google-vision"` تغییر می‌کند
+- به Gemini اطلاع داده می‌شود که OCR واقعی انجام شده و فقط باید ساختار استخراج کند
+- confidence مقادیر واقعی از Vision API خواهد بود
 
-```text
-Flow جدید:
-1. PDF/Image دریافت می‌شود
-2. تصاویر به Google Vision API ارسال -> 3 پاس OCR واقعی
-3. نتایج OCR (متن + confidence + bbox) به Gemini ارسال
-4. Gemini با داده‌های OCR واقعی تحلیل ساختاری انجام می‌دهد
-5. خروجی ElementUnit[] با engine: "google-vision" به جای "gemini-vision"
-```
+### جزئیات فنی
 
-#### 3. تغییرات System Prompt
-
-System prompt به‌روز می‌شود تا:
-- به Gemini بگوید که نتایج OCR واقعی از Google Vision API دریافت شده
-- Gemini وظیفه تحلیل ساختاری (شناسایی elements، regions، schedules) را دارد نه OCR
-- engine در ocr_passes به `"google-vision"` تغییر می‌کند
-- confidence مقادیر واقعی Vision API خواهد بود
-
----
-
-### جزئیات فنی JWT Authentication
-
-```text
-1. Service Account JSON را از secret بخوان
-2. JWT Header: {"alg": "RS256", "typ": "JWT"}
-3. JWT Payload: {
-     "iss": client_email,
-     "scope": "https://www.googleapis.com/auth/cloud-vision",
-     "aud": "https://oauth2.googleapis.com/token",
-     "iat": now,
-     "exp": now + 3600
-   }
-4. JWT را با private_key امضا کن (RS256)
-5. POST به https://oauth2.googleapis.com/token
-6. access_token دریافت و در Vision API استفاده کن
-```
-
-### Vision API Calls
-
-```text
-POST https://vision.googleapis.com/v1/images:annotate
-Authorization: Bearer {access_token}
-
-Pass 1 (STANDARD):
-  features: [{ type: "TEXT_DETECTION" }]
-
-Pass 2 (ENHANCED):
-  features: [{ type: "DOCUMENT_TEXT_DETECTION" }]
-
-Pass 3 (ALT_CROP):
-  features: [{ type: "TEXT_DETECTION" }]
-  imageContext: { languageHints: ["en"] }
-```
-
----
-
-### فایل‌های تغییر یافته
-
-| فایل | نوع تغییر |
+| مورد | جزئیات |
 |---|---|
-| `supabase/functions/analyze-blueprint/index.ts` | بازنویسی - اضافه Vision API + JWT auth |
-| Secret: `GOOGLE_VISION_SA_KEY` | جدید - ذخیره service account JSON |
+| Secret Name | `GOOGLE_VISION_SA_KEY` |
+| Auth Flow | JWT RS256 -> Google OAuth2 -> Access Token |
+| Vision Endpoint | `https://vision.googleapis.com/v1/images:annotate` |
+| فایل تغییر یافته | `supabase/functions/analyze-blueprint/index.ts` |
 
-سایر فایل‌ها (validate-elements، price-elements، ChatArea، UI components) بدون تغییر باقی می‌مانند چون فقط موتور OCR عوض می‌شود و خروجی همان ساختار ElementUnit را حفظ می‌کند.
+### توصیه امنیتی
+
+از آنجا که کلید خصوصی در چت نمایش داده شد، پس از ذخیره secret:
+1. به Google Cloud Console بروید
+2. در IAM > Service Accounts > Keys کلید فعلی را حذف کنید
+3. کلید جدید بسازید و مقدار secret را به‌روزرسانی کنید
 
