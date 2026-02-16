@@ -15,6 +15,9 @@ import BlueprintViewer from "./BlueprintViewer";
 import { type OverlayElement } from "./DrawingOverlay";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import BarListTable from "./BarListTable";
+import BendingScheduleTable from "./BendingScheduleTable";
 
 interface Message {
   id: string;
@@ -791,24 +794,61 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             </div>
           ) : validationData ? (
             <div className="py-2">
-              <ValidationResults
-                elements={validationData.elements}
-                summary={validationData.summary}
-                questions={validationData.questions || []}
-                quoteResult={quoteResult}
-                onAnswerQuestion={handleAnswerQuestion}
-                onRequestQuote={handleRequestQuote}
-                scopeData={scopeData}
-                onShowOnDrawing={handleShowOnDrawing}
-                onToggleViewer={() => setShowBlueprintViewer((v) => !v)}
-                showViewer={showBlueprintViewer}
-                selectedElementId={selectedElementId}
-                hasDrawingData={hasDrawingData}
-                onStartReview={() => {
-                  setReviewMode(true);
-                  setShowBlueprintViewer(true);
-                }}
-              />
+              <Tabs defaultValue="cards" className="w-full">
+                <TabsList className="w-full mb-3 h-9 rounded-xl bg-muted p-1">
+                  <TabsTrigger value="cards" className="flex-1 text-xs rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">
+                    Cards
+                  </TabsTrigger>
+                  {quoteResult?.quote?.bar_list && (
+                    <TabsTrigger value="barlist" className="flex-1 text-xs rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">
+                      Bar List
+                    </TabsTrigger>
+                  )}
+                  {quoteResult?.quote?.bar_list?.some((b: any) => b.shape_code && b.shape_code !== "straight" && b.shape_code !== "closed") && (
+                    <TabsTrigger value="bending" className="flex-1 text-xs rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">
+                      Bending
+                    </TabsTrigger>
+                  )}
+                </TabsList>
+                <TabsContent value="cards">
+                  <ValidationResults
+                    elements={validationData.elements}
+                    summary={validationData.summary}
+                    questions={validationData.questions || []}
+                    quoteResult={quoteResult}
+                    onAnswerQuestion={handleAnswerQuestion}
+                    onRequestQuote={handleRequestQuote}
+                    scopeData={scopeData}
+                    onShowOnDrawing={handleShowOnDrawing}
+                    onToggleViewer={() => setShowBlueprintViewer((v) => !v)}
+                    showViewer={showBlueprintViewer}
+                    selectedElementId={selectedElementId}
+                    hasDrawingData={hasDrawingData}
+                    onStartReview={() => {
+                      setReviewMode(true);
+                      setShowBlueprintViewer(true);
+                    }}
+                  />
+                </TabsContent>
+                {quoteResult?.quote?.bar_list && (
+                  <TabsContent value="barlist">
+                    <BarListTable
+                      barList={quoteResult.quote.bar_list}
+                      onShowOnDrawing={handleShowOnDrawing}
+                      selectedElementId={selectedElementId}
+                    />
+                  </TabsContent>
+                )}
+                {quoteResult?.quote?.bar_list && (
+                  <TabsContent value="bending">
+                    <BendingScheduleTable
+                      barList={quoteResult.quote.bar_list}
+                      onShowOnDrawing={handleShowOnDrawing}
+                      selectedElementId={selectedElementId}
+                    />
+                  </TabsContent>
+                )}
+              </Tabs>
             </div>
           ) : null}
 

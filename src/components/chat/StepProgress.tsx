@@ -3,15 +3,15 @@ import { Check, Loader2 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
 const STEPS = [
-  { num: 1, label: "OCR & Scope Detection" },
-  { num: 2, label: "Rebar Type Selection" },
-  { num: 3, label: "Structural Elements" },
-  { num: 4, label: "Dimensions & Scale" },
-  { num: 5, label: "Quantities & Arrangement" },
-  { num: 5.5, label: "Length Optimization" },
-  { num: 6, label: "Weight Calculation" },
-  { num: 7, label: "Weight Summary" },
-  { num: 8, label: "Wire Mesh Estimation" },
+  { num: 1, label: "OCR & Scope Detection", statusLabel: "Uploading" },
+  { num: 2, label: "Rebar Type Selection", statusLabel: "Analyzing" },
+  { num: 3, label: "Structural Elements", statusLabel: "Analyzing" },
+  { num: 4, label: "Dimensions & Scale", statusLabel: "Analyzing" },
+  { num: 5, label: "Quantities & Arrangement", statusLabel: "Processing" },
+  { num: 5.5, label: "Length Optimization", statusLabel: "Processing" },
+  { num: 6, label: "Weight Calculation", statusLabel: "Validating" },
+  { num: 7, label: "Weight Summary", statusLabel: "Validating" },
+  { num: 8, label: "Wire Mesh Estimation", statusLabel: "Complete" },
 ];
 
 interface StepProgressProps {
@@ -99,6 +99,11 @@ const StepProgress: React.FC<StepProgressProps> = ({ currentStep, mode, processi
                 >
                   {step.label}
                 </span>
+                {isActive && (
+                  <span className="ml-2 text-[9px] font-semibold text-primary/70 uppercase tracking-wider">
+                    {step.statusLabel}
+                  </span>
+                )}
               </div>
             </div>
           );
