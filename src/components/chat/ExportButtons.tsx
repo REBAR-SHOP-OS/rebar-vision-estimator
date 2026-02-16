@@ -1,6 +1,7 @@
-import React, { forwardRef } from "react";
+import React, { forwardRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { FileSpreadsheet, FileText, Download } from "lucide-react";
+import { FileSpreadsheet, FileText, Ruler, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import * as XLSX from "xlsx";
 
 // Rebar unit weights in lb/ft
@@ -17,7 +18,10 @@ interface ExportButtonsProps {
   scopeData?: any;
 }
 
+const SHOP_DRAWING_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-shop-drawing`;
+
 const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteResult, elements, scopeData }, ref) => {
+  const [shopDrawingLoading, setShopDrawingLoading] = useState(false);
   const barList: any[] = quoteResult.quote.bar_list || [];
   const sizeBreakdown: Record<string, number> = quoteResult.quote.size_breakdown || {};
   const totalLbs = quoteResult.quote.total_weight_lbs;
@@ -140,15 +144,70 @@ ${bendHtml}
     printWindow.onload = () => printWindow.print();
   };
 
+  // ─── Shop Drawing Export ────────────────────────────────────────
+  const handleShopDrawing = async () => {
+    setShopDrawingLoading(true);
+    try {
+      const resp = await fetch(SHOP_DRAWING_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({
+          barList,
+          elements: quoteResult.quote.elements,
+          projectName: scopeData?.projectName,
+          clientName: scopeData?.clientName,
+          standard: scopeData?.standard,
+          coatingType: scopeData?.coatingType,
+          sizeBreakdown,
+        }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: "Failed" }));
+        throw new Error(err.error || "Shop drawing generation failed");
+      }
+
+      const data = await resp.json();
+      if (data.html) {
+        const printWindow = window.open("", "_blank");
+        if (printWindow) {
+          printWindow.document.write(data.html);
+          printWindow.document.close();
+        }
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Shop drawing generation failed");
+    }
+    setShopDrawingLoading(false);
+  };
+
   return (
-    <div ref={ref} className="flex gap-2 mt-4 pt-3 border-t border-border">
-      <Button onClick={handleExcelExport} className="flex-1 gap-2 h-10 rounded-xl font-semibold bg-primary hover:bg-primary/90">
-        <FileSpreadsheet className="h-4 w-4" />
-        Export Excel
-      </Button>
-      <Button variant="outline" onClick={handlePdfExport} className="flex-1 gap-2 h-10 rounded-xl font-semibold">
-        <FileText className="h-4 w-4" />
-        Download PDF
+    <div ref={ref} className="flex flex-col gap-2 mt-4 pt-3 border-t border-border">
+      <div className="flex gap-2">
+        <Button onClick={handleExcelExport} className="flex-1 gap-2 h-10 rounded-xl font-semibold bg-primary hover:bg-primary/90">
+          <FileSpreadsheet className="h-4 w-4" />
+          Export Excel
+        </Button>
+        <Button variant="outline" onClick={handlePdfExport} className="flex-1 gap-2 h-10 rounded-xl font-semibold">
+          <FileText className="h-4 w-4" />
+          Download PDF
+        </Button>
+      </div>
+      <Button
+        variant="outline"
+        onClick={handleShopDrawing}
+        disabled={shopDrawingLoading}
+        className="w-full gap-2 h-10 rounded-xl font-semibold border-primary/30 text-primary hover:bg-primary/10"
+      >
+        {shopDrawingLoading ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <Ruler className="h-4 w-4" />
+        )}
+        {shopDrawingLoading ? "Generating Shop Drawing..." : "Create Shop Drawing"}
       </Button>
     </div>
   );

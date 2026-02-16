@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.detect-project-type]
 verify_jwt = false
+
+[functions.generate-shop-drawing]
+verify_jwt = false

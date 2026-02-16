@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import ChatMessage from "./ChatMessage";
 import CalculationModePicker from "./CalculationModePicker";
 import ValidationResults from "./ValidationResults";
+import PageReviewPanel from "./PageReviewPanel";
 import ScopeDefinitionPanel, { type ScopeData, type DetectionResult } from "./ScopeDefinitionPanel";
 import BlueprintViewer from "./BlueprintViewer";
 import { type OverlayElement } from "./DrawingOverlay";
@@ -61,6 +62,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const [isDetecting, setIsDetecting] = useState(false);
   const [showBlueprintViewer, setShowBlueprintViewer] = useState(false);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+  const [reviewMode, setReviewMode] = useState(false);
+  const [pdfPageCount, setPdfPageCount] = useState(1);
   const isMobile = useIsMobile();
   useEffect(() => {
     // Reset state when switching projects
@@ -735,8 +738,38 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             messages.map((msg) => <ChatMessage key={msg.id} message={msg} />)
           )}
 
-          {/* Validation Results */}
-          {validationData && (
+          {/* Review Mode or Validation Results */}
+          {validationData && reviewMode ? (
+            <div className="py-2">
+              <PageReviewPanel
+                elements={validationData.elements}
+                totalPages={pdfPageCount}
+                onComplete={async (answers) => {
+                  setReviewMode(false);
+                  // Convert review answers to userAnswers format and re-validate
+                  const newAnswers = answers
+                    .filter((a) => a.correctedValue)
+                    .map((a) => ({ element_id: a.element_id, field: a.field || "truth", value: a.correctedValue! }));
+                  if (newAnswers.length > 0) {
+                    setUserAnswers((prev) => [...prev, ...newAnswers]);
+                    await runValidation(validationData.elements, [...userAnswers, ...newAnswers]);
+                    toast.success(`Review complete! ${newAnswers.length} correction(s) applied.`);
+                  } else {
+                    toast.success("Review complete! All elements confirmed.");
+                  }
+                }}
+                onCancel={() => setReviewMode(false)}
+                onPageChange={(page) => {
+                  // Sync PDF viewer to review page if viewer is open
+                  // The BlueprintViewer handles page via selectedElementId
+                }}
+                onSelectElement={(id) => {
+                  setSelectedElementId(id);
+                  if (!showBlueprintViewer) setShowBlueprintViewer(true);
+                }}
+              />
+            </div>
+          ) : validationData ? (
             <div className="py-2">
               <ValidationResults
                 elements={validationData.elements}
@@ -751,9 +784,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 showViewer={showBlueprintViewer}
                 selectedElementId={selectedElementId}
                 hasDrawingData={hasDrawingData}
+                onStartReview={() => {
+                  setReviewMode(true);
+                  setShowBlueprintViewer(true);
+                }}
               />
             </div>
-          )}
+          ) : null}
 
           {/* Scope Definition Panel */}
           {showScopePanel && !scopeData && !calculationMode && (
