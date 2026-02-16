@@ -901,6 +901,65 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       {/* Input Bar */}
       <div className="border-t border-border bg-background/80 backdrop-blur-sm p-3">
         <div className="mx-auto max-w-none">
+          {/* Suggestion Chips */}
+          {!input.trim() && !loading && (
+            <div className="flex gap-2 overflow-x-auto pb-2 mb-1 scrollbar-none">
+              {(() => {
+                const lastMsg = messages.filter(m => m.role === 'assistant').slice(-1)[0];
+                const hasConfirmQuestion = lastMsg?.content?.match(/do you agree|confirm|proceed\?|is this correct/i);
+
+                let chips: { label: string; autoSend?: boolean }[] = [];
+
+                if (hasConfirmQuestion) {
+                  chips = [
+                    { label: "Yes, proceed to next stage", autoSend: true },
+                    { label: "I need to adjust the scope", autoSend: true },
+                    { label: "Add more element types", autoSend: true },
+                  ];
+                } else if (validationData || quoteResult) {
+                  chips = [
+                    { label: "Show me the bar list" },
+                    { label: "Export to Excel" },
+                    { label: "Review flagged elements" },
+                    { label: "Recalculate with edits" },
+                  ];
+                } else if (uploadedFiles.length > 0 && !calculationMode) {
+                  chips = [
+                    { label: "Start step-by-step analysis", autoSend: true },
+                    { label: "What elements can you detect?" },
+                    { label: "Explain the estimation process" },
+                  ];
+                } else if (uploadedFiles.length === 0) {
+                  chips = [
+                    { label: "Upload a blueprint PDF" },
+                    { label: "What file types are supported?" },
+                    { label: "How does the AI detection work?" },
+                  ];
+                }
+
+                return chips.map((chip) => (
+                  <button
+                    key={chip.label}
+                    onClick={() => {
+                      if (chip.label === "Upload a blueprint PDF") {
+                        fileInputRef.current?.click();
+                      } else {
+                        setInput(chip.label);
+                        if (chip.autoSend) {
+                          setTimeout(() => {
+                            sendMessage();
+                          }, 0);
+                        }
+                      }
+                    }}
+                    className="flex-shrink-0 rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-primary hover:border-primary/50 hover:bg-primary/5 transition-colors whitespace-nowrap"
+                  >
+                    {chip.label}
+                  </button>
+                ));
+              })()}
+            </div>
+          )}
           <div className="flex items-end gap-2 rounded-2xl border border-border bg-chat-input p-2 shadow-sm">
             <input
               ref={fileInputRef}
