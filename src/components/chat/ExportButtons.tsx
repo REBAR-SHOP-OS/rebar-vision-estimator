@@ -1,8 +1,8 @@
 import React, { forwardRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { FileSpreadsheet, FileText, Ruler, Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import { FileSpreadsheet, FileText, Ruler } from "lucide-react";
 import * as XLSX from "xlsx";
+import ShopDrawingModal from "./ShopDrawingModal";
 
 // Rebar unit weights in lb/ft
 const REBAR_UNIT_WEIGHT: Record<string, number> = {
@@ -16,12 +16,11 @@ interface ExportButtonsProps {
   quoteResult: any;
   elements: any[];
   scopeData?: any;
+  projectId?: string;
 }
 
-const SHOP_DRAWING_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-shop-drawing`;
-
-const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteResult, elements, scopeData }, ref) => {
-  const [shopDrawingLoading, setShopDrawingLoading] = useState(false);
+const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteResult, elements, scopeData, projectId }, ref) => {
+  const [shopDrawingOpen, setShopDrawingOpen] = useState(false);
   const barList: any[] = quoteResult.quote.bar_list || [];
   const sizeBreakdown: Record<string, number> = quoteResult.quote.size_breakdown || {};
   const totalLbs = quoteResult.quote.total_weight_lbs;
@@ -145,45 +144,6 @@ ${bendHtml}
   };
 
   // ─── Shop Drawing Export ────────────────────────────────────────
-  const handleShopDrawing = async () => {
-    setShopDrawingLoading(true);
-    try {
-      const resp = await fetch(SHOP_DRAWING_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: JSON.stringify({
-          barList,
-          elements: quoteResult.quote.elements,
-          projectName: scopeData?.projectName,
-          clientName: scopeData?.clientName,
-          standard: scopeData?.standard,
-          coatingType: scopeData?.coatingType,
-          sizeBreakdown,
-        }),
-      });
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ error: "Failed" }));
-        throw new Error(err.error || "Shop drawing generation failed");
-      }
-
-      const data = await resp.json();
-      if (data.html) {
-        const printWindow = window.open("", "_blank");
-        if (printWindow) {
-          printWindow.document.write(data.html);
-          printWindow.document.close();
-        }
-      }
-    } catch (err: any) {
-      toast.error(err.message || "Shop drawing generation failed");
-    }
-    setShopDrawingLoading(false);
-  };
-
   return (
     <div ref={ref} className="flex flex-col gap-2 mt-4 pt-3 border-t border-border">
       <div className="flex gap-2">
@@ -198,17 +158,20 @@ ${bendHtml}
       </div>
       <Button
         variant="outline"
-        onClick={handleShopDrawing}
-        disabled={shopDrawingLoading}
+        onClick={() => setShopDrawingOpen(true)}
         className="w-full gap-2 h-10 rounded-xl font-semibold border-primary/30 text-primary hover:bg-primary/10"
       >
-        {shopDrawingLoading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <Ruler className="h-4 w-4" />
-        )}
-        {shopDrawingLoading ? "Generating Shop Drawing..." : "Create Shop Drawing"}
+        <Ruler className="h-4 w-4" />
+        Create Shop Drawing
       </Button>
+      <ShopDrawingModal
+        open={shopDrawingOpen}
+        onOpenChange={setShopDrawingOpen}
+        quoteResult={quoteResult}
+        elements={elements}
+        scopeData={scopeData}
+        projectId={projectId}
+      />
     </div>
   );
 });

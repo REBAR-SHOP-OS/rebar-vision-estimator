@@ -11,14 +11,24 @@ serve(async (req) => {
   }
 
   try {
-    const { barList, elements, projectName, clientName, standard, coatingType, sizeBreakdown } = await req.json();
+    const { barList, elements, projectName, clientName, standard, coatingType, sizeBreakdown, options } = await req.json();
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
     const dateStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
-    // Build a concise data summary for the AI
+    // Merge options with defaults
+    const opts = {
+      scale: "1:50",
+      includeDims: true,
+      layerGrouping: true,
+      barMarks: true,
+      drawingPrefix: "SD-",
+      notes: "",
+      ...options,
+    };
+
     const barSummary = (barList || []).slice(0, 200).map((b: any) =>
       `${b.bar_mark || "—"}|${b.size}|${b.shape_code || "straight"}|${b.qty}|${b.length_ft}ft|${b.element_id}`
     ).join("\n");
@@ -37,6 +47,14 @@ PROJECT INFO:
 - Date: ${dateStr}
 - Standard: ${standard || "ACI 318 / RSIC"}
 - Coating: ${coatingType || "Black Steel"}
+- Drawing Number Prefix: ${opts.drawingPrefix}
+- Scale: ${opts.scale}
+
+DRAWING OPTIONS:
+- Include Dimension Lines & Length Annotations: ${opts.includeDims ? "YES" : "NO"}
+- Group Bars by Element Type (Layer Grouping): ${opts.layerGrouping ? "YES" : "NO"}
+- Show Bar Mark Labels on Each Bar: ${opts.barMarks ? "YES" : "NO"}
+${opts.notes ? `- Special Notes from User: ${opts.notes}` : ""}
 
 BAR LIST DATA (bar_mark|size|shape_code|qty|length_ft|element_id):
 ${barSummary || "No bar list data"}
@@ -46,12 +64,15 @@ SIZE BREAKDOWN: ${sizeSummary || "N/A"}
 UNIQUE SHAPE CODES: ${uniqueShapes.join(", ") || "straight only"}
 
 Generate a COMPLETE standalone HTML document for a professional shop drawing with:
-1. Project header (name, client, date, standard)
-2. Bar Bending Schedule table with columns: Bar Mark, Size, Shape Code, Qty, Cut Length, Total Weight
-3. For each unique shape code, a section describing the bend geometry (dimensions A, B, C, D, E as applicable)
-4. Size summary table
-5. Notes section with applicable standards
-6. Footer with disclaimer and date
+1. Project header (name, client, date, standard, drawing number with prefix "${opts.drawingPrefix}")
+2. Scale indicator showing "${opts.scale}"
+${opts.includeDims ? "3. Bar Bending Schedule table with columns: Bar Mark, Size, Shape Code, Qty, Cut Length, Total Weight, with dimension annotations" : "3. Bar Bending Schedule table with columns: Bar Mark, Size, Shape Code, Qty, Cut Length, Total Weight (NO dimension annotations)"}
+${opts.layerGrouping ? "4. Group bars by element type with section headers for each group" : "4. List all bars in a single flat table without grouping"}
+${opts.barMarks ? "5. Label each bar with its bar mark ID" : "5. Do NOT show bar mark labels"}
+6. For each unique shape code, a section describing the bend geometry (dimensions A, B, C, D, E as applicable)
+7. Size summary table
+8. Notes section with applicable standards${opts.notes ? ` and user notes: "${opts.notes}"` : ""}
+9. Footer with disclaimer and date
 
 Use professional styling:
 - Dark navy header (#1a1a2e)
