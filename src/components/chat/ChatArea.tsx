@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import ChatMessage from "./ChatMessage";
 import CalculationModePicker from "./CalculationModePicker";
 import ValidationResults from "./ValidationResults";
+import ScopeDefinitionPanel, { type ScopeData } from "./ScopeDefinitionPanel";
 
 interface Message {
   id: string;
@@ -49,6 +50,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const [validationData, setValidationData] = useState<any>(null);
   const [quoteResult, setQuoteResult] = useState<any>(null);
   const [userAnswers, setUserAnswers] = useState<{ element_id: string; field: string; value: string }[]>([]);
+  const [showScopePanel, setShowScopePanel] = useState(false);
+  const [scopeData, setScopeData] = useState<ScopeData | null>(null);
 
   useEffect(() => {
     // Reset state when switching projects
@@ -60,6 +63,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     setValidationData(null);
     setQuoteResult(null);
     setUserAnswers([]);
+    setShowScopePanel(false);
+    setScopeData(null);
     initialFilesProcessed.current = false;
     onModeChange?.(null);
     onStepChange?.(null);
@@ -185,7 +190,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           "Content-Type": "application/json",
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ messages: chatMessages, mode, fileUrls, knowledgeContext }),
+        body: JSON.stringify({ messages: chatMessages, mode, fileUrls, knowledgeContext, scope: scopeData }),
       });
 
       if (!resp.ok) {
@@ -584,9 +589,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       onProjectNameChange?.(firstName);
     }
 
-    // Show mode picker after upload if not already selected
+    // Show scope panel after upload if not already selected
     if (!calculationMode && (uploadedFiles.length + newUrls.length) > 0) {
-      setShowModePicker(true);
+      setShowScopePanel(true);
     }
   };
 
@@ -651,6 +656,29 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             </div>
           )}
 
+
+          {/* Scope Definition Panel */}
+          {showScopePanel && !scopeData && !calculationMode && (
+            <div className="py-2">
+              <ScopeDefinitionPanel
+                onProceed={(scope) => {
+                  setScopeData(scope);
+                  setShowScopePanel(false);
+                  setShowModePicker(true);
+                  // Save scope to project
+                  if (user) {
+                    supabase.from("projects").update({
+                      client_name: scope.clientName || null,
+                      project_type: scope.projectType || null,
+                      scope_items: scope.scopeItems,
+                      deviations: scope.deviations || null,
+                    } as any).eq("id", projectId);
+                  }
+                }}
+                disabled={loading}
+              />
+            </div>
+          )}
 
           {showModePicker && !calculationMode && (
             <div className="py-2">

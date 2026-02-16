@@ -39,20 +39,42 @@ interface ElementTruth {
   status: "READY" | "FLAGGED" | "BLOCKED";
 }
 
-function calculateElementWeight(truth: ElementTruth["truth"]): {
+function calculateElementWeight(truth: ElementTruth["truth"], elementType: string): {
   weight_lbs: number;
   breakdown: Record<string, number>;
 } {
   const breakdown: Record<string, number> = {};
   let totalWeight = 0;
 
+  const SLAB_TYPES = ["SLAB", "RAFT_SLAB", "SLAB_STRIP"];
+
+  if (SLAB_TYPES.includes(elementType) && truth.area_sqft && truth.mesh_type) {
+    // Area-based calculation for slabs with mesh
+    const meshWeightPerSqft = 0.85; // approximate for standard WWF
+    const weight = truth.area_sqft * meshWeightPerSqft;
+    breakdown[`mesh_${truth.mesh_type || "standard"}`] = weight;
+    totalWeight += weight;
+  }
+
+  if (elementType === "WIRE_MESH" && truth.area_sqft) {
+    const meshWeightPerSqft = 0.85;
+    const weight = truth.area_sqft * meshWeightPerSqft;
+    breakdown["wire_mesh"] = weight;
+    totalWeight += weight;
+  }
+
   // Vertical bars weight estimation
-  // Assuming standard 12ft (3.66m) bar length per element as default
   if (truth.vertical_bars?.size && truth.vertical_bars?.qty) {
     const size = truth.vertical_bars.size;
     const qty = truth.vertical_bars.qty;
     const weightPerFt = REBAR_WEIGHT[size] || 0;
-    const defaultLengthFt = 12; // conservative default
+    // Default lengths by type
+    const lengthDefaults: Record<string, number> = {
+      COLUMN: 12, WALL: 12, FOOTING: 6, BEAM: 20, GRADE_BEAM: 20,
+      RETAINING_WALL: 12, ICF_WALL: 10, CMU_WALL: 10, PIER: 10,
+      STAIR: 8, SLAB: 10, RAFT_SLAB: 10, SLAB_STRIP: 20,
+    };
+    const defaultLengthFt = lengthDefaults[elementType] || 12;
     const weight = weightPerFt * defaultLengthFt * qty;
     breakdown[`vertical_${size}`] = weight;
     totalWeight += weight;
@@ -62,10 +84,16 @@ function calculateElementWeight(truth: ElementTruth["truth"]): {
   if (truth.ties?.size && truth.ties?.spacing_mm) {
     const size = truth.ties.size;
     const weightPerFt = REBAR_WEIGHT[size] || 0;
-    // Estimate tie perimeter based on element type — rough 4ft perimeter default
-    const tiePerimeterFt = 4;
-    // Estimate number of ties for a 12ft element
-    const elementHeightMm = 3660; // ~12ft
+    const tiePerimeterDefaults: Record<string, number> = {
+      COLUMN: 4, WALL: 6, FOOTING: 5, BEAM: 4, GRADE_BEAM: 4,
+      RETAINING_WALL: 6, ICF_WALL: 3, CMU_WALL: 3, PIER: 3,
+    };
+    const tiePerimeterFt = tiePerimeterDefaults[elementType] || 4;
+    const lengthDefaults: Record<string, number> = {
+      COLUMN: 3660, WALL: 3660, FOOTING: 1830, BEAM: 6100, GRADE_BEAM: 6100,
+      RETAINING_WALL: 3660, ICF_WALL: 3050, CMU_WALL: 3050, PIER: 3050,
+    };
+    const elementHeightMm = lengthDefaults[elementType] || 3660;
     const numTies = Math.ceil(elementHeightMm / truth.ties.spacing_mm);
     const weight = weightPerFt * tiePerimeterFt * numTies;
     breakdown[`ties_${size}`] = weight;
@@ -120,7 +148,7 @@ serve(async (req) => {
       const sizeBreakdown: Record<string, number> = {};
 
       for (const el of readyElements) {
-        const { weight_lbs, breakdown } = calculateElementWeight(el.truth);
+        const { weight_lbs, breakdown } = calculateElementWeight(el.truth, el.element_type);
         totalWeightLbs += weight_lbs;
         elementWeights.push({
           element_id: el.element_id,
@@ -160,7 +188,7 @@ serve(async (req) => {
     const sizeBreakdown: Record<string, number> = {};
 
     for (const el of readyElements) {
-      const { weight_lbs, breakdown } = calculateElementWeight(el.truth);
+      const { weight_lbs, breakdown } = calculateElementWeight(el.truth, el.element_type);
       totalWeightLbs += weight_lbs;
       elementWeights.push({
         element_id: el.element_id,

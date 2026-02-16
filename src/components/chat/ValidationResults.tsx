@@ -1,7 +1,11 @@
-import React from "react";
-import { CheckCircle2, AlertTriangle, XCircle, Shield, Zap, FileCheck } from "lucide-react";
+import React, { useState } from "react";
+import { CheckCircle2, AlertTriangle, XCircle, Shield, Zap, FileCheck, ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import QuestionCard from "./QuestionCard";
+import ExportButtons from "./ExportButtons";
+import SizeBreakdownTable from "./SizeBreakdownTable";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 interface ValidationElement {
   element_id: string;
@@ -71,6 +75,88 @@ const GateBadge: React.FC<{ name: string; passed: boolean }> = ({ name, passed }
   </Badge>
 );
 
+const ElementCard: React.FC<{ el: ValidationElement; weightInfo?: any }> = ({ el, weightInfo }) => (
+  <div
+    className={`p-3 rounded-lg border ${
+      el.status === "READY"
+        ? "border-primary/30 bg-primary/5"
+        : el.status === "FLAGGED"
+        ? "border-amber-500/30 bg-amber-500/5"
+        : "border-destructive/30 bg-destructive/5"
+    }`}
+  >
+    <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center gap-2">
+        <StatusIcon status={el.status} />
+        <span className="text-sm font-semibold text-foreground">{el.element_id}</span>
+        <Badge variant="outline" className="text-[10px]">{el.element_type}</Badge>
+        {weightInfo && (
+          <span className="text-[10px] text-muted-foreground font-medium">
+            {weightInfo.weight_lbs.toLocaleString()} lbs
+          </span>
+        )}
+      </div>
+      <Badge
+        variant={el.status === "READY" ? "secondary" : el.status === "FLAGGED" ? "outline" : "destructive"}
+        className="text-[10px]"
+      >
+        {el.status}
+      </Badge>
+    </div>
+
+    {/* Gate Results */}
+    <div className="flex gap-1.5 flex-wrap mb-2">
+      <GateBadge name="Identity" passed={el.validation.identity.passed} />
+      <GateBadge name="Complete" passed={el.validation.completeness.passed} />
+      <GateBadge name="Consistent" passed={el.validation.consistency.passed} />
+      <GateBadge name="Scope" passed={el.validation.scope.passed} />
+    </div>
+
+    {/* Confidence Bar */}
+    {el.extraction?.confidence !== undefined && (
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[10px] text-muted-foreground w-16">Confidence</span>
+        <Progress value={el.extraction.confidence * 100} className="h-1.5 flex-1" />
+        <span className="text-[10px] font-medium text-foreground">
+          {(el.extraction.confidence * 100).toFixed(0)}%
+        </span>
+      </div>
+    )}
+
+    {/* Truth data */}
+    {el.extraction?.truth && (
+      <div className="text-xs text-muted-foreground mt-1">
+        {el.extraction.truth.vertical_bars && (
+          <span className="mr-3">
+            Vert: {el.extraction.truth.vertical_bars.qty}×{el.extraction.truth.vertical_bars.size}
+          </span>
+        )}
+        {el.extraction.truth.ties && (
+          <span>
+            Ties: {el.extraction.truth.ties.size} @{el.extraction.truth.ties.spacing_mm}mm
+          </span>
+        )}
+      </div>
+    )}
+
+    {/* Errors/Warnings */}
+    {el.validation.errors.length > 0 && (
+      <div className="mt-2 space-y-1">
+        {el.validation.errors.map((err, i) => (
+          <p key={i} className="text-xs text-destructive">⛔ {err}</p>
+        ))}
+      </div>
+    )}
+    {el.validation.warnings.length > 0 && (
+      <div className="mt-1 space-y-1">
+        {el.validation.warnings.map((warn, i) => (
+          <p key={i} className="text-xs text-amber-600 dark:text-amber-400">⚠️ {warn}</p>
+        ))}
+      </div>
+    )}
+  </div>
+);
+
 const ValidationResults: React.FC<ValidationResultsProps> = ({
   elements,
   summary,
@@ -79,6 +165,26 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
   onAnswerQuestion,
   onRequestQuote,
 }) => {
+  // Group elements by type
+  const grouped = elements.reduce<Record<string, ValidationElement[]>>((acc, el) => {
+    const type = el.element_type || "OTHER";
+    if (!acc[type]) acc[type] = [];
+    acc[type].push(el);
+    return acc;
+  }, {});
+
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(
+    () => Object.keys(grouped).reduce((acc, k) => ({ ...acc, [k]: true }), {} as Record<string, boolean>)
+  );
+
+  // Map element weights from quote
+  const weightMap: Record<string, any> = {};
+  if (quoteResult?.quote?.elements) {
+    for (const el of quoteResult.quote.elements) {
+      weightMap[el.element_id] = el;
+    }
+  }
+
   return (
     <div className="space-y-4 my-4">
       {/* Summary Bar */}
@@ -103,73 +209,29 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
         )}
       </div>
 
-      {/* Element List */}
+      {/* Element List — Grouped by Type */}
       <div className="space-y-2">
-        {elements.map((el) => (
-          <div
-            key={el.element_id}
-            className={`p-3 rounded-lg border ${
-              el.status === "READY"
-                ? "border-primary/30 bg-primary/5"
-                : el.status === "FLAGGED"
-                ? "border-amber-500/30 bg-amber-500/5"
-                : "border-destructive/30 bg-destructive/5"
-            }`}
+        {Object.entries(grouped).map(([type, els]) => (
+          <Collapsible
+            key={type}
+            open={openGroups[type]}
+            onOpenChange={(open) => setOpenGroups((prev) => ({ ...prev, [type]: open }))}
           >
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <StatusIcon status={el.status} />
-                <span className="text-sm font-semibold text-foreground">{el.element_id}</span>
-                <Badge variant="outline" className="text-[10px]">{el.element_type}</Badge>
-              </div>
-              <Badge
-                variant={el.status === "READY" ? "secondary" : el.status === "FLAGGED" ? "outline" : "destructive"}
-                className="text-[10px]"
-              >
-                {el.status}
-              </Badge>
-            </div>
-
-            {/* Gate Results */}
-            <div className="flex gap-1.5 flex-wrap mb-2">
-              <GateBadge name="Identity" passed={el.validation.identity.passed} />
-              <GateBadge name="Complete" passed={el.validation.completeness.passed} />
-              <GateBadge name="Consistent" passed={el.validation.consistency.passed} />
-              <GateBadge name="Scope" passed={el.validation.scope.passed} />
-            </div>
-
-            {/* Truth data */}
-            {el.extraction?.truth && (
-              <div className="text-xs text-muted-foreground mt-1">
-                {el.extraction.truth.vertical_bars && (
-                  <span className="mr-3">
-                    Vert: {el.extraction.truth.vertical_bars.qty}×{el.extraction.truth.vertical_bars.size}
-                  </span>
-                )}
-                {el.extraction.truth.ties && (
-                  <span>
-                    Ties: {el.extraction.truth.ties.size} @{el.extraction.truth.ties.spacing_mm}mm
-                  </span>
-                )}
-              </div>
-            )}
-
-            {/* Errors/Warnings */}
-            {el.validation.errors.length > 0 && (
-              <div className="mt-2 space-y-1">
-                {el.validation.errors.map((err, i) => (
-                  <p key={i} className="text-xs text-destructive">⛔ {err}</p>
-                ))}
-              </div>
-            )}
-            {el.validation.warnings.length > 0 && (
-              <div className="mt-1 space-y-1">
-                {el.validation.warnings.map((warn, i) => (
-                  <p key={i} className="text-xs text-amber-600 dark:text-amber-400">⚠️ {warn}</p>
-                ))}
-              </div>
-            )}
-          </div>
+            <CollapsibleTrigger className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded-md hover:bg-accent/50 transition-colors">
+              {openGroups[type] ? (
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+              )}
+              <span className="text-xs font-semibold text-foreground">{type}</span>
+              <Badge variant="outline" className="text-[10px] ml-auto">{els.length}</Badge>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-2 mt-1 pl-2">
+              {els.map((el) => (
+                <ElementCard key={el.element_id} el={el} weightInfo={weightMap[el.element_id]} />
+              ))}
+            </CollapsibleContent>
+          </Collapsible>
         ))}
       </div>
 
@@ -235,6 +297,10 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
               <p className="text-xs text-muted-foreground">Total Tons</p>
             </div>
           </div>
+
+          {/* Size Breakdown Table */}
+          <SizeBreakdownTable sizeBreakdown={quoteResult.quote.size_breakdown} />
+
           {quoteResult.excluded && quoteResult.excluded.length > 0 && (
             <div className="mt-3 text-xs text-muted-foreground">
               <p className="font-medium">Excluded ({quoteResult.excluded_count}):</p>
@@ -243,6 +309,9 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
               ))}
             </div>
           )}
+
+          {/* Export Buttons */}
+          <ExportButtons quoteResult={quoteResult} elements={elements} />
         </div>
       )}
     </div>

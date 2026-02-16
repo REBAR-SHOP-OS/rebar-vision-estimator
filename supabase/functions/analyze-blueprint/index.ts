@@ -183,7 +183,7 @@ Each element you identify MUST be output as a JSON object following this schema:
 \`\`\`json
 {
   "element_id": "string — e.g. C1, W3, F2. Pattern: ^[A-Z]+[-]?[0-9A-Z]+$",
-  "element_type": "COLUMN | WALL | FOOTING | BEAM | SLAB_STRIP | OTHER",
+  "element_type": "COLUMN | WALL | FOOTING | BEAM | SLAB_STRIP | GRADE_BEAM | RAFT_SLAB | RETAINING_WALL | ICF_WALL | CMU_WALL | PIER | SLAB | STAIR | WIRE_MESH | OTHER",
   "sheet_refs": ["S-101", "S-301"],
   "regions": {
     "tag_region": { "page": 0, "bbox": [x1, y1, x2, y2] },
@@ -256,7 +256,7 @@ You MUST execute these stages IN ORDER for every blueprint analysis:
 
 ### Stage 1 — Scope Load
 Determine the job scope from the blueprints. Identify which element_types are present.
-Allowed element types: COLUMN, WALL, FOOTING, BEAM, SLAB_STRIP, OTHER.
+Allowed element types: COLUMN, WALL, FOOTING, BEAM, SLAB_STRIP, GRADE_BEAM, RAFT_SLAB, RETAINING_WALL, ICF_WALL, CMU_WALL, PIER, SLAB, STAIR, WIRE_MESH, OTHER.
 
 ### Stage 2 — Finder Pass
 Perform a quick scan to locate:
@@ -520,12 +520,25 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, mode, fileUrls, knowledgeContext } = await req.json();
+    const { messages, mode, fileUrls, knowledgeContext, scope } = await req.json();
     
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
     let systemPrompt = mode === "step-by-step" ? STEP_BY_STEP_SYSTEM_PROMPT : SMART_SYSTEM_PROMPT;
+
+    // Inject scope definition if provided
+    if (scope) {
+      let scopeBlock = "\n\n## PROJECT SCOPE DEFINITION (from user)\n";
+      if (scope.scopeItems && scope.scopeItems.length > 0) {
+        scopeBlock += `Only analyze these element types: ${scope.scopeItems.join(", ")}\n`;
+        scopeBlock += `Ignore any elements NOT in this list.\n`;
+      }
+      if (scope.clientName) scopeBlock += `Client: ${scope.clientName}\n`;
+      if (scope.projectType) scopeBlock += `Project Type: ${scope.projectType}\n`;
+      if (scope.deviations) scopeBlock += `Project-Specific Deviations: ${scope.deviations}\n`;
+      systemPrompt = scopeBlock + "\n---\n\n" + systemPrompt;
+    }
 
     // Prepend user knowledge context if available
     if (knowledgeContext && knowledgeContext.rules && knowledgeContext.rules.length > 0) {

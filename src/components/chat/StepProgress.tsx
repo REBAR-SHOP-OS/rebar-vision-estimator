@@ -1,5 +1,6 @@
 import React from "react";
 import { Check, Circle, Loader2 } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 
 const STEPS = [
   { num: 1, label: "OCR & Scope Detection" },
@@ -16,16 +17,41 @@ const STEPS = [
 interface StepProgressProps {
   currentStep: number | null;
   mode: "smart" | "step-by-step" | null;
+  processingPhase?: string | null;
 }
 
-const StepProgress: React.FC<StepProgressProps> = ({ currentStep, mode }) => {
+const StepProgress: React.FC<StepProgressProps> = ({ currentStep, mode, processingPhase }) => {
   if (!mode) return null;
+
+  const totalSteps = STEPS.length;
+  const completedSteps = currentStep
+    ? STEPS.filter((s) => s.num < currentStep).length
+    : 0;
+  const overallProgress = Math.round((completedSteps / totalSteps) * 100);
 
   return (
     <div className="px-3 py-2">
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-2 px-1">
         {mode === "smart" ? "⚡ Smart Mode" : "📋 Step-by-Step"}
       </p>
+
+      {/* Overall Progress */}
+      <div className="mb-3 px-1">
+        <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
+          <span>Overall Progress</span>
+          <span className="font-medium">{overallProgress}%</span>
+        </div>
+        <Progress value={overallProgress} className="h-1.5" />
+      </div>
+
+      {/* Processing Phase */}
+      {processingPhase && (
+        <div className="flex items-center gap-2 px-2 py-1.5 mb-2 rounded-md bg-primary/10 text-primary text-[11px] font-medium">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          {processingPhase}
+        </div>
+      )}
+
       <div className="space-y-0.5">
         {STEPS.map((step) => {
           const isCompleted = currentStep !== null && step.num < currentStep;
