@@ -714,7 +714,12 @@ This is a BAR LIST / BENDING SCHEDULE project. NO blueprint element detection ne
 - Extract: bar mark, size, quantity, cut length, shape code, bend dimensions
 - Calculate weight: quantity × cut_length × unit_weight_per_size
 - Output a summary by bar size and grand total
-- Skip all OCR element detection stages — go straight to table parsing`;
+- Skip all OCR element detection stages — go straight to table parsing
+
+**IMPORTANT — Page Location Data**: For each element you identify from the bar list/schedule, you MUST include the PDF page number and approximate bounding box of the row where the data was found. Use:
+- \`regions.tag_region.page_number\`: the 1-indexed PDF page number
+- \`regions.tag_region.bbox\`: approximate row region as [x1, y1, x2, y2] in pixels (estimate the row's vertical position on the page, e.g. [50, row_y_start, 750, row_y_end])
+This allows the viewer to navigate to the correct page and highlight the relevant table row.`;
 
     case "residential":
       return `### RESIDENTIAL PROJECT FOCUS

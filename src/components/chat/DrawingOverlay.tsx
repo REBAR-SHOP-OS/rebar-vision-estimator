@@ -25,6 +25,7 @@ export interface OverlayElement {
   bbox: [number, number, number, number]; // [x1, y1, x2, y2] in image pixel coords
   confidence?: number;
   weight_lbs?: number;
+  page_number?: number; // PDF page number (1-indexed)
 }
 
 interface DrawingOverlayProps {

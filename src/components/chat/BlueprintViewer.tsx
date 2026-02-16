@@ -1,9 +1,10 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
-import { ZoomIn, ZoomOut, Maximize2, X, Eye, EyeOff } from "lucide-react";
+import { ZoomIn, ZoomOut, Maximize2, X, EyeOff, ChevronLeft, ChevronRight, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import DrawingOverlay, { ELEMENT_TYPE_COLORS, type OverlayElement } from "./DrawingOverlay";
+import PdfRenderer from "./PdfRenderer";
 
 interface BlueprintViewerProps {
   imageUrl: string;
@@ -16,6 +17,11 @@ interface BlueprintViewerProps {
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 5;
 const ZOOM_STEP = 0.25;
+
+const isPdfUrl = (url: string) => {
+  const path = url.toLowerCase().split("?")[0];
+  return path.endsWith(".pdf");
+};
 
 const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
   imageUrl,
@@ -34,6 +40,12 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
 
+  // PDF state
+  const isPdf = isPdfUrl(imageUrl);
+  const [pdfPageCount, setPdfPageCount] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pdfImageUrl, setPdfImageUrl] = useState<string | null>(null);
+
   // Visible type filter
   const allTypes = [...new Set(elements.map((e) => e.element_type))];
   const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set(allTypes));
@@ -42,14 +54,18 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
     setVisibleTypes(new Set([...new Set(elements.map((e) => e.element_type))]));
   }, [elements]);
 
+  // Filter elements by current page for PDF
+  const pageElements = isPdf
+    ? elements.filter((el) => !el.page_number || el.page_number === currentPage)
+    : elements;
+
   const handleImageLoad = useCallback(() => {
     if (imgRef.current) {
       setImageSize({ w: imgRef.current.naturalWidth, h: imgRef.current.naturalHeight });
       setImageLoaded(true);
-      // Fit to container
       if (containerRef.current) {
         const cw = containerRef.current.clientWidth;
-        const ch = containerRef.current.clientHeight - 52; // toolbar height
+        const ch = containerRef.current.clientHeight - 52;
         const fitZoom = Math.min(cw / imgRef.current.naturalWidth, ch / imgRef.current.naturalHeight, 1);
         setZoom(fitZoom);
         setPan({ x: 0, y: 0 });
@@ -57,20 +73,42 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
     }
   }, []);
 
-  const fitToScreen = useCallback(() => {
-    if (imgRef.current && containerRef.current) {
+  const handlePdfPageRendered = useCallback((dataUrl: string, width: number, height: number) => {
+    setPdfImageUrl(dataUrl);
+    setImageSize({ w: width, h: height });
+    setImageLoaded(true);
+    if (containerRef.current) {
       const cw = containerRef.current.clientWidth;
       const ch = containerRef.current.clientHeight - 52;
-      const fitZoom = Math.min(cw / imgRef.current.naturalWidth, ch / imgRef.current.naturalHeight, 1);
+      const fitZoom = Math.min(cw / width, ch / height, 1);
       setZoom(fitZoom);
       setPan({ x: 0, y: 0 });
     }
   }, []);
 
+  const fitToScreen = useCallback(() => {
+    if (imageSize.w && containerRef.current) {
+      const cw = containerRef.current.clientWidth;
+      const ch = containerRef.current.clientHeight - 52;
+      const fitZoom = Math.min(cw / imageSize.w, ch / imageSize.h, 1);
+      setZoom(fitZoom);
+      setPan({ x: 0, y: 0 });
+    }
+  }, [imageSize]);
+
+  // Navigate to element's page in PDF
+  useEffect(() => {
+    if (!selectedElementId || !isPdf) return;
+    const el = elements.find((e) => e.element_id === selectedElementId);
+    if (el?.page_number && el.page_number !== currentPage) {
+      setCurrentPage(el.page_number);
+    }
+  }, [selectedElementId, elements, isPdf]);
+
   // Zoom to selected element
   useEffect(() => {
     if (!selectedElementId || !containerRef.current || !imageSize.w) return;
-    const el = elements.find((e) => e.element_id === selectedElementId);
+    const el = pageElements.find((e) => e.element_id === selectedElementId);
     if (!el || (el.bbox[2] <= el.bbox[0] && el.bbox[3] <= el.bbox[1])) return;
 
     const cx = (el.bbox[0] + el.bbox[2]) / 2;
@@ -84,7 +122,7 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
       x: containerW / 2 - cx * targetZoom,
       y: containerH / 2 - cy * targetZoom,
     });
-  }, [selectedElementId, elements, imageSize]);
+  }, [selectedElementId, pageElements, imageSize]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -115,6 +153,8 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
   };
 
   const hoveredElement = elements.find((e) => e.element_id === hoveredId);
+  const hasOverlays = pageElements.some(el => el.bbox[2] > el.bbox[0] || el.bbox[3] > el.bbox[1]);
+  const displayImageUrl = isPdf ? pdfImageUrl : imageUrl;
 
   return (
     <div className="flex flex-col h-full bg-card border border-border rounded-xl overflow-hidden">
@@ -149,38 +189,66 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
 
         <span className="text-[10px] text-muted-foreground font-medium ml-1">{Math.round(zoom * 100)}%</span>
 
+        {/* PDF Page Navigation */}
+        {isPdf && pdfPageCount > 1 && (
+          <>
+            <div className="h-4 w-px bg-border mx-1" />
+            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </Button>
+            <span className="text-[10px] text-muted-foreground font-medium">
+              {currentPage} / {pdfPageCount}
+            </span>
+            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg" onClick={() => setCurrentPage((p) => Math.min(pdfPageCount, p + 1))} disabled={currentPage >= pdfPageCount}>
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </>
+        )}
+
         <div className="h-4 w-px bg-border mx-1" />
 
         {/* Type filter chips */}
-        <div className="flex gap-1 flex-wrap">
-          {allTypes.map((type) => {
-            const color = ELEMENT_TYPE_COLORS[type] || ELEMENT_TYPE_COLORS.OTHER;
-            const visible = visibleTypes.has(type);
-            const count = elements.filter((e) => e.element_type === type).length;
-            return (
-              <button
-                key={type}
-                onClick={() => toggleType(type)}
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold transition-all border ${
-                  visible ? "border-transparent" : "border-border opacity-40"
-                }`}
-                style={{
-                  backgroundColor: visible ? `${color}18` : "transparent",
-                  color: visible ? color : undefined,
-                }}
-              >
-                <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: color, opacity: visible ? 1 : 0.3 }} />
-                {type} ({count})
-                {!visible && <EyeOff className="h-2.5 w-2.5 ml-0.5" />}
-              </button>
-            );
-          })}
-        </div>
+        {allTypes.length > 0 && (
+          <div className="flex gap-1 flex-wrap">
+            {allTypes.map((type) => {
+              const color = ELEMENT_TYPE_COLORS[type] || ELEMENT_TYPE_COLORS.OTHER;
+              const visible = visibleTypes.has(type);
+              const count = pageElements.filter((e) => e.element_type === type).length;
+              return (
+                <button
+                  key={type}
+                  onClick={() => toggleType(type)}
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold transition-all border ${
+                    visible ? "border-transparent" : "border-border opacity-40"
+                  }`}
+                  style={{
+                    backgroundColor: visible ? `${color}18` : "transparent",
+                    color: visible ? color : undefined,
+                  }}
+                >
+                  <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: color, opacity: visible ? 1 : 0.3 }} />
+                  {type} ({count})
+                  {!visible && <EyeOff className="h-2.5 w-2.5 ml-0.5" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg ml-auto" onClick={onClose}>
           <X className="h-3.5 w-3.5" />
         </Button>
       </div>
+
+      {/* PDF Renderer (headless) */}
+      {isPdf && (
+        <PdfRenderer
+          url={imageUrl}
+          currentPage={currentPage}
+          onPageCount={setPdfPageCount}
+          onPageRendered={handlePdfPageRendered}
+        />
+      )}
 
       {/* Canvas area */}
       <div
@@ -192,38 +260,54 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
-        <div
-          style={{
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-            transformOrigin: "0 0",
-            transition: isPanning ? "none" : "transform 0.3s ease-out",
-          }}
-          className="absolute"
-        >
-          <div className="relative inline-block">
-            <img
-              ref={imgRef}
-              src={imageUrl}
-              alt="Blueprint"
-              onLoad={handleImageLoad}
-              className="block max-w-none"
-              style={{ imageRendering: zoom > 2 ? "pixelated" : "auto" }}
-              draggable={false}
-            />
-            {imageLoaded && (
-              <DrawingOverlay
-                elements={elements}
-                selectedId={selectedElementId}
-                hoveredId={hoveredId}
-                visibleTypes={visibleTypes}
-                onSelect={onSelectElement}
-                onHover={setHoveredId}
-                imageWidth={imageSize.w}
-                imageHeight={imageSize.h}
+        {displayImageUrl ? (
+          <div
+            style={{
+              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+              transformOrigin: "0 0",
+              transition: isPanning ? "none" : "transform 0.3s ease-out",
+            }}
+            className="absolute"
+          >
+            <div className="relative inline-block">
+              <img
+                ref={imgRef}
+                src={displayImageUrl}
+                alt="Blueprint"
+                onLoad={!isPdf ? handleImageLoad : undefined}
+                className="block max-w-none"
+                style={{ imageRendering: zoom > 2 ? "pixelated" : "auto" }}
+                draggable={false}
               />
-            )}
+              {imageLoaded && hasOverlays && (
+                <DrawingOverlay
+                  elements={pageElements}
+                  selectedId={selectedElementId}
+                  hoveredId={hoveredId}
+                  visibleTypes={visibleTypes}
+                  onSelect={onSelectElement}
+                  onHover={setHoveredId}
+                  imageWidth={imageSize.w}
+                  imageHeight={imageSize.h}
+                />
+              )}
+            </div>
           </div>
-        </div>
+        ) : (
+          !isPdf && (
+            <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+              Loading...
+            </div>
+          )
+        )}
+
+        {/* No spatial data notice */}
+        {imageLoaded && !hasOverlays && (
+          <div className="absolute top-3 left-3 bg-popover/90 backdrop-blur-sm border border-border rounded-lg px-3 py-2 shadow-md flex items-center gap-2">
+            <FileText className="h-4 w-4 text-muted-foreground" />
+            <span className="text-[10px] text-muted-foreground">No spatial data — elements were parsed from tabular data</span>
+          </div>
+        )}
 
         {/* Hover Tooltip */}
         {hoveredElement && (
@@ -252,7 +336,7 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
         )}
 
         {/* Legend */}
-        {imageLoaded && allTypes.length > 0 && (
+        {imageLoaded && allTypes.length > 0 && hasOverlays && (
           <div className="absolute bottom-3 right-3 bg-popover/90 backdrop-blur-sm border border-border rounded-lg px-2.5 py-2 shadow-md">
             <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider mb-1">Legend</p>
             <div className="flex flex-col gap-0.5">
