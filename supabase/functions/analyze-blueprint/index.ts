@@ -1,10 +1,177 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+import { decode as decodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+
+// ── Google Vision API Integration ──
+
+function base64url(data: Uint8Array): string {
+  return encodeBase64(data).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function importPrivateKey(pem: string): Promise<CryptoKey> {
+  const pemContents = pem
+    .replace(/-----BEGIN PRIVATE KEY-----/, '')
+    .replace(/-----END PRIVATE KEY-----/, '')
+    .replace(/\n/g, '');
+  const binaryDer = decodeBase64(pemContents);
+  return await crypto.subtle.importKey(
+    'pkcs8',
+    binaryDer,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+}
+
+async function getGoogleAccessToken(): Promise<string> {
+  const saKeyJson = Deno.env.get("GOOGLE_VISION_SA_KEY");
+  if (!saKeyJson) throw new Error("GOOGLE_VISION_SA_KEY not configured");
+  
+  const sa = JSON.parse(saKeyJson);
+  const now = Math.floor(Date.now() / 1000);
+  
+  const header = { alg: "RS256", typ: "JWT" };
+  const payload = {
+    iss: sa.client_email,
+    scope: "https://www.googleapis.com/auth/cloud-vision",
+    aud: "https://oauth2.googleapis.com/token",
+    iat: now,
+    exp: now + 3600,
+  };
+
+  const encoder = new TextEncoder();
+  const headerB64 = base64url(encoder.encode(JSON.stringify(header)));
+  const payloadB64 = base64url(encoder.encode(JSON.stringify(payload)));
+  const signingInput = `${headerB64}.${payloadB64}`;
+
+  const key = await importPrivateKey(sa.private_key);
+  const signature = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    key,
+    encoder.encode(signingInput)
+  );
+  const signatureB64 = base64url(new Uint8Array(signature));
+  const jwt = `${signingInput}.${signatureB64}`;
+
+  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+  });
+
+  if (!tokenRes.ok) {
+    const errText = await tokenRes.text();
+    throw new Error(`Google OAuth2 token exchange failed: ${tokenRes.status} ${errText}`);
+  }
+
+  const tokenData = await tokenRes.json();
+  return tokenData.access_token;
+}
+
+async function callVisionAPI(
+  accessToken: string,
+  imageBase64: string,
+  features: { type: string; maxResults?: number }[],
+  imageContext?: Record<string, unknown>
+): Promise<any> {
+  const request: any = {
+    image: { content: imageBase64 },
+    features,
+  };
+  if (imageContext) request.imageContext = imageContext;
+
+  const res = await fetch("https://vision.googleapis.com/v1/images:annotate", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ requests: [request] }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Vision API error: ${res.status} ${errText}`);
+  }
+
+  const data = await res.json();
+  return data.responses?.[0] || {};
+}
+
+interface OcrPassResult {
+  pass: number;
+  engine: string;
+  preprocess: string;
+  fullText: string;
+  blocks: { text: string; confidence: number; bbox: number[] }[];
+}
+
+async function tripleOCR(accessToken: string, imageBase64: string): Promise<OcrPassResult[]> {
+  // Run all 3 passes in parallel
+  const [pass1, pass2, pass3] = await Promise.all([
+    // Pass 1: TEXT_DETECTION (general)
+    callVisionAPI(accessToken, imageBase64, [{ type: "TEXT_DETECTION" }]),
+    // Pass 2: DOCUMENT_TEXT_DETECTION (document-optimized)
+    callVisionAPI(accessToken, imageBase64, [{ type: "DOCUMENT_TEXT_DETECTION" }]),
+    // Pass 3: TEXT_DETECTION with English language hint
+    callVisionAPI(accessToken, imageBase64, 
+      [{ type: "TEXT_DETECTION" }],
+      { languageHints: ["en"] }
+    ),
+  ]);
+
+  const extractResult = (raw: any, passNum: number, preprocess: string): OcrPassResult => {
+    const fullText = raw.fullTextAnnotation?.text || raw.textAnnotations?.[0]?.description || "";
+    const blocks: { text: string; confidence: number; bbox: number[] }[] = [];
+
+    if (raw.fullTextAnnotation?.pages) {
+      for (const page of raw.fullTextAnnotation.pages) {
+        for (const block of page.blocks || []) {
+          const blockText = (block.paragraphs || [])
+            .flatMap((p: any) => (p.words || []).map((w: any) => 
+              (w.symbols || []).map((s: any) => s.text).join("")
+            ))
+            .join(" ");
+          const vertices = block.boundingBox?.vertices || [];
+          const bbox = vertices.length >= 4
+            ? [vertices[0]?.x || 0, vertices[0]?.y || 0, vertices[2]?.x || 0, vertices[2]?.y || 0]
+            : [0, 0, 0, 0];
+          blocks.push({
+            text: blockText,
+            confidence: block.confidence || 0,
+            bbox,
+          });
+        }
+      }
+    } else if (raw.textAnnotations && raw.textAnnotations.length > 1) {
+      for (let i = 1; i < raw.textAnnotations.length; i++) {
+        const ann = raw.textAnnotations[i];
+        const vertices = ann.boundingPoly?.vertices || [];
+        const bbox = vertices.length >= 4
+          ? [vertices[0]?.x || 0, vertices[0]?.y || 0, vertices[2]?.x || 0, vertices[2]?.y || 0]
+          : [0, 0, 0, 0];
+        blocks.push({
+          text: ann.description || "",
+          confidence: 0.9,
+          bbox,
+        });
+      }
+    }
+
+    return { pass: passNum, engine: "google-vision", preprocess, fullText, blocks };
+  };
+
+  return [
+    extractResult(pass1, 1, "STANDARD"),
+    extractResult(pass2, 2, "ENHANCED"),
+    extractResult(pass3, 3, "ALT_CROP"),
+  ];
+}
 
 // ── Atomic Truth Pipeline: System Prompts ──
 
@@ -33,7 +200,7 @@ Each element you identify MUST be output as a JSON object following this schema:
         {
           "pass": 1,
           "timestamp": "ISO8601",
-          "engine": "gemini-vision",
+          "engine": "google-vision",
           "preprocess": "STANDARD | ENHANCED | ALT_CROP",
           "chunks": [
             { "text": "extracted text", "confidence": 0.95, "bbox": [x1,y1,x2,y2] }
@@ -107,14 +274,12 @@ For each element candidate, build a minimum chunk set:
 - GOV_NOTES: governing general notes for that element type
 
 ### Stage 4 — Triple OCR (per chunk)
-For each chunk, perform exactly 3 OCR passes:
-- Pass 1: STANDARD — normal reading
-- Pass 2: ENHANCED — focus on small text and numbers
-- Pass 3: ALT_CROP — read from different angle/region focus
-Record each pass with confidence scores per text chunk.
+IMPORTANT: Real Google Vision OCR has already been performed on each image. The OCR results are provided below.
+Use the provided OCR text and confidence scores directly — do NOT attempt to re-read text from images.
+For each chunk, map the relevant OCR blocks to your extraction.
 
 ### Stage 5 — Field Voting + Normalization
-For critical fields, apply majority voting across the 3 passes:
+For critical fields, apply majority voting across the 3 OCR passes:
 - If 2/3 passes agree → winner (method: "majority")
 - If all 3 differ → accept confidence-winner ONLY if differences are minor (normalization)
 
@@ -259,9 +424,11 @@ ${REBAR_WEIGHT_TABLE}
 Execute ALL 9 pipeline stages automatically without pausing for user input.
 Analyze every page of every uploaded blueprint exhaustively.
 
+IMPORTANT: Google Vision OCR has already been performed on the uploaded images. The OCR results (text, confidence, bounding boxes) are injected into the user message. Use these REAL OCR results for Stage 4 instead of attempting your own text extraction. Your job is to STRUCTURE and ANALYZE the OCR output, not to re-read the images.
+
 ### Estimation Steps (Human-Readable Section)
 
-Step 1 — OCR & Scope Detection: Identify ALL rebar and wire mesh scopes from ALL pages.
+Step 1 — OCR & Scope Detection: Use the provided Google Vision OCR results to identify ALL rebar and wire mesh scopes from ALL pages.
 Step 2 — Scope Classification: Classify as Existing/New/Proposed. Only New/Proposed proceed.
 Step 2.5 — Rebar Type Identification: Identify all rebar types (Black Steel, Deformed, Smooth, Plain, Galvanized, Epoxy-Coated, Stainless Steel).
 Step 3 — Structural Element Identification: ALL elements in 12 categories (Footings, Grade Beams, Raft Slabs, Walls, Retaining Walls, ICF Walls, CMU Walls, Piers/Pedestals, Slabs, Stairs, Wire Mesh).
@@ -292,10 +459,12 @@ ${REBAR_WEIGHT_TABLE}
 ## Mode: STEP-BY-STEP (Interactive)
 Execute ONE step at a time and WAIT for user confirmation before proceeding.
 
+IMPORTANT: Google Vision OCR has already been performed on the uploaded images. The OCR results are injected into the user message. Use these REAL OCR results instead of attempting your own text extraction.
+
 ### Steps with User Interaction
 
 Step 1 — OCR & Scope Detection
-Scan all blueprint pages and present ALL identified scopes. → Ask user to confirm.
+Use the provided Google Vision OCR results and present ALL identified scopes. → Ask user to confirm.
 
 Step 2 — Scope Classification
 Classify each scope as Existing/New/Proposed. → Ask user to confirm.
@@ -385,8 +554,7 @@ serve(async (req) => {
       { role: "system", content: systemPrompt },
     ];
 
-    // Process file URLs - convert PDFs to base64 data URLs, keep images as direct URLs
-    // Also include knowledge files
+    // Process file URLs - download images for Vision OCR, convert PDFs to base64
     const allFileUrls = [...(fileUrls || [])];
     if (knowledgeContext && knowledgeContext.fileUrls) {
       allFileUrls.push(...knowledgeContext.fileUrls);
@@ -396,7 +564,20 @@ serve(async (req) => {
     const MAX_PDF_COUNT = 2;
     let pdfCount = 0;
 
+    // Google Vision OCR results to inject
+    let visionOcrText = "";
+    let visionOcrAvailable = false;
+
     if (allFileUrls.length > 0) {
+      // Try to get Google Vision access token
+      let accessToken: string | null = null;
+      try {
+        accessToken = await getGoogleAccessToken();
+        console.log("Google Vision access token obtained successfully");
+      } catch (err) {
+        console.error("Failed to get Google Vision token, falling back to Gemini-only OCR:", err);
+      }
+
       for (const url of allFileUrls) {
         const urlLower = url.toLowerCase().split('?')[0];
         if (urlLower.endsWith('.pdf')) {
@@ -421,18 +602,53 @@ serve(async (req) => {
             console.log("PDF converted, base64:", Math.round(base64.length / 1024), "KB");
           } catch (err) { console.error("PDF convert error:", err); }
         } else {
+          // Image file - run Vision OCR if token available
           fileContentParts.push({ type: "image_url", image_url: { url } });
+
+          if (accessToken) {
+            try {
+              console.log("Running Google Vision Triple OCR on image:", url.substring(0, 60) + "...");
+              const imgResponse = await fetch(url);
+              if (!imgResponse.ok) { console.error("Image download failed:", imgResponse.status); continue; }
+              const imgBuffer = await imgResponse.arrayBuffer();
+              const imgBase64 = encodeBase64(imgBuffer);
+              
+              const ocrResults = await tripleOCR(accessToken, imgBase64);
+              
+              visionOcrText += `\n\n## Google Vision OCR Results for image: ${url.split('/').pop()?.split('?')[0] || 'image'}\n\n`;
+              for (const pass of ocrResults) {
+                visionOcrText += `### OCR Pass ${pass.pass} (${pass.preprocess})\n`;
+                visionOcrText += `**Full Text:**\n\`\`\`\n${pass.fullText}\n\`\`\`\n\n`;
+                if (pass.blocks.length > 0) {
+                  visionOcrText += `**Blocks (${pass.blocks.length} detected):**\n`;
+                  for (const block of pass.blocks.slice(0, 50)) {
+                    visionOcrText += `- [conf: ${block.confidence.toFixed(2)}, bbox: [${block.bbox.join(',')}]] "${block.text}"\n`;
+                  }
+                }
+                visionOcrText += `\n`;
+              }
+              visionOcrAvailable = true;
+              console.log(`Vision OCR complete for image, ${ocrResults.reduce((s, r) => s + r.blocks.length, 0)} total blocks`);
+            } catch (err) {
+              console.error("Vision OCR failed for image, Gemini will handle OCR:", err);
+            }
+          }
         }
       }
-      console.log(`Total file parts: ${fileContentParts.length} (${pdfCount} PDFs)`);
+      console.log(`Total file parts: ${fileContentParts.length} (${pdfCount} PDFs), Vision OCR: ${visionOcrAvailable}`);
     }
 
     if (fileContentParts.length > 0 && messages.length > 0) {
       const firstUserMsgIndex = messages.findIndex((m: any) => m.role === "user");
       for (let i = 0; i < messages.length; i++) {
         if (i === firstUserMsgIndex) {
+          let userText = messages[i].content || "Please analyze these blueprints.";
+          // Inject Vision OCR results into user message
+          if (visionOcrAvailable && visionOcrText) {
+            userText += `\n\n---\n\n# REAL Google Vision OCR Results (USE THESE — do NOT re-read text from images)\n${visionOcrText}`;
+          }
           const content: any[] = [
-            { type: "text", text: messages[i].content || "Please analyze these blueprints." },
+            { type: "text", text: userText },
             ...fileContentParts,
           ];
           aiMessages.push({ role: messages[i].role, content });
