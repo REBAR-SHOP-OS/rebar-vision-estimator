@@ -1,28 +1,45 @@
 
 
-## Add Cage Element and Fix Right Panel Scrolling
+## Make the UI Foolproof with Visual Guidance
 
-### What's Already Done
-The **Cage** element type with its **Assemblies** category and orange color-coding (`#F97316`) has already been added in the previous changes to `ScopeDefinitionPanel.tsx` and `DrawingOverlay.tsx`. No further changes needed there.
+### Problem
+The current interface shows elements like "LEGEND: PIER" without explaining what to do. Users shouldn't need to guess what things mean or what action to take.
 
-### Remaining Change: Right Panel Text Layout
+### Changes
 
-The right-side chat panel (visible when the Blueprint Viewer is open in split mode) currently constrains content to `max-w-3xl` (768px) and uses `overflow-y-auto`, causing unnecessary scrolling and wasted horizontal space.
+**1. Blueprint Viewer Legend - Add counts and action hints**
 
-**Fix in `src/components/chat/ChatArea.tsx`:**
+In `BlueprintViewer.tsx`, enhance the bottom-right legend box to show:
+- Element type name with count (e.g., "PIER - 2 found")
+- A subtle hint: "Click any box to see details"
 
-- Remove or relax the `max-w-3xl` constraint on the messages container when in split-panel mode, so text fills the available width
-- Keep vertical scroll functional but improve content density so less scrolling is needed
+**2. Element Cards - Add "What is this?" context**
 
-**Fix in `src/components/chat/ChatMessage.tsx`:**
+In `ValidationResults.tsx`, add a one-line plain-English description under each element card header explaining what the element is:
+- PIER: "A deep foundation element (caisson)"
+- COLUMN: "A vertical structural member"
+- BEAM: "A horizontal structural member"
+- FOOTING: "A base that transfers load to ground"
+- CAGE: "A pre-assembled rebar cage"
+- etc.
 
-- Tighten prose spacing (reduce vertical margins on paragraphs, lists, headings) to make content more compact
-- Ensure long text wraps properly with `break-words` to avoid horizontal overflow
+**3. Drawing Overlay Labels - Make them readable**
+
+In `DrawingOverlay.tsx`, increase the label font size slightly and add the element type after the ID (e.g., "CAISSON-4.5M | PIER") so users instantly know what each box represents without hovering.
+
+**4. First-time guidance banner on Blueprint Viewer**
+
+In `BlueprintViewer.tsx`, show a dismissible tip banner at the top when the viewer opens:
+> "Colored boxes highlight detected elements. Click any box to select it, or use the filter chips above to show/hide types."
+
+This disappears after first interaction.
 
 ### Technical Details
 
 | File | Change |
 |---|---|
-| `src/components/chat/ChatArea.tsx` | Change `max-w-3xl` to `max-w-none` inside the messages container div (line 713) so content uses full panel width in split view |
-| `src/components/chat/ChatMessage.tsx` | Add `break-words` and tighten prose spacing classes for more compact, readable text that fills the panel |
+| `src/components/chat/BlueprintViewer.tsx` | Add dismissible guidance banner; enhance legend with counts and "click to select" hint |
+| `src/components/chat/DrawingOverlay.tsx` | Append element type to label text (e.g., "CAISSON-4.5M | PIER"); widen label background accordingly |
+| `src/components/chat/ValidationResults.tsx` | Add plain-English element type descriptions under each card header |
+| `src/components/chat/ElementReviewPanel.tsx` | Add a one-line instruction at top: "Verify each element below. Click Confirm, Edit, or Reject, then move to Next." |
 
