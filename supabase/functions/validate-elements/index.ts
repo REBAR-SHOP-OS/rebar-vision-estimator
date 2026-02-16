@@ -22,7 +22,11 @@ const THRESHOLDS = {
   },
 };
 
-const ALLOWED_ELEMENT_TYPES = ["COLUMN", "WALL", "FOOTING", "BEAM", "SLAB_STRIP", "OTHER"];
+const ALLOWED_ELEMENT_TYPES = [
+  "COLUMN", "WALL", "FOOTING", "BEAM", "SLAB_STRIP",
+  "GRADE_BEAM", "RAFT_SLAB", "RETAINING_WALL", "ICF_WALL", "CMU_WALL",
+  "PIER", "SLAB", "STAIR", "WIRE_MESH", "OTHER"
+];
 const VALID_IDENTITY_SOURCES = ["TAG", "SCHEDULE_ROW", "DETAIL"];
 
 // ── Normalization ──
@@ -89,11 +93,28 @@ function identityGate(element: any): GateResult {
 function completenessGate(element: any): GateResult {
   const truth = element.extraction?.truth || {};
   const missing: string[] = [];
+  const type = element.element_type;
 
-  if (!truth.vertical_bars?.size) missing.push("vertical_bars.size");
-  if (!truth.vertical_bars?.qty) missing.push("vertical_bars.qty");
-  if (!truth.ties?.size) missing.push("ties.size");
-  if (!truth.ties?.spacing_mm) missing.push("ties.spacing_mm");
+  // Type-specific completeness rules
+  const SLAB_TYPES = ["SLAB", "RAFT_SLAB", "SLAB_STRIP"];
+  const WALL_TYPES = ["WALL", "RETAINING_WALL", "ICF_WALL", "CMU_WALL"];
+
+  if (SLAB_TYPES.includes(type)) {
+    if (!truth.thickness) missing.push("thickness");
+    if (!truth.mesh_type && !truth.vertical_bars?.size) missing.push("mesh_type or rebar size");
+  } else if (type === "WIRE_MESH") {
+    if (!truth.mesh_type) missing.push("mesh_type");
+    if (!truth.area_sqft) missing.push("area_sqft");
+  } else if (type === "STAIR") {
+    if (!truth.vertical_bars?.size) missing.push("vertical_bars.size");
+    if (!truth.vertical_bars?.qty) missing.push("vertical_bars.qty");
+  } else {
+    // Standard rebar elements (COLUMN, WALL, FOOTING, BEAM, PIER, etc.)
+    if (!truth.vertical_bars?.size) missing.push("vertical_bars.size");
+    if (!truth.vertical_bars?.qty) missing.push("vertical_bars.qty");
+    if (!truth.ties?.size) missing.push("ties.size");
+    if (!truth.ties?.spacing_mm) missing.push("ties.spacing_mm");
+  }
 
   return { passed: missing.length === 0, details: { missing_fields: missing } };
 }

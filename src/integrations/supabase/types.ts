@@ -200,28 +200,40 @@ export type Database = {
       }
       projects: {
         Row: {
+          client_name: string | null
           created_at: string
           description: string | null
+          deviations: string | null
           id: string
           name: string
+          project_type: string | null
+          scope_items: string[] | null
           status: string
           updated_at: string
           user_id: string
         }
         Insert: {
+          client_name?: string | null
           created_at?: string
           description?: string | null
+          deviations?: string | null
           id?: string
           name: string
+          project_type?: string | null
+          scope_items?: string[] | null
           status?: string
           updated_at?: string
           user_id: string
         }
         Update: {
+          client_name?: string | null
           created_at?: string
           description?: string | null
+          deviations?: string | null
           id?: string
           name?: string
+          project_type?: string | null
+          scope_items?: string[] | null
           status?: string
           updated_at?: string
           user_id?: string
