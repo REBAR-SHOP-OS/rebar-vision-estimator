@@ -34,8 +34,35 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
         {isUser ? <User className="h-3.5 w-3.5" /> : <Bot className="h-3.5 w-3.5" />}
       </div>
       <div className="min-w-0 flex-1 text-sm leading-relaxed text-foreground pt-0.5 break-words">
-        <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-0.5 prose-ul:my-0.5 prose-ol:my-0.5 prose-li:my-0 prose-headings:my-1 prose-pre:bg-secondary prose-pre:text-secondary-foreground prose-pre:rounded-lg prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:before:content-none prose-code:after:content-none">
-          <ReactMarkdown>{displayContent}</ReactMarkdown>
+        <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-headings:my-2 prose-headings:font-semibold prose-pre:bg-secondary prose-pre:text-secondary-foreground prose-pre:rounded-lg prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-strong:text-foreground">
+          <ReactMarkdown
+            components={{
+              table: ({ children }) => (
+                <div className="my-3 overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-xs">{children}</table>
+                </div>
+              ),
+              thead: ({ children }) => (
+                <thead className="bg-muted/50 border-b border-border">{children}</thead>
+              ),
+              tbody: ({ children }) => <tbody>{children}</tbody>,
+              tr: ({ children }) => (
+                <tr className="border-b border-border/50 even:bg-muted/20">{children}</tr>
+              ),
+              th: ({ children }) => (
+                <th className="px-3 py-2 text-left text-[11px] font-semibold text-muted-foreground whitespace-nowrap">{children}</th>
+              ),
+              td: ({ children }) => (
+                <td className="px-3 py-2 text-xs text-foreground whitespace-nowrap">{children}</td>
+              ),
+              strong: ({ children }) => (
+                <strong className="font-semibold text-foreground">{children}</strong>
+              ),
+              p: ({ children }) => <p className="my-1">{children}</p>,
+            }}
+          >
+            {displayContent}
+          </ReactMarkdown>
         </div>
       </div>
     </div>
