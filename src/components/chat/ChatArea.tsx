@@ -710,7 +710,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     <div className="flex flex-1 flex-col min-h-0 bg-background/50">
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-4 py-6 space-y-1">
+        <div className="mx-auto max-w-none px-4 py-6 space-y-1">
           {loadingMessages ? (
             <div className="flex justify-center py-10">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -860,7 +860,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
       {/* Input Bar */}
       <div className="border-t border-border bg-background/80 backdrop-blur-sm p-3">
-        <div className="mx-auto max-w-3xl">
+        <div className="mx-auto max-w-none">
           <div className="flex items-end gap-2 rounded-2xl border border-border bg-chat-input p-2 shadow-sm">
             <input
               ref={fileInputRef}

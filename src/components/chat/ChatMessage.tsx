@@ -33,8 +33,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
       >
         {isUser ? <User className="h-3.5 w-3.5" /> : <Bot className="h-3.5 w-3.5" />}
       </div>
-      <div className="min-w-0 flex-1 text-sm leading-relaxed text-foreground pt-0.5">
-        <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1.5 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2 prose-pre:bg-secondary prose-pre:text-secondary-foreground prose-pre:rounded-lg prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:before:content-none prose-code:after:content-none">
+      <div className="min-w-0 flex-1 text-sm leading-relaxed text-foreground pt-0.5 break-words">
+        <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-0.5 prose-ul:my-0.5 prose-ol:my-0.5 prose-li:my-0 prose-headings:my-1 prose-pre:bg-secondary prose-pre:text-secondary-foreground prose-pre:rounded-lg prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:before:content-none prose-code:after:content-none">
           <ReactMarkdown>{displayContent}</ReactMarkdown>
         </div>
       </div>
