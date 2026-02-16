@@ -112,27 +112,35 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
               onMouseLeave={() => onHover(null)}
             />
             {/* Label */}
-            <rect
-              x={x}
-              y={y - 18}
-              width={Math.max(el.element_id.length * 8 + 12, 36)}
-              height={18}
-              rx={4}
-              fill={color}
-              fillOpacity={0.9}
-              className="pointer-events-none"
-            />
-            <text
-              x={x + 6}
-              y={y - 5}
-              fill="white"
-              fontSize={11}
-              fontWeight={600}
-              fontFamily="system-ui, sans-serif"
-              className="pointer-events-none select-none"
-            >
-              {el.element_id}
-            </text>
+            {(() => {
+              const labelText = `${el.element_id} | ${el.element_type}`;
+              const labelWidth = Math.max(labelText.length * 7 + 14, 60);
+              return (
+                <>
+                  <rect
+                    x={x}
+                    y={y - 20}
+                    width={labelWidth}
+                    height={20}
+                    rx={4}
+                    fill={color}
+                    fillOpacity={0.9}
+                    className="pointer-events-none"
+                  />
+                  <text
+                    x={x + 6}
+                    y={y - 6}
+                    fill="white"
+                    fontSize={12}
+                    fontWeight={600}
+                    fontFamily="system-ui, sans-serif"
+                    className="pointer-events-none select-none"
+                  >
+                    {labelText}
+                  </text>
+                </>
+              );
+            })()}
           </g>
         );
       })}
