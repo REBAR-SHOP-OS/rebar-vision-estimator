@@ -209,3 +209,12 @@
 .review-active-element {
   animation: review-pulse 1.2s ease-in-out infinite;
 }
+
+/* Overlay pulsing center dot */
+@keyframes overlay-dot-pulse {
+  0%, 100% { r: 6; opacity: 0.4; }
+  50% { r: 14; opacity: 0; }
+}
+.overlay-pulse {
+  animation: overlay-dot-pulse 1.5s ease-in-out infinite;
+}
