@@ -191,3 +191,12 @@
 .stat-card-gradient {
   background: linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--accent)) 100%);
 }
+
+/* Blueprint overlay pulse animation */
+@keyframes blueprint-pulse {
+  0%, 100% { filter: drop-shadow(0 0 4px currentColor); }
+  50% { filter: drop-shadow(0 0 12px currentColor); }
+}
+.blueprint-overlay-selected {
+  animation: blueprint-pulse 1.5s ease-in-out infinite;
+}

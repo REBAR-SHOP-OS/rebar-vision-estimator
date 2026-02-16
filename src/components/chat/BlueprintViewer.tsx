@@ -1,0 +1,273 @@
+import React, { useState, useRef, useCallback, useEffect } from "react";
+import { ZoomIn, ZoomOut, Maximize2, X, Eye, EyeOff } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import DrawingOverlay, { ELEMENT_TYPE_COLORS, type OverlayElement } from "./DrawingOverlay";
+
+interface BlueprintViewerProps {
+  imageUrl: string;
+  elements: OverlayElement[];
+  selectedElementId: string | null;
+  onSelectElement: (id: string | null) => void;
+  onClose: () => void;
+}
+
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 5;
+const ZOOM_STEP = 0.25;
+
+const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
+  imageUrl,
+  elements,
+  selectedElementId,
+  onSelectElement,
+  onClose,
+}) => {
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const [imageSize, setImageSize] = useState({ w: 0, h: 0 });
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  // Visible type filter
+  const allTypes = [...new Set(elements.map((e) => e.element_type))];
+  const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set(allTypes));
+
+  useEffect(() => {
+    setVisibleTypes(new Set([...new Set(elements.map((e) => e.element_type))]));
+  }, [elements]);
+
+  const handleImageLoad = useCallback(() => {
+    if (imgRef.current) {
+      setImageSize({ w: imgRef.current.naturalWidth, h: imgRef.current.naturalHeight });
+      setImageLoaded(true);
+      // Fit to container
+      if (containerRef.current) {
+        const cw = containerRef.current.clientWidth;
+        const ch = containerRef.current.clientHeight - 52; // toolbar height
+        const fitZoom = Math.min(cw / imgRef.current.naturalWidth, ch / imgRef.current.naturalHeight, 1);
+        setZoom(fitZoom);
+        setPan({ x: 0, y: 0 });
+      }
+    }
+  }, []);
+
+  const fitToScreen = useCallback(() => {
+    if (imgRef.current && containerRef.current) {
+      const cw = containerRef.current.clientWidth;
+      const ch = containerRef.current.clientHeight - 52;
+      const fitZoom = Math.min(cw / imgRef.current.naturalWidth, ch / imgRef.current.naturalHeight, 1);
+      setZoom(fitZoom);
+      setPan({ x: 0, y: 0 });
+    }
+  }, []);
+
+  // Zoom to selected element
+  useEffect(() => {
+    if (!selectedElementId || !containerRef.current || !imageSize.w) return;
+    const el = elements.find((e) => e.element_id === selectedElementId);
+    if (!el || (el.bbox[2] <= el.bbox[0] && el.bbox[3] <= el.bbox[1])) return;
+
+    const cx = (el.bbox[0] + el.bbox[2]) / 2;
+    const cy = (el.bbox[1] + el.bbox[3]) / 2;
+    const containerW = containerRef.current.clientWidth;
+    const containerH = containerRef.current.clientHeight - 52;
+
+    const targetZoom = Math.min(2, Math.max(1, containerW / (el.bbox[2] - el.bbox[0]) * 0.5));
+    setZoom(targetZoom);
+    setPan({
+      x: containerW / 2 - cx * targetZoom,
+      y: containerH / 2 - cy * targetZoom,
+    });
+  }, [selectedElementId, elements, imageSize]);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+    setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z + delta)));
+  }, []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    setIsPanning(true);
+    setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+  }, [pan]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isPanning) return;
+    setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
+  }, [isPanning, panStart]);
+
+  const handleMouseUp = useCallback(() => setIsPanning(false), []);
+
+  const toggleType = (type: string) => {
+    setVisibleTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  };
+
+  const hoveredElement = elements.find((e) => e.element_id === hoveredId);
+
+  return (
+    <div className="flex flex-col h-full bg-card border border-border rounded-xl overflow-hidden">
+      {/* Toolbar */}
+      <div className="flex items-center gap-1.5 px-3 py-2 bg-card border-b border-border flex-shrink-0 flex-wrap">
+        <TooltipProvider delayDuration={200}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg" onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z + ZOOM_STEP))}>
+                <ZoomIn className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Zoom In</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg" onClick={() => setZoom((z) => Math.max(MIN_ZOOM, z - ZOOM_STEP))}>
+                <ZoomOut className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Zoom Out</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg" onClick={fitToScreen}>
+                <Maximize2 className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Fit to Screen</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
+        <span className="text-[10px] text-muted-foreground font-medium ml-1">{Math.round(zoom * 100)}%</span>
+
+        <div className="h-4 w-px bg-border mx-1" />
+
+        {/* Type filter chips */}
+        <div className="flex gap-1 flex-wrap">
+          {allTypes.map((type) => {
+            const color = ELEMENT_TYPE_COLORS[type] || ELEMENT_TYPE_COLORS.OTHER;
+            const visible = visibleTypes.has(type);
+            const count = elements.filter((e) => e.element_type === type).length;
+            return (
+              <button
+                key={type}
+                onClick={() => toggleType(type)}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold transition-all border ${
+                  visible ? "border-transparent" : "border-border opacity-40"
+                }`}
+                style={{
+                  backgroundColor: visible ? `${color}18` : "transparent",
+                  color: visible ? color : undefined,
+                }}
+              >
+                <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: color, opacity: visible ? 1 : 0.3 }} />
+                {type} ({count})
+                {!visible && <EyeOff className="h-2.5 w-2.5 ml-0.5" />}
+              </button>
+            );
+          })}
+        </div>
+
+        <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg ml-auto" onClick={onClose}>
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
+      {/* Canvas area */}
+      <div
+        ref={containerRef}
+        className="flex-1 relative overflow-hidden cursor-grab active:cursor-grabbing bg-muted/30"
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      >
+        <div
+          style={{
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: "0 0",
+            transition: isPanning ? "none" : "transform 0.3s ease-out",
+          }}
+          className="absolute"
+        >
+          <div className="relative inline-block">
+            <img
+              ref={imgRef}
+              src={imageUrl}
+              alt="Blueprint"
+              onLoad={handleImageLoad}
+              className="block max-w-none"
+              style={{ imageRendering: zoom > 2 ? "pixelated" : "auto" }}
+              draggable={false}
+            />
+            {imageLoaded && (
+              <DrawingOverlay
+                elements={elements}
+                selectedId={selectedElementId}
+                hoveredId={hoveredId}
+                visibleTypes={visibleTypes}
+                onSelect={onSelectElement}
+                onHover={setHoveredId}
+                imageWidth={imageSize.w}
+                imageHeight={imageSize.h}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Hover Tooltip */}
+        {hoveredElement && (
+          <div
+            className="absolute z-50 pointer-events-none bg-popover border border-border rounded-xl px-3 py-2 shadow-lg"
+            style={{ bottom: 16, left: 16 }}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <span
+                className="w-2.5 h-2.5 rounded-sm"
+                style={{ backgroundColor: ELEMENT_TYPE_COLORS[hoveredElement.element_type] || ELEMENT_TYPE_COLORS.OTHER }}
+              />
+              <span className="text-xs font-bold text-foreground">{hoveredElement.element_id}</span>
+              <Badge variant="outline" className="text-[9px] rounded-md">{hoveredElement.element_type}</Badge>
+            </div>
+            <div className="flex gap-3 text-[10px] text-muted-foreground">
+              <span>Status: <span className="font-semibold text-foreground">{hoveredElement.status}</span></span>
+              {hoveredElement.confidence !== undefined && (
+                <span>Confidence: <span className="font-semibold text-foreground">{Math.round(hoveredElement.confidence * 100)}%</span></span>
+              )}
+              {hoveredElement.weight_lbs !== undefined && (
+                <span>Weight: <span className="font-semibold text-foreground">{hoveredElement.weight_lbs.toLocaleString()} lbs</span></span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Legend */}
+        {imageLoaded && allTypes.length > 0 && (
+          <div className="absolute bottom-3 right-3 bg-popover/90 backdrop-blur-sm border border-border rounded-lg px-2.5 py-2 shadow-md">
+            <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider mb-1">Legend</p>
+            <div className="flex flex-col gap-0.5">
+              {allTypes.map((type) => (
+                <div key={type} className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: ELEMENT_TYPE_COLORS[type] || ELEMENT_TYPE_COLORS.OTHER }} />
+                  <span className="text-[10px] text-foreground">{type}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default BlueprintViewer;

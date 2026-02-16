@@ -1,7 +1,8 @@
 import React, { useState } from "react";
-import { CheckCircle2, AlertTriangle, XCircle, Shield, Zap, FileCheck, ChevronDown, ChevronRight, Weight, BarChart3, Target } from "lucide-react";
+import { CheckCircle2, AlertTriangle, XCircle, Shield, Zap, FileCheck, ChevronDown, ChevronRight, MapPin, Map, Target } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
 import QuestionCard from "./QuestionCard";
 import ExportButtons from "./ExportButtons";
 import SizeBreakdownTable from "./SizeBreakdownTable";
@@ -21,6 +22,7 @@ interface ValidationElement {
   };
   questions: any[];
   extraction?: { truth?: any; confidence?: number };
+  regions?: { tag_region?: { bbox?: number[] } };
 }
 
 interface QuoteResult {
@@ -52,6 +54,11 @@ interface ValidationResultsProps {
   onAnswerQuestion?: (elementId: string, field: string, value: string) => void;
   onRequestQuote?: (mode: "ai_express" | "verified") => void;
   scopeData?: any;
+  onShowOnDrawing?: (elementId: string) => void;
+  onToggleViewer?: () => void;
+  showViewer?: boolean;
+  selectedElementId?: string | null;
+  hasDrawingData?: boolean;
 }
 
 const StatusIcon: React.FC<{ status: string }> = ({ status }) => {
@@ -71,12 +78,25 @@ const GateBadge: React.FC<{ name: string; passed: boolean }> = ({ name, passed }
   </span>
 );
 
-const ElementCard: React.FC<{ el: ValidationElement; weightInfo?: any }> = ({ el, weightInfo }) => (
-  <div className={`p-4 rounded-xl border-2 transition-all ${
-    el.status === "READY" ? "border-primary/20 bg-primary/5"
-    : el.status === "FLAGGED" ? "border-amber-500/20 bg-amber-500/5"
-    : "border-destructive/20 bg-destructive/5"
-  }`}>
+interface ElementCardProps {
+  el: ValidationElement;
+  weightInfo?: any;
+  onShowOnDrawing?: (id: string) => void;
+  isSelected?: boolean;
+  hasBbox?: boolean;
+}
+
+const ElementCard: React.FC<ElementCardProps> = ({ el, weightInfo, onShowOnDrawing, isSelected, hasBbox }) => (
+  <div
+    id={`element-card-${el.element_id}`}
+    className={`p-4 rounded-xl border-2 transition-all ${
+      isSelected
+        ? "border-primary ring-2 ring-primary/30 bg-primary/10"
+        : el.status === "READY" ? "border-primary/20 bg-primary/5"
+        : el.status === "FLAGGED" ? "border-amber-500/20 bg-amber-500/5"
+        : "border-destructive/20 bg-destructive/5"
+    }`}
+  >
     <div className="flex items-center justify-between mb-2">
       <div className="flex items-center gap-2">
         <StatusIcon status={el.status} />
@@ -88,9 +108,20 @@ const ElementCard: React.FC<{ el: ValidationElement; weightInfo?: any }> = ({ el
           </span>
         )}
       </div>
-      <Badge variant={el.status === "READY" ? "secondary" : el.status === "FLAGGED" ? "outline" : "destructive"} className="text-[10px] rounded-md">
-        {el.status}
-      </Badge>
+      <div className="flex items-center gap-1">
+        {hasBbox && onShowOnDrawing && (
+          <button
+            onClick={() => onShowOnDrawing(el.element_id)}
+            className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg bg-accent hover:bg-accent/80 text-foreground font-medium transition-colors"
+            title="Show on Drawing"
+          >
+            <MapPin className="h-3 w-3" />
+          </button>
+        )}
+        <Badge variant={el.status === "READY" ? "secondary" : el.status === "FLAGGED" ? "outline" : "destructive"} className="text-[10px] rounded-md">
+          {el.status}
+        </Badge>
+      </div>
     </div>
     <div className="flex gap-1.5 flex-wrap mb-2">
       <GateBadge name="Identity" passed={el.validation.identity.passed} />
@@ -126,6 +157,7 @@ const ElementCard: React.FC<{ el: ValidationElement; weightInfo?: any }> = ({ el
 
 const ValidationResults: React.FC<ValidationResultsProps> = ({
   elements, summary, questions, quoteResult, onAnswerQuestion, onRequestQuote, scopeData,
+  onShowOnDrawing, onToggleViewer, showViewer, selectedElementId, hasDrawingData,
 }) => {
   const grouped = elements.reduce<Record<string, ValidationElement[]>>((acc, el) => {
     const type = el.element_type || "OTHER";
@@ -143,8 +175,26 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
     for (const el of quoteResult.quote.elements) weightMap[el.element_id] = el;
   }
 
+  const hasBboxData = (el: ValidationElement) => {
+    const bbox = el.regions?.tag_region?.bbox;
+    return bbox && bbox.length === 4 && (bbox[2] > bbox[0] || bbox[3] > bbox[1]);
+  };
+
   return (
     <div className="space-y-4 my-4">
+      {/* View Drawing Toggle */}
+      {hasDrawingData && onToggleViewer && (
+        <Button
+          onClick={onToggleViewer}
+          variant={showViewer ? "default" : "outline"}
+          className="w-full rounded-xl gap-2 font-semibold"
+          size="sm"
+        >
+          <Map className="h-4 w-4" />
+          {showViewer ? "Hide Drawing Viewer" : "View on Drawing"}
+        </Button>
+      )}
+
       {/* Stat Cards */}
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded-xl border border-border bg-card p-4 text-center">
@@ -185,7 +235,16 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
               <Badge variant="secondary" className="text-[10px] ml-auto rounded-md">{els.length}</Badge>
             </CollapsibleTrigger>
             <CollapsibleContent className="space-y-2 mt-2 pl-2">
-              {els.map((el) => <ElementCard key={el.element_id} el={el} weightInfo={weightMap[el.element_id]} />)}
+              {els.map((el) => (
+                <ElementCard
+                  key={el.element_id}
+                  el={el}
+                  weightInfo={weightMap[el.element_id]}
+                  onShowOnDrawing={onShowOnDrawing}
+                  isSelected={el.element_id === selectedElementId}
+                  hasBbox={hasBboxData(el)}
+                />
+              ))}
             </CollapsibleContent>
           </Collapsible>
         ))}
