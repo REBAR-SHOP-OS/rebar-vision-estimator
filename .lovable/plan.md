@@ -1,61 +1,104 @@
 
 
-## Smarter Project Type Detection and Category-Specific Estimation
+## Blueprint Viewer -- "Show Where in Drawing" Feature
 
-Enhance the detection edge function and analysis pipeline to be truly intelligent about project categories -- especially Cage projects -- and enforce Canadian RSIC standards when detected.
-
----
-
-### Problem
-
-The detection function exists but its prompt is generic. When a cage project is uploaded, the system needs to:
-1. Confidently detect "Cage" and pre-select only COLUMN + PIER scope items
-2. Adapt the entire estimation approach for cage assembly (verticals, ties, spirals, cage marks)
-3. Apply RSIC Canadian rules automatically when metric sizes are found
-
-Currently the detection prompt is too brief and the analysis prompt treats all project types similarly.
+Add an interactive blueprint viewer that displays the uploaded drawing with colored overlay rectangles highlighting where each detected element was found on the drawing, similar to Beam AI's visual takeoff interface.
 
 ---
 
-### Changes
+### What You'll See
 
-**1. Enhance `detect-project-type` edge function prompt**
+After the AI analysis completes and returns element results, a new **"View on Drawing"** toggle button appears above the results. When activated:
 
-Make the detection prompt much more specific with clear indicators for each category:
-- **Cage**: Look for column cage schedules, "cage" labels, prefab marks (e.g., C1-CAGE), tied assemblies, cage height/diameter callouts, spiral details, shop drawing format
-- **Bar List**: No drawings -- just tables with bar marks, sizes, quantities, cut lengths
-- **Residential**: Strip footings, ICF, SOG, basement walls, light bars (10M-20M)
-- **Industrial**: Heavy footings, equipment pads, 25M+ bars, crane beams
-- **Commercial**: Multi-storey columns, flat slabs, parking, drop panels
-- **Infrastructure**: Bridges, abutments, retaining walls, MTO/OPSS references
+- A split-panel layout shows the **blueprint image on the left** and the **results list on the right**
+- Colored rectangles overlay the drawing at each element's detected location
+- Clicking an element card in the results highlights and zooms to it on the drawing
+- Clicking a rectangle on the drawing scrolls to and highlights that element's card
+- A legend and element-type filter toolbar sits at the top of the viewer
 
-Add a secondary check: if OCR text contains "cage", "spiral", "tied assembly" keywords, boost cage confidence.
+---
 
-**2. Add cage-specific estimation rules to `analyze-blueprint`**
+### New Components
 
-Add a new `CAGE_PROJECT_RULES` constant with detailed instructions:
-- Focus on cage assembly output: cage mark, vertical bar count/size, tie size/spacing, cage height, cage diameter/dimensions
-- Calculate tie quantity = (cage_height / tie_spacing) + 1
-- Calculate tie perimeter from column dimensions minus 80mm per RSIC
-- Include spiral calculations if present
-- Output format: one row per cage type (not per column instance)
-- Multiply cage weights by quantity of that cage type
-- Include shop bending details (offset bends for verticals, hooks for ties)
+**1. `BlueprintViewer.tsx`** -- The main interactive viewer
 
-When `scope.detectedCategory === "cage"`, prepend these rules to the system prompt.
+- Loads the uploaded blueprint image from the signed URL
+- Renders SVG overlay rectangles on top of the image for each element's `regions.tag_region.bbox`
+- Color-coded by element type (Columns = blue, Footings = orange, Beams = green, etc.)
+- Supports zoom (mouse wheel / pinch) and pan (click-drag)
+- Toolbar: zoom in, zoom out, fit-to-screen, element-type filter chips
+- Tooltip on hover showing element ID, type, status, and confidence
+- Selected element gets a pulsing glow border
+- Legend with colored squares per element type
 
-**3. Add category-specific prompt reinforcement blocks**
+**2. `DrawingOverlay.tsx`** -- Lightweight SVG layer
 
-For each detected category, inject a focused instruction block into the system prompt:
-- **Cage**: "This is a CAGE project. Focus exclusively on cage assemblies..."
-- **Residential**: "This is a RESIDENTIAL project. Focus on footings, walls, SOG mesh..."
-- **Industrial**: "This is an INDUSTRIAL project. Focus on heavy foundations..."
-- **Bar List**: "This is a BAR LIST project. Parse the table directly, skip OCR element detection..."
-- **Infrastructure**: "This is an INFRASTRUCTURE project. Check for DOT specs..."
+- Renders positioned rectangles based on normalized bbox coordinates
+- Handles click events to select elements
+- Handles hover events for tooltips
+- Color map: COLUMN=#3B82F6, FOOTING=#F59E0B, BEAM=#10B981, WALL=#8B5CF6, SLAB=#14B8A6, PIER=#EC4899, OTHER=#6B7280
 
-**4. Improve scope panel feedback for cage detection**
+---
 
-When cage is detected, show a specific note: "Cage project detected -- only Column and Pier elements are relevant. The estimator will focus on cage assembly details (verticals, ties, spirals)."
+### Updated Components
+
+**3. `ValidationResults.tsx`** -- Add "Show on Drawing" per element
+
+- Each `ElementCard` gets a small map-pin icon button
+- Clicking it fires `onShowOnDrawing(element_id)` callback
+- Selected element card gets a highlighted ring/border
+- New toggle button at top: "View Drawing" with a map icon
+
+**4. `ChatArea.tsx`** -- Split-panel layout
+
+- When the blueprint viewer is active, switch from single-column to a `ResizablePanelGroup` (already installed via `react-resizable-panels`)
+- Left panel: BlueprintViewer (default 55% width)
+- Right panel: existing chat/results content (45%)
+- State: `showBlueprintViewer` toggle, `selectedElementId` for syncing between viewer and results
+- Pass `uploadedFiles[0]` URL and `validationData.elements` to BlueprintViewer
+
+**5. `analyze-blueprint/index.ts`** -- Reinforce bbox output
+
+- Add a note in the system prompt reinforcing that the AI should output real OCR bounding box coordinates (from the Google Vision data) into each element's `regions.tag_region.bbox` field rather than `[0,0,0,0]`
+- This ensures meaningful overlay positioning
+
+---
+
+### Visual Design
+
+- Dark semi-transparent toolbar at the top of the viewer with rounded controls
+- Overlay rectangles: 2px colored border, 10% opacity fill, rounded corners
+- Selected element: 3px border with CSS pulsing glow animation
+- Hover tooltip: dark card with element details (ID, type, weight, confidence %)
+- Legend: small colored squares in the bottom-left corner
+- Filter chips: toggle visibility per element type
+- On mobile: viewer is full-width and shown above results (stacked, not side-by-side)
+
+---
+
+### Element Type Color Map
+
+| Type | Color | Hex |
+|---|---|---|
+| COLUMN | Blue | #3B82F6 |
+| FOOTING | Orange | #F59E0B |
+| BEAM | Green | #10B981 |
+| WALL | Purple | #8B5CF6 |
+| SLAB | Teal | #14B8A6 |
+| PIER | Pink | #EC4899 |
+| STAIR | Indigo | #6366F1 |
+| OTHER | Gray | #6B7280 |
+
+---
+
+### Data Flow
+
+1. AI analysis returns elements with `regions.tag_region.bbox` coordinates (from OCR bounding boxes)
+2. User clicks "View Drawing" toggle
+3. ChatArea switches to split-panel layout using `ResizablePanelGroup`
+4. BlueprintViewer loads the first uploaded file's image and renders SVG overlays at each element's bbox position
+5. User clicks an element card -- viewer smoothly zooms/pans to center that element's region
+6. User clicks an overlay rectangle -- results panel scrolls to and highlights that element's card
 
 ---
 
@@ -63,17 +106,10 @@ When cage is detected, show a specific note: "Cage project detected -- only Colu
 
 | File | Changes |
 |---|---|
-| `supabase/functions/detect-project-type/index.ts` | Enhanced detection prompt with keyword boosting; more specific category indicators; add cage-specific OCR keyword search before AI call |
-| `supabase/functions/analyze-blueprint/index.ts` | New `CAGE_PROJECT_RULES` constant; category-specific prompt blocks injected based on `scope.detectedCategory`; cage output format (cage mark, qty, verticals, ties, height, weight per cage) |
-| `src/components/chat/ScopeDefinitionPanel.tsx` | Category-specific help text in detection banner (e.g., cage-specific note about assembly focus); show detected standard more prominently |
+| `src/components/chat/BlueprintViewer.tsx` | New -- Image viewer with SVG overlay, zoom/pan, toolbar, tooltips, element selection |
+| `src/components/chat/DrawingOverlay.tsx` | New -- SVG rectangle layer with color-coding, click/hover handlers |
+| `src/components/chat/ValidationResults.tsx` | Add "Show on Drawing" button per element; add "View Drawing" toggle; highlight selected element; new props for `onShowOnDrawing` and `selectedElementId` |
+| `src/components/chat/ChatArea.tsx` | Split-panel layout with ResizablePanelGroup when viewer active; selectedElementId state; pass data to BlueprintViewer |
+| `supabase/functions/analyze-blueprint/index.ts` | Add prompt reinforcement to output real bbox coordinates from OCR data |
+| `src/index.css` | Add `@keyframes blueprint-pulse` animation for selected overlay glow |
 
-### Flow for Cage Project
-
-1. User uploads cage blueprint PDF
-2. `detect-project-type` runs OCR, finds keywords like "cage", "spiral", "tied assembly", column schedules
-3. Returns `{ category: "cage", recommendedScope: ["COLUMN", "PIER"], detectedStandard: "canadian_metric", confidence: 0.95 }`
-4. Scope panel shows only COLUMN + PIER pre-checked, banner says "Cage Project (Canadian Metric)"
-5. User confirms, picks mode
-6. `analyze-blueprint` receives `detectedCategory: "cage"`, injects `CAGE_PROJECT_RULES` into prompt
-7. AI focuses on cage assemblies: cage marks, vertical counts, tie calculations, spiral data
-8. Output includes per-cage-type weight breakdown with RSIC rules applied
