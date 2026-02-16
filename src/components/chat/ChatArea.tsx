@@ -744,17 +744,66 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     }
 
     if (!validationData?.elements) return [];
-    return validationData.elements
-      .filter((el: any) => el.regions?.tag_region?.bbox)
-      .map((el: any) => ({
-        element_id: el.element_id,
-        element_type: el.element_type,
-        status: el.status,
-        bbox: el.regions.tag_region.bbox as [number, number, number, number],
-        confidence: el.extraction?.confidence,
-        weight_lbs: quoteResult?.quote?.elements?.find((qe: any) => qe.element_id === el.element_id)?.weight_lbs,
-        page_number: el.regions?.tag_region?.page_number,
-      }));
+
+    // Separate elements with and without spatial data
+    const withBbox: OverlayElement[] = [];
+    const withoutBbox: any[] = [];
+
+    validationData.elements.forEach((el: any) => {
+      if (el.regions?.tag_region?.bbox) {
+        withBbox.push({
+          element_id: el.element_id,
+          element_type: el.element_type,
+          status: el.status,
+          bbox: el.regions.tag_region.bbox as [number, number, number, number],
+          confidence: el.extraction?.confidence,
+          weight_lbs: quoteResult?.quote?.elements?.find((qe: any) => qe.element_id === el.element_id)?.weight_lbs,
+          page_number: el.regions?.tag_region?.page_number,
+        });
+      } else {
+        withoutBbox.push(el);
+      }
+    });
+
+    // Generate synthetic positions for elements without bbox
+    if (withoutBbox.length > 0) {
+      // Use a reasonable default image size for positioning
+      const imgH = 2000;
+      let curX = 80;
+      let curY = 80;
+      const boxSize = 40;
+      const gap = 60;
+
+      // Group by type for organized placement
+      const grouped: Record<string, any[]> = {};
+      withoutBbox.forEach((el) => {
+        const t = el.element_type || "OTHER";
+        if (!grouped[t]) grouped[t] = [];
+        grouped[t].push(el);
+      });
+
+      Object.values(grouped).forEach((group) => {
+        group.forEach((el) => {
+          if (curY + boxSize > imgH - 40) {
+            curY = 80;
+            curX += 200;
+          }
+          withBbox.push({
+            element_id: el.element_id,
+            element_type: el.element_type,
+            status: el.status,
+            bbox: [curX, curY, curX + boxSize, curY + boxSize] as [number, number, number, number],
+            confidence: el.extraction?.confidence,
+            weight_lbs: quoteResult?.quote?.elements?.find((qe: any) => qe.element_id === el.element_id)?.weight_lbs,
+            page_number: el.regions?.tag_region?.page_number,
+          });
+          curY += gap;
+        });
+        curY += 20; // extra gap between type groups
+      });
+    }
+
+    return withBbox;
   }, [validationData, quoteResult, finderPassCandidates, finderReviewMode]);
 
   // Show viewer whenever uploaded files exist (supports PDF read-only mode too)

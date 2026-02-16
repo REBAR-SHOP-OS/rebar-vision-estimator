@@ -321,7 +321,7 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
                   style={{ imageRendering: zoom > 2 ? "pixelated" : "auto" }}
                   draggable={false}
                 />
-                {imageLoaded && hasOverlays && (
+                {imageLoaded && pageElements.length > 0 && (
                   <DrawingOverlay
                     elements={pageElements}
                     selectedId={selectedElementId}
@@ -345,7 +345,7 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
           )}
 
           {/* Guidance banner */}
-          {imageLoaded && showGuidance && hasOverlays && (
+          {imageLoaded && showGuidance && pageElements.length > 0 && (
             <div className="absolute top-3 left-3 right-3 bg-primary/10 backdrop-blur-sm border border-primary/30 rounded-lg px-3 py-2 shadow-md flex items-center gap-2 z-10">
               <span className="text-[11px] text-foreground">💡 Colored boxes highlight detected elements. <strong>Click any box</strong> to select it, or use the Features panel to browse.</span>
               <button onClick={() => setShowGuidance(false)} className="ml-auto text-muted-foreground hover:text-foreground flex-shrink-0">
@@ -354,11 +354,11 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
             </div>
           )}
 
-          {/* No spatial data notice */}
-          {imageLoaded && !hasOverlays && (
+          {/* Approximate position notice */}
+          {imageLoaded && pageElements.length > 0 && !pageElements.some(el => (el.bbox[2] - el.bbox[0]) > 50) && (
             <div className="absolute top-3 left-3 bg-popover/90 backdrop-blur-sm border border-border rounded-lg px-3 py-2 shadow-md flex items-center gap-2">
               <FileText className="h-4 w-4 text-muted-foreground" />
-              <span className="text-[10px] text-muted-foreground">No spatial data — elements were parsed from tabular data</span>
+              <span className="text-[10px] text-muted-foreground">📍 Element positions are approximate — parsed from tabular data</span>
             </div>
           )}
 
