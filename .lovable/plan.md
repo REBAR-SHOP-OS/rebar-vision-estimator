@@ -1,112 +1,98 @@
 
 
-## Interactive Page-by-Page Review + Shop Drawing Generation
+## Element-by-Element Guided Review with Drawing Markers
 
-### What Changes
+### Overview
 
-**1. Page-by-Page Review Mode**
-
-After the AI estimation completes, instead of just dumping all results at once, add a new interactive review flow that walks the customer through the document one page at a time:
-
-- A "Review Document" button appears after estimation is done
-- Opens a guided review panel that shows Page 1 in the BlueprintViewer, with all elements found on that page listed beside it
-- Any element with confidence below 100% (or below 0.82 threshold) gets a confirmation prompt inline: "We detected [element] here with [X]% confidence. Is this correct?" with Yes/No/Edit buttons
-- Customer confirms or corrects each flagged item, then clicks "Next Page" to proceed
-- A progress bar shows "Page 3 of 15 reviewed"
-- After all pages are reviewed, a summary shows what was confirmed, corrected, and the updated totals
-- Answers are fed back into the validation pipeline (existing `runValidation` with `userAnswers`)
-
-**2. "Create Shop Drawing" Button**
-
-After the estimation (and optionally the review) is complete and a quote result exists, add a "Create Shop Drawing" button alongside the existing Export Excel / Download PDF buttons:
-
-- Calls a new `generate-shop-drawing` edge function
-- The edge function takes the finalized bar list (elements, bar marks, sizes, shapes, bend details, quantities) and uses AI to generate a professional shop drawing description/DXF-style output
-- For MVP: generates a formatted PDF shop drawing with bar bending schedule, shape diagrams (using standard shape codes), and bar mark labels
-- The PDF opens in a new tab for download/print
+Replace the current page-by-page review flow with a focused **element-by-element** walkthrough. Instead of showing all elements on a page at once, the reviewer steps through **one element at a time**, with the Blueprint Viewer automatically zooming to and highlighting that element's location on the drawing.
 
 ---
 
-### New Components
+### How It Works
 
-**`PageReviewPanel.tsx`** -- The guided review UI
+1. User clicks **"Review Elements"** after estimation
+2. The Blueprint Viewer opens alongside a new **ElementReviewPanel**
+3. The panel focuses on **Element 1 of N** -- showing its ID, type, confidence, and extracted data
+4. The drawing automatically zooms to and pulses/highlights the element's bounding box
+5. User chooses: **Confirm**, **Edit**, or **Reject**
+6. Clicking **Next** advances to Element 2, the drawing pans to that element
+7. A progress bar at the top shows "3 / 12 elements reviewed"
+8. Low-confidence elements (below 82%) get a warning banner prompting extra attention
+9. After the last element, a summary screen shows confirmed/corrected/rejected counts
+10. Corrections feed back into the validation pipeline to update totals
 
-- Shows current page number and total pages
-- Lists elements found on the current page with their confidence levels
-- For items below 100% confidence: shows an inline confirmation card with the detected value, a "Confirm" button, and an "Edit" button (which opens a small input field)
-- "Previous Page" / "Next Page" navigation
-- Progress bar at top
-- "Finish Review" button on the last page that triggers re-validation with all collected answers
-- Tracks review state: `{ pageAnswers: Map<string, {confirmed: boolean, correctedValue?: string}> }`
+### Drawing Marking
 
----
-
-### Updated Components
-
-**`ValidationResults.tsx`**
-
-- Add a "Review Document" button (appears after estimation, next to "View Document")
-- Add a "Create Shop Drawing" button in the quote result section, next to existing Export buttons
-
-**`ExportButtons.tsx`**
-
-- Add a third button: "Create Shop Drawing" with a drafting icon
-- On click, calls the `generate-shop-drawing` edge function with the full bar list and element data
-- Shows a loading spinner while generating
-- Opens the result (PDF) in a new tab
-
-**`ChatArea.tsx`**
-
-- Add `reviewMode` state (boolean) to toggle between normal results view and page-by-page review
-- When review mode is active, show `PageReviewPanel` instead of `ValidationResults`
-- Pass review answers back through existing `handleAnswerQuestion` flow
-- After review completes, re-run validation and update results
+- The **currently reviewed element** gets a pulsing highlight (thicker border + animated glow) on the drawing overlay
+- **Confirmed** elements turn green with a checkmark indicator
+- **Rejected** elements turn red with an X indicator
+- **Not yet reviewed** elements remain in their default semi-transparent color
+- The viewer auto-zooms and pans to center each element as the user steps through
 
 ---
 
-### New Edge Function: `generate-shop-drawing`
+### Technical Changes
 
-- Receives: bar list array, element details, project metadata (name, client, standard)
-- Uses AI (Gemini) to generate a formatted shop drawing with:
-  - Bar bending schedule table (bar mark, size, shape code, dimensions, quantity)
-  - Standard shape code diagrams described textually (for each unique shape)
-  - Summary totals by size
-  - Project header with name, client, date
-- Outputs: HTML that renders as a printable shop drawing (similar to existing PDF export but with bending detail diagrams)
-- Opens in new tab for print/save as PDF
-
----
-
-### Technical Details
-
-| File | Changes |
+| File | Change |
 |---|---|
-| `src/components/chat/PageReviewPanel.tsx` | New -- guided page-by-page review with confidence-based confirmation prompts, page navigation, progress tracking |
-| `src/components/chat/ValidationResults.tsx` | Add "Review Document" button after estimation; pass review trigger callback |
-| `src/components/chat/ExportButtons.tsx` | Add "Create Shop Drawing" button that calls the new edge function |
-| `src/components/chat/ChatArea.tsx` | Add `reviewMode` state; toggle between ValidationResults and PageReviewPanel; handle review completion with re-validation |
-| `supabase/functions/generate-shop-drawing/index.ts` | New edge function -- takes bar list + elements, uses AI to produce formatted shop drawing HTML/PDF |
-| `supabase/config.toml` | Add `[functions.generate-shop-drawing]` with `verify_jwt = false` |
+| `src/components/chat/PageReviewPanel.tsx` | Rewrite into `ElementReviewPanel` -- single-element focus with prev/next navigation, progress bar, auto-select on step change |
+| `src/components/chat/DrawingOverlay.tsx` | Add `reviewStatus` map prop to color-code elements by review state (confirmed=green, rejected=red, active=pulsing); add CSS animation for active element |
+| `src/components/chat/ChatArea.tsx` | Replace `PageReviewPanel` usage with new `ElementReviewPanel`; pass review state to overlay elements; track `reviewAnswers` map for overlay coloring |
+| `src/components/chat/ValidationResults.tsx` | Rename button from "Review Document" to "Review Elements" |
+| `src/index.css` | Add `@keyframes` pulse animation for the active review element overlay |
 
-### Review Flow
+### New ElementReviewPanel UI Layout
 
-1. User uploads PDF, AI runs estimation, results appear with element cards
-2. User clicks **"Review Document"** button
-3. BlueprintViewer opens on Page 1, PageReviewPanel shows elements found on Page 1
-4. Low-confidence items show: "Detected: 4x 20M verticals (78% confidence) -- Confirm / Edit"
-5. User confirms or edits each flagged item
-6. User clicks "Next Page" -- viewer advances to Page 2, new elements shown
-7. After last page: "Review Complete" summary with changes made
-8. System re-runs validation with user corrections, updates weights/totals
-9. User clicks **"Create Shop Drawing"** -- edge function generates formatted bending schedule PDF
-10. PDF opens in new browser tab for printing
+```text
++------------------------------------------+
+| Review Elements          [3 / 12]  Cancel |
+| [==========>              ] 25%           |
++------------------------------------------+
+|  FOOTING-ISO                    FOOTING   |
+|  Confidence: 50%  [!!!]                   |
+|                                           |
+|  Extracted Data:                          |
+|  +--------------------------------------+|
+|  | vertical_bars: 4x 20M                ||
+|  | ties: 10M @ 300mm                    ||
+|  +--------------------------------------+|
+|                                           |
+|  [!] Low confidence -- please verify      |
+|                                           |
+|  [ Confirm ]  [ Edit ]  [ Reject ]        |
++------------------------------------------+
+|        [ < Prev ]  [ Next > ]             |
++------------------------------------------+
+```
 
-### Shop Drawing Output Format
+### DrawingOverlay Review States
 
-The generated shop drawing will include:
-- Project header (name, client, date, standard)
-- Bar bending schedule table: Bar Mark, Size, Shape Code, Qty, Cut Length, Bend Dimensions (A, B, C, D, E), Total Weight
-- Shape diagrams section: for each unique shape code, a text description of the bend geometry
-- Size summary table
-- Notes section with applicable standards (RSIC/ACI)
-- Footer with disclaimer and generation date
+The overlay will accept an optional `reviewStatuses` prop:
+
+```text
+Map<string, "confirmed" | "rejected" | "active" | "pending">
+```
+
+- `active`: pulsing border animation (2px dashed + glow), fill opacity 0.25
+- `confirmed`: green border, green fill at 0.1 opacity, small checkmark icon
+- `rejected`: red border, red fill at 0.1 opacity
+- `pending`: default semi-transparent (current behavior)
+
+### Data Flow
+
+1. `ElementReviewPanel` maintains current element index and answers map
+2. On each step change, it calls `onSelectElement(currentElement.element_id)` which triggers the BlueprintViewer to zoom to that element
+3. The `reviewAnswers` map is passed up to `ChatArea` which converts it into a `reviewStatuses` map for the overlay
+4. On completion, answers are converted to `userAnswers` format and fed to `runValidation`
+
+### CSS Animation (added to index.css)
+
+```text
+@keyframes review-pulse {
+  0%, 100% { stroke-opacity: 1; stroke-width: 3; }
+  50% { stroke-opacity: 0.5; stroke-width: 5; }
+}
+```
+
+Applied via the class `.review-active-element` on the SVG rect in DrawingOverlay.
+
