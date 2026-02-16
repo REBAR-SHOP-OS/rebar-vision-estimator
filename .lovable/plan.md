@@ -1,31 +1,58 @@
 
-## Make Chat Messages More Visual with Proper Table Rendering
+
+## Upgrade Suggestion Chips to Visual Idea Cards
 
 ### Problem
-AI messages contain markdown tables (pipe-delimited `| col | col |` format) but they render as plain unstyled text. The "Finder Pass" results and element tables look like a wall of text instead of clean, structured tables.
+The current suggestion chips are plain text pills that feel vague and easy to miss. Users need clearer, more visual prompts that explain what each action does.
 
-### Changes
+### Solution
+Replace the single-line text chips with a grid of small **idea cards**, each containing an icon, a bold title, and a short description line. This makes the options self-explanatory and impossible to misunderstand.
 
-**1. Add table rendering to ChatMessage.tsx**
+### Visual Layout
 
-Update the `ReactMarkdown` component to use custom `components` prop that renders `table`, `thead`, `tbody`, `tr`, `th`, and `td` elements with proper styling:
+Each card is a compact rounded box (~140px wide) with:
+- An icon at the top (from lucide-react)
+- A bold 1-2 word title
+- A muted one-line description underneath
 
-- Tables get rounded borders, alternating row colors, and proper padding
-- Headers get a muted background with bold text
-- Cells get consistent padding and border separators
-- Code spans inside tables stay readable
-- Tables are wrapped in a scrollable container for wide content
+Cards sit in a horizontally scrollable row above the input, or wrap into a 2x2 grid on wider screens.
 
-**2. Improve overall prose styling**
+### Card Content by State
 
-- Tighten up the prose classes so headings, lists, and paragraphs have better spacing
-- Add `prose-table` overrides so tables integrate with the existing dark/light theme
-- Bold text and inline code get slightly better contrast
+**No files uploaded:**
+| Icon | Title | Description |
+|---|---|---|
+| Upload | Upload PDF | Drop your blueprint here |
+| FileQuestion | File Types | See supported formats |
+| Sparkles | How It Works | Learn about AI detection |
+
+**Files uploaded, no mode selected:**
+| Icon | Title | Description |
+|---|---|---|
+| Zap | Smart Analysis | Auto-detect and estimate |
+| ListChecks | Step-by-Step | Review each element |
+| HelpCircle | What's Detected? | Preview element types |
+
+**Results available:**
+| Icon | Title | Description |
+|---|---|---|
+| Table | Bar List | View full rebar table |
+| Download | Export Excel | Download spreadsheet |
+| AlertTriangle | Review Flags | Check flagged items |
+| RefreshCw | Recalculate | Update with your edits |
+
+**AI asks confirmation question:**
+| Icon | Title | Description |
+|---|---|---|
+| CheckCircle | Yes, Proceed | Continue to next step |
+| SlidersHorizontal | Adjust Scope | Change element types |
+| Plus | Add More | Include more elements |
 
 ### Technical Details
 
 | File | Change |
 |---|---|
-| `src/components/chat/ChatMessage.tsx` | Add `components` prop to `ReactMarkdown` with custom renderers for `table`, `thead`, `tbody`, `tr`, `th`, `td`. Wrap tables in `overflow-x-auto` container. Style with Tailwind classes: rounded borders, `bg-muted/30` header, `text-xs` cells, alternating `even:bg-muted/20` rows. Also add renderers for `strong` (slightly bolder color) and `p` (better margin). |
+| `src/components/chat/ChatArea.tsx` | Replace the plain `button` chips (lines 904-961) with styled card components. Each card uses a `div` with icon + title + description, arranged in a `flex gap-2 overflow-x-auto` container. Cards have `border border-border rounded-xl p-3 min-w-[130px]` styling with hover effects (`hover:border-primary/50 hover:bg-primary/5`). Icons rendered from lucide-react at `h-4 w-4`. Title is `text-xs font-semibold`, description is `text-[10px] text-muted-foreground`. Click behavior unchanged (autoSend for confirmations, setInput for others, file picker for upload). |
 
-This is a single-file change that dramatically improves readability of all AI responses containing tables.
+Single file change only.
+
