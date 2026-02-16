@@ -107,7 +107,7 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
 
         const cLen = Math.min(CORNER_LEN, w / 3, h / 3);
         const sw = isActive ? 3 : isSelected ? 3 : isHovered ? 2.5 : 2;
-        const dotR = isSelected || isHovered || isActive ? 14 : 10;
+        const dotR = isSelected || isHovered || isActive ? 20 : 16;
 
         // Corner bracket paths (L-shapes at each corner)
         const corners = [
@@ -202,7 +202,7 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
               r={dotR}
               fill={color}
               stroke="white"
-              strokeWidth={2}
+              strokeWidth={3}
               className="pointer-events-none"
             />
 
@@ -218,36 +218,34 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
               />
             )}
 
-            {/* Label with pointer arrow — only on hover/select/active */}
-            {(isSelected || isHovered || isActive) && (
-              <g filter="url(#label-shadow)" className="pointer-events-none">
-                <rect
-                  x={x}
-                  y={y - labelH - arrowSize}
-                  width={labelWidth}
-                  height={labelH}
-                  rx={5}
-                  fill={color}
-                  fillOpacity={0.92}
-                />
-                <polygon
-                  points={`${x + 12 - arrowSize},${y - arrowSize} ${x + 12 + arrowSize},${y - arrowSize} ${x + 12},${y}`}
-                  fill={color}
-                  fillOpacity={0.92}
-                />
-                <text
-                  x={x + 10}
-                  y={y - arrowSize - 7}
-                  fill="white"
-                  fontSize={14}
-                  fontWeight={700}
-                  fontFamily="system-ui, sans-serif"
-                  className="select-none"
-                >
-                  {labelText}
-                </text>
-              </g>
-            )}
+            {/* Always-visible label with pointer arrow */}
+            <g filter="url(#label-shadow)" className="pointer-events-none">
+              <rect
+                x={x}
+                y={y - labelH - arrowSize}
+                width={labelWidth}
+                height={labelH}
+                rx={5}
+                fill={color}
+                fillOpacity={isSelected || isHovered || isActive ? 0.95 : 0.75}
+              />
+              <polygon
+                points={`${x + 12 - arrowSize},${y - arrowSize} ${x + 12 + arrowSize},${y - arrowSize} ${x + 12},${y}`}
+                fill={color}
+                fillOpacity={isSelected || isHovered || isActive ? 0.95 : 0.75}
+              />
+              <text
+                x={x + 10}
+                y={y - arrowSize - 7}
+                fill="white"
+                fontSize={isSelected || isHovered || isActive ? 15 : 13}
+                fontWeight={isSelected || isHovered || isActive ? 800 : 600}
+                fontFamily="system-ui, sans-serif"
+                className="select-none"
+              >
+                {labelText}
+              </text>
+            </g>
           </g>
         );
       })}

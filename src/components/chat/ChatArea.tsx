@@ -778,9 +778,28 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const handleSelectElementFromViewer = useCallback((id: string | null) => {
     setSelectedElementId(id);
     if (id) {
-      // Scroll to element card in results
+      // Auto-expand collapsed collapsible groups containing this element
       const card = document.getElementById(`element-card-${id}`);
-      card?.scrollIntoView({ behavior: "smooth", block: "center" });
+      
+      // Find the parent collapsible and open it if collapsed
+      const collapsibleContent = card?.closest('[data-state]');
+      if (collapsibleContent?.getAttribute('data-state') === 'closed') {
+        // Find the trigger button and click it to expand
+        const collapsibleRoot = collapsibleContent?.closest('[data-radix-collapsible]') || collapsibleContent?.parentElement;
+        const trigger = collapsibleRoot?.querySelector('[data-radix-collapsible-trigger]') as HTMLElement;
+        if (trigger) trigger.click();
+      }
+
+      // Scroll to element card with a small delay to allow expansion
+      setTimeout(() => {
+        const targetCard = document.getElementById(`element-card-${id}`);
+        targetCard?.scrollIntoView({ behavior: "smooth", block: "center" });
+        // Add highlight animation
+        targetCard?.classList.add('ring-2', 'ring-primary', 'ring-offset-2', 'transition-all');
+        setTimeout(() => {
+          targetCard?.classList.remove('ring-2', 'ring-primary', 'ring-offset-2');
+        }, 2000);
+      }, 150);
     }
   }, []);
 
