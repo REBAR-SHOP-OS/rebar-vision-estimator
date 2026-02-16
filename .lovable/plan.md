@@ -1,39 +1,37 @@
 
 
-## Make Element Overlays More Visible and Clear on the Drawing
+## Improve Overlay Markers to Match Takeoff-Style Colored Dots
 
-### Problem
-The current overlay rectangles are nearly invisible -- thin, low-opacity strokes that blend into the blueprint. Users can't easily tell what's being highlighted or where to look.
+### What Changes
+The reference image shows a professional takeoff tool where each element is marked with a **bold colored dot/pin** at its center -- simple, clean, and instantly recognizable. Our current overlay uses corner brackets and filled rectangles that clutter the drawing and are hard to parse at a glance.
 
-### Changes to `src/components/chat/DrawingOverlay.tsx`
+### New Visual Style
+- **Always-visible colored dot** at the center of every element (radius ~10px, with white border for contrast)
+- **Light shaded rectangle** kept but made more subtle (lower opacity) -- just to show the element's area
+- **Label only appears on hover or selection** instead of always showing -- reduces clutter dramatically
+- **Corner brackets kept but thinner** as a subtle boundary indicator, not the primary visual
+- Selected/hovered elements get a **larger dot with pulse animation** and the label becomes visible
 
-**1. Bolder boxes with higher contrast**
-- Increase default stroke width from 2 to 3, and selected/hovered even thicker (4-5)
-- Increase fill opacity from 0.08 to 0.15 (default), 0.25 (hovered), 0.3 (selected)
-- Add a white outer stroke (glow effect) behind the colored stroke for contrast against dark blueprints
+### Summary of Changes
 
-**2. Add corner bracket markers instead of plain rectangles**
-- Draw L-shaped corner brackets at each corner of the bounding box (like a camera viewfinder / targeting reticle)
-- These are universally understood as "pointing at this area" markers
-- Each corner gets a short line pair (e.g., 20px long) in the element's color with thicker stroke
+| Visual Element | Before | After |
+|---|---|---|
+| Primary marker | Corner brackets (hard to see) | Bold colored dot at center (like reference) |
+| Label | Always visible on every element | Only shown on hover or selection |
+| Area highlight | Always visible fill | Lighter default, stronger on hover |
+| Corner brackets | Thick, primary visual | Thinner, secondary visual |
+| Selected state | Pulsing center dot | Larger dot + label appears + pulse |
 
-**3. Improve the label tag**
-- Make the label pill larger with more padding and bigger font (14px instead of 12px)
-- Add a small downward-pointing triangle/arrow connecting the label to the box so it clearly "points" to the element
-- Add a subtle drop shadow via SVG filter for readability on any background
+### Technical Details
 
-**4. Add a pulsing dot at the center of selected/active elements**
-- A small filled circle at the center of the bounding box that pulses, drawing the eye to the target
+**File: `src/components/chat/DrawingOverlay.tsx`**
 
-### Visual comparison
+1. Add a prominent **colored circle** (r=10, white stroke r=2) at center (cx, cy) for every element -- always visible
+2. On hover/select, increase dot radius to 14 and show the label group
+3. Wrap the label `<g>` in a conditional: only render when `isSelected || isHovered || isActive`
+4. Reduce default corner bracket stroke width from 3 to 2, and fill opacity from 0.12 to 0.06
+5. On hover, bump fill opacity to 0.15 and corner stroke to 2.5; on select, 0.2 and 3
 
-Before: Thin transparent rectangle, tiny label floating above
-After: Bold corner brackets with glow, larger label with pointer arrow, pulsing center dot on selection
-
-### Files Changed
-
-| File | Change |
-|---|---|
-| `src/components/chat/DrawingOverlay.tsx` | Replace plain rect with corner-bracket markers, add glow filter, pointer arrow on label, pulsing center dot, increase all opacities and stroke widths |
-| `src/index.css` | Add keyframe animation for the pulsing center dot (`@keyframes overlay-pulse`) |
+**File: `src/index.css`**
+- No changes needed -- existing pulse animation already covers the dot
 
