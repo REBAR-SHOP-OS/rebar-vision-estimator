@@ -20,6 +20,41 @@ const REBAR_WEIGHT: Record<string, number> = {
   "#18": 13.600,
 };
 
+// Canadian metric bar mass (kg/m) — CSA G30.18 / RSIC 2018
+const METRIC_REBAR_MASS: Record<string, number> = {
+  "10M": 0.785,
+  "15M": 1.570,
+  "20M": 2.355,
+  "25M": 3.925,
+  "30M": 5.495,
+  "35M": 7.850,
+  "45M": 11.775,
+  "55M": 19.625,
+};
+
+// Metric to imperial size mapping
+const METRIC_TO_IMPERIAL: Record<string, string> = {
+  "10M": "#3", "15M": "#5", "20M": "#6", "25M": "#8",
+  "30M": "#9", "35M": "#11", "45M": "#14", "55M": "#18",
+};
+
+// Standard mill lengths (metres) per RSIC
+const METRIC_MILL_LENGTHS: Record<string, number> = {
+  "10M": 12, "15M": 18, "20M": 18, "25M": 18,
+  "30M": 18, "35M": 18, "45M": 18, "55M": 18,
+};
+
+// Resolve any size to lb/ft (handles both imperial and metric)
+function getWeightPerFt(size: string): number {
+  if (REBAR_WEIGHT[size]) return REBAR_WEIGHT[size];
+  // Metric: convert kg/m to lb/ft
+  if (METRIC_REBAR_MASS[size]) return METRIC_REBAR_MASS[size] * 0.671969; // 1 kg/m ≈ 0.671969 lb/ft
+  // Try mapping metric to imperial
+  const imp = METRIC_TO_IMPERIAL[size];
+  if (imp && REBAR_WEIGHT[imp]) return REBAR_WEIGHT[imp];
+  return 0;
+}
+
 interface ElementTruth {
   element_id: string;
   element_type: string;
@@ -74,7 +109,7 @@ function calculateElementWeight(truth: ElementTruth["truth"], elementType: strin
   if (truth.vertical_bars?.size && truth.vertical_bars?.qty) {
     const size = truth.vertical_bars.size;
     const qty = truth.vertical_bars.qty;
-    const weightPerFt = REBAR_WEIGHT[size] || 0;
+    const weightPerFt = getWeightPerFt(size);
     const lengthDefaults: Record<string, number> = {
       COLUMN: 12, WALL: 12, FOOTING: 6, BEAM: 20, GRADE_BEAM: 20,
       RETAINING_WALL: 12, ICF_WALL: 10, CMU_WALL: 10, PIER: 10,
@@ -118,7 +153,7 @@ function calculateElementWeight(truth: ElementTruth["truth"], elementType: strin
   // Ties weight estimation
   if (truth.ties?.size && truth.ties?.spacing_mm) {
     const size = truth.ties.size;
-    const weightPerFt = REBAR_WEIGHT[size] || 0;
+    const weightPerFt = getWeightPerFt(size);
     const tiePerimeterDefaults: Record<string, number> = {
       COLUMN: 4, WALL: 6, FOOTING: 5, BEAM: 4, GRADE_BEAM: 4,
       RETAINING_WALL: 6, ICF_WALL: 3, CMU_WALL: 3, PIER: 3,
