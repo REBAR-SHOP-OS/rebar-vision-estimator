@@ -1,44 +1,31 @@
 
+## Make Chat Messages More Visual with Proper Table Rendering
 
-## Add Contextual Suggestion Chips Above Chat Input
+### Problem
+AI messages contain markdown tables (pipe-delimited `| col | col |` format) but they render as plain unstyled text. The "Finder Pass" results and element tables look like a wall of text instead of clean, structured tables.
 
-### What This Does
-Adds a row of clickable suggestion chips (ideas/prompts) just above the chat input bar. These give users quick actions they can tap instead of typing, adapting based on the current state of the conversation.
+### Changes
 
-### Suggestion Categories
+**1. Add table rendering to ChatMessage.tsx**
 
-**When no files uploaded yet:**
-- "Upload a blueprint PDF"
-- "What file types are supported?"
-- "How does the AI detection work?"
+Update the `ReactMarkdown` component to use custom `components` prop that renders `table`, `thead`, `tbody`, `tr`, `th`, and `td` elements with proper styling:
 
-**When files uploaded but no mode selected (scope/mode picking phase):**
-- "Start step-by-step analysis"
-- "What elements can you detect?"
-- "Explain the estimation process"
+- Tables get rounded borders, alternating row colors, and proper padding
+- Headers get a muted background with bold text
+- Cells get consistent padding and border separators
+- Code spans inside tables stay readable
+- Tables are wrapped in a scrollable container for wide content
 
-**When analysis is running or results are available:**
-- "Show me the bar list"
-- "Export to Excel"
-- "Review flagged elements"
-- "Recalculate with edits"
+**2. Improve overall prose styling**
 
-**When the AI asks a confirmation question (like "Do you agree with this scope?"):**
-- "Yes, proceed to next stage"
-- "I need to adjust the scope"
-- "Add more element types"
-
-### Visual Design
-- Small rounded pill-shaped chips in a horizontally scrollable row
-- Subtle border, muted text, hover highlights to primary color
-- Positioned directly above the input bar (inside the bottom input section)
-- Chips auto-hide when the user starts typing
+- Tighten up the prose classes so headings, lists, and paragraphs have better spacing
+- Add `prose-table` overrides so tables integrate with the existing dark/light theme
+- Bold text and inline code get slightly better contrast
 
 ### Technical Details
 
 | File | Change |
 |---|---|
-| `src/components/chat/ChatArea.tsx` | Add a suggestion chips section above the input bar that renders context-aware suggestions based on current state (uploadedFiles, calculationMode, validationData, messages). Clicking a chip sets the input text and optionally auto-sends it. Chips hidden when `input` is non-empty or `loading` is true. |
+| `src/components/chat/ChatMessage.tsx` | Add `components` prop to `ReactMarkdown` with custom renderers for `table`, `thead`, `tbody`, `tr`, `th`, `td`. Wrap tables in `overflow-x-auto` container. Style with Tailwind classes: rounded borders, `bg-muted/30` header, `text-xs` cells, alternating `even:bg-muted/20` rows. Also add renderers for `strong` (slightly bolder color) and `p` (better margin). |
 
-No new files needed -- this is a self-contained addition to the input area in ChatArea.tsx.
-
+This is a single-file change that dramatically improves readability of all AI responses containing tables.
