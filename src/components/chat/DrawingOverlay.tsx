@@ -28,6 +28,8 @@ export interface OverlayElement {
   page_number?: number; // PDF page number (1-indexed)
 }
 
+export type ReviewStatus = "confirmed" | "rejected" | "active" | "pending";
+
 interface DrawingOverlayProps {
   elements: OverlayElement[];
   selectedId: string | null;
@@ -37,7 +39,14 @@ interface DrawingOverlayProps {
   onHover: (id: string | null) => void;
   imageWidth: number;
   imageHeight: number;
+  reviewStatuses?: Map<string, ReviewStatus>;
 }
+
+const REVIEW_COLORS: Record<string, string> = {
+  confirmed: "#22C55E",
+  rejected: "#EF4444",
+  active: "#3B82F6",
+};
 
 const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
   elements,
@@ -48,6 +57,7 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
   onHover,
   imageWidth,
   imageHeight,
+  reviewStatuses,
 }) => {
   if (!imageWidth || !imageHeight) return null;
 
@@ -63,9 +73,14 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
       style={{ width: "100%", height: "100%" }}
     >
       {filtered.map((el) => {
-        const color = ELEMENT_TYPE_COLORS[el.element_type] || ELEMENT_TYPE_COLORS.OTHER;
+        const reviewStatus = reviewStatuses?.get(el.element_id);
+        const baseColor = ELEMENT_TYPE_COLORS[el.element_type] || ELEMENT_TYPE_COLORS.OTHER;
+        const color = reviewStatus && reviewStatus !== "pending"
+          ? REVIEW_COLORS[reviewStatus] || baseColor
+          : baseColor;
         const isSelected = el.element_id === selectedId;
         const isHovered = el.element_id === hoveredId;
+        const isActive = reviewStatus === "active";
         const x = el.bbox[0];
         const y = el.bbox[1];
         const w = el.bbox[2] - el.bbox[0];
@@ -81,11 +96,13 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
               rx={4}
               ry={4}
               fill={color}
-              fillOpacity={isSelected ? 0.2 : isHovered ? 0.15 : 0.08}
+              fillOpacity={isActive ? 0.25 : isSelected ? 0.2 : isHovered ? 0.15 : 0.08}
               stroke={color}
-              strokeWidth={isSelected ? 3 : isHovered ? 2.5 : 2}
-              strokeDasharray={isSelected ? "none" : "none"}
-              className={`pointer-events-auto cursor-pointer transition-all ${isSelected ? "blueprint-overlay-selected" : ""}`}
+              strokeWidth={isActive ? 4 : isSelected ? 3 : isHovered ? 2.5 : 2}
+              strokeDasharray={isActive ? "8 4" : "none"}
+              className={`pointer-events-auto cursor-pointer transition-all ${
+                isActive ? "review-active-element" : isSelected ? "blueprint-overlay-selected" : ""
+              }`}
               onClick={(e) => {
                 e.stopPropagation();
                 onSelect(el.element_id);

@@ -8,7 +8,8 @@ import { toast } from "sonner";
 import ChatMessage from "./ChatMessage";
 import CalculationModePicker from "./CalculationModePicker";
 import ValidationResults from "./ValidationResults";
-import PageReviewPanel from "./PageReviewPanel";
+import ElementReviewPanel, { type ReviewAnswer } from "./ElementReviewPanel";
+import { type ReviewStatus } from "./DrawingOverlay";
 import ScopeDefinitionPanel, { type ScopeData, type DetectionResult } from "./ScopeDefinitionPanel";
 import BlueprintViewer from "./BlueprintViewer";
 import { type OverlayElement } from "./DrawingOverlay";
@@ -63,6 +64,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const [showBlueprintViewer, setShowBlueprintViewer] = useState(false);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [reviewMode, setReviewMode] = useState(false);
+  const [reviewStatuses, setReviewStatuses] = useState<Map<string, ReviewStatus>>(new Map());
   const [pdfPageCount, setPdfPageCount] = useState(1);
   const isMobile = useIsMobile();
   useEffect(() => {
@@ -680,6 +682,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   // Show viewer whenever uploaded files exist (supports PDF read-only mode too)
   const hasDrawingData = uploadedFiles.length > 0;
 
+  // Compute effective review statuses (add "active" for selected element during review)
+  const effectiveReviewStatuses = useMemo(() => {
+    if (!reviewMode) return undefined;
+    const statuses = new Map(reviewStatuses);
+    if (selectedElementId && !statuses.has(selectedElementId)) {
+      statuses.set(selectedElementId, "active");
+    }
+    return statuses;
+  }, [reviewMode, reviewStatuses, selectedElementId]);
+
   const handleShowOnDrawing = useCallback((elementId: string) => {
     setSelectedElementId(elementId);
     if (!showBlueprintViewer) setShowBlueprintViewer(true);
@@ -741,12 +753,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           {/* Review Mode or Validation Results */}
           {validationData && reviewMode ? (
             <div className="py-2">
-              <PageReviewPanel
+              <ElementReviewPanel
                 elements={validationData.elements}
-                totalPages={pdfPageCount}
                 onComplete={async (answers) => {
                   setReviewMode(false);
-                  // Convert review answers to userAnswers format and re-validate
+                  setReviewStatuses(new Map());
                   const newAnswers = answers
                     .filter((a) => a.correctedValue)
                     .map((a) => ({ element_id: a.element_id, field: a.field || "truth", value: a.correctedValue! }));
@@ -758,14 +769,23 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                     toast.success("Review complete! All elements confirmed.");
                   }
                 }}
-                onCancel={() => setReviewMode(false)}
-                onPageChange={(page) => {
-                  // Sync PDF viewer to review page if viewer is open
-                  // The BlueprintViewer handles page via selectedElementId
+                onCancel={() => {
+                  setReviewMode(false);
+                  setReviewStatuses(new Map());
                 }}
                 onSelectElement={(id) => {
                   setSelectedElementId(id);
                   if (!showBlueprintViewer) setShowBlueprintViewer(true);
+                }}
+                onAnswersChange={(answersMap) => {
+                  // Build review statuses from answers + mark current as active
+                  const statuses = new Map<string, ReviewStatus>();
+                  for (const [elId, answer] of answersMap) {
+                    statuses.set(elId, answer.confirmed ? "confirmed" : "rejected");
+                  }
+                  // The active element is handled by selectedElementId matching
+                  // We set all non-answered as pending implicitly
+                  setReviewStatuses(statuses);
                 }}
               />
             </div>
@@ -902,6 +922,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             selectedElementId={selectedElementId}
             onSelectElement={handleSelectElementFromViewer}
             onClose={() => setShowBlueprintViewer(false)}
+            reviewStatuses={effectiveReviewStatuses}
           />
         </ResizablePanel>
         <ResizableHandle withHandle />
@@ -923,6 +944,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             selectedElementId={selectedElementId}
             onSelectElement={handleSelectElementFromViewer}
             onClose={() => setShowBlueprintViewer(false)}
+            reviewStatuses={effectiveReviewStatuses}
           />
         </div>
         {chatContent}

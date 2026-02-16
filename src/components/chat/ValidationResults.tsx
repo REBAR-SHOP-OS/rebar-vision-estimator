@@ -203,7 +203,7 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
               size="sm"
             >
               <ClipboardCheck className="h-4 w-4" />
-              Review Document
+              Review Elements
             </Button>
           )}
         </div>

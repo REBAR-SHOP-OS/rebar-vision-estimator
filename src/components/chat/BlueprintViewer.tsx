@@ -3,7 +3,7 @@ import { ZoomIn, ZoomOut, Maximize2, X, EyeOff, ChevronLeft, ChevronRight, FileT
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import DrawingOverlay, { ELEMENT_TYPE_COLORS, type OverlayElement } from "./DrawingOverlay";
+import DrawingOverlay, { ELEMENT_TYPE_COLORS, type OverlayElement, type ReviewStatus } from "./DrawingOverlay";
 import PdfRenderer from "./PdfRenderer";
 
 interface BlueprintViewerProps {
@@ -12,6 +12,7 @@ interface BlueprintViewerProps {
   selectedElementId: string | null;
   onSelectElement: (id: string | null) => void;
   onClose: () => void;
+  reviewStatuses?: Map<string, ReviewStatus>;
 }
 
 const MIN_ZOOM = 0.25;
@@ -29,6 +30,7 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
   selectedElementId,
   onSelectElement,
   onClose,
+  reviewStatuses,
 }) => {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -289,6 +291,7 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
                   onHover={setHoveredId}
                   imageWidth={imageSize.w}
                   imageHeight={imageSize.h}
+                  reviewStatuses={reviewStatuses}
                 />
               )}
             </div>
