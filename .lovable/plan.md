@@ -1,94 +1,112 @@
 
 
-## Fix: Blueprint Viewer for PDF Uploads and Bar List Projects
+## Interactive Page-by-Page Review + Shop Drawing Generation
 
-### Problem
+### What Changes
 
-Two issues prevent the "Show Where in Drawing" feature from working:
+**1. Page-by-Page Review Mode**
 
-1. **PDF files cannot render in an `<img>` tag.** The BlueprintViewer uses `<img src={signedUrl}>`, but when users upload PDFs (the most common format), the browser cannot display them as images. The viewer never shows anything.
+After the AI estimation completes, instead of just dumping all results at once, add a new interactive review flow that walks the customer through the document one page at a time:
 
-2. **Bar List projects produce no spatial data.** When the AI classifies a document as "BAR LIST ONLY", elements get `bbox: [0,0,0,0]` because there is no drawing to reference. The `hasDrawingData` check returns `false` and the "View on Drawing" button is hidden.
+- A "Review Document" button appears after estimation is done
+- Opens a guided review panel that shows Page 1 in the BlueprintViewer, with all elements found on that page listed beside it
+- Any element with confidence below 100% (or below 0.82 threshold) gets a confirmation prompt inline: "We detected [element] here with [X]% confidence. Is this correct?" with Yes/No/Edit buttons
+- Customer confirms or corrects each flagged item, then clicks "Next Page" to proceed
+- A progress bar shows "Page 3 of 15 reviewed"
+- After all pages are reviewed, a summary shows what was confirmed, corrected, and the updated totals
+- Answers are fed back into the validation pipeline (existing `runValidation` with `userAnswers`)
 
----
+**2. "Create Shop Drawing" Button**
 
-### Solution
+After the estimation (and optionally the review) is complete and a quote result exists, add a "Create Shop Drawing" button alongside the existing Export Excel / Download PDF buttons:
 
-**Phase 1: PDF Page Rendering with pdf.js**
-
-Add PDF-to-canvas rendering so the viewer can display PDF pages as images. When the uploaded file is a PDF:
-- Use Mozilla's `pdfjs-dist` library to load the PDF and render each page to a canvas/image
-- Add page navigation controls (previous/next, page indicator) to the BlueprintViewer toolbar
-- Each page renders as a bitmap that the existing SVG overlay system works on top of
-
-**Phase 2: Bar List Mode -- Table Row Highlighting**
-
-For "BAR LIST" projects, adapt the viewer to highlight table rows in the PDF:
-- Update the `analyze-blueprint` system prompt to instruct the AI to output approximate page numbers and vertical positions for each parsed element (which page of the PDF the data was found on, and rough row position)
-- The overlay shows horizontal band highlights on the relevant page, color-coded by element type
-- Clicking an element card navigates to the correct page and highlights the row region
-
-**Phase 3: Always Show Viewer When Files Exist**
-
-Even when bbox data is sparse, allow users to view the uploaded document:
-- Change `hasDrawingData` logic: show the viewer button whenever uploaded files exist (not only when overlay elements have valid bboxes)
-- When no overlay data exists, show the PDF/image viewer in "read-only" mode without overlays
-- Add a note: "No spatial data available -- elements were parsed from tabular data"
+- Calls a new `generate-shop-drawing` edge function
+- The edge function takes the finalized bar list (elements, bar marks, sizes, shapes, bend details, quantities) and uses AI to generate a professional shop drawing description/DXF-style output
+- For MVP: generates a formatted PDF shop drawing with bar bending schedule, shape diagrams (using standard shape codes), and bar mark labels
+- The PDF opens in a new tab for download/print
 
 ---
 
-### Technical Changes
+### New Components
+
+**`PageReviewPanel.tsx`** -- The guided review UI
+
+- Shows current page number and total pages
+- Lists elements found on the current page with their confidence levels
+- For items below 100% confidence: shows an inline confirmation card with the detected value, a "Confirm" button, and an "Edit" button (which opens a small input field)
+- "Previous Page" / "Next Page" navigation
+- Progress bar at top
+- "Finish Review" button on the last page that triggers re-validation with all collected answers
+- Tracks review state: `{ pageAnswers: Map<string, {confirmed: boolean, correctedValue?: string}> }`
+
+---
+
+### Updated Components
+
+**`ValidationResults.tsx`**
+
+- Add a "Review Document" button (appears after estimation, next to "View Document")
+- Add a "Create Shop Drawing" button in the quote result section, next to existing Export buttons
+
+**`ExportButtons.tsx`**
+
+- Add a third button: "Create Shop Drawing" with a drafting icon
+- On click, calls the `generate-shop-drawing` edge function with the full bar list and element data
+- Shows a loading spinner while generating
+- Opens the result (PDF) in a new tab
+
+**`ChatArea.tsx`**
+
+- Add `reviewMode` state (boolean) to toggle between normal results view and page-by-page review
+- When review mode is active, show `PageReviewPanel` instead of `ValidationResults`
+- Pass review answers back through existing `handleAnswerQuestion` flow
+- After review completes, re-run validation and update results
+
+---
+
+### New Edge Function: `generate-shop-drawing`
+
+- Receives: bar list array, element details, project metadata (name, client, standard)
+- Uses AI (Gemini) to generate a formatted shop drawing with:
+  - Bar bending schedule table (bar mark, size, shape code, dimensions, quantity)
+  - Standard shape code diagrams described textually (for each unique shape)
+  - Summary totals by size
+  - Project header with name, client, date
+- Outputs: HTML that renders as a printable shop drawing (similar to existing PDF export but with bending detail diagrams)
+- Opens in new tab for print/save as PDF
+
+---
+
+### Technical Details
 
 | File | Changes |
 |---|---|
-| `package.json` | Add `pdfjs-dist` dependency for PDF rendering |
-| `src/components/chat/BlueprintViewer.tsx` | Add PDF detection (check if URL ends in `.pdf` or content-type); render PDF pages via pdfjs canvas; add page navigation (prev/next/page indicator); fall back to `<img>` for image files; pass current page dimensions to DrawingOverlay |
-| `src/components/chat/DrawingOverlay.tsx` | Accept optional `pageNumber` prop to filter elements by page; support horizontal band overlays for bar-list row highlighting |
-| `src/components/chat/ChatArea.tsx` | Change `hasDrawingData` to `uploadedFiles.length > 0` so the viewer button always appears when files exist; pass file type info to BlueprintViewer |
-| `src/components/chat/ValidationResults.tsx` | Update "View on Drawing" button label to "View Document" when no bbox data exists; always show button when files are uploaded |
-| `supabase/functions/analyze-blueprint/index.ts` | For BAR LIST projects, instruct AI to include `page_number` and approximate `y_position` (as percentage of page height) in each element's `regions.tag_region` so the viewer can navigate to the right page and highlight the row |
+| `src/components/chat/PageReviewPanel.tsx` | New -- guided page-by-page review with confidence-based confirmation prompts, page navigation, progress tracking |
+| `src/components/chat/ValidationResults.tsx` | Add "Review Document" button after estimation; pass review trigger callback |
+| `src/components/chat/ExportButtons.tsx` | Add "Create Shop Drawing" button that calls the new edge function |
+| `src/components/chat/ChatArea.tsx` | Add `reviewMode` state; toggle between ValidationResults and PageReviewPanel; handle review completion with re-validation |
+| `supabase/functions/generate-shop-drawing/index.ts` | New edge function -- takes bar list + elements, uses AI to produce formatted shop drawing HTML/PDF |
+| `supabase/config.toml` | Add `[functions.generate-shop-drawing]` with `verify_jwt = false` |
 
----
+### Review Flow
 
-### New Dependencies
+1. User uploads PDF, AI runs estimation, results appear with element cards
+2. User clicks **"Review Document"** button
+3. BlueprintViewer opens on Page 1, PageReviewPanel shows elements found on Page 1
+4. Low-confidence items show: "Detected: 4x 20M verticals (78% confidence) -- Confirm / Edit"
+5. User confirms or edits each flagged item
+6. User clicks "Next Page" -- viewer advances to Page 2, new elements shown
+7. After last page: "Review Complete" summary with changes made
+8. System re-runs validation with user corrections, updates weights/totals
+9. User clicks **"Create Shop Drawing"** -- edge function generates formatted bending schedule PDF
+10. PDF opens in new browser tab for printing
 
-- `pdfjs-dist` -- Mozilla's PDF.js library for client-side PDF rendering (renders PDF pages to canvas elements)
+### Shop Drawing Output Format
 
----
-
-### PDF Rendering Flow
-
-1. User uploads a PDF file
-2. BlueprintViewer detects PDF format from the URL or file type
-3. Loads PDF via `pdfjs-dist` getDocument()
-4. Renders the current page to an off-screen canvas, converts to image data URL
-5. Displays the rendered page image with existing zoom/pan controls
-6. Page navigation buttons (prev/next) in the toolbar switch between pages
-7. SVG overlays filter to elements matching the current page number
-8. Clicking an element card auto-navigates to the correct page and highlights it
-
----
-
-### Updated Data Shape for Bar List Elements
-
-The `regions.tag_region` for bar list elements will include:
-
-```
-{
-  "bbox": [50, 200, 750, 240],   // approximate row region on the page
-  "page_number": 3                // which PDF page
-}
-```
-
-This gives the viewer enough information to navigate to the right page and draw a highlight band across the table row where the element data was found.
-
----
-
-### Viewer Modes
-
-| Upload Type | Viewer Behavior |
-|---|---|
-| Image file (PNG/JPG) | Shows image with SVG bbox overlays (current behavior) |
-| PDF with blueprint drawings | Renders PDF pages, shows bbox overlays per page |
-| PDF with bar list/tables | Renders PDF pages, shows row-band highlights, page navigation to relevant data |
-| Any file, no bbox data | Shows document in read-only mode with "No spatial data" note |
+The generated shop drawing will include:
+- Project header (name, client, date, standard)
+- Bar bending schedule table: Bar Mark, Size, Shape Code, Qty, Cut Length, Bend Dimensions (A, B, C, D, E), Total Weight
+- Shape diagrams section: for each unique shape code, a text description of the bend geometry
+- Size summary table
+- Notes section with applicable standards (RSIC/ACI)
+- Footer with disclaimer and generation date
