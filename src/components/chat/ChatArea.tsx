@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,10 @@ import ChatMessage from "./ChatMessage";
 import CalculationModePicker from "./CalculationModePicker";
 import ValidationResults from "./ValidationResults";
 import ScopeDefinitionPanel, { type ScopeData, type DetectionResult } from "./ScopeDefinitionPanel";
+import BlueprintViewer from "./BlueprintViewer";
+import { type OverlayElement } from "./DrawingOverlay";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 interface Message {
   id: string;
@@ -55,7 +59,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const [scopeData, setScopeData] = useState<ScopeData | null>(null);
   const [detectionResult, setDetectionResult] = useState<DetectionResult | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
-
+  const [showBlueprintViewer, setShowBlueprintViewer] = useState(false);
+  const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+  const isMobile = useIsMobile();
   useEffect(() => {
     // Reset state when switching projects
     setMessages([]);
@@ -652,7 +658,38 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     el.style.height = Math.min(el.scrollHeight, 200) + "px";
   };
 
-  return (
+  // Build overlay elements from validation data
+  const overlayElements: OverlayElement[] = useMemo(() => {
+    if (!validationData?.elements) return [];
+    return validationData.elements
+      .filter((el: any) => el.regions?.tag_region?.bbox)
+      .map((el: any) => ({
+        element_id: el.element_id,
+        element_type: el.element_type,
+        status: el.status,
+        bbox: el.regions.tag_region.bbox as [number, number, number, number],
+        confidence: el.extraction?.confidence,
+        weight_lbs: quoteResult?.quote?.elements?.find((qe: any) => qe.element_id === el.element_id)?.weight_lbs,
+      }));
+  }, [validationData, quoteResult]);
+
+  const hasDrawingData = overlayElements.length > 0 && uploadedFiles.length > 0;
+
+  const handleShowOnDrawing = useCallback((elementId: string) => {
+    setSelectedElementId(elementId);
+    if (!showBlueprintViewer) setShowBlueprintViewer(true);
+  }, [showBlueprintViewer]);
+
+  const handleSelectElementFromViewer = useCallback((id: string | null) => {
+    setSelectedElementId(id);
+    if (id) {
+      // Scroll to element card in results
+      const card = document.getElementById(`element-card-${id}`);
+      card?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, []);
+
+  const chatContent = (
     <div className="flex flex-1 flex-col min-h-0 bg-background/50">
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
@@ -707,10 +744,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 onAnswerQuestion={handleAnswerQuestion}
                 onRequestQuote={handleRequestQuote}
                 scopeData={scopeData}
+                onShowOnDrawing={handleShowOnDrawing}
+                onToggleViewer={() => setShowBlueprintViewer((v) => !v)}
+                showViewer={showBlueprintViewer}
+                selectedElementId={selectedElementId}
+                hasDrawingData={hasDrawingData}
               />
             </div>
           )}
-
 
           {/* Scope Definition Panel */}
           {showScopePanel && !scopeData && !calculationMode && (
@@ -810,6 +851,47 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       </div>
     </div>
   );
+
+  // If blueprint viewer is active and not mobile, show split panel
+  if (showBlueprintViewer && hasDrawingData && !isMobile) {
+    return (
+      <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0">
+        <ResizablePanel defaultSize={55} minSize={30}>
+          <BlueprintViewer
+            imageUrl={uploadedFiles[0]}
+            elements={overlayElements}
+            selectedElementId={selectedElementId}
+            onSelectElement={handleSelectElementFromViewer}
+            onClose={() => setShowBlueprintViewer(false)}
+          />
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize={45} minSize={25}>
+          {chatContent}
+        </ResizablePanel>
+      </ResizablePanelGroup>
+    );
+  }
+
+  // Mobile: stack viewer above chat
+  if (showBlueprintViewer && hasDrawingData && isMobile) {
+    return (
+      <div className="flex flex-col flex-1 min-h-0">
+        <div className="h-[40vh] flex-shrink-0">
+          <BlueprintViewer
+            imageUrl={uploadedFiles[0]}
+            elements={overlayElements}
+            selectedElementId={selectedElementId}
+            onSelectElement={handleSelectElementFromViewer}
+            onClose={() => setShowBlueprintViewer(false)}
+          />
+        </div>
+        {chatContent}
+      </div>
+    );
+  }
+
+  return chatContent;
 };
 
 export default ChatArea;
