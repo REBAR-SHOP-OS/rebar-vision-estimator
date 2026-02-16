@@ -1,11 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowRight, Info } from "lucide-react";
+import { ArrowRight, Info, Sparkles, AlertTriangle } from "lucide-react";
 
 const SCOPE_ITEMS = [
   { id: "FOOTING", label: "Footings", category: "Foundation" },
@@ -30,25 +30,64 @@ const REBAR_COATING_TYPES = [
   { id: "stainless_steel", label: "Stainless Steel" },
 ] as const;
 
+const CATEGORY_LABELS: Record<string, string> = {
+  cage: "Cage Project",
+  industrial: "Industrial",
+  residential: "Residential",
+  commercial: "Commercial",
+  bar_list: "Bar List",
+  infrastructure: "Infrastructure",
+};
+
+const STANDARD_LABELS: Record<string, string> = {
+  canadian_metric: "Canadian Metric (CSA/RSIC)",
+  us_imperial: "US Imperial (ACI)",
+  unknown: "Unknown",
+};
+
 export interface ScopeData {
   scopeItems: string[];
   clientName: string;
   projectType: string;
   deviations: string;
   rebarCoating: string;
+  detectedCategory?: string;
+  detectedStandard?: string;
+}
+
+export interface DetectionResult {
+  category: string;
+  recommendedScope: string[];
+  detectedStandard: string;
+  confidence: number;
+  reasoning: string;
 }
 
 interface ScopeDefinitionPanelProps {
   onProceed: (scope: ScopeData) => void;
   disabled?: boolean;
+  detectionResult?: DetectionResult | null;
+  isDetecting?: boolean;
 }
 
-const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, disabled }) => {
+const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, disabled, detectionResult, isDetecting }) => {
   const [selectedItems, setSelectedItems] = useState<string[]>(SCOPE_ITEMS.map((s) => s.id));
   const [clientName, setClientName] = useState("");
   const [projectType, setProjectType] = useState("");
   const [deviations, setDeviations] = useState("");
   const [rebarCoating, setRebarCoating] = useState("black_steel");
+
+  // Apply detection results when they arrive
+  useEffect(() => {
+    if (detectionResult) {
+      if (detectionResult.recommendedScope && detectionResult.recommendedScope.length > 0) {
+        setSelectedItems(detectionResult.recommendedScope);
+      }
+      if (detectionResult.category) {
+        setProjectType(detectionResult.category);
+      }
+    }
+  }, [detectionResult]);
 
   const toggleItem = (id: string) => {
     setSelectedItems((prev) =>
@@ -66,10 +105,17 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
 
   const handleProceed = () => {
     if (selectedItems.length === 0) return;
-    onProceed({ scopeItems: selectedItems, clientName, projectType, deviations, rebarCoating });
+    onProceed({
+      scopeItems: selectedItems,
+      clientName,
+      projectType,
+      deviations,
+      rebarCoating,
+      detectedCategory: detectionResult?.category,
+      detectedStandard: detectionResult?.detectedStandard,
+    });
   };
 
-  // Group by category
   const categories = SCOPE_ITEMS.reduce<Record<string, typeof SCOPE_ITEMS[number][]>>((acc, item) => {
     if (!acc[item.category]) acc[item.category] = [];
     acc[item.category].push(item);
@@ -88,13 +134,56 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
       </div>
 
       <div className="p-4 space-y-5">
+        {/* Detection Banner */}
+        {isDetecting && (
+          <div className="flex items-center gap-3 rounded-lg bg-primary/10 border border-primary/20 p-3 animate-pulse">
+            <Sparkles className="h-4 w-4 text-primary flex-shrink-0 animate-spin" />
+            <p className="text-xs text-primary font-medium">Analyzing blueprints to detect project type...</p>
+          </div>
+        )}
+
+        {detectionResult && detectionResult.confidence > 0 && (
+          <div className="rounded-lg border border-primary/25 bg-primary/5 p-3 space-y-2">
+            <div className="flex items-start gap-2">
+              <Sparkles className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-xs font-semibold text-foreground">
+                  Detected: <span className="text-primary">{CATEGORY_LABELS[detectionResult.category] || detectionResult.category}</span>
+                  {detectionResult.detectedStandard !== "unknown" && (
+                    <span className="text-muted-foreground font-normal"> — {STANDARD_LABELS[detectionResult.detectedStandard]}</span>
+                  )}
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">{detectionResult.reasoning}</p>
+                <div className="flex items-center gap-2 mt-1.5">
+                  <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all"
+                      style={{ width: `${Math.round(detectionResult.confidence * 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] text-muted-foreground font-medium">{Math.round(detectionResult.confidence * 100)}% confidence</span>
+                </div>
+              </div>
+            </div>
+            {detectionResult.detectedStandard === "canadian_metric" && (
+              <div className="flex items-start gap-2 rounded-md bg-accent/50 p-2 mt-1">
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0 mt-0.5" />
+                <p className="text-[11px] text-muted-foreground">Canadian metric detected — RSIC standard practice rules will be applied automatically.</p>
+              </div>
+            )}
+            <p className="text-[10px] text-muted-foreground italic">Scope adjusted automatically. You can still modify selections below.</p>
+          </div>
+        )}
+
         {/* Info Box */}
-        <div className="flex items-start gap-2 rounded-lg bg-primary/5 border border-primary/15 p-3">
-          <Info className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            Select the element types present in your blueprint. The AI will focus on these items during estimation. You can always adjust later.
-          </p>
-        </div>
+        {!detectionResult && !isDetecting && (
+          <div className="flex items-start gap-2 rounded-lg bg-primary/5 border border-primary/15 p-3">
+            <Info className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Select the element types present in your blueprint. The AI will focus on these items during estimation.
+            </p>
+          </div>
+        )}
 
         {/* Element Types by Category */}
         <div>
@@ -175,10 +264,12 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
                 <SelectValue placeholder="Select type" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="cage">Cage</SelectItem>
                 <SelectItem value="commercial">Commercial</SelectItem>
                 <SelectItem value="residential">Residential</SelectItem>
                 <SelectItem value="industrial">Industrial</SelectItem>
                 <SelectItem value="infrastructure">Infrastructure</SelectItem>
+                <SelectItem value="bar_list">Bar List</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -200,7 +291,7 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
         {/* Proceed Button */}
         <Button
           onClick={handleProceed}
-          disabled={disabled || selectedItems.length === 0}
+          disabled={disabled || selectedItems.length === 0 || isDetecting}
           className="w-full gap-2 h-10 rounded-xl font-semibold"
         >
           Proceed with {selectedItems.length} element type{selectedItems.length !== 1 ? "s" : ""}

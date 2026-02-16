@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import ChatMessage from "./ChatMessage";
 import CalculationModePicker from "./CalculationModePicker";
 import ValidationResults from "./ValidationResults";
-import ScopeDefinitionPanel, { type ScopeData } from "./ScopeDefinitionPanel";
+import ScopeDefinitionPanel, { type ScopeData, type DetectionResult } from "./ScopeDefinitionPanel";
 
 interface Message {
   id: string;
@@ -32,6 +32,7 @@ const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-blue
 const LEARN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-learning`;
 const VALIDATE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/validate-elements`;
 const PRICE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/price-elements`;
+const DETECT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/detect-project-type`;
 
 const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialFilesConsumed, onProjectNameChange, onStepChange, onModeChange }) => {
   const { user } = useAuth();
@@ -52,6 +53,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const [userAnswers, setUserAnswers] = useState<{ element_id: string; field: string; value: string }[]>([]);
   const [showScopePanel, setShowScopePanel] = useState(false);
   const [scopeData, setScopeData] = useState<ScopeData | null>(null);
+  const [detectionResult, setDetectionResult] = useState<DetectionResult | null>(null);
+  const [isDetecting, setIsDetecting] = useState(false);
 
   useEffect(() => {
     // Reset state when switching projects
@@ -65,6 +68,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     setUserAnswers([]);
     setShowScopePanel(false);
     setScopeData(null);
+    setDetectionResult(null);
+    setIsDetecting(false);
     initialFilesProcessed.current = false;
     onModeChange?.(null);
     onStepChange?.(null);
@@ -607,9 +612,29 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       onProjectNameChange?.(firstName);
     }
 
-    // Show scope panel after upload if not already selected
+    // Show scope panel and trigger detection after upload
     if (!calculationMode && (uploadedFiles.length + newUrls.length) > 0) {
       setShowScopePanel(true);
+      // Trigger smart project type detection
+      const allUrls = [...uploadedFiles, ...newUrls];
+      setIsDetecting(true);
+      try {
+        const detectResp = await fetch(DETECT_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({ fileUrls: allUrls }),
+        });
+        if (detectResp.ok) {
+          const result = await detectResp.json();
+          setDetectionResult(result);
+        }
+      } catch (err) {
+        console.error("Project type detection failed:", err);
+      }
+      setIsDetecting(false);
     }
   };
 
@@ -695,7 +720,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                   setScopeData(scope);
                   setShowScopePanel(false);
                   setShowModePicker(true);
-                  // Save scope to project
                   if (user) {
                     supabase.from("projects").update({
                       client_name: scope.clientName || null,
@@ -706,6 +730,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                   }
                 }}
                 disabled={loading}
+                detectionResult={detectionResult}
+                isDetecting={isDetecting}
               />
             </div>
           )}
