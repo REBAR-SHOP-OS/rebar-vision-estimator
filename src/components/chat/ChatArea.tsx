@@ -7,6 +7,7 @@ import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import ChatMessage from "./ChatMessage";
 import CalculationModePicker from "./CalculationModePicker";
+import ValidationResults from "./ValidationResults";
 
 interface Message {
   id: string;
@@ -28,6 +29,8 @@ interface ChatAreaProps {
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-blueprint`;
 const LEARN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-learning`;
+const VALIDATE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/validate-elements`;
+const PRICE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/price-elements`;
 
 const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialFilesConsumed, onProjectNameChange, onStepChange, onModeChange }) => {
   const { user } = useAuth();
@@ -43,6 +46,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadProgress, setUploadProgress] = useState<{ fileName: string; progress: number } | null>(null);
   const messageCountSinceLastLearn = useRef(0);
+  const [validationData, setValidationData] = useState<any>(null);
+  const [quoteResult, setQuoteResult] = useState<any>(null);
+  const [userAnswers, setUserAnswers] = useState<{ element_id: string; field: string; value: string }[]>([]);
 
   useEffect(() => {
     // Reset state when switching projects
@@ -51,6 +57,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     setShowModePicker(false);
     setCalculationMode(null);
     setUploadProgress(null);
+    setValidationData(null);
+    setQuoteResult(null);
+    setUserAnswers([]);
     initialFilesProcessed.current = false;
     onModeChange?.(null);
     onStepChange?.(null);
@@ -285,6 +294,97 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     }).catch(() => {}); // fire-and-forget
   }, [user]);
 
+  // ── Atomic Truth Pipeline helpers ──
+  const extractAtomicTruthJSON = (content: string): any | null => {
+    const startMarker = "%%%ATOMIC_TRUTH_JSON_START%%%";
+    const endMarker = "%%%ATOMIC_TRUTH_JSON_END%%%";
+    const startIdx = content.indexOf(startMarker);
+    const endIdx = content.indexOf(endMarker);
+    if (startIdx === -1 || endIdx === -1) return null;
+    const jsonStr = content.substring(startIdx + startMarker.length, endIdx).trim();
+    try {
+      return JSON.parse(jsonStr);
+    } catch {
+      console.error("Failed to parse Atomic Truth JSON");
+      return null;
+    }
+  };
+
+  const runValidation = async (elements: any[], answers?: any[]) => {
+    try {
+      const resp = await fetch(VALIDATE_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({ elements, userAnswers: answers }),
+      });
+      if (!resp.ok) throw new Error("Validation failed");
+      const data = await resp.json();
+      setValidationData(data);
+      return data;
+    } catch (err: any) {
+      toast.error("Validation failed: " + (err.message || "Unknown error"));
+      return null;
+    }
+  };
+
+  const runPricing = async (elements: any[], mode: "ai_express" | "verified") => {
+    try {
+      const truthElements = elements
+        .filter((e: any) => mode === "ai_express" ? e.status === "READY" : true)
+        .map((e: any) => ({
+          element_id: e.element_id,
+          element_type: e.element_type,
+          truth: e.extraction?.truth || {},
+          sources: e.extraction?.sources || { identity_sources: [] },
+          confidence: e.extraction?.confidence || 0,
+          status: e.status,
+        }));
+
+      const resp = await fetch(PRICE_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({ elements: truthElements, mode }),
+      });
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}));
+        throw new Error(errData.message || "Pricing failed");
+      }
+      const data = await resp.json();
+      setQuoteResult(data);
+    } catch (err: any) {
+      toast.error("Pricing failed: " + (err.message || "Unknown error"));
+    }
+  };
+
+  const handleAnswerQuestion = (elementId: string, field: string, value: string) => {
+    setUserAnswers((prev) => [...prev, { element_id: elementId, field, value }]);
+  };
+
+  const handleRequestQuote = async (mode: "ai_express" | "verified") => {
+    if (!validationData?.elements) return;
+    if (userAnswers.length > 0) {
+      const revalidated = await runValidation(validationData.elements, userAnswers);
+      if (revalidated) {
+        await runPricing(revalidated.elements, mode);
+      }
+    } else {
+      await runPricing(validationData.elements, mode);
+    }
+  };
+
+  const processAtomicTruth = async (fullContent: string) => {
+    const atomicData = extractAtomicTruthJSON(fullContent);
+    if (atomicData?.elements && atomicData.elements.length > 0) {
+      await runValidation(atomicData.elements);
+    }
+  };
+
   const handleModeSelect = async (mode: "smart" | "step-by-step") => {
     if (!user) return;
     setShowModePicker(false);
@@ -328,6 +428,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         content: fullContent,
         metadata: { calculationMode: mode, step: 1 },
       });
+
+      // Process Atomic Truth pipeline
+      await processAtomicTruth(fullContent);
     } catch (err: any) {
       toast.error(err.message || "AI analysis failed");
     }
@@ -386,6 +489,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           role: "assistant",
           content: fullContent,
         });
+
+        // Process Atomic Truth pipeline
+        await processAtomicTruth(fullContent);
       } catch (err: any) {
         toast.error(err.message || "AI analysis failed");
       }
@@ -531,7 +637,21 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             messages.map((msg) => <ChatMessage key={msg.id} message={msg} />)
           )}
 
-          {/* Mode Picker */}
+          {/* Validation Results */}
+          {validationData && (
+            <div className="py-2">
+              <ValidationResults
+                elements={validationData.elements}
+                summary={validationData.summary}
+                questions={validationData.questions || []}
+                quoteResult={quoteResult}
+                onAnswerQuestion={handleAnswerQuestion}
+                onRequestQuote={handleRequestQuote}
+              />
+            </div>
+          )}
+
+
           {showModePicker && !calculationMode && (
             <div className="py-2">
               <CalculationModePicker onSelect={handleModeSelect} disabled={loading} />
