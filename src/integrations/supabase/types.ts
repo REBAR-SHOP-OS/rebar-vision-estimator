@@ -240,6 +240,44 @@ export type Database = {
         }
         Relationships: []
       }
+      shop_drawings: {
+        Row: {
+          created_at: string
+          html_content: string
+          id: string
+          options: Json
+          project_id: string
+          user_id: string
+          version: number
+        }
+        Insert: {
+          created_at?: string
+          html_content: string
+          id?: string
+          options?: Json
+          project_id: string
+          user_id: string
+          version?: number
+        }
+        Update: {
+          created_at?: string
+          html_content?: string
+          id?: string
+          options?: Json
+          project_id?: string
+          user_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shop_drawings_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
