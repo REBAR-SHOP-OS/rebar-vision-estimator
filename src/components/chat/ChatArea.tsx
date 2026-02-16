@@ -73,6 +73,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const [finderPassCandidates, setFinderPassCandidates] = useState<FinderCandidate[]>([]);
   const [finderReviewMode, setFinderReviewMode] = useState(false);
   const [confirmedFinderCandidates, setConfirmedFinderCandidates] = useState<ReviewedCandidate[]>([]);
+  const [importedBarList, setImportedBarList] = useState<any[] | null>(null);
   const isMobile = useIsMobile();
   useEffect(() => {
     // Reset state when switching projects
@@ -88,6 +89,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     setScopeData(null);
     setDetectionResult(null);
     setIsDetecting(false);
+    setImportedBarList(null);
     initialFilesProcessed.current = false;
     onModeChange?.(null);
     onStepChange?.(null);
@@ -959,57 +961,62 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 }}
               />
             </div>
-          ) : validationData ? (
+          ) : (validationData || importedBarList) ? (
             <div className="py-2">
-              <Tabs defaultValue="cards" className="w-full">
+              <Tabs defaultValue={validationData ? "cards" : "barlist"} className="w-full">
                 <TabsList className="w-full mb-3 h-9 rounded-xl bg-muted p-1">
-                  <TabsTrigger value="cards" className="flex-1 text-xs rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">
-                    Cards
-                  </TabsTrigger>
-                  {quoteResult?.quote?.bar_list && (
+                  {validationData && (
+                    <TabsTrigger value="cards" className="flex-1 text-xs rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">
+                      Cards
+                    </TabsTrigger>
+                  )}
+                  {(quoteResult?.quote?.bar_list || importedBarList) && (
                     <TabsTrigger value="barlist" className="flex-1 text-xs rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">
                       Bar List
                     </TabsTrigger>
                   )}
-                  {quoteResult?.quote?.bar_list?.some((b: any) => b.shape_code && b.shape_code !== "straight" && b.shape_code !== "closed") && (
+                  {(quoteResult?.quote?.bar_list || importedBarList)?.some((b: any) => b.shape_code && b.shape_code !== "straight" && b.shape_code !== "closed") && (
                     <TabsTrigger value="bending" className="flex-1 text-xs rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">
                       Bending
                     </TabsTrigger>
                   )}
                 </TabsList>
-                <TabsContent value="cards">
-                  <ValidationResults
-                    elements={validationData.elements}
-                    summary={validationData.summary}
-                    questions={validationData.questions || []}
-                    quoteResult={quoteResult}
-                    onAnswerQuestion={handleAnswerQuestion}
-                    onRequestQuote={handleRequestQuote}
-                    scopeData={scopeData}
-                    onShowOnDrawing={handleShowOnDrawing}
-                    onToggleViewer={() => setShowBlueprintViewer((v) => !v)}
-                    showViewer={showBlueprintViewer}
-                    selectedElementId={selectedElementId}
-                    hasDrawingData={hasDrawingData}
-                    onStartReview={() => {
-                      setReviewMode(true);
-                      setShowBlueprintViewer(true);
-                    }}
-                  />
-                </TabsContent>
-                {quoteResult?.quote?.bar_list && (
-                  <TabsContent value="barlist">
-                    <BarListTable
-                      barList={quoteResult.quote.bar_list}
+                {validationData && (
+                  <TabsContent value="cards">
+                    <ValidationResults
+                      elements={validationData.elements}
+                      summary={validationData.summary}
+                      questions={validationData.questions || []}
+                      quoteResult={quoteResult}
+                      onAnswerQuestion={handleAnswerQuestion}
+                      onRequestQuote={handleRequestQuote}
+                      scopeData={scopeData}
                       onShowOnDrawing={handleShowOnDrawing}
+                      onToggleViewer={() => setShowBlueprintViewer((v) => !v)}
+                      showViewer={showBlueprintViewer}
                       selectedElementId={selectedElementId}
+                      hasDrawingData={hasDrawingData}
+                      onStartReview={() => {
+                        setReviewMode(true);
+                        setShowBlueprintViewer(true);
+                      }}
                     />
                   </TabsContent>
                 )}
-                {quoteResult?.quote?.bar_list && (
+                {(quoteResult?.quote?.bar_list || importedBarList) && (
+                  <TabsContent value="barlist">
+                    <BarListTable
+                      barList={quoteResult?.quote?.bar_list || importedBarList || []}
+                      onShowOnDrawing={handleShowOnDrawing}
+                      selectedElementId={selectedElementId}
+                      onImport={(data) => setImportedBarList(data)}
+                    />
+                  </TabsContent>
+                )}
+                {(quoteResult?.quote?.bar_list || importedBarList) && (
                   <TabsContent value="bending">
                     <BendingScheduleTable
-                      barList={quoteResult.quote.bar_list}
+                      barList={quoteResult?.quote?.bar_list || importedBarList || []}
                       onShowOnDrawing={handleShowOnDrawing}
                       selectedElementId={selectedElementId}
                     />
