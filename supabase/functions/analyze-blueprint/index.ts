@@ -674,6 +674,75 @@ ${OUTPUT_FORMAT_INSTRUCTIONS}
 
 NOTE: In step-by-step mode, output the JSON block only after the FINAL step (Step 8) or when the user asks for it.`;
 
+// ── Category-Specific Estimation Rules ──
+
+function getCategorySpecificRules(category: string): string | null {
+  switch (category) {
+    case "cage":
+      return `### CAGE PROJECT ESTIMATION RULES (MANDATORY)
+This is a CAGE project. Focus EXCLUSIVELY on cage assemblies.
+
+**Output Format**: One row per CAGE TYPE (not per column instance). Multiply by quantity of that cage type.
+
+**Required per cage**:
+- Cage mark (e.g., C1-CAGE, CAGE-A)
+- Vertical bars: count, size, length (= cage height + lap extensions)
+- Ties: size, spacing, quantity = FLOOR(cage_height / tie_spacing) + 1
+- Tie perimeter: column dimensions MINUS 80mm per side (RSIC rule) → perimeter = 2×(W-160) + 2×(D-160) for rectangular, or π×(diameter-160) for round
+- Spiral (if present): diameter = column diameter - 80mm, pitch, total length = (cage_height / pitch) × π × spiral_diameter
+- Shop bending: ALL column verticals with lap splices → estimate as SHOP OFFSET BENT
+- Hooks on ties: standard 135° hooks per RSIC
+
+**Weight Calculation**:
+- Per cage: (vertical_bars × bar_length × unit_weight) + (tie_qty × tie_perimeter × unit_weight) + spiral_weight
+- Total: per_cage_weight × quantity_of_this_cage_type
+
+**Tie Spacing Rules**:
+- Lowest tie: no more than HALF the designated spacing above top of footing/floor
+- Top tie: same distance below lowest horizontal member above
+- Extra ties at offset bend locations (usually 1-2 below lower bend point)
+
+**Spiral Spacer Count (RSIC)**:
+- 10M spiral: ≤500mm core=2 spacers, 500-800mm=3, >800mm=4
+- 15M spiral: ≤600mm core=3 spacers, >600mm=4`;
+
+    case "bar_list":
+      return `### BAR LIST ESTIMATION RULES (MANDATORY)
+This is a BAR LIST / BENDING SCHEDULE project. NO blueprint element detection needed.
+
+**Approach**: Parse the bar schedule table directly.
+- Extract: bar mark, size, quantity, cut length, shape code, bend dimensions
+- Calculate weight: quantity × cut_length × unit_weight_per_size
+- Output a summary by bar size and grand total
+- Skip all OCR element detection stages — go straight to table parsing`;
+
+    case "residential":
+      return `### RESIDENTIAL PROJECT FOCUS
+Focus on: strip footings (75mm cover per RSIC), basement/foundation walls, SOG mesh, ICF walls, small columns.
+Typical bar sizes: 10M-20M. Lighter reinforcement patterns. Include SOG wire mesh calculations.`;
+
+    case "industrial":
+      return `### INDUSTRIAL PROJECT FOCUS  
+Focus on: heavy isolated footings, equipment pads, crane beams, tank foundations. 
+Expect heavy bars (25M-55M). Check for epoxy/galvanized coatings in corrosive environments.
+Watch for radius bends, special bending per RSIC rules (bars 15M-55M bent at 6 points or fewer).`;
+
+    case "commercial":
+      return `### COMMERCIAL PROJECT FOCUS
+Focus on: multi-storey columns with splice tracking across floors, flat slabs with column/middle strips, beams, drop panels, parking structures.
+Track column bar size changes floor-to-floor. Include slab band reinforcement.`;
+
+    case "infrastructure":
+      return `### INFRASTRUCTURE PROJECT FOCUS
+Focus on: bridge elements, abutments, retaining walls, culverts, barriers.
+Check for provincial DOT specs (MTO, MTQ, MTBC). Epoxy coating is common.
+Longer development lengths for bridge elements. Check for special bar bending requirements.`;
+
+    default:
+      return null;
+  }
+}
+
 // ── Edge Function Handler ──
 
 serve(async (req) => {
@@ -702,9 +771,18 @@ serve(async (req) => {
       if (scope.detectedCategory) {
         scopeBlock += `\n### PRE-CLASSIFIED PROJECT CATEGORY: ${scope.detectedCategory.toUpperCase()}\n`;
         scopeBlock += `This project has been pre-classified by AI analysis of the blueprints. Prioritize this classification unless the blueprints clearly indicate otherwise.\n`;
+        
+        // Category-specific estimation rules
+        const categoryRules = getCategorySpecificRules(scope.detectedCategory);
+        if (categoryRules) {
+          scopeBlock += `\n${categoryRules}\n`;
+        }
       }
       if (scope.detectedStandard && scope.detectedStandard !== "unknown") {
-        scopeBlock += `Detected Standard: ${scope.detectedStandard === "canadian_metric" ? "Canadian Metric (CSA/RSIC) — apply RSIC rules" : "US Imperial (ACI)"}\n`;
+        scopeBlock += `\nDetected Standard: ${scope.detectedStandard === "canadian_metric" ? "Canadian Metric (CSA/RSIC) — apply ALL RSIC rules strictly" : "US Imperial (ACI)"}\n`;
+        if (scope.detectedStandard === "canadian_metric") {
+          scopeBlock += `CRITICAL: Use metric bar sizes (10M, 15M, 20M, etc.), kg/m mass values, and mm/m dimensions throughout. Apply RSIC Manual of Standard Practice 2018 rules for ALL calculations.\n`;
+        }
       }
       if (scope.deviations) scopeBlock += `Project-Specific Deviations: ${scope.deviations}\n`;
       systemPrompt = scopeBlock + "\n---\n\n" + systemPrompt;
