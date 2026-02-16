@@ -699,6 +699,13 @@ serve(async (req) => {
       if (scope.rebarCoating) scopeBlock += `Rebar Coating Type: ${scope.rebarCoating}\n`;
       if (scope.clientName) scopeBlock += `Client: ${scope.clientName}\n`;
       if (scope.projectType) scopeBlock += `Project Type: ${scope.projectType}\n`;
+      if (scope.detectedCategory) {
+        scopeBlock += `\n### PRE-CLASSIFIED PROJECT CATEGORY: ${scope.detectedCategory.toUpperCase()}\n`;
+        scopeBlock += `This project has been pre-classified by AI analysis of the blueprints. Prioritize this classification unless the blueprints clearly indicate otherwise.\n`;
+      }
+      if (scope.detectedStandard && scope.detectedStandard !== "unknown") {
+        scopeBlock += `Detected Standard: ${scope.detectedStandard === "canadian_metric" ? "Canadian Metric (CSA/RSIC) — apply RSIC rules" : "US Imperial (ACI)"}\n`;
+      }
       if (scope.deviations) scopeBlock += `Project-Specific Deviations: ${scope.deviations}\n`;
       systemPrompt = scopeBlock + "\n---\n\n" + systemPrompt;
     }

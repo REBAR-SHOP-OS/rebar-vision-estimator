@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.price-elements]
 verify_jwt = false
+
+[functions.detect-project-type]
+verify_jwt = false
