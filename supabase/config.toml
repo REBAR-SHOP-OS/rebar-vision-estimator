@@ -5,3 +5,9 @@ verify_jwt = false
 
 [functions.extract-learning]
 verify_jwt = false
+
+[functions.validate-elements]
+verify_jwt = false
+
+[functions.price-elements]
+verify_jwt = false
