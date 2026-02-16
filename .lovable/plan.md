@@ -1,62 +1,44 @@
 
 
-## Build Interactive Bar List Table and Improve the App
+## Add Contextual Suggestion Chips Above Chat Input
 
-This plan adds a dedicated, editable Bar List Table as the primary results view, plus several improvements to the overall app quality.
+### What This Does
+Adds a row of clickable suggestion chips (ideas/prompts) just above the chat input bar. These give users quick actions they can tap instead of typing, adapting based on the current state of the conversation.
 
-### 1. Interactive Bar List Table Component
+### Suggestion Categories
 
-Create a new `src/components/chat/BarListTable.tsx` component that displays all detected bars in an editable, sortable table format:
+**When no files uploaded yet:**
+- "Upload a blueprint PDF"
+- "What file types are supported?"
+- "How does the AI detection work?"
 
-- **Columns**: Bar Mark, Size, Shape Code, Qty, Length (ft), Unit Weight (lb/ft), Total Weight (lbs)
-- **Grouped by element type** with collapsible sections and subtotals per group
-- **Inline editing**: Click any cell (Qty, Length, Size) to edit it directly -- changes auto-recalculate weight using the existing REBAR_UNIT_WEIGHT lookup
-- **Row highlighting**: Click a row to highlight the corresponding element on the Blueprint Viewer (uses the existing `onShowOnDrawing` callback)
-- **Status indicators**: Color-coded left border per row (green = READY, amber = FLAGGED, red = BLOCKED)
-- **Grand total row** at the bottom with total weight in lbs and tons
-- **Search/filter bar** at top to filter by bar mark, size, or element type
+**When files uploaded but no mode selected (scope/mode picking phase):**
+- "Start step-by-step analysis"
+- "What elements can you detect?"
+- "Explain the estimation process"
 
-### 2. Integrate Bar List Table into Results Flow
+**When analysis is running or results are available:**
+- "Show me the bar list"
+- "Export to Excel"
+- "Review flagged elements"
+- "Recalculate with edits"
 
-In `ChatArea.tsx`, add a tab system in the results area with two tabs:
-- **Cards View** (current ValidationResults component)
-- **Bar List View** (new BarListTable component)
+**When the AI asks a confirmation question (like "Do you agree with this scope?"):**
+- "Yes, proceed to next stage"
+- "I need to adjust the scope"
+- "Add more element types"
 
-This uses the existing `validationData` and `quoteResult` state -- no new data fetching needed.
-
-### 3. Bending Schedule Panel
-
-Create `src/components/chat/BendingScheduleTable.tsx`:
-- Filters the bar list to show only bent bars (shape_code is not "straight" or "closed")
-- Columns: Element ID, Bar Mark, Size, Shape Code, Qty, Leg A/B/C dimensions, Weight
-- Inline editing for dimensions
-- Accessible as a third tab in the results area
-
-### 4. App Quality Improvements
-
-**Processing state indicator** (in `StepProgress.tsx`):
-- Show "In Queue", "Processing", "Ready" status labels alongside the existing step dots
-- Add a pulsing animation on the active step
-
-**Better empty states**:
-- When no results yet but files uploaded, show a clearer "waiting for analysis" state
-- Improve the scope panel's loading skeleton during detection
-
-### About Computer Vision Models
-
-Adding Detectron2 or similar CV models requires a Python GPU backend, which cannot run in browser or in Deno edge functions. The current architecture (Google Vision OCR + Gemini) already provides strong detection. To add CV models in the future, you would need:
-- A separate Python backend service (e.g., on AWS/GCP with GPU)
-- An edge function that proxies requests to that service
-- The UI we are building now (Bar List Table, Bending Schedule) is already designed to display results from any detection backend, so it will work seamlessly when CV models are added later
+### Visual Design
+- Small rounded pill-shaped chips in a horizontally scrollable row
+- Subtle border, muted text, hover highlights to primary color
+- Positioned directly above the input bar (inside the bottom input section)
+- Chips auto-hide when the user starts typing
 
 ### Technical Details
 
 | File | Change |
 |---|---|
-| `src/components/chat/BarListTable.tsx` | NEW -- Editable bar list table with grouping, inline edit, live weight recalculation, row selection sync with Blueprint Viewer |
-| `src/components/chat/BendingScheduleTable.tsx` | NEW -- Filtered view of bent bars with shape/dimension columns |
-| `src/components/chat/ChatArea.tsx` | Add tab switcher (Cards / Bar List / Bending) in the results section; pass quoteResult bar_list data to new components |
-| `src/components/chat/ValidationResults.tsx` | Extract the tab container logic; keep existing card view as default |
-| `src/components/chat/StepProgress.tsx` | Add status labels ("Uploading", "Analyzing", "Validating", "Complete") and pulsing animation on active step |
-| `src/components/chat/ExportButtons.tsx` | No changes needed -- already exports bar list and bending schedule from the same data |
+| `src/components/chat/ChatArea.tsx` | Add a suggestion chips section above the input bar that renders context-aware suggestions based on current state (uploadedFiles, calculationMode, validationData, messages). Clicking a chip sets the input text and optionally auto-sends it. Chips hidden when `input` is non-empty or `loading` is true. |
+
+No new files needed -- this is a self-contained addition to the input area in ChatArea.tsx.
 
