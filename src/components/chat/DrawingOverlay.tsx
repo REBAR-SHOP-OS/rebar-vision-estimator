@@ -106,7 +106,8 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
         const cy = y + h / 2;
 
         const cLen = Math.min(CORNER_LEN, w / 3, h / 3);
-        const sw = isActive ? 5 : isSelected ? 4 : isHovered ? 3.5 : 3;
+        const sw = isActive ? 3 : isSelected ? 3 : isHovered ? 2.5 : 2;
+        const dotR = isSelected || isHovered || isActive ? 14 : 10;
 
         // Corner bracket paths (L-shapes at each corner)
         const corners = [
@@ -153,7 +154,7 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
               ry={4}
               fill={color}
               fillOpacity={
-                isActive ? 0.3 : isSelected ? 0.25 : isHovered ? 0.2 : 0.12
+                isActive ? 0.2 : isSelected ? 0.2 : isHovered ? 0.15 : 0.06
               }
               stroke="none"
               className="pointer-events-none"
@@ -194,58 +195,59 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
               />
             ))}
 
-            {/* Pulsing center dot for selected/active */}
+            {/* Always-visible colored center dot */}
+            <circle
+              cx={cx}
+              cy={cy}
+              r={dotR}
+              fill={color}
+              stroke="white"
+              strokeWidth={2}
+              className="pointer-events-none"
+            />
+
+            {/* Pulsing ring for selected/active */}
             {(isSelected || isActive) && (
-              <>
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r={6}
-                  fill={color}
-                  opacity={0.4}
-                  className="overlay-pulse pointer-events-none"
-                />
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r={3}
-                  fill={color}
-                  className="pointer-events-none"
-                />
-              </>
+              <circle
+                cx={cx}
+                cy={cy}
+                r={6}
+                fill={color}
+                opacity={0.4}
+                className="overlay-pulse pointer-events-none"
+              />
             )}
 
-            {/* Label with pointer arrow */}
-            <g filter="url(#label-shadow)" className="pointer-events-none">
-              {/* Label pill */}
-              <rect
-                x={x}
-                y={y - labelH - arrowSize}
-                width={labelWidth}
-                height={labelH}
-                rx={5}
-                fill={color}
-                fillOpacity={0.92}
-              />
-              {/* Downward pointer triangle */}
-              <polygon
-                points={`${x + 12 - arrowSize},${y - arrowSize} ${x + 12 + arrowSize},${y - arrowSize} ${x + 12},${y}`}
-                fill={color}
-                fillOpacity={0.92}
-              />
-              {/* Label text */}
-              <text
-                x={x + 10}
-                y={y - arrowSize - 7}
-                fill="white"
-                fontSize={14}
-                fontWeight={700}
-                fontFamily="system-ui, sans-serif"
-                className="select-none"
-              >
-                {labelText}
-              </text>
-            </g>
+            {/* Label with pointer arrow — only on hover/select/active */}
+            {(isSelected || isHovered || isActive) && (
+              <g filter="url(#label-shadow)" className="pointer-events-none">
+                <rect
+                  x={x}
+                  y={y - labelH - arrowSize}
+                  width={labelWidth}
+                  height={labelH}
+                  rx={5}
+                  fill={color}
+                  fillOpacity={0.92}
+                />
+                <polygon
+                  points={`${x + 12 - arrowSize},${y - arrowSize} ${x + 12 + arrowSize},${y - arrowSize} ${x + 12},${y}`}
+                  fill={color}
+                  fillOpacity={0.92}
+                />
+                <text
+                  x={x + 10}
+                  y={y - arrowSize - 7}
+                  fill="white"
+                  fontSize={14}
+                  fontWeight={700}
+                  fontFamily="system-ui, sans-serif"
+                  className="select-none"
+                >
+                  {labelText}
+                </text>
+              </g>
+            )}
           </g>
         );
       })}
