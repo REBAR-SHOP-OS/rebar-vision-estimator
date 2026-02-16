@@ -79,6 +79,25 @@ const GateBadge: React.FC<{ name: string; passed: boolean }> = ({ name, passed }
   </span>
 );
 
+const ELEMENT_DESCRIPTIONS: Record<string, string> = {
+  PIER: "A deep foundation element (caisson)",
+  COLUMN: "A vertical structural member",
+  BEAM: "A horizontal structural member",
+  FOOTING: "A base that transfers load to ground",
+  CAGE: "A pre-assembled rebar cage",
+  WALL: "A vertical enclosure or shear element",
+  SLAB: "A flat horizontal concrete surface",
+  SLAB_STRIP: "A strip of slab reinforcement",
+  STAIR: "A stepped structure between levels",
+  GRADE_BEAM: "A beam at ground level connecting foundations",
+  RAFT_SLAB: "A mat foundation supporting the structure",
+  RETAINING_WALL: "A wall resisting lateral earth pressure",
+  ICF_WALL: "An insulated concrete form wall",
+  CMU_WALL: "A concrete masonry unit wall",
+  WIRE_MESH: "Welded wire reinforcement mesh",
+  OTHER: "Other structural element",
+};
+
 interface ElementCardProps {
   el: ValidationElement;
   weightInfo?: any;
@@ -103,6 +122,7 @@ const ElementCard: React.FC<ElementCardProps> = ({ el, weightInfo, onShowOnDrawi
         <StatusIcon status={el.status} />
         <span className="text-sm font-bold text-foreground">{el.element_id}</span>
         <Badge variant="outline" className="text-[10px] rounded-md">{el.element_type}</Badge>
+        <span className="text-[9px] text-muted-foreground italic hidden sm:inline">{ELEMENT_DESCRIPTIONS[el.element_type] || ELEMENT_DESCRIPTIONS.OTHER}</span>
         {weightInfo && (
           <span className="text-[10px] text-primary font-semibold">
             {weightInfo.weight_lbs.toLocaleString()} lbs

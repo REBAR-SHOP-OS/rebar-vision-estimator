@@ -51,6 +51,7 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
   // Visible type filter
   const allTypes = [...new Set(elements.map((e) => e.element_type))];
   const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set(allTypes));
+  const [showGuidance, setShowGuidance] = useState(true);
 
   useEffect(() => {
     setVisibleTypes(new Set([...new Set(elements.map((e) => e.element_type))]));
@@ -304,6 +305,16 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
           )
         )}
 
+        {/* Guidance banner */}
+        {imageLoaded && showGuidance && hasOverlays && (
+          <div className="absolute top-3 left-3 right-3 bg-primary/10 backdrop-blur-sm border border-primary/30 rounded-lg px-3 py-2 shadow-md flex items-center gap-2 z-10">
+            <span className="text-[11px] text-foreground">💡 Colored boxes highlight detected elements. <strong>Click any box</strong> to select it, or use the filter chips above to show/hide types.</span>
+            <button onClick={() => setShowGuidance(false)} className="ml-auto text-muted-foreground hover:text-foreground flex-shrink-0">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* No spatial data notice */}
         {imageLoaded && !hasOverlays && (
           <div className="absolute top-3 left-3 bg-popover/90 backdrop-blur-sm border border-border rounded-lg px-3 py-2 shadow-md flex items-center gap-2">
@@ -343,13 +354,18 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
           <div className="absolute bottom-3 right-3 bg-popover/90 backdrop-blur-sm border border-border rounded-lg px-2.5 py-2 shadow-md">
             <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider mb-1">Legend</p>
             <div className="flex flex-col gap-0.5">
-              {allTypes.map((type) => (
-                <div key={type} className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: ELEMENT_TYPE_COLORS[type] || ELEMENT_TYPE_COLORS.OTHER }} />
-                  <span className="text-[10px] text-foreground">{type}</span>
-                </div>
-              ))}
+              {allTypes.map((type) => {
+                const count = pageElements.filter((e) => e.element_type === type).length;
+                return (
+                  <div key={type} className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: ELEMENT_TYPE_COLORS[type] || ELEMENT_TYPE_COLORS.OTHER }} />
+                    <span className="text-[10px] text-foreground">{type}</span>
+                    <span className="text-[9px] text-muted-foreground">— {count} found</span>
+                  </div>
+                );
+              })}
             </div>
+            <p className="text-[8px] text-muted-foreground mt-1.5 italic">Click any box to see details</p>
           </div>
         )}
       </div>

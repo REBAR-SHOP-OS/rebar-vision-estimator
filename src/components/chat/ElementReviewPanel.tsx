@@ -167,6 +167,11 @@ const ElementReviewPanel: React.FC<ElementReviewPanelProps> = ({
 
   return (
     <div className="space-y-3 p-4 rounded-xl border-2 border-border bg-card">
+      {/* Instruction */}
+      <div className="flex items-center gap-2 p-2 rounded-lg bg-accent/50 border border-border">
+        <span className="text-[11px] text-foreground">👉 Verify each element below. Click <strong>Confirm</strong>, <strong>Edit</strong>, or <strong>Reject</strong>, then move to <strong>Next</strong>.</span>
+      </div>
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-bold text-foreground">Review Elements</h3>
