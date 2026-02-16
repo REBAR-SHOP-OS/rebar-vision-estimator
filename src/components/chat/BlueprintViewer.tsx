@@ -1,10 +1,12 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
-import { ZoomIn, ZoomOut, Maximize2, X, EyeOff, ChevronLeft, ChevronRight, FileText } from "lucide-react";
+import { ZoomIn, ZoomOut, Maximize2, X, ChevronLeft, ChevronRight, FileText, PanelLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import DrawingOverlay, { ELEMENT_TYPE_COLORS, type OverlayElement, type ReviewStatus } from "./DrawingOverlay";
 import PdfRenderer from "./PdfRenderer";
+import FeaturesPanel from "./FeaturesPanel";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 interface BlueprintViewerProps {
   imageUrl: string;
@@ -39,8 +41,10 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
   const [imageSize, setImageSize] = useState({ w: 0, h: 0 });
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
+  const [showPanel, setShowPanel] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+  const isMobile = useIsMobile();
 
   // PDF state
   const isPdf = isPdfUrl(imageUrl);
@@ -158,12 +162,32 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
   const hoveredElement = elements.find((e) => e.element_id === hoveredId);
   const hasOverlays = pageElements.some(el => (el.bbox[2] - el.bbox[0]) > 10 && (el.bbox[3] - el.bbox[1]) > 10);
   const displayImageUrl = isPdf ? pdfImageUrl : imageUrl;
+  const showFeaturesPanel = showPanel && !isMobile && elements.length > 0;
 
   return (
     <div className="flex flex-col h-full bg-card border border-border rounded-xl overflow-hidden">
       {/* Toolbar */}
       <div className="flex items-center gap-1.5 px-3 py-2 bg-card border-b border-border flex-shrink-0 flex-wrap">
         <TooltipProvider delayDuration={200}>
+          {/* Toggle Features Panel */}
+          {!isMobile && elements.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={showPanel ? "secondary" : "ghost"}
+                  size="icon"
+                  className="h-7 w-7 rounded-lg"
+                  onClick={() => setShowPanel((p) => !p)}
+                >
+                  <PanelLeft className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Features Panel</TooltipContent>
+            </Tooltip>
+          )}
+
+          <div className="h-4 w-px bg-border mx-0.5" />
+
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg" onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z + ZOOM_STEP))}>
@@ -208,34 +232,34 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
           </>
         )}
 
-        <div className="h-4 w-px bg-border mx-1" />
-
-        {/* Type filter chips */}
-        {allTypes.length > 0 && (
-          <div className="flex gap-1 flex-wrap">
-            {allTypes.map((type) => {
-              const color = ELEMENT_TYPE_COLORS[type] || ELEMENT_TYPE_COLORS.OTHER;
-              const visible = visibleTypes.has(type);
-              const count = pageElements.filter((e) => e.element_type === type).length;
-              return (
-                <button
-                  key={type}
-                  onClick={() => toggleType(type)}
-                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold transition-all border ${
-                    visible ? "border-transparent" : "border-border opacity-40"
-                  }`}
-                  style={{
-                    backgroundColor: visible ? `${color}18` : "transparent",
-                    color: visible ? color : undefined,
-                  }}
-                >
-                  <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: color, opacity: visible ? 1 : 0.3 }} />
-                  {type} ({count})
-                  {!visible && <EyeOff className="h-2.5 w-2.5 ml-0.5" />}
-                </button>
-              );
-            })}
-          </div>
+        {/* Mobile-only type filter chips */}
+        {isMobile && allTypes.length > 0 && (
+          <>
+            <div className="h-4 w-px bg-border mx-1" />
+            <div className="flex gap-1 flex-wrap">
+              {allTypes.map((type) => {
+                const color = ELEMENT_TYPE_COLORS[type] || ELEMENT_TYPE_COLORS.OTHER;
+                const visible = visibleTypes.has(type);
+                const count = pageElements.filter((e) => e.element_type === type).length;
+                return (
+                  <button
+                    key={type}
+                    onClick={() => toggleType(type)}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold transition-all border ${
+                      visible ? "border-transparent" : "border-border opacity-40"
+                    }`}
+                    style={{
+                      backgroundColor: visible ? `${color}18` : "transparent",
+                      color: visible ? color : undefined,
+                    }}
+                  >
+                    <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: color, opacity: visible ? 1 : 0.3 }} />
+                    {type} ({count})
+                  </button>
+                );
+              })}
+            </div>
+          </>
         )}
 
         <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg ml-auto" onClick={onClose}>
@@ -253,121 +277,117 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
         />
       )}
 
-      {/* Canvas area */}
-      <div
-        ref={containerRef}
-        className="flex-1 relative overflow-hidden cursor-grab active:cursor-grabbing bg-muted/30"
-        onWheel={handleWheel}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-      >
-        {displayImageUrl ? (
-          <div
-            style={{
-              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-              transformOrigin: "0 0",
-              transition: isPanning ? "none" : "transform 0.3s ease-out",
-            }}
-            className="absolute"
-          >
-            <div className="relative inline-block">
-              <img
-                ref={imgRef}
-                src={displayImageUrl}
-                alt="Blueprint"
-                onLoad={!isPdf ? handleImageLoad : undefined}
-                className="block max-w-none"
-                style={{ imageRendering: zoom > 2 ? "pixelated" : "auto" }}
-                draggable={false}
-              />
-              {imageLoaded && hasOverlays && (
-                <DrawingOverlay
-                  elements={pageElements}
-                  selectedId={selectedElementId}
-                  hoveredId={hoveredId}
-                  visibleTypes={visibleTypes}
-                  onSelect={onSelectElement}
-                  onHover={setHoveredId}
-                  imageWidth={imageSize.w}
-                  imageHeight={imageSize.h}
-                  reviewStatuses={reviewStatuses}
+      {/* Main content: Features Panel + Canvas */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Features Side Panel */}
+        {showFeaturesPanel && (
+          <FeaturesPanel
+            elements={pageElements}
+            selectedElementId={selectedElementId}
+            onSelectElement={onSelectElement}
+            visibleTypes={visibleTypes}
+            onToggleType={toggleType}
+            onClose={() => setShowPanel(false)}
+            reviewStatuses={reviewStatuses}
+          />
+        )}
+
+        {/* Canvas area */}
+        <div
+          ref={containerRef}
+          className="flex-1 relative overflow-hidden cursor-grab active:cursor-grabbing bg-muted/30"
+          onWheel={handleWheel}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+        >
+          {displayImageUrl ? (
+            <div
+              style={{
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                transformOrigin: "0 0",
+                transition: isPanning ? "none" : "transform 0.3s ease-out",
+              }}
+              className="absolute"
+            >
+              <div className="relative inline-block">
+                <img
+                  ref={imgRef}
+                  src={displayImageUrl}
+                  alt="Blueprint"
+                  onLoad={!isPdf ? handleImageLoad : undefined}
+                  className="block max-w-none"
+                  style={{ imageRendering: zoom > 2 ? "pixelated" : "auto" }}
+                  draggable={false}
                 />
-              )}
+                {imageLoaded && hasOverlays && (
+                  <DrawingOverlay
+                    elements={pageElements}
+                    selectedId={selectedElementId}
+                    hoveredId={hoveredId}
+                    visibleTypes={visibleTypes}
+                    onSelect={onSelectElement}
+                    onHover={setHoveredId}
+                    imageWidth={imageSize.w}
+                    imageHeight={imageSize.h}
+                    reviewStatuses={reviewStatuses}
+                  />
+                )}
+              </div>
             </div>
-          </div>
-        ) : (
-          !isPdf && (
-            <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-              Loading...
-            </div>
-          )
-        )}
+          ) : (
+            !isPdf && (
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                Loading...
+              </div>
+            )
+          )}
 
-        {/* Guidance banner */}
-        {imageLoaded && showGuidance && hasOverlays && (
-          <div className="absolute top-3 left-3 right-3 bg-primary/10 backdrop-blur-sm border border-primary/30 rounded-lg px-3 py-2 shadow-md flex items-center gap-2 z-10">
-            <span className="text-[11px] text-foreground">💡 Colored boxes highlight detected elements. <strong>Click any box</strong> to select it, or use the filter chips above to show/hide types.</span>
-            <button onClick={() => setShowGuidance(false)} className="ml-auto text-muted-foreground hover:text-foreground flex-shrink-0">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        )}
-
-        {/* No spatial data notice */}
-        {imageLoaded && !hasOverlays && (
-          <div className="absolute top-3 left-3 bg-popover/90 backdrop-blur-sm border border-border rounded-lg px-3 py-2 shadow-md flex items-center gap-2">
-            <FileText className="h-4 w-4 text-muted-foreground" />
-            <span className="text-[10px] text-muted-foreground">No spatial data — elements were parsed from tabular data</span>
-          </div>
-        )}
-
-        {/* Hover Tooltip */}
-        {hoveredElement && (
-          <div
-            className="absolute z-50 pointer-events-none bg-popover border border-border rounded-xl px-3 py-2 shadow-lg"
-            style={{ bottom: 16, left: 16 }}
-          >
-            <div className="flex items-center gap-2 mb-1">
-              <span
-                className="w-2.5 h-2.5 rounded-sm"
-                style={{ backgroundColor: ELEMENT_TYPE_COLORS[hoveredElement.element_type] || ELEMENT_TYPE_COLORS.OTHER }}
-              />
-              <span className="text-xs font-bold text-foreground">{hoveredElement.element_id}</span>
-              <Badge variant="outline" className="text-[9px] rounded-md">{hoveredElement.element_type}</Badge>
+          {/* Guidance banner */}
+          {imageLoaded && showGuidance && hasOverlays && (
+            <div className="absolute top-3 left-3 right-3 bg-primary/10 backdrop-blur-sm border border-primary/30 rounded-lg px-3 py-2 shadow-md flex items-center gap-2 z-10">
+              <span className="text-[11px] text-foreground">💡 Colored boxes highlight detected elements. <strong>Click any box</strong> to select it, or use the Features panel to browse.</span>
+              <button onClick={() => setShowGuidance(false)} className="ml-auto text-muted-foreground hover:text-foreground flex-shrink-0">
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
-            <div className="flex gap-3 text-[10px] text-muted-foreground">
-              <span>Status: <span className="font-semibold text-foreground">{hoveredElement.status}</span></span>
-              {hoveredElement.confidence !== undefined && (
-                <span>Confidence: <span className="font-semibold text-foreground">{Math.round(hoveredElement.confidence * 100)}%</span></span>
-              )}
-              {hoveredElement.weight_lbs !== undefined && (
-                <span>Weight: <span className="font-semibold text-foreground">{hoveredElement.weight_lbs.toLocaleString()} lbs</span></span>
-              )}
-            </div>
-          </div>
-        )}
+          )}
 
-        {/* Legend */}
-        {imageLoaded && allTypes.length > 0 && hasOverlays && (
-          <div className="absolute bottom-3 right-3 bg-popover/90 backdrop-blur-sm border border-border rounded-lg px-2.5 py-2 shadow-md">
-            <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider mb-1">Legend</p>
-            <div className="flex flex-col gap-0.5">
-              {allTypes.map((type) => {
-                const count = pageElements.filter((e) => e.element_type === type).length;
-                return (
-                  <div key={type} className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: ELEMENT_TYPE_COLORS[type] || ELEMENT_TYPE_COLORS.OTHER }} />
-                    <span className="text-[10px] text-foreground">{type}</span>
-                    <span className="text-[9px] text-muted-foreground">— {count} found</span>
-                  </div>
-                );
-              })}
+          {/* No spatial data notice */}
+          {imageLoaded && !hasOverlays && (
+            <div className="absolute top-3 left-3 bg-popover/90 backdrop-blur-sm border border-border rounded-lg px-3 py-2 shadow-md flex items-center gap-2">
+              <FileText className="h-4 w-4 text-muted-foreground" />
+              <span className="text-[10px] text-muted-foreground">No spatial data — elements were parsed from tabular data</span>
             </div>
-            <p className="text-[8px] text-muted-foreground mt-1.5 italic">Click any box to see details</p>
-          </div>
-        )}
+          )}
+
+          {/* Hover Tooltip */}
+          {hoveredElement && (
+            <div
+              className="absolute z-50 pointer-events-none bg-popover border border-border rounded-xl px-3 py-2 shadow-lg"
+              style={{ bottom: 16, left: 16 }}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <span
+                  className="w-2.5 h-2.5 rounded-sm"
+                  style={{ backgroundColor: ELEMENT_TYPE_COLORS[hoveredElement.element_type] || ELEMENT_TYPE_COLORS.OTHER }}
+                />
+                <span className="text-xs font-bold text-foreground">{hoveredElement.element_id}</span>
+                <Badge variant="outline" className="text-[9px] rounded-md">{hoveredElement.element_type}</Badge>
+              </div>
+              <div className="flex gap-3 text-[10px] text-muted-foreground">
+                <span>Status: <span className="font-semibold text-foreground">{hoveredElement.status}</span></span>
+                {hoveredElement.confidence !== undefined && (
+                  <span>Confidence: <span className="font-semibold text-foreground">{Math.round(hoveredElement.confidence * 100)}%</span></span>
+                )}
+                {hoveredElement.weight_lbs !== undefined && (
+                  <span>Weight: <span className="font-semibold text-foreground">{hoveredElement.weight_lbs.toLocaleString()} lbs</span></span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
