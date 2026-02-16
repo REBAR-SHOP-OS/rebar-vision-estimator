@@ -54,6 +54,7 @@ interface ValidationResultsProps {
   quoteResult?: QuoteResult | null;
   onAnswerQuestion?: (elementId: string, field: string, value: string) => void;
   onRequestQuote?: (mode: "ai_express" | "verified") => void;
+  scopeData?: any;
 }
 
 const StatusIcon: React.FC<{ status: string }> = ({ status }) => {
@@ -164,6 +165,7 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
   quoteResult,
   onAnswerQuestion,
   onRequestQuote,
+  scopeData,
 }) => {
   // Group elements by type
   const grouped = elements.reduce<Record<string, ValidationElement[]>>((acc, el) => {
@@ -311,7 +313,7 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
           )}
 
           {/* Export Buttons */}
-          <ExportButtons quoteResult={quoteResult} elements={elements} />
+          <ExportButtons quoteResult={quoteResult} elements={elements} scopeData={scopeData} />
         </div>
       )}
     </div>

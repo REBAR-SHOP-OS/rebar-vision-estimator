@@ -670,6 +670,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 quoteResult={quoteResult}
                 onAnswerQuestion={handleAnswerQuestion}
                 onRequestQuote={handleRequestQuote}
+                scopeData={scopeData}
               />
             </div>
           )}
