@@ -179,6 +179,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     return { rules, fileUrls: knowledgeFileUrls, trainingExamples, learnedRules };
   };
 
+  const scopeDataRef = useRef(scopeData);
+  useEffect(() => { scopeDataRef.current = scopeData; }, [scopeData]);
+
   const streamAIResponse = useCallback(
     async (chatMessages: { role: string; content: string }[], mode: "smart" | "step-by-step", fileUrls: string[]) => {
       // Fetch user knowledge context
@@ -190,7 +193,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           "Content-Type": "application/json",
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ messages: chatMessages, mode, fileUrls, knowledgeContext, scope: scopeData }),
+        body: JSON.stringify({ messages: chatMessages, mode, fileUrls, knowledgeContext, scope: scopeDataRef.current }),
       });
 
       if (!resp.ok) {
@@ -229,6 +232,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             const content = parsed.choices?.[0]?.delta?.content as string | undefined;
             if (content) {
               fullContent += content;
+              
+              // Parse step markers from streamed content
+              const stepMatch = fullContent.match(/(?:^|\n)\s*(?:###?\s*)?Step\s+(\d+(?:\.\d+)?)\s*[—–\-:]/gim);
+              if (stepMatch) {
+                const lastStep = stepMatch[stepMatch.length - 1];
+                const numMatch = lastStep.match(/Step\s+(\d+(?:\.\d+)?)/i);
+                if (numMatch) {
+                  const stepNum = parseFloat(numMatch[1]);
+                  onStepChange?.(stepNum);
+                }
+              }
+              
               setMessages((prev) => {
                 const last = prev[prev.length - 1];
                 if (last?.id === assistantId) {
@@ -273,9 +288,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         }
       }
 
+      // Mark final step as done
+      onStepChange?.(9);
+      
       return fullContent;
     },
-    []
+    [onStepChange]
   );
 
   // Fire-and-forget: extract learnings from chat
