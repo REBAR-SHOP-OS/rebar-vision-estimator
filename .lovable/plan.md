@@ -1,115 +1,94 @@
 
 
-## Blueprint Viewer -- "Show Where in Drawing" Feature
+## Fix: Blueprint Viewer for PDF Uploads and Bar List Projects
 
-Add an interactive blueprint viewer that displays the uploaded drawing with colored overlay rectangles highlighting where each detected element was found on the drawing, similar to Beam AI's visual takeoff interface.
+### Problem
 
----
+Two issues prevent the "Show Where in Drawing" feature from working:
 
-### What You'll See
+1. **PDF files cannot render in an `<img>` tag.** The BlueprintViewer uses `<img src={signedUrl}>`, but when users upload PDFs (the most common format), the browser cannot display them as images. The viewer never shows anything.
 
-After the AI analysis completes and returns element results, a new **"View on Drawing"** toggle button appears above the results. When activated:
-
-- A split-panel layout shows the **blueprint image on the left** and the **results list on the right**
-- Colored rectangles overlay the drawing at each element's detected location
-- Clicking an element card in the results highlights and zooms to it on the drawing
-- Clicking a rectangle on the drawing scrolls to and highlights that element's card
-- A legend and element-type filter toolbar sits at the top of the viewer
+2. **Bar List projects produce no spatial data.** When the AI classifies a document as "BAR LIST ONLY", elements get `bbox: [0,0,0,0]` because there is no drawing to reference. The `hasDrawingData` check returns `false` and the "View on Drawing" button is hidden.
 
 ---
 
-### New Components
+### Solution
 
-**1. `BlueprintViewer.tsx`** -- The main interactive viewer
+**Phase 1: PDF Page Rendering with pdf.js**
 
-- Loads the uploaded blueprint image from the signed URL
-- Renders SVG overlay rectangles on top of the image for each element's `regions.tag_region.bbox`
-- Color-coded by element type (Columns = blue, Footings = orange, Beams = green, etc.)
-- Supports zoom (mouse wheel / pinch) and pan (click-drag)
-- Toolbar: zoom in, zoom out, fit-to-screen, element-type filter chips
-- Tooltip on hover showing element ID, type, status, and confidence
-- Selected element gets a pulsing glow border
-- Legend with colored squares per element type
+Add PDF-to-canvas rendering so the viewer can display PDF pages as images. When the uploaded file is a PDF:
+- Use Mozilla's `pdfjs-dist` library to load the PDF and render each page to a canvas/image
+- Add page navigation controls (previous/next, page indicator) to the BlueprintViewer toolbar
+- Each page renders as a bitmap that the existing SVG overlay system works on top of
 
-**2. `DrawingOverlay.tsx`** -- Lightweight SVG layer
+**Phase 2: Bar List Mode -- Table Row Highlighting**
 
-- Renders positioned rectangles based on normalized bbox coordinates
-- Handles click events to select elements
-- Handles hover events for tooltips
-- Color map: COLUMN=#3B82F6, FOOTING=#F59E0B, BEAM=#10B981, WALL=#8B5CF6, SLAB=#14B8A6, PIER=#EC4899, OTHER=#6B7280
+For "BAR LIST" projects, adapt the viewer to highlight table rows in the PDF:
+- Update the `analyze-blueprint` system prompt to instruct the AI to output approximate page numbers and vertical positions for each parsed element (which page of the PDF the data was found on, and rough row position)
+- The overlay shows horizontal band highlights on the relevant page, color-coded by element type
+- Clicking an element card navigates to the correct page and highlights the row region
 
----
+**Phase 3: Always Show Viewer When Files Exist**
 
-### Updated Components
-
-**3. `ValidationResults.tsx`** -- Add "Show on Drawing" per element
-
-- Each `ElementCard` gets a small map-pin icon button
-- Clicking it fires `onShowOnDrawing(element_id)` callback
-- Selected element card gets a highlighted ring/border
-- New toggle button at top: "View Drawing" with a map icon
-
-**4. `ChatArea.tsx`** -- Split-panel layout
-
-- When the blueprint viewer is active, switch from single-column to a `ResizablePanelGroup` (already installed via `react-resizable-panels`)
-- Left panel: BlueprintViewer (default 55% width)
-- Right panel: existing chat/results content (45%)
-- State: `showBlueprintViewer` toggle, `selectedElementId` for syncing between viewer and results
-- Pass `uploadedFiles[0]` URL and `validationData.elements` to BlueprintViewer
-
-**5. `analyze-blueprint/index.ts`** -- Reinforce bbox output
-
-- Add a note in the system prompt reinforcing that the AI should output real OCR bounding box coordinates (from the Google Vision data) into each element's `regions.tag_region.bbox` field rather than `[0,0,0,0]`
-- This ensures meaningful overlay positioning
+Even when bbox data is sparse, allow users to view the uploaded document:
+- Change `hasDrawingData` logic: show the viewer button whenever uploaded files exist (not only when overlay elements have valid bboxes)
+- When no overlay data exists, show the PDF/image viewer in "read-only" mode without overlays
+- Add a note: "No spatial data available -- elements were parsed from tabular data"
 
 ---
 
-### Visual Design
-
-- Dark semi-transparent toolbar at the top of the viewer with rounded controls
-- Overlay rectangles: 2px colored border, 10% opacity fill, rounded corners
-- Selected element: 3px border with CSS pulsing glow animation
-- Hover tooltip: dark card with element details (ID, type, weight, confidence %)
-- Legend: small colored squares in the bottom-left corner
-- Filter chips: toggle visibility per element type
-- On mobile: viewer is full-width and shown above results (stacked, not side-by-side)
-
----
-
-### Element Type Color Map
-
-| Type | Color | Hex |
-|---|---|---|
-| COLUMN | Blue | #3B82F6 |
-| FOOTING | Orange | #F59E0B |
-| BEAM | Green | #10B981 |
-| WALL | Purple | #8B5CF6 |
-| SLAB | Teal | #14B8A6 |
-| PIER | Pink | #EC4899 |
-| STAIR | Indigo | #6366F1 |
-| OTHER | Gray | #6B7280 |
-
----
-
-### Data Flow
-
-1. AI analysis returns elements with `regions.tag_region.bbox` coordinates (from OCR bounding boxes)
-2. User clicks "View Drawing" toggle
-3. ChatArea switches to split-panel layout using `ResizablePanelGroup`
-4. BlueprintViewer loads the first uploaded file's image and renders SVG overlays at each element's bbox position
-5. User clicks an element card -- viewer smoothly zooms/pans to center that element's region
-6. User clicks an overlay rectangle -- results panel scrolls to and highlights that element's card
-
----
-
-### Technical Details
+### Technical Changes
 
 | File | Changes |
 |---|---|
-| `src/components/chat/BlueprintViewer.tsx` | New -- Image viewer with SVG overlay, zoom/pan, toolbar, tooltips, element selection |
-| `src/components/chat/DrawingOverlay.tsx` | New -- SVG rectangle layer with color-coding, click/hover handlers |
-| `src/components/chat/ValidationResults.tsx` | Add "Show on Drawing" button per element; add "View Drawing" toggle; highlight selected element; new props for `onShowOnDrawing` and `selectedElementId` |
-| `src/components/chat/ChatArea.tsx` | Split-panel layout with ResizablePanelGroup when viewer active; selectedElementId state; pass data to BlueprintViewer |
-| `supabase/functions/analyze-blueprint/index.ts` | Add prompt reinforcement to output real bbox coordinates from OCR data |
-| `src/index.css` | Add `@keyframes blueprint-pulse` animation for selected overlay glow |
+| `package.json` | Add `pdfjs-dist` dependency for PDF rendering |
+| `src/components/chat/BlueprintViewer.tsx` | Add PDF detection (check if URL ends in `.pdf` or content-type); render PDF pages via pdfjs canvas; add page navigation (prev/next/page indicator); fall back to `<img>` for image files; pass current page dimensions to DrawingOverlay |
+| `src/components/chat/DrawingOverlay.tsx` | Accept optional `pageNumber` prop to filter elements by page; support horizontal band overlays for bar-list row highlighting |
+| `src/components/chat/ChatArea.tsx` | Change `hasDrawingData` to `uploadedFiles.length > 0` so the viewer button always appears when files exist; pass file type info to BlueprintViewer |
+| `src/components/chat/ValidationResults.tsx` | Update "View on Drawing" button label to "View Document" when no bbox data exists; always show button when files are uploaded |
+| `supabase/functions/analyze-blueprint/index.ts` | For BAR LIST projects, instruct AI to include `page_number` and approximate `y_position` (as percentage of page height) in each element's `regions.tag_region` so the viewer can navigate to the right page and highlight the row |
 
+---
+
+### New Dependencies
+
+- `pdfjs-dist` -- Mozilla's PDF.js library for client-side PDF rendering (renders PDF pages to canvas elements)
+
+---
+
+### PDF Rendering Flow
+
+1. User uploads a PDF file
+2. BlueprintViewer detects PDF format from the URL or file type
+3. Loads PDF via `pdfjs-dist` getDocument()
+4. Renders the current page to an off-screen canvas, converts to image data URL
+5. Displays the rendered page image with existing zoom/pan controls
+6. Page navigation buttons (prev/next) in the toolbar switch between pages
+7. SVG overlays filter to elements matching the current page number
+8. Clicking an element card auto-navigates to the correct page and highlights it
+
+---
+
+### Updated Data Shape for Bar List Elements
+
+The `regions.tag_region` for bar list elements will include:
+
+```
+{
+  "bbox": [50, 200, 750, 240],   // approximate row region on the page
+  "page_number": 3                // which PDF page
+}
+```
+
+This gives the viewer enough information to navigate to the right page and draw a highlight band across the table row where the element data was found.
+
+---
+
+### Viewer Modes
+
+| Upload Type | Viewer Behavior |
+|---|---|
+| Image file (PNG/JPG) | Shows image with SVG bbox overlays (current behavior) |
+| PDF with blueprint drawings | Renders PDF pages, shows bbox overlays per page |
+| PDF with bar list/tables | Renders PDF pages, shows row-band highlights, page navigation to relevant data |
+| Any file, no bbox data | Shows document in read-only mode with "No spatial data" note |
