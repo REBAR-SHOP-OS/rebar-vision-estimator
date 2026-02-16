@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { CheckCircle2, AlertTriangle, XCircle, Shield, Zap, FileCheck, ChevronDown, ChevronRight, MapPin, Map, Target } from "lucide-react";
+import { CheckCircle2, AlertTriangle, XCircle, Shield, Zap, FileCheck, ChevronDown, ChevronRight, MapPin, Map, Target, ClipboardCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
@@ -59,6 +59,7 @@ interface ValidationResultsProps {
   showViewer?: boolean;
   selectedElementId?: string | null;
   hasDrawingData?: boolean;
+  onStartReview?: () => void;
 }
 
 const StatusIcon: React.FC<{ status: string }> = ({ status }) => {
@@ -157,7 +158,7 @@ const ElementCard: React.FC<ElementCardProps> = ({ el, weightInfo, onShowOnDrawi
 
 const ValidationResults: React.FC<ValidationResultsProps> = ({
   elements, summary, questions, quoteResult, onAnswerQuestion, onRequestQuote, scopeData,
-  onShowOnDrawing, onToggleViewer, showViewer, selectedElementId, hasDrawingData,
+  onShowOnDrawing, onToggleViewer, showViewer, selectedElementId, hasDrawingData, onStartReview,
 }) => {
   const grouped = elements.reduce<Record<string, ValidationElement[]>>((acc, el) => {
     const type = el.element_type || "OTHER";
@@ -184,15 +185,28 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
     <div className="space-y-4 my-4">
       {/* View Drawing Toggle */}
       {hasDrawingData && onToggleViewer && (
-        <Button
-          onClick={onToggleViewer}
-          variant={showViewer ? "default" : "outline"}
-          className="w-full rounded-xl gap-2 font-semibold"
-          size="sm"
-        >
-          <Map className="h-4 w-4" />
-          {showViewer ? "Hide Document Viewer" : "View Document"}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={onToggleViewer}
+            variant={showViewer ? "default" : "outline"}
+            className="flex-1 rounded-xl gap-2 font-semibold"
+            size="sm"
+          >
+            <Map className="h-4 w-4" />
+            {showViewer ? "Hide Document Viewer" : "View Document"}
+          </Button>
+          {onStartReview && (
+            <Button
+              onClick={onStartReview}
+              variant="outline"
+              className="flex-1 rounded-xl gap-2 font-semibold border-primary/30 text-primary hover:bg-primary/10"
+              size="sm"
+            >
+              <ClipboardCheck className="h-4 w-4" />
+              Review Document
+            </Button>
+          )}
+        </div>
       )}
 
       {/* Stat Cards */}
