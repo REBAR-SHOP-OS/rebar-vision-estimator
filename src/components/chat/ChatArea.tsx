@@ -534,18 +534,19 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     setLoading(false);
   };
 
-  const sendMessage = async () => {
-    if (!input.trim() || !user || loading) return;
+  const sendMessage = async (overrideText?: string) => {
+    const text = (overrideText ?? input).trim();
+    if (!text || !user || loading) return;
 
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
-      content: input.trim(),
+      content: text,
       created_at: new Date().toISOString(),
     };
 
     setMessages((prev) => [...prev, userMessage]);
-    const msgContent = input.trim();
+    const msgContent = text;
     setInput("");
     setLoading(true);
 
@@ -1051,13 +1052,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                       onClick={() => {
                         if (card.action === 'upload') {
                           fileInputRef.current?.click();
-                        } else {
-                          setInput(card.sendText);
-                          if (card.autoSend) {
-                            setTimeout(() => {
-                              sendMessage();
-                            }, 0);
-                          }
+                        } else if (card.sendText) {
+                          sendMessage(card.sendText);
                         }
                       }}
                       className="flex-shrink-0 flex flex-col items-start gap-1 rounded-xl border border-border p-3 min-w-[130px] max-w-[160px] text-left hover:border-primary/50 hover:bg-primary/5 transition-colors group"
@@ -1099,7 +1095,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none min-h-[36px] max-h-[200px] py-2"
             />
             <Button
-              onClick={sendMessage}
+              onClick={() => sendMessage()}
               disabled={(!input.trim() && !showModePicker) || loading}
               size="icon"
               className="h-9 w-9 flex-shrink-0 rounded-xl"
