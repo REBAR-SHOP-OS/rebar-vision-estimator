@@ -3,140 +3,290 @@ import { Button } from "@/components/ui/button";
 import { FileSpreadsheet, FileText } from "lucide-react";
 import * as XLSX from "xlsx";
 
+// Rebar unit weights in lb/ft
+const REBAR_UNIT_WEIGHT: Record<string, number> = {
+  "#3": 0.376, "#4": 0.668, "#5": 1.043, "#6": 1.502, "#7": 2.044,
+  "#8": 2.670, "#9": 3.400, "#10": 4.303, "#11": 5.313, "#14": 7.650, "#18": 13.60,
+};
+
 interface ExportButtonsProps {
   quoteResult: any;
   elements: any[];
+  scopeData?: any;
 }
 
-const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteResult, elements }, ref) => {
+const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteResult, elements, scopeData }, ref) => {
+  const barList: any[] = quoteResult.quote.bar_list || [];
+  const sizeBreakdown: Record<string, number> = quoteResult.quote.size_breakdown || {};
+  const totalLbs = quoteResult.quote.total_weight_lbs;
+  const totalTons = quoteResult.quote.total_weight_tons;
+  const dateStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+  // ─── Excel Export ───────────────────────────────────────────────
   const handleExcelExport = () => {
     const wb = XLSX.utils.book_new();
 
-    // Summary sheet
-    const summaryData = [
-      ["Rebar Takeoff Summary"],
+    // ── Sheet 1: Cover Page ──
+    const coverData: any[][] = [
+      ["REBAR ESTIMATOR PRO"],
+      ["Rebar Estimation Report"],
       [],
-      ["Mode", quoteResult.mode === "ai_express" ? "AI Express" : "Verified"],
-      ["Total Weight (lbs)", quoteResult.quote.total_weight_lbs],
-      ["Total Weight (tons)", quoteResult.quote.total_weight_tons],
-      ["Elements Included", quoteResult.included_count || quoteResult.quote.elements.length],
-      ["Elements Excluded", quoteResult.excluded_count || 0],
+      ["Project Name", scopeData?.projectName || "—"],
+      ["Client Name", scopeData?.clientName || "—"],
+      ["Project Type", scopeData?.projectType || "—"],
+      ["Date Generated", dateStr],
+      ["Rebar Coating", scopeData?.coatingType || "Black Steel"],
+      [],
+      ["SCOPE ITEMS INCLUDED"],
+      ...(scopeData?.scopeItems || []).map((s: string) => ["  •  " + s]),
+      [],
+      ["DEVIATIONS / NOTES"],
+      [scopeData?.deviations || "None"],
+      [],
+      ["GRAND TOTAL"],
+      ["Total Weight (lbs)", totalLbs],
+      ["Total Weight (tons)", totalTons],
+      [],
+      ["ELEMENT COUNT"],
+      ["Ready", quoteResult.included_count || quoteResult.quote.elements.length],
+      ["Flagged", elements.filter((e: any) => e.status === "FLAGGED").length],
+      ["Excluded", quoteResult.excluded_count || 0],
     ];
-    const summaryWs = XLSX.utils.aoa_to_sheet(summaryData);
-    XLSX.utils.book_append_sheet(wb, summaryWs, "Summary");
+    const coverWs = XLSX.utils.aoa_to_sheet(coverData);
+    coverWs["!cols"] = [{ wch: 30 }, { wch: 30 }];
+    coverWs["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 1 } },
+    ];
+    XLSX.utils.book_append_sheet(wb, coverWs, "Cover Page");
 
-    // Elements Detail sheet
-    const elemHeaders = ["Element ID", "Element Type", "Weight (lbs)"];
-    const elemRows = quoteResult.quote.elements.map((el: any) => [
-      el.element_id,
-      el.element_type,
-      el.weight_lbs,
-    ]);
-    const elemWs = XLSX.utils.aoa_to_sheet([elemHeaders, ...elemRows]);
-    XLSX.utils.book_append_sheet(wb, elemWs, "Elements Detail");
+    // ── Sheet 2: Bar List (grouped by element type with subtotals) ──
+    const barHeaders = ["Element ID", "Bar Mark", "Size", "Shape Code", "Qty", "Length (ft)", "Unit Wt (lb/ft)", "Total Weight (lbs)"];
+    const barRows: any[][] = [barHeaders];
 
-    // Size Breakdown sheet
-    const sizeHeaders = ["Rebar Size", "Total Weight (lbs)"];
-    const sizeRows = Object.entries(quoteResult.quote.size_breakdown || {}).map(([size, weight]) => [
-      size,
-      weight,
-    ]);
-    const sizeWs = XLSX.utils.aoa_to_sheet([sizeHeaders, ...sizeRows]);
-    XLSX.utils.book_append_sheet(wb, sizeWs, "Size Breakdown");
-
-    // Bar List sheet
-    const barList = quoteResult.quote.bar_list || [];
-    if (barList.length > 0) {
-      const barHeaders = ["Element ID", "Element Type", "Bar Mark", "Size", "Shape Code", "Qty", "Length (ft)", "Weight (lbs)"];
-      const barRows = barList.map((b: any) => [
-        b.element_id,
-        b.element_type,
-        b.bar_mark,
-        b.size,
-        b.shape_code,
-        b.qty,
-        b.length_ft,
-        b.weight_lbs,
-      ]);
-      const barWs = XLSX.utils.aoa_to_sheet([barHeaders, ...barRows]);
-      XLSX.utils.book_append_sheet(wb, barWs, "Bar List");
+    // Group by element_type
+    const grouped: Record<string, any[]> = {};
+    for (const b of barList) {
+      const t = b.element_type || "OTHER";
+      if (!grouped[t]) grouped[t] = [];
+      grouped[t].push(b);
     }
 
-    // Bending Schedule sheet
+    let grandTotal = 0;
+    for (const [type, bars] of Object.entries(grouped)) {
+      // Group header
+      barRows.push([`── ${type} ──`, "", "", "", "", "", "", ""]);
+      let subtotal = 0;
+      for (const b of bars) {
+        const unitWt = REBAR_UNIT_WEIGHT[b.size] || 0;
+        const wt = typeof b.weight_lbs === "number" ? b.weight_lbs : 0;
+        subtotal += wt;
+        barRows.push([b.element_id, b.bar_mark, b.size, b.shape_code, b.qty, b.length_ft, unitWt, wt]);
+      }
+      barRows.push(["", "", "", "", "", "", `${type} Subtotal`, subtotal]);
+      barRows.push([]); // blank spacer
+      grandTotal += subtotal;
+    }
+    barRows.push(["", "", "", "", "", "", "GRAND TOTAL", grandTotal]);
+
+    const barWs = XLSX.utils.aoa_to_sheet(barRows);
+    barWs["!cols"] = [
+      { wch: 16 }, { wch: 10 }, { wch: 8 }, { wch: 12 },
+      { wch: 6 }, { wch: 12 }, { wch: 14 }, { wch: 16 },
+    ];
+    XLSX.utils.book_append_sheet(wb, barWs, "Bar List");
+
+    // ── Sheet 3: Size Summary ──
+    const sizeTotal = Object.values(sizeBreakdown).reduce((a, b) => a + b, 0);
+    const sizeHeaders = ["Rebar Size", "Total Weight (lbs)", "Percentage (%)"];
+    const sortedSizes = Object.entries(sizeBreakdown).sort((a, b) => {
+      const numA = parseInt(a[0].replace("#", ""));
+      const numB = parseInt(b[0].replace("#", ""));
+      return numA - numB;
+    });
+    const sizeRows: any[][] = [sizeHeaders];
+    for (const [size, weight] of sortedSizes) {
+      const pct = sizeTotal > 0 ? ((weight / sizeTotal) * 100).toFixed(1) : "0.0";
+      sizeRows.push([size, weight, pct + "%"]);
+    }
+    sizeRows.push(["TOTAL", sizeTotal, "100%"]);
+    const sizeWs = XLSX.utils.aoa_to_sheet(sizeRows);
+    sizeWs["!cols"] = [{ wch: 14 }, { wch: 20 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, sizeWs, "Size Summary");
+
+    // ── Sheet 4: Bending Schedule ──
     const bentBars = barList.filter((b: any) => b.shape_code && b.shape_code !== "straight" && b.shape_code !== "closed");
     if (bentBars.length > 0) {
       const bendHeaders = ["Element ID", "Bar Mark", "Size", "Shape Code", "Qty", "Length (ft)", "Weight (lbs)"];
-      const bendRows = bentBars.map((b: any) => [
-        b.element_id,
-        b.bar_mark,
-        b.size,
-        b.shape_code,
-        b.qty,
-        b.length_ft,
-        b.weight_lbs,
-      ]);
-      const bendWs = XLSX.utils.aoa_to_sheet([bendHeaders, ...bendRows]);
+      const bendRows: any[][] = [bendHeaders];
+      // Group by shape code
+      const byShape: Record<string, any[]> = {};
+      for (const b of bentBars) {
+        const sc = b.shape_code || "unknown";
+        if (!byShape[sc]) byShape[sc] = [];
+        byShape[sc].push(b);
+      }
+      for (const [shape, bars] of Object.entries(byShape)) {
+        bendRows.push([`── ${shape} ──`, "", "", "", "", "", ""]);
+        for (const b of bars) {
+          bendRows.push([b.element_id, b.bar_mark, b.size, b.shape_code, b.qty, b.length_ft, b.weight_lbs]);
+        }
+        bendRows.push([]);
+      }
+      const bendWs = XLSX.utils.aoa_to_sheet(bendRows);
+      bendWs["!cols"] = [{ wch: 16 }, { wch: 10 }, { wch: 8 }, { wch: 12 }, { wch: 6 }, { wch: 12 }, { wch: 16 }];
       XLSX.utils.book_append_sheet(wb, bendWs, "Bending Schedule");
     }
 
-    XLSX.writeFile(wb, "rebar-takeoff.xlsx");
+    // ── Sheet 5: Elements Detail ──
+    const elemHeaders = ["Element ID", "Type", "Status", "Confidence (%)", "Total Weight (lbs)"];
+    const elemRows: any[][] = [elemHeaders];
+    for (const el of elements) {
+      const conf = el.extraction?.confidence !== undefined ? (el.extraction.confidence * 100).toFixed(0) : "—";
+      const wInfo = quoteResult.quote.elements.find((q: any) => q.element_id === el.element_id);
+      const wt = wInfo ? wInfo.weight_lbs : "—";
+      elemRows.push([el.element_id, el.element_type, el.status, conf, wt]);
+    }
+    const elemWs = XLSX.utils.aoa_to_sheet(elemRows);
+    elemWs["!cols"] = [{ wch: 16 }, { wch: 14 }, { wch: 10 }, { wch: 16 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, elemWs, "Elements Detail");
+
+    // ── Sheet 6: Notes ──
+    const notesData: any[][] = [
+      ["PROJECT NOTES"],
+      [],
+      ["Deviations", scopeData?.deviations || "None"],
+      [],
+      ["Scope Items"],
+      ...(scopeData?.scopeItems || []).map((s: string) => ["  •  " + s]),
+      [],
+      ["Calculation Mode", quoteResult.mode === "ai_express" ? "AI Express" : "Verified"],
+      [],
+      ["DISCLAIMER"],
+      ["This estimation is generated by Rebar Estimator Pro and should be verified by a qualified engineer before use in construction."],
+      ["Generated on " + dateStr],
+    ];
+    const notesWs = XLSX.utils.aoa_to_sheet(notesData);
+    notesWs["!cols"] = [{ wch: 20 }, { wch: 60 }];
+    XLSX.utils.book_append_sheet(wb, notesWs, "Notes");
+
+    const projectSlug = (scopeData?.projectName || "rebar-takeoff").replace(/\s+/g, "_");
+    XLSX.writeFile(wb, `${projectSlug}_Estimation_File.xlsx`);
   };
 
+  // ─── PDF Export ─────────────────────────────────────────────────
   const handlePdfExport = () => {
     const printWindow = window.open("", "_blank");
     if (!printWindow) return;
 
-    const barList = quoteResult.quote.bar_list || [];
-    const barListHtml = barList.length > 0 ? `
-      <h2>Bar List</h2>
-      <table>
-        <tr><th>Element</th><th>Bar Mark</th><th>Size</th><th>Shape</th><th>Qty</th><th>Length (ft)</th><th>Weight (lbs)</th></tr>
-        ${barList.map((b: any) => `<tr><td>${b.element_id}</td><td>${b.bar_mark}</td><td>${b.size}</td><td>${b.shape_code}</td><td>${b.qty}</td><td>${b.length_ft}</td><td>${b.weight_lbs}</td></tr>`).join("")}
-      </table>
+    // Build grouped bar list HTML
+    const grouped: Record<string, any[]> = {};
+    for (const b of barList) {
+      const t = b.element_type || "OTHER";
+      if (!grouped[t]) grouped[t] = [];
+      grouped[t].push(b);
+    }
+
+    let barListHtml = "";
+    let grandTotal = 0;
+    for (const [type, bars] of Object.entries(grouped)) {
+      let subtotal = 0;
+      barListHtml += `<tr class="group-header"><td colspan="8">${type}</td></tr>`;
+      for (const b of bars) {
+        const unitWt = REBAR_UNIT_WEIGHT[b.size] || 0;
+        const wt = typeof b.weight_lbs === "number" ? b.weight_lbs : 0;
+        subtotal += wt;
+        barListHtml += `<tr><td>${b.element_id}</td><td>${b.bar_mark || "—"}</td><td>${b.size}</td><td>${b.shape_code || "—"}</td><td>${b.qty}</td><td>${b.length_ft}</td><td>${unitWt.toFixed(3)}</td><td>${wt.toLocaleString()}</td></tr>`;
+      }
+      barListHtml += `<tr class="subtotal"><td colspan="7" style="text-align:right">${type} Subtotal</td><td>${subtotal.toLocaleString()}</td></tr>`;
+      grandTotal += subtotal;
+    }
+    barListHtml += `<tr class="grand-total"><td colspan="7" style="text-align:right">GRAND TOTAL</td><td>${grandTotal.toLocaleString()}</td></tr>`;
+
+    // Size summary with percentages
+    const sizeTotal = Object.values(sizeBreakdown).reduce((a, b) => a + b, 0);
+    const sortedSizes = Object.entries(sizeBreakdown).sort((a, b) => parseInt(a[0].replace("#", "")) - parseInt(b[0].replace("#", "")));
+    const sizeHtml = sortedSizes.map(([size, w]) => {
+      const pct = sizeTotal > 0 ? ((w / sizeTotal) * 100).toFixed(1) : "0.0";
+      return `<tr><td>${size}</td><td>${w.toLocaleString()}</td><td>${pct}%</td></tr>`;
+    }).join("") + `<tr class="grand-total"><td>TOTAL</td><td>${sizeTotal.toLocaleString()}</td><td>100%</td></tr>`;
+
+    // Bending schedule
+    const bentBars = barList.filter((b: any) => b.shape_code && b.shape_code !== "straight" && b.shape_code !== "closed");
+    const bendHtml = bentBars.length > 0 ? `
+      <div class="section page-break">
+        <h2>Bending Schedule</h2>
+        <table>
+          <tr><th>Element</th><th>Bar Mark</th><th>Size</th><th>Shape</th><th>Qty</th><th>Length (ft)</th><th>Weight (lbs)</th></tr>
+          ${bentBars.map((b: any) => `<tr><td>${b.element_id}</td><td>${b.bar_mark || "—"}</td><td>${b.size}</td><td>${b.shape_code}</td><td>${b.qty}</td><td>${b.length_ft}</td><td>${b.weight_lbs}</td></tr>`).join("")}
+        </table>
+      </div>
     ` : "";
 
-    const html = `
-      <!DOCTYPE html>
-      <html><head><title>Rebar Takeoff Report</title>
-      <style>
-        body { font-family: Arial, sans-serif; padding: 40px; color: #333; }
-        h1 { color: #1a1a2e; border-bottom: 2px solid #1a1a2e; padding-bottom: 8px; }
-        h2 { color: #16213e; margin-top: 24px; }
-        table { width: 100%; border-collapse: collapse; margin: 12px 0; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 13px; }
-        th { background: #f0f0f0; font-weight: 600; }
-        .summary { display: flex; gap: 40px; margin: 16px 0; }
-        .summary-item { text-align: center; }
-        .summary-item .value { font-size: 28px; font-weight: 700; color: #1a1a2e; }
-        .summary-item .label { font-size: 12px; color: #666; }
-        @media print { body { padding: 20px; } }
-      </style></head><body>
-        <h1>Rebar Takeoff Report</h1>
-        <p>Mode: ${quoteResult.mode === "ai_express" ? "AI Express" : "Verified"}</p>
-        <div class="summary">
-          <div class="summary-item">
-            <div class="value">${quoteResult.quote.total_weight_lbs.toLocaleString()}</div>
-            <div class="label">Total Weight (lbs)</div>
-          </div>
-          <div class="summary-item">
-            <div class="value">${quoteResult.quote.total_weight_tons}</div>
-            <div class="label">Total Weight (tons)</div>
-          </div>
-        </div>
-        <h2>Elements</h2>
-        <table>
-          <tr><th>Element ID</th><th>Type</th><th>Weight (lbs)</th></tr>
-          ${quoteResult.quote.elements.map((el: any) => `<tr><td>${el.element_id}</td><td>${el.element_type}</td><td>${el.weight_lbs}</td></tr>`).join("")}
-        </table>
-        <h2>Size Breakdown</h2>
-        <table>
-          <tr><th>Rebar Size</th><th>Weight (lbs)</th></tr>
-          ${Object.entries(quoteResult.quote.size_breakdown || {}).map(([size, w]) => `<tr><td>${size}</td><td>${w}</td></tr>`).join("")}
-        </table>
-        ${barListHtml}
-        <p style="margin-top:24px;font-size:11px;color:#999;">Generated by Rebar Estimator Pro</p>
-      </body></html>
-    `;
+    const html = `<!DOCTYPE html><html><head><title>Rebar Estimation Report</title>
+<style>
+  @page { margin: 0.75in; size: letter; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a2e; margin: 0; padding: 40px; font-size: 12px; }
+  .header { border-bottom: 3px solid #1a1a2e; padding-bottom: 12px; margin-bottom: 24px; }
+  .header h1 { margin: 0; font-size: 22px; color: #1a1a2e; }
+  .header .subtitle { font-size: 13px; color: #555; margin-top: 4px; }
+  .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; margin-bottom: 20px; font-size: 12px; }
+  .meta-grid .label { font-weight: 600; color: #333; }
+  .meta-grid .value { color: #555; }
+  .summary-boxes { display: flex; gap: 24px; margin: 20px 0; }
+  .summary-box { text-align: center; flex: 1; padding: 14px; border: 1px solid #ddd; border-radius: 6px; }
+  .summary-box .num { font-size: 26px; font-weight: 700; color: #1a1a2e; }
+  .summary-box .lbl { font-size: 10px; color: #777; text-transform: uppercase; letter-spacing: 0.5px; }
+  .section { margin-top: 28px; }
+  .page-break { page-break-before: always; }
+  h2 { font-size: 15px; color: #1a1a2e; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 10px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px; }
+  th { background: #1a1a2e; color: #fff; padding: 6px 8px; text-align: left; font-weight: 600; font-size: 10px; text-transform: uppercase; }
+  td { padding: 5px 8px; border-bottom: 1px solid #eee; }
+  tr:nth-child(even) { background: #f9f9fb; }
+  .group-header td { background: #e8e8f0; font-weight: 700; font-size: 11px; padding: 8px; border-bottom: 2px solid #1a1a2e; }
+  .subtotal td { background: #f0f0f5; font-weight: 600; border-top: 1px solid #999; }
+  .grand-total td { background: #1a1a2e; color: #fff; font-weight: 700; font-size: 12px; }
+  .footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #ccc; font-size: 9px; color: #999; text-align: center; }
+  @media print { .page-break { page-break-before: always; } body { padding: 0; } }
+</style></head><body>
+  <div class="header">
+    <h1>Rebar Estimation Report</h1>
+    <div class="subtitle">${scopeData?.projectName || "Project"} — ${dateStr}</div>
+  </div>
+  <div class="meta-grid">
+    <div><span class="label">Client:</span> <span class="value">${scopeData?.clientName || "—"}</span></div>
+    <div><span class="label">Project Type:</span> <span class="value">${scopeData?.projectType || "—"}</span></div>
+    <div><span class="label">Mode:</span> <span class="value">${quoteResult.mode === "ai_express" ? "AI Express" : "Verified"}</span></div>
+    <div><span class="label">Coating:</span> <span class="value">${scopeData?.coatingType || "Black Steel"}</span></div>
+  </div>
+  <div class="summary-boxes">
+    <div class="summary-box"><div class="num">${totalLbs.toLocaleString()}</div><div class="lbl">Total Weight (lbs)</div></div>
+    <div class="summary-box"><div class="num">${totalTons}</div><div class="lbl">Total Weight (tons)</div></div>
+    <div class="summary-box"><div class="num">${quoteResult.included_count || quoteResult.quote.elements.length}</div><div class="lbl">Elements Included</div></div>
+  </div>
+
+  <div class="section">
+    <h2>Bar List</h2>
+    <table>
+      <tr><th>Element</th><th>Bar Mark</th><th>Size</th><th>Shape</th><th>Qty</th><th>Length (ft)</th><th>Unit Wt</th><th>Weight (lbs)</th></tr>
+      ${barListHtml}
+    </table>
+  </div>
+
+  <div class="section page-break">
+    <h2>Size Summary</h2>
+    <table>
+      <tr><th>Rebar Size</th><th>Weight (lbs)</th><th>Percentage</th></tr>
+      ${sizeHtml}
+    </table>
+  </div>
+
+  ${bendHtml}
+
+  <div class="footer">Generated by Rebar Estimator Pro &bull; ${dateStr}</div>
+</body></html>`;
 
     printWindow.document.write(html);
     printWindow.document.close();
