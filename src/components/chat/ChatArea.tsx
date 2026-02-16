@@ -641,17 +641,28 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-primary mb-5">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>
               </div>
-              <h3 className="text-xl font-semibold text-foreground mb-2">
-                Welcome to Rebar Estimator Pro
+              <h3 className="text-xl font-bold text-foreground mb-2">
+                Upload Your Blueprint
               </h3>
-              <p className="text-muted-foreground text-sm mb-4">
-                Upload your construction blueprint files (PDF or images) using the 📎 button below to get started with rebar weight and wire mesh estimation.
+              <p className="text-muted-foreground text-sm mb-5">
+                Drag and drop your files below or click the 📎 button to upload PDF, DWG, or image files.
               </p>
-              <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-left">
+              {/* Drop zone */}
+              <div
+                className="w-full rounded-xl border-2 border-dashed border-primary/30 bg-primary/5 p-8 cursor-pointer hover:border-primary/50 hover:bg-primary/10 transition-all"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <div className="flex flex-col items-center gap-2">
+                  <div className="flex gap-3 text-2xl">📄 🏗️ 📐</div>
+                  <p className="text-xs font-semibold text-primary">Click to upload files</p>
+                  <p className="text-[10px] text-muted-foreground">PDF, DWG, PNG, JPG supported</p>
+                </div>
+              </div>
+              <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-left mt-5 w-full">
                 <p className="text-xs text-destructive flex items-start gap-2">
                   <span className="text-base leading-none mt-0.5">⚠️</span>
                   <span>
-                    <strong>Important:</strong> This app is an AI-powered estimation tool and may produce errors or inaccurate results. Always double-check and verify the calculations against your original blueprints before using them in any project.
+                    <strong>Important:</strong> This app is an AI-powered estimation tool and may produce errors. Always verify calculations against your original blueprints.
                   </span>
                 </p>
               </div>
@@ -722,9 +733,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       </div>
 
       {/* Input Bar */}
-      <div className="border-t border-border bg-background/80 backdrop-blur-sm p-4">
+      <div className="border-t border-border bg-background/80 backdrop-blur-sm p-3">
         <div className="mx-auto max-w-3xl">
-          <div className="flex items-end gap-2 rounded-xl border border-border bg-chat-input p-2">
+          <div className="flex items-end gap-2 rounded-2xl border border-border bg-chat-input p-2 shadow-sm">
             <input
               ref={fileInputRef}
               type="file"
@@ -737,9 +748,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               variant="ghost"
               size="icon"
               onClick={() => fileInputRef.current?.click()}
-              className="h-9 w-9 flex-shrink-0 text-muted-foreground hover:text-foreground"
+              className="h-9 w-9 flex-shrink-0 text-muted-foreground hover:text-primary rounded-xl"
+              title="Attach files"
             >
-              <Paperclip className="h-5 w-5" />
+              <Paperclip className="h-4 w-4" />
             </Button>
             <textarea
               ref={textareaRef}
@@ -754,7 +766,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               onClick={sendMessage}
               disabled={(!input.trim() && !showModePicker) || loading}
               size="icon"
-              className="h-9 w-9 flex-shrink-0 rounded-lg"
+              className="h-9 w-9 flex-shrink-0 rounded-xl"
             >
               {loading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -763,9 +775,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               )}
             </Button>
           </div>
-          <p className="mt-2 text-center text-xs text-muted-foreground">
-            AI-powered rebar and wire mesh estimation from construction blueprints
-          </p>
+          <div className="flex items-center justify-center gap-2 mt-2">
+            <span className="text-[10px] text-muted-foreground">Powered by AI</span>
+            <span className="text-[10px] text-muted-foreground/50">•</span>
+            <span className="text-[10px] text-muted-foreground/50">Shift+Enter for new line</span>
+          </div>
         </div>
       </div>
     </div>

@@ -4,24 +4,23 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Settings2, ArrowRight } from "lucide-react";
+import { ArrowRight, Info } from "lucide-react";
 
 const SCOPE_ITEMS = [
-  { id: "FOOTING", label: "Footings" },
-  { id: "GRADE_BEAM", label: "Grade Beams" },
-  { id: "RAFT_SLAB", label: "Raft Slabs" },
-  { id: "BEAM", label: "Beams" },
-  { id: "WALL", label: "Walls" },
-  { id: "RETAINING_WALL", label: "Retaining Walls" },
-  { id: "ICF_WALL", label: "ICF Walls" },
-  { id: "CMU_WALL", label: "CMU Walls" },
-  { id: "PIER", label: "Piers / Pedestals" },
-  { id: "COLUMN", label: "Columns" },
-  { id: "SLAB", label: "Slabs" },
-  { id: "STAIR", label: "Stairs" },
-  { id: "WIRE_MESH", label: "Wire Mesh" },
+  { id: "FOOTING", label: "Footings", category: "Foundation" },
+  { id: "GRADE_BEAM", label: "Grade Beams", category: "Foundation" },
+  { id: "RAFT_SLAB", label: "Raft Slabs", category: "Foundation" },
+  { id: "PIER", label: "Piers / Pedestals", category: "Foundation" },
+  { id: "BEAM", label: "Beams", category: "Structural" },
+  { id: "COLUMN", label: "Columns", category: "Structural" },
+  { id: "SLAB", label: "Slabs", category: "Structural" },
+  { id: "STAIR", label: "Stairs", category: "Structural" },
+  { id: "WALL", label: "Walls", category: "Walls" },
+  { id: "RETAINING_WALL", label: "Retaining Walls", category: "Walls" },
+  { id: "ICF_WALL", label: "ICF Walls", category: "Walls" },
+  { id: "CMU_WALL", label: "CMU Walls", category: "Walls" },
+  { id: "WIRE_MESH", label: "Wire Mesh", category: "Other" },
 ] as const;
 
 const REBAR_COATING_TYPES = [
@@ -67,91 +66,112 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
 
   const handleProceed = () => {
     if (selectedItems.length === 0) return;
-    onProceed({
-      scopeItems: selectedItems,
-      clientName,
-      projectType,
-      deviations,
-      rebarCoating,
-    });
+    onProceed({ scopeItems: selectedItems, clientName, projectType, deviations, rebarCoating });
   };
 
+  // Group by category
+  const categories = SCOPE_ITEMS.reduce<Record<string, typeof SCOPE_ITEMS[number][]>>((acc, item) => {
+    if (!acc[item.category]) acc[item.category] = [];
+    acc[item.category].push(item);
+    return acc;
+  }, {});
+
   return (
-    <Card className="border-primary/20 bg-card">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Settings2 className="h-5 w-5 text-primary" />
-          Define Takeoff Scope
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Element Type Checkboxes */}
+    <div className="rounded-xl border-2 border-primary/20 bg-card overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-3 p-4 border-b border-border bg-primary/5">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground text-sm font-bold">2</div>
         <div>
-          <div className="flex items-center justify-between mb-2">
-            <Label className="text-sm font-medium">Element Types</Label>
-            <button
-              type="button"
-              onClick={toggleAll}
-              className="text-xs text-primary hover:underline"
-            >
+          <h3 className="text-sm font-semibold text-foreground">Define Takeoff Scope</h3>
+          <p className="text-xs text-muted-foreground">Select elements and project details</p>
+        </div>
+      </div>
+
+      <div className="p-4 space-y-5">
+        {/* Info Box */}
+        <div className="flex items-start gap-2 rounded-lg bg-primary/5 border border-primary/15 p-3">
+          <Info className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Select the element types present in your blueprint. The AI will focus on these items during estimation. You can always adjust later.
+          </p>
+        </div>
+
+        {/* Element Types by Category */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <Label className="text-xs font-semibold text-foreground uppercase tracking-wider">Element Types</Label>
+            <button type="button" onClick={toggleAll} className="text-xs text-primary hover:underline font-medium">
               {selectedItems.length === SCOPE_ITEMS.length ? "Deselect All" : "Select All"}
             </button>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {SCOPE_ITEMS.map((item) => (
-              <label
-                key={item.id}
-                className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-accent/50 transition-colors"
-              >
-                <Checkbox
-                  checked={selectedItems.includes(item.id)}
-                  onCheckedChange={() => toggleItem(item.id)}
-                />
-                <span className="text-foreground">{item.label}</span>
-              </label>
+          <div className="space-y-3">
+            {Object.entries(categories).map(([cat, items]) => (
+              <div key={cat}>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5 px-1">{cat}</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                  {items.map((item) => (
+                    <label
+                      key={item.id}
+                      className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs cursor-pointer transition-all ${
+                        selectedItems.includes(item.id)
+                          ? "border-primary/40 bg-primary/5 text-foreground"
+                          : "border-border hover:bg-accent/50 text-muted-foreground"
+                      }`}
+                    >
+                      <Checkbox
+                        checked={selectedItems.includes(item.id)}
+                        onCheckedChange={() => toggleItem(item.id)}
+                        className="h-3.5 w-3.5"
+                      />
+                      <span>{item.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </div>
 
-        {/* Rebar Coating Type */}
+        {/* Rebar Coating */}
         <div>
-          <Label className="text-xs text-muted-foreground">Rebar Coating Type</Label>
-          <div className="grid grid-cols-2 gap-2 mt-1">
+          <Label className="text-xs font-semibold text-foreground uppercase tracking-wider mb-2 block">Rebar Coating</Label>
+          <div className="grid grid-cols-2 gap-1.5">
             {REBAR_COATING_TYPES.map((coating) => (
               <label
                 key={coating.id}
-                className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-accent/50 transition-colors"
+                className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs cursor-pointer transition-all ${
+                  rebarCoating === coating.id
+                    ? "border-primary/40 bg-primary/5 text-foreground"
+                    : "border-border hover:bg-accent/50 text-muted-foreground"
+                }`}
               >
                 <Checkbox
                   checked={rebarCoating === coating.id}
                   onCheckedChange={() => setRebarCoating(coating.id)}
+                  className="h-3.5 w-3.5"
                 />
-                <span className="text-foreground">{coating.label}</span>
+                <span>{coating.label}</span>
               </label>
             ))}
           </div>
         </div>
 
-        {/* Metadata */}
+        {/* Project Details */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <Label htmlFor="clientName" className="text-xs text-muted-foreground">
-              Client Name (optional)
-            </Label>
+            <Label htmlFor="clientName" className="text-xs text-muted-foreground mb-1 block">Client Name</Label>
             <Input
               id="clientName"
               value={clientName}
               onChange={(e) => setClientName(e.target.value)}
               placeholder="e.g. ABC Construction"
-              className="mt-1 h-9 text-sm"
+              className="h-9 text-xs rounded-lg"
             />
           </div>
           <div>
-            <Label htmlFor="projectType" className="text-xs text-muted-foreground">
-              Project Type (optional)
-            </Label>
+            <Label htmlFor="projectType" className="text-xs text-muted-foreground mb-1 block">Project Type</Label>
             <Select value={projectType} onValueChange={setProjectType}>
-              <SelectTrigger className="mt-1 h-9 text-sm">
+              <SelectTrigger className="h-9 text-xs rounded-lg">
                 <SelectValue placeholder="Select type" />
               </SelectTrigger>
               <SelectContent>
@@ -166,30 +186,28 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
 
         {/* Deviations */}
         <div>
-          <Label htmlFor="deviations" className="text-xs text-muted-foreground">
-            Project-Specific Deviations (optional)
-          </Label>
+          <Label htmlFor="deviations" className="text-xs text-muted-foreground mb-1 block">Project Notes / Deviations</Label>
           <Textarea
             id="deviations"
             value={deviations}
             onChange={(e) => setDeviations(e.target.value)}
-            placeholder="Any special notes, exclusions, or deviations from standard..."
-            className="mt-1 text-sm min-h-[60px]"
+            placeholder="Any special notes, exclusions, or deviations from standard practice..."
+            className="text-xs min-h-[50px] rounded-lg"
             rows={2}
           />
         </div>
 
-        {/* Proceed */}
+        {/* Proceed Button */}
         <Button
           onClick={handleProceed}
           disabled={disabled || selectedItems.length === 0}
-          className="w-full gap-2"
+          className="w-full gap-2 h-10 rounded-xl font-semibold"
         >
           Proceed with {selectedItems.length} element type{selectedItems.length !== 1 ? "s" : ""}
           <ArrowRight className="h-4 w-4" />
         </Button>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 };
 
