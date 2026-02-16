@@ -15,6 +15,7 @@ export const ELEMENT_TYPE_COLORS: Record<string, string> = {
   ICF_WALL: "#8B5CF6",
   CMU_WALL: "#8B5CF6",
   WIRE_MESH: "#6B7280",
+  CAGE: "#F97316",
   OTHER: "#6B7280",
 };
 

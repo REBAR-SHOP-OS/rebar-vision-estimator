@@ -21,6 +21,7 @@ const SCOPE_ITEMS = [
   { id: "ICF_WALL", label: "ICF Walls", category: "Walls" },
   { id: "CMU_WALL", label: "CMU Walls", category: "Walls" },
   { id: "WIRE_MESH", label: "Wire Mesh", category: "Other" },
+  { id: "CAGE", label: "Cage", category: "Assemblies" },
 ] as const;
 
 const REBAR_COATING_TYPES = [
