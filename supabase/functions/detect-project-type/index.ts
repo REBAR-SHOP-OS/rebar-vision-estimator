@@ -99,6 +99,16 @@ serve(async (req) => {
           contentParts.push({ type: "image_url", image_url: { url: `data:application/pdf;base64,${encodeBase64(buf)}` } });
         } catch {}
       } else {
+        // Check if this is a supported image format
+        const supportedImageExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif'];
+        const fileExt = urlLower.split('.').pop()?.split('?')[0] || '';
+        const isSupportedImage = supportedImageExts.some(ext => ext === `.${fileExt}`);
+        
+        if (!isSupportedImage) {
+          console.log(`Skipping unsupported file format: .${fileExt}`);
+          continue;
+        }
+        
         // Image - run quick OCR + send to Gemini
         contentParts.push({ type: "image_url", image_url: { url } });
         if (accessToken) {
