@@ -1,162 +1,90 @@
 
 
-## پیاده‌سازی Pipeline "Atomic Truth" با روش ترکیبی + Pricing
+## پیاده‌سازی Google Vision API برای OCR واقعی
 
-این پلن سیستم تحلیل نقشه را از یک prompt ساده به یک pipeline ساختاریافته با validation gates، question generation، و دو حالت قیمت‌گذاری ارتقا می‌دهد.
+Service Account شما دریافت شد. این پلن Google Vision API را به عنوان موتور OCR اصلی در pipeline جایگزین OCR شبیه‌سازی‌شده Gemini می‌کند.
 
 ---
 
-### معماری کلی
+### تغییرات
 
-سیستم از ۳ لایه تشکیل می‌شود:
+#### 1. ذخیره Service Account به عنوان Secret
 
-1. **AI Analysis Layer** - مدل Gemini با system prompt جدید که خروجی JSON ساختاریافته (ElementUnit) تولید می‌کند
-2. **Validation Layer** - Edge Function جدید که خروجی AI را validate می‌کند (Gates + Question Generation)
-3. **Pricing Layer** - Edge Function جدید که فقط عناصر READY را قبول و قیمت‌گذاری می‌کند
+کل محتوای فایل JSON سرویس اکانت به عنوان یک secret با نام `GOOGLE_VISION_SA_KEY` ذخیره می‌شود. Edge Function این secret را می‌خواند، JWT تولید می‌کند، و access token از Google دریافت می‌کند.
+
+#### 2. بازنویسی `supabase/functions/analyze-blueprint/index.ts`
+
+تغییرات اصلی:
+- اضافه شدن تابع `getGoogleAccessToken()` که از service account یک JWT می‌سازد و آن را با Google OAuth2 تبادل کرده و access token دریافت می‌کند
+- اضافه شدن تابع `callVisionAPI(imageBase64, features)` که با access token واقعی Google Vision API را فراخوانی می‌کند
+- اضافه شدن تابع `tripleOCR(imageBase64)` که 3 پاس OCR واقعی اجرا می‌کند:
+  - **Pass 1 (STANDARD)**: `TEXT_DETECTION` - تشخیص متن عمومی
+  - **Pass 2 (ENHANCED)**: `DOCUMENT_TEXT_DETECTION` - تشخیص متن سند (دقت بالاتر برای اعداد کوچک)
+  - **Pass 3 (ALT_CROP)**: `TEXT_DETECTION` با `imageContext.languageHints` برای تمرکز روی اعداد و نشانه‌های فنی
+- هر پاس confidence و bbox واقعی از Vision API برمی‌گرداند
+- نتایج OCR واقعی به system prompt اضافه می‌شوند تا Gemini از داده‌های دقیق‌تر استفاده کند
 
 ```text
-[Blueprint Upload]
-       |
-       v
-[analyze-blueprint] -- AI outputs ElementUnit[] JSON
-       |
-       v
-[validate-elements] -- Runs 4 Gates + generates Questions
-       |
-       v
-[Frontend] -- Shows results, asks questions for FLAGGED items
-       |
-       v
-[price-elements] -- Only accepts READY elements
-       |
-       v
-[AI Express / Verified Quote]
+Flow جدید:
+1. PDF/Image دریافت می‌شود
+2. تصاویر به Google Vision API ارسال -> 3 پاس OCR واقعی
+3. نتایج OCR (متن + confidence + bbox) به Gemini ارسال
+4. Gemini با داده‌های OCR واقعی تحلیل ساختاری انجام می‌دهد
+5. خروجی ElementUnit[] با engine: "google-vision" به جای "gemini-vision"
+```
+
+#### 3. تغییرات System Prompt
+
+System prompt به‌روز می‌شود تا:
+- به Gemini بگوید که نتایج OCR واقعی از Google Vision API دریافت شده
+- Gemini وظیفه تحلیل ساختاری (شناسایی elements، regions، schedules) را دارد نه OCR
+- engine در ocr_passes به `"google-vision"` تغییر می‌کند
+- confidence مقادیر واقعی Vision API خواهد بود
+
+---
+
+### جزئیات فنی JWT Authentication
+
+```text
+1. Service Account JSON را از secret بخوان
+2. JWT Header: {"alg": "RS256", "typ": "JWT"}
+3. JWT Payload: {
+     "iss": client_email,
+     "scope": "https://www.googleapis.com/auth/cloud-vision",
+     "aud": "https://oauth2.googleapis.com/token",
+     "iat": now,
+     "exp": now + 3600
+   }
+4. JWT را با private_key امضا کن (RS256)
+5. POST به https://oauth2.googleapis.com/token
+6. access_token دریافت و در Vision API استفاده کن
+```
+
+### Vision API Calls
+
+```text
+POST https://vision.googleapis.com/v1/images:annotate
+Authorization: Bearer {access_token}
+
+Pass 1 (STANDARD):
+  features: [{ type: "TEXT_DETECTION" }]
+
+Pass 2 (ENHANCED):
+  features: [{ type: "DOCUMENT_TEXT_DETECTION" }]
+
+Pass 3 (ALT_CROP):
+  features: [{ type: "TEXT_DETECTION" }]
+  imageContext: { languageHints: ["en"] }
 ```
 
 ---
 
-### تغییرات فایل‌ها
+### فایل‌های تغییر یافته
 
-#### 1. `supabase/functions/analyze-blueprint/index.ts` - بازنویسی System Prompts
+| فایل | نوع تغییر |
+|---|---|
+| `supabase/functions/analyze-blueprint/index.ts` | بازنویسی - اضافه Vision API + JWT auth |
+| Secret: `GOOGLE_VISION_SA_KEY` | جدید - ذخیره service account JSON |
 
-هر دو system prompt (Smart و Step-by-Step) بازنویسی می‌شوند تا:
-- تمام JSON Schema های ElementUnit، ElementTruth، و Question را شامل شوند
-- دستورالعمل 9-مرحله‌ای pipeline (Scope Load تا Pricing Export) در prompt قرار گیرد
-- خروجی AI به صورت JSON ساختاریافته باشد نه متن آزاد
-- Thresholds (confidence 0.82، min 2 sources، و...) در prompt تعریف شوند
-- Minor diff normalization rules (O/0، I/1، S/5) ذکر شوند
-- Gate logic دقیق (Identity، Completeness، Consistency، Scope) توضیح داده شود
-- AI موظف باشد هر element را با status مشخص (READY/FLAGGED/BLOCKED) برگرداند
-
-تغییر مهم: خروجی AI حالا یک JSON wrapper خواهد داشت:
-```text
-{
-  "elements": [ElementUnit, ...],
-  "summary": { ... },
-  "quote_modes": {
-    "ai_express": { "ready_elements": [...], "excluded": [...] },
-    "verified": { "status": "ready" | "pending_answers" }
-  }
-}
-```
-
-همچنین بخش تحلیل متنی (مرحله‌به‌مرحله با جداول و توضیحات) حفظ می‌شود تا کاربر بتواند نتایج را بخواند. JSON ساختاریافته در انتهای پاسخ در یک بلوک مشخص قرار می‌گیرد.
-
-#### 2. ساخت Edge Function جدید: `supabase/functions/validate-elements/index.ts`
-
-این تابع ElementUnit[] را از frontend دریافت و:
-- **Identity Gate**: بررسی identity_sources.count >= 2
-- **Completeness Gate**: بررسی وجود vertical_bars.size، vertical_bars.qty، ties.size، ties.spacing_mm
-- **Consistency Gate**: مقایسه SCHEDULE_ROW با DETAIL و TAG
-- **Scope Gate**: بررسی element_type در لیست مجاز
-- status هر element را تعیین می‌کند (READY/FLAGGED/BLOCKED)
-- برای عناصر FLAGGED، سوالات تولید می‌کند (حداکثر 2 سوال در هر element، 3 در هر job)
-- اولویت سوالات: tie spacing > vertical qty > bar size > other
-- اگر flagged_elements_count > 3، job را HUMAN_REVIEW_REQUIRED می‌کند
-
-#### 3. ساخت Edge Function جدید: `supabase/functions/price-elements/index.ts`
-
-این تابع:
-- فقط ElementTruth با status=READY قبول می‌کند
-- اگر FLAGGED/BLOCKED دریافت کند، hard error برمی‌گرداند
-- دو خروجی تولید می‌کند:
-  - **AI Express**: فقط READY elements + لیست excluded با دلایل
-  - **Verified**: اگر همه READY باشند quote نهایی، وگرنه "pending answers"
-
-#### 4. تغییر `src/components/chat/ChatArea.tsx`
-
-- پس از دریافت پاسخ AI، JSON ساختاریافته را parse می‌کند
-- آن را به validate-elements ارسال می‌کند
-- نتایج validation (gates, questions, status) را نمایش می‌دهد
-- اگر سوالاتی وجود داشته باشد، به کاربر نمایش می‌دهد
-- پس از پاسخ کاربر به سوالات، re-validate می‌کند
-- در نهایت price-elements را فراخوانی و نتیجه quote را نمایش می‌دهد
-
-#### 5. ساخت کامپوننت جدید: `src/components/chat/ValidationResults.tsx`
-
-کامپوننت UI برای نمایش:
-- لیست elements با status هر کدام (READY سبز، FLAGGED زرد، BLOCKED قرمز)
-- Gate results به صورت بصری
-- سوالات interactive برای عناصر FLAGGED
-- خلاصه quote (AI Express و Verified)
-
-#### 6. ساخت کامپوننت جدید: `src/components/chat/QuestionCard.tsx`
-
-کامپوننت برای نمایش هر سوال:
-- عنوان element و field مورد نظر
-- نوع مشکل (CONFLICT, LOW_CONFIDENCE, MISSING)
-- گزینه‌ها برای انتخاب
-- severity badge (LOW/MED/HIGH/BLOCKING)
-
-#### 7. تغییر `supabase/config.toml`
-
-اضافه کردن دو function جدید:
-```text
-[functions.validate-elements]
-verify_jwt = false
-
-[functions.price-elements]
-verify_jwt = false
-```
-
----
-
-### جزئیات فنی Pipeline
-
-**مرحله 1-4 (AI در analyze-blueprint):**
-AI مدل Gemini با prompt جدید تمام مراحل Scope Load، Finder، Region Builder، و Triple OCR (شبیه‌سازی شده) را انجام می‌دهد و نتیجه را به فرمت ElementUnit[] خروجی می‌دهد.
-
-**مرحله 5-6 (validate-elements):**
-Edge Function بدون AI، با logic خالص JavaScript:
-- Field Voting بر اساس OCR passes
-- Normalization (O/0، I/1، S/5)
-- اجرای 4 Gate
-- تولید Questions
-
-**مرحله 7-9 (price-elements):**
-Edge Function بدون AI:
-- فیلتر READY elements
-- محاسبه وزن نهایی بر اساس ElementTruth
-- تولید AI Express و Verified quotes
-
-**Flow در Frontend:**
-```text
-1. کاربر blueprint آپلود می‌کند
-2. انتخاب mode (Smart / Step-by-Step)
-3. AI تحلیل انجام می‌دهد -> متن + JSON
-4. Frontend JSON را extract و به validate-elements ارسال
-5. نتایج validation نمایش داده می‌شود
-6. اگر سوال وجود دارد -> کاربر پاسخ می‌دهد
-7. Re-validate با پاسخ‌های کاربر
-8. price-elements فراخوانی -> quote نمایش
-```
-
----
-
-### محدودیت‌ها و نکات
-
-- **بدون تاثیر روی سایر قسمت‌ها**: فقط فایل‌هایی که ذکر شده تغییر می‌کنند
-- OCR همچنان توسط Gemini انجام می‌شود (native multimodal) - اگر بعدا Google Vision API اضافه شود، فقط analyze-blueprint تغییر می‌کند
-- در حالت Step-by-Step، کاربر همچنان بین مراحل confirm می‌کند
-- تمام schema ها و threshold ها در کد hard-code می‌شوند تا قابل تغییر نباشند (مطابق spec "locked")
+سایر فایل‌ها (validate-elements، price-elements، ChatArea، UI components) بدون تغییر باقی می‌مانند چون فقط موتور OCR عوض می‌شود و خروجی همان ساختار ElementUnit را حفظ می‌کند.
 
