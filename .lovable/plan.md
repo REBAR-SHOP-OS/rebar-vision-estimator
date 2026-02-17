@@ -1,109 +1,81 @@
 
 
-## Fix: Overhaul Weight Calculation Pipeline for Accuracy
+## Patch: Coverage Enforcement + Missing-Length Tracking + Weight Regression Test
 
-### The Problem
-Your app estimated **234.86 lbs** for a project that is actually **44,777 kg (98,720 lbs)**. That is 420x too low. The issue is architectural -- three systems are broken.
+### What's Already Done (no changes needed)
+- bar_lines array in ELEMENT_UNIT_SCHEMA (analyze-blueprint lines 247-260)
+- BAR-LINE-LEVEL EXTRACTION mandatory rule (lines 392-418)
+- price-elements rewrite with bar_lines primary path (lines 113-153)
+- SizeBreakdownTable with kg column
+- ValidationResults with dual-unit display
+- Detection veto regression tests
 
-### Root Causes
+### Remaining Gap 1: Coverage Enforcement in analyze-blueprint
 
-1. **One bar group per element**: The data schema only allows a single `vertical_bars: {size, qty}` per element. A real raft slab has 12+ bar lines (20M@12" BLL, 20M@12" BUL, chair bars, step bars, dowels, etc.). Everything past the first line is lost.
+File: `supabase/functions/analyze-blueprint/index.ts`
 
-2. **Fake lengths**: The pricing function uses hardcoded lengths (e.g., raft slab = 10 ft) instead of actual lengths from the blueprint (e.g., 57 ft, 97 ft). This alone causes 5-10x undercount.
-
-3. **Too few elements**: Instead of extracting ~80 individual bar lines, the AI creates 2-3 summary elements. Coverage is under 5%.
-
-### The Fix (3 parts)
-
----
-
-**Part 1: Add `bar_lines` array to ElementUnit schema**
-
-In `analyze-blueprint/index.ts`, update the `ELEMENT_UNIT_SCHEMA` to add a `bar_lines` array inside `extraction.truth`:
+Add to `OUTPUT_FORMAT_INSTRUCTIONS` (around line 421), inside the JSON schema block, a `coverage` object:
 
 ```text
-"bar_lines": [
-  {
-    "mark": "20M @ 12\" OC",
-    "size": "20M",
-    "multiplier": 2,
-    "qty": 87,
-    "length_mm": 17437,
-    "shape": "straight",
-    "info": "BLL & TUL",
-    "weight_kg": 7145.16
-  },
-  ...more lines
-]
+"coverage": {
+  "bar_lines_count": <total bar_lines across all elements>,
+  "elements_count": <total elements>,
+  "pages_processed": <number of blueprint pages analyzed>,
+  "status": "OK" | "LOW_COVERAGE"
+}
 ```
 
-This replaces the single `vertical_bars`/`ties` fields as the primary data source. Keep `vertical_bars`/`ties` as fallback for backward compatibility.
-
-Update the prompt instructions to tell the AI: "For EVERY bar line you find in the blueprint, schedules, or details, create a separate entry in `bar_lines`. Do NOT summarize multiple bar lines into one."
-
----
-
-**Part 2: Rewrite price-elements to use bar_lines**
-
-In `price-elements/index.ts`, change `calculateElementWeight()`:
-
-1. Check if `truth.bar_lines` array exists and has entries
-2. If yes: compute weight from actual data:
-   - For each bar line: `weight = multiplier x qty x (length_mm / 1000) x mass_kg_per_m`
-   - Or if length is in feet: `weight = multiplier x qty x length_ft x weight_lb_per_ft`
-3. If no bar_lines (backward compat): fall back to current hardcoded-length logic
-4. Output totals in both kg and lbs
-
----
-
-**Part 3: Update AI prompt for exhaustive bar-line extraction**
-
-In `analyze-blueprint/index.ts`, add a new mandatory rule to the pipeline instructions:
+Add a rule to `PIPELINE_INSTRUCTIONS` (after the BAR-LINE-LEVEL EXTRACTION block, around line 418):
 
 ```text
-## BAR-LINE-LEVEL EXTRACTION (MANDATORY)
-For every element, you MUST extract EVERY individual bar line you find.
-Each bar line is a separate row in the estimation spreadsheet.
-
-A "bar line" is one specification like:
-  "20M @ 12" OC" with multiplier=2, qty=87, length=17437mm
-
-DO NOT summarize. If a raft slab has 12 different bar specifications, 
-output 12 entries in bar_lines.
-
-For each bar line extract:
-- mark: the specification text (e.g., "20M @ 12\" OC")
-- size: bar size (e.g., "20M" or "#5")
-- multiplier: layer multiplier (1 or 2 for top+bottom)
-- qty: number of bars
-- length_mm: individual bar length in millimeters
-- length_ft: individual bar length in feet (if given in imperial)
-- shape: straight, bend, L-bend, U-bend, hook
-- info: placement info (BLL, TUL, BUL, TLL, DOWELS, VERT, HOR, etc.)
-- sheet_ref: which sheet/detail this came from
+## COVERAGE ENFORCEMENT (MANDATORY)
+After completing extraction, count total bar_lines across all elements.
+If pages_processed >= 5 AND bar_lines_count < 30:
+  - Set coverage.status = "LOW_COVERAGE"
+  - Re-scan ALL pages with stricter instructions: parse every callout, every table row, every note
+  - Do NOT summarize — each bar specification is a separate bar_line entry
+  - After re-scan, update bar_lines_count
+If still LOW_COVERAGE after retry, flag it in the output so the user is warned.
 ```
 
----
+### Remaining Gap 2: Missing-Length Tracking in price-elements
 
-### Technical Details
+File: `supabase/functions/price-elements/index.ts`
+
+In the `calculateElementWeight()` function, when iterating bar_lines (lines 114-150):
+- Track bar lines where neither `length_mm` nor `length_ft` is provided AND no fallback `weight_kg` exists
+- Add to the return type: `missing_length_count: number` and `missing_length_bars: string[]`
+- In the response JSON, include these fields alongside the quote for debugging visibility
+
+In the serve handler response (both ai_express and verified blocks):
+- Sum `missing_length_count` across all elements
+- Include `missing_length_count` and `missing_length_bars` at the top level of the response
+
+### Remaining Gap 3: Weight Comparison Regression Test
+
+File: `src/test/detection-regression.test.ts`
+
+Add a new `describe("Weight Accuracy Regression")` block with:
+
+- A helper function `checkWeightAccuracy(aiWeightKg, excelWeightKg, maxErrorPct)` that computes error percentage and asserts it's within threshold
+- Test case for "20 York Valley": expected ~44,777 kg, threshold 25%
+- A test that asserts: if `coverage.status === "LOW_COVERAGE"` in AI output, the test should warn (not hard-fail, since this is prompt-dependent)
+- A fail condition test: `if primaryCategory === "cage_only" AND buildingSignals.length > 0 => FAIL`
+
+These tests use static fixture data (not live edge function calls) to validate the pricing math in isolation.
+
+### Technical Summary
 
 | File | Change |
 |---|---|
-| `supabase/functions/analyze-blueprint/index.ts` | Add `bar_lines` array to ELEMENT_UNIT_SCHEMA; add BAR-LINE-LEVEL EXTRACTION mandatory rule to PIPELINE_INSTRUCTIONS; update Step 5 and Step 6 instructions |
-| `supabase/functions/price-elements/index.ts` | Rewrite `calculateElementWeight()` to use `truth.bar_lines` array with real lengths/quantities; fall back to old logic only when bar_lines is empty; output dual units (kg + lbs) |
-| `src/components/chat/SizeBreakdownTable.tsx` | Add kg column alongside lbs for Canadian metric projects |
-
-### Expected Outcome
-
-For the 20 York Valley project:
-- Before: 234.86 lbs (0.117 tons)
-- After: Should approach 98,720 lbs / 44,777 kg (44.78 tons)
-- The accuracy depends on how many bar lines the AI extracts from the blueprint images, but the architecture will no longer be the bottleneck
+| `supabase/functions/analyze-blueprint/index.ts` | Add coverage object to OUTPUT_FORMAT_INSTRUCTIONS JSON schema; add COVERAGE ENFORCEMENT rule to PIPELINE_INSTRUCTIONS |
+| `supabase/functions/price-elements/index.ts` | Track missing_length_count/missing_length_bars in calculateElementWeight; include in response JSON |
+| `src/test/detection-regression.test.ts` | Add Weight Accuracy Regression describe block with threshold checks and fixture data |
 
 ### What Stays the Same
-- Detection V2 pipeline (primaryCategory, features, veto logic)
-- ScopeDefinitionPanel UI
-- Estimation group filtering (loose vs cage)
-- Export/PDF/shop drawing features
-- Authentication and database
+- All existing bar_lines extraction logic
+- All existing pricing math (bar_lines primary, legacy fallback)
+- Detection V2 pipeline and veto logic
+- ScopeDefinitionPanel, estimation group filtering, exports, auth/db
+- UI components (SizeBreakdownTable, ValidationResults)
 
