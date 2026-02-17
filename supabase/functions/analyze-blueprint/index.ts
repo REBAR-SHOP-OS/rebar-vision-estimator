@@ -416,6 +416,15 @@ DO NOT use default lengths. If dimensions are on the drawing, extract and use th
 For example, if a raft slab is 17437mm x 29566mm, bar lengths should reflect those dimensions minus cover (75mm each side per RSIC).
 
 The vertical_bars and ties fields are kept for backward compatibility but bar_lines is the PRIMARY data source for weight calculation.
+
+## COVERAGE ENFORCEMENT (MANDATORY)
+After completing extraction, count total bar_lines across all elements.
+If pages_processed >= 5 AND bar_lines_count < 30:
+  - Set coverage.status = "LOW_COVERAGE"
+  - Re-scan ALL pages with stricter instructions: parse every callout, every table row, every note
+  - Do NOT summarize — each bar specification is a separate bar_line entry
+  - After re-scan, update bar_lines_count
+If still LOW_COVERAGE after retry, flag it in the output so the user is warned.
 `;
 
 const OUTPUT_FORMAT_INSTRUCTIONS = `
@@ -461,6 +470,12 @@ At the VERY END of your response, output a JSON block wrapped in these exact mar
       "pending_questions": [...],
       "estimated_weight_lbs": 12500
     }
+  },
+  "coverage": {
+    "bar_lines_count": <total bar_lines across all elements>,
+    "elements_count": <total elements>,
+    "pages_processed": <number of blueprint pages analyzed>,
+    "status": "OK" | "LOW_COVERAGE"
   }
 }
 %%%ATOMIC_TRUTH_JSON_END%%%

@@ -104,11 +104,15 @@ function calculateElementWeight(truth: ElementTruth["truth"], elementType: strin
   breakdown: Record<string, number>;
   breakdown_kg: Record<string, number>;
   bar_list_entries: { bar_mark: string; size: string; shape_code: string; qty: number; length_ft: number; weight_lbs: number; weight_kg: number }[];
+  missing_length_count: number;
+  missing_length_bars: string[];
 } {
   const breakdown: Record<string, number> = {};
   const breakdown_kg: Record<string, number> = {};
   let totalWeight_kg = 0;
   const bar_list_entries: any[] = [];
+  const missing_length_bars: string[] = [];
+  let missing_length_count = 0;
 
   // ── PRIMARY PATH: bar_lines array (actual extracted data) ──
   if (truth.bar_lines && Array.isArray(truth.bar_lines) && truth.bar_lines.length > 0) {
@@ -118,7 +122,6 @@ function calculateElementWeight(truth: ElementTruth["truth"], elementType: strin
       const qty = line.qty || 0;
       let weight_kg = 0;
 
-      // If the AI already computed weight_kg, use it as a cross-check
       if (line.length_mm && line.length_mm > 0) {
         const massKgM = getMassKgPerM(size);
         weight_kg = mult * qty * (line.length_mm / 1000) * massKgM;
@@ -127,8 +130,11 @@ function calculateElementWeight(truth: ElementTruth["truth"], elementType: strin
         const weight_lbs = mult * qty * line.length_ft * wPerFt;
         weight_kg = weight_lbs * 0.453592;
       } else if (line.weight_kg && line.weight_kg > 0) {
-        // Fallback: use pre-computed weight from AI
         weight_kg = line.weight_kg;
+      } else {
+        // No length and no pre-computed weight — track as missing
+        missing_length_count++;
+        missing_length_bars.push(`${line.mark || "unknown"} (${size})`);
       }
 
       const key = `${line.info || "bar"}_${size}`;
@@ -150,7 +156,7 @@ function calculateElementWeight(truth: ElementTruth["truth"], elementType: strin
     }
 
     const totalWeight_lbs = totalWeight_kg / 0.453592;
-    return { weight_lbs: totalWeight_lbs, weight_kg: totalWeight_kg, breakdown, breakdown_kg, bar_list_entries };
+    return { weight_lbs: totalWeight_lbs, weight_kg: totalWeight_kg, breakdown, breakdown_kg, bar_list_entries, missing_length_count, missing_length_bars };
   }
 
   // ── FALLBACK PATH: legacy vertical_bars + ties (hardcoded lengths) ──
@@ -235,7 +241,7 @@ function calculateElementWeight(truth: ElementTruth["truth"], elementType: strin
   for (const [k, v] of Object.entries(breakdown)) {
     breakdown_kg[k] = v * 0.453592;
   }
-  return { weight_lbs: totalWeight_lbs, weight_kg: totalWeight_kg, breakdown, breakdown_kg, bar_list_entries };
+  return { weight_lbs: totalWeight_lbs, weight_kg: totalWeight_kg, breakdown, breakdown_kg, bar_list_entries, missing_length_count, missing_length_bars };
 }
 
 serve(async (req) => {
@@ -283,11 +289,15 @@ serve(async (req) => {
       const sizeBreakdown: Record<string, number> = {};
       const sizeBreakdownKg: Record<string, number> = {};
       const allBarListEntries: any[] = [];
+      let totalMissingLength = 0;
+      const allMissingLengthBars: string[] = [];
 
       for (const el of readyElements) {
-        const { weight_lbs, weight_kg, breakdown, breakdown_kg, bar_list_entries } = calculateElementWeight(el.truth, el.element_type);
+        const { weight_lbs, weight_kg, breakdown, breakdown_kg, bar_list_entries, missing_length_count, missing_length_bars } = calculateElementWeight(el.truth, el.element_type);
         totalWeightLbs += weight_lbs;
         totalWeightKg += weight_kg;
+        totalMissingLength += missing_length_count;
+        allMissingLengthBars.push(...missing_length_bars);
         elementWeights.push({
           element_id: el.element_id,
           element_type: el.element_type,
@@ -296,6 +306,8 @@ serve(async (req) => {
           breakdown,
           breakdown_kg,
           bar_list_entries,
+          missing_length_count,
+          missing_length_bars,
         });
         allBarListEntries.push(...bar_list_entries.map(b => ({ ...b, element_id: el.element_id, element_type: el.element_type })));
         for (const [key, val] of Object.entries(breakdown)) {
@@ -319,6 +331,8 @@ serve(async (req) => {
             size_breakdown_kg: sizeBreakdownKg,
             bar_list: allBarListEntries,
           },
+          missing_length_count: totalMissingLength,
+          missing_length_bars: allMissingLengthBars,
           included_count: readyElements.length,
           excluded: excludedElements.map((e: ElementTruth) => ({
             element_id: e.element_id,
@@ -337,11 +351,15 @@ serve(async (req) => {
     const sizeBreakdown: Record<string, number> = {};
     const sizeBreakdownKg: Record<string, number> = {};
     const allBarListEntries: any[] = [];
+    let totalMissingLength = 0;
+    const allMissingLengthBars: string[] = [];
 
     for (const el of readyElements) {
-      const { weight_lbs, weight_kg, breakdown, breakdown_kg, bar_list_entries } = calculateElementWeight(el.truth, el.element_type);
+      const { weight_lbs, weight_kg, breakdown, breakdown_kg, bar_list_entries, missing_length_count, missing_length_bars } = calculateElementWeight(el.truth, el.element_type);
       totalWeightLbs += weight_lbs;
       totalWeightKg += weight_kg;
+      totalMissingLength += missing_length_count;
+      allMissingLengthBars.push(...missing_length_bars);
       elementWeights.push({
         element_id: el.element_id,
         element_type: el.element_type,
@@ -350,6 +368,8 @@ serve(async (req) => {
         breakdown,
         breakdown_kg,
         bar_list_entries,
+        missing_length_count,
+        missing_length_bars,
       });
       allBarListEntries.push(...bar_list_entries.map(b => ({ ...b, element_id: el.element_id, element_type: el.element_type })));
       for (const [key, val] of Object.entries(breakdown)) {
@@ -373,6 +393,8 @@ serve(async (req) => {
           size_breakdown_kg: sizeBreakdownKg,
           bar_list: allBarListEntries,
         },
+        missing_length_count: totalMissingLength,
+        missing_length_bars: allMissingLengthBars,
         included_count: readyElements.length,
         status: "complete",
       }),
