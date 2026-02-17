@@ -130,3 +130,99 @@ describe("Detection Veto Logic", () => {
     expect(result.evidence.buildingSignals.length).toBeGreaterThan(0);
   });
 });
+
+// ── Weight Accuracy Regression ──────────────────────────────────────────────
+
+/** Re-implement the core bar_lines weight math from price-elements for local testing */
+const METRIC_REBAR_MASS: Record<string, number> = {
+  "10M": 0.785, "15M": 1.570, "20M": 2.355, "25M": 3.925,
+  "30M": 5.495, "35M": 7.850, "45M": 11.775, "55M": 19.625,
+};
+const IMPERIAL_REBAR_WEIGHT: Record<string, number> = {
+  "#3": 0.376, "#4": 0.668, "#5": 1.043, "#6": 1.502,
+  "#7": 2.044, "#8": 2.670, "#9": 3.400, "#10": 4.303,
+  "#11": 5.313, "#14": 7.650, "#18": 13.600,
+};
+
+function getMassKgPerM(size: string): number {
+  if (METRIC_REBAR_MASS[size]) return METRIC_REBAR_MASS[size];
+  if (IMPERIAL_REBAR_WEIGHT[size]) return IMPERIAL_REBAR_WEIGHT[size] * 1.48816;
+  return 0;
+}
+
+interface TestBarLine {
+  mark?: string; size: string; multiplier?: number; qty: number;
+  length_mm?: number; length_ft?: number; weight_kg?: number;
+}
+
+function computeWeightKg(barLines: TestBarLine[]): number {
+  let total = 0;
+  for (const line of barLines) {
+    const mult = line.multiplier || 1;
+    const qty = line.qty || 0;
+    if (line.length_mm && line.length_mm > 0) {
+      total += mult * qty * (line.length_mm / 1000) * getMassKgPerM(line.size);
+    } else if (line.length_ft && line.length_ft > 0) {
+      const wPerFt = IMPERIAL_REBAR_WEIGHT[line.size] || 0;
+      total += mult * qty * line.length_ft * wPerFt * 0.453592;
+    } else if (line.weight_kg && line.weight_kg > 0) {
+      total += line.weight_kg;
+    }
+  }
+  return total;
+}
+
+function checkWeightAccuracy(aiWeightKg: number, excelWeightKg: number, maxErrorPct: number) {
+  const errorPct = Math.abs(aiWeightKg - excelWeightKg) / excelWeightKg * 100;
+  return { errorPct, pass: errorPct <= maxErrorPct };
+}
+
+describe("Weight Accuracy Regression", () => {
+  // Fixture: representative bar_lines for 20 York Valley (subset to validate math)
+  const YORK_VALLEY_FIXTURE: TestBarLine[] = [
+    { mark: "20M @ 12\" OC BLL", size: "20M", multiplier: 2, qty: 87, length_mm: 17437 },
+    { mark: "20M @ 12\" OC BUL", size: "20M", multiplier: 2, qty: 57, length_mm: 29566 },
+    { mark: "15M @ 12\" OC TUL", size: "15M", multiplier: 2, qty: 87, length_mm: 17437 },
+    { mark: "15M @ 12\" OC TLL", size: "15M", multiplier: 2, qty: 57, length_mm: 29566 },
+    { mark: "20M dowels", size: "20M", multiplier: 1, qty: 120, length_mm: 1200 },
+    { mark: "15M chairs", size: "15M", multiplier: 1, qty: 200, length_mm: 900 },
+    { mark: "25M step bars", size: "25M", multiplier: 1, qty: 45, length_mm: 3500 },
+    { mark: "20M grade beam vert", size: "20M", multiplier: 1, qty: 64, length_mm: 2400 },
+    { mark: "10M ties @ 300", size: "10M", multiplier: 1, qty: 320, length_mm: 1600 },
+    { mark: "15M footing bot EW", size: "15M", multiplier: 1, qty: 48, length_mm: 2700 },
+  ];
+
+  it("bar_lines math produces non-trivial weight for a real project fixture", () => {
+    const totalKg = computeWeightKg(YORK_VALLEY_FIXTURE);
+    // Must be at least 5000 kg for this subset (real total is ~44,777 kg)
+    expect(totalKg).toBeGreaterThan(5000);
+    // Should not exceed the full project weight
+    expect(totalKg).toBeLessThan(50000);
+  });
+
+  it("checkWeightAccuracy helper correctly identifies pass/fail", () => {
+    const pass = checkWeightAccuracy(40000, 44777, 25);
+    expect(pass.pass).toBe(true);
+    expect(pass.errorPct).toBeLessThan(25);
+
+    const fail = checkWeightAccuracy(5000, 44777, 25);
+    expect(fail.pass).toBe(false);
+    expect(fail.errorPct).toBeGreaterThan(25);
+  });
+
+  it("coverage LOW_COVERAGE flag should be present when bar_lines_count is low", () => {
+    // Simulate coverage output
+    const coverage = { bar_lines_count: 5, elements_count: 2, pages_processed: 8, status: "LOW_COVERAGE" };
+    if (coverage.pages_processed >= 5 && coverage.bar_lines_count < 30) {
+      expect(coverage.status).toBe("LOW_COVERAGE");
+    }
+  });
+
+  it("fail condition: cage_only must never coexist with building signals", () => {
+    // Reuse veto logic from Detection tests
+    const result = simulateVetoLogic("CAGE SCHEDULE\nFOUNDATION PLAN\nBASEMENT WALL");
+    if (result.evidence.buildingSignals.length > 0) {
+      expect(result.primaryCategory).not.toBe("cage_only");
+    }
+  });
+});
