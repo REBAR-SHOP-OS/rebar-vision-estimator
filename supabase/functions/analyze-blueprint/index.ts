@@ -212,6 +212,7 @@ Each element you identify MUST be output as a JSON object following this schema:
 {
   "element_id": "string — e.g. C1, W3, F2. Pattern: ^[A-Z]+[-]?[0-9A-Z]+$",
   "element_type": "COLUMN | WALL | FOOTING | BEAM | SLAB_STRIP | GRADE_BEAM | RAFT_SLAB | RETAINING_WALL | ICF_WALL | CMU_WALL | PIER | SLAB | STAIR | WIRE_MESH | OTHER",
+  "estimation_group": "LOOSE_REBAR | CAGE_ASSEMBLY — default LOOSE_REBAR for all standard elements; use CAGE_ASSEMBLY for elements from cage schedules/details",
   "sheet_refs": ["S-101", "S-301"],
   "regions": {
     "tag_region": { "page": 0, "bbox": [x1, y1, x2, y2] },
@@ -399,7 +400,11 @@ At the VERY END of your response, output a JSON block wrapped in these exact mar
     "job_status": "OK" | "HUMAN_REVIEW_REQUIRED",
     "total_rebar_weight_lbs": 12500,
     "total_rebar_weight_tons": 6.25,
-    "wire_mesh_sheets": 0
+    "wire_mesh_sheets": 0,
+    "weight_by_group": {
+      "LOOSE_REBAR": { "weight_lbs": 10000, "weight_tons": 5.0 },
+      "CAGE_ASSEMBLY": { "weight_lbs": 2500, "weight_tons": 1.25 }
+    }
   },
   "quote_modes": {
     "ai_express": {
@@ -676,76 +681,102 @@ NOTE: In step-by-step mode, output the JSON block only after the FINAL step (Ste
 
 // ── Category-Specific Estimation Rules ──
 
-function getCategorySpecificRules(category: string): string | null {
-  switch (category) {
+function getCategorySpecificRules(category: string, features?: { hasCageAssembly?: boolean; hasBarListTable?: boolean }): string | null {
+  // Normalize V2 categories
+  const effectiveCategory = category === "cage_only" ? "cage" : category === "bar_list_only" ? "bar_list" : category;
+  
+  let rules = "";
+  
+  switch (effectiveCategory) {
     case "cage":
-      return `### CAGE PROJECT ESTIMATION RULES (MANDATORY)
-This is a CAGE project. Focus EXCLUSIVELY on cage assemblies.
+      rules = `### CAGE-ONLY PROJECT ESTIMATION RULES (MANDATORY)
+This is a CAGE-ONLY project. Focus EXCLUSIVELY on cage assemblies.
+ALL output elements MUST have "estimation_group": "CAGE_ASSEMBLY".
+
+**REPLACE the standard 9-stage pipeline** with this cage-only pipeline:
+1. Parse cage schedules / cage detail drawings
+2. For each cage type: extract cage mark, vertical bars (count, size, length), ties (size, spacing), spirals (if present)
+3. Calculate tie quantity = FLOOR(cage_height / tie_spacing) + 1
+4. Calculate tie perimeter: column dimensions MINUS 80mm per side (RSIC rule) → perimeter = 2×(W-160) + 2×(D-160) for rectangular, or π×(diameter-160) for round
+5. ALL column verticals with lap splices → estimate as SHOP OFFSET BENT
+6. Calculate weight per cage and total
 
 **Output Format**: One row per CAGE TYPE (not per column instance). Multiply by quantity of that cage type.
 
-**Required per cage**:
-- Cage mark (e.g., C1-CAGE, CAGE-A)
-- Vertical bars: count, size, length (= cage height + lap extensions)
-- Ties: size, spacing, quantity = FLOOR(cage_height / tie_spacing) + 1
-- Tie perimeter: column dimensions MINUS 80mm per side (RSIC rule) → perimeter = 2×(W-160) + 2×(D-160) for rectangular, or π×(diameter-160) for round
-- Spiral (if present): diameter = column diameter - 80mm, pitch, total length = (cage_height / pitch) × π × spiral_diameter
-- Shop bending: ALL column verticals with lap splices → estimate as SHOP OFFSET BENT
-- Hooks on ties: standard 135° hooks per RSIC
+**Spiral Rules (if present)**:
+- Diameter = column diameter - 80mm
+- Total length = (cage_height / pitch) × π × spiral_diameter
+- 10M spiral spacers: ≤500mm core=2, 500-800mm=3, >800mm=4
+- 15M spiral spacers: ≤600mm core=3, >600mm=4
 
-**Weight Calculation**:
-- Per cage: (vertical_bars × bar_length × unit_weight) + (tie_qty × tie_perimeter × unit_weight) + spiral_weight
-- Total: per_cage_weight × quantity_of_this_cage_type
-
-**Tie Spacing Rules**:
+**Tie Rules**:
 - Lowest tie: no more than HALF the designated spacing above top of footing/floor
 - Top tie: same distance below lowest horizontal member above
 - Extra ties at offset bend locations (usually 1-2 below lower bend point)
-
-**Spiral Spacer Count (RSIC)**:
-- 10M spiral: ≤500mm core=2 spacers, 500-800mm=3, >800mm=4
-- 15M spiral: ≤600mm core=3 spacers, >600mm=4`;
+- Hooks on ties: standard 135° hooks per RSIC`;
+      break;
 
     case "bar_list":
-      return `### BAR LIST ESTIMATION RULES (MANDATORY)
+      rules = `### BAR LIST ESTIMATION RULES (MANDATORY)
 This is a BAR LIST / BENDING SCHEDULE project. NO blueprint element detection needed.
+ALL output elements have "estimation_group": "LOOSE_REBAR".
 
-**Approach**: Parse the bar schedule table directly.
+**REPLACE the standard 9-stage pipeline** with table-parse-only:
 - Extract: bar mark, size, quantity, cut length, shape code, bend dimensions
 - Calculate weight: quantity × cut_length × unit_weight_per_size
 - Output a summary by bar size and grand total
-- Skip all OCR element detection stages — go straight to table parsing
 
-**IMPORTANT — Page Location Data**: For each element you identify from the bar list/schedule, you MUST include the PDF page number and approximate bounding box of the row where the data was found. Use:
-- \`regions.tag_region.page_number\`: the 1-indexed PDF page number
-- \`regions.tag_region.bbox\`: approximate row region as [x1, y1, x2, y2] in pixels (estimate the row's vertical position on the page, e.g. [50, row_y_start, 750, row_y_end])
-This allows the viewer to navigate to the correct page and highlight the relevant table row.`;
+**IMPORTANT — Page Location Data**: Include PDF page number and approximate bbox for each row.`;
+      break;
 
     case "residential":
-      return `### RESIDENTIAL PROJECT FOCUS
+      rules = `### RESIDENTIAL PROJECT FOCUS
 Focus on: strip footings (75mm cover per RSIC), basement/foundation walls, SOG mesh, ICF walls, small columns.
 Typical bar sizes: 10M-20M. Lighter reinforcement patterns. Include SOG wire mesh calculations.`;
+      break;
 
     case "industrial":
-      return `### INDUSTRIAL PROJECT FOCUS  
+      rules = `### INDUSTRIAL PROJECT FOCUS  
 Focus on: heavy isolated footings, equipment pads, crane beams, tank foundations. 
 Expect heavy bars (25M-55M). Check for epoxy/galvanized coatings in corrosive environments.
 Watch for radius bends, special bending per RSIC rules (bars 15M-55M bent at 6 points or fewer).`;
+      break;
 
     case "commercial":
-      return `### COMMERCIAL PROJECT FOCUS
+      rules = `### COMMERCIAL PROJECT FOCUS
 Focus on: multi-storey columns with splice tracking across floors, flat slabs with column/middle strips, beams, drop panels, parking structures.
 Track column bar size changes floor-to-floor. Include slab band reinforcement.`;
+      break;
 
     case "infrastructure":
-      return `### INFRASTRUCTURE PROJECT FOCUS
+      rules = `### INFRASTRUCTURE PROJECT FOCUS
 Focus on: bridge elements, abutments, retaining walls, culverts, barriers.
 Check for provincial DOT specs (MTO, MTQ, MTBC). Epoxy coating is common.
 Longer development lengths for bridge elements. Check for special bar bending requirements.`;
+      break;
 
     default:
-      return null;
+      break;
   }
+
+  // Append cage module for non-cage projects that have cage features
+  if (effectiveCategory !== "cage" && features?.hasCageAssembly) {
+    rules += `
+
+### ADDITIONAL: CAGE ASSEMBLY MODULE (detected cage content in this project)
+After completing the standard estimation pipeline for loose rebar elements, ALSO run a cage assembly scan:
+1. Look for any cage schedules, caisson details, drilled pier details, or tied column assembly drawings
+2. For each cage type found: extract cage mark, verticals, ties, spirals
+3. Output these elements SEPARATELY with "estimation_group": "CAGE_ASSEMBLY"
+4. Standard building elements (footings, walls, slabs, etc.) keep "estimation_group": "LOOSE_REBAR"
+
+### ANTI-DOUBLE-COUNTING RULE (CRITICAL):
+If a cage mark/type exists in a cage schedule, those verticals/ties/spirals are EXCLUSIVELY under CAGE_ASSEMBLY.
+Do NOT also count those bars as loose rebar from plan scanning. Cage assembly elements are self-contained.
+Totals and weight summaries MUST be computed per estimation_group separately.`;
+  }
+
+  return rules || null;
 }
 
 // ── Edge Function Handler ──
@@ -773,12 +804,13 @@ serve(async (req) => {
       if (scope.rebarCoating) scopeBlock += `Rebar Coating Type: ${scope.rebarCoating}\n`;
       if (scope.clientName) scopeBlock += `Client: ${scope.clientName}\n`;
       if (scope.projectType) scopeBlock += `Project Type: ${scope.projectType}\n`;
-      if (scope.detectedCategory) {
-        scopeBlock += `\n### PRE-CLASSIFIED PROJECT CATEGORY: ${scope.detectedCategory.toUpperCase()}\n`;
+      if (scope.primaryCategory || scope.detectedCategory) {
+        const effectiveCategory = scope.primaryCategory || scope.detectedCategory;
+        scopeBlock += `\n### PRE-CLASSIFIED PROJECT CATEGORY: ${effectiveCategory!.toUpperCase()}\n`;
         scopeBlock += `This project has been pre-classified by AI analysis of the blueprints. Prioritize this classification unless the blueprints clearly indicate otherwise.\n`;
         
-        // Category-specific estimation rules
-        const categoryRules = getCategorySpecificRules(scope.detectedCategory);
+        // Category-specific estimation rules (with features for cage module)
+        const categoryRules = getCategorySpecificRules(effectiveCategory!, scope.features);
         if (categoryRules) {
           scopeBlock += `\n${categoryRules}\n`;
         }

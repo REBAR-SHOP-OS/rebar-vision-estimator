@@ -7,7 +7,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// ── Google Vision helpers (reused from analyze-blueprint) ──
+// ── Google Vision helpers ──
 
 function base64url(data: Uint8Array): string {
   return encodeBase64(data).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -63,6 +63,15 @@ async function quickOCR(accessToken: string, imageBase64: string): Promise<strin
   return data.responses?.[0]?.fullTextAnnotation?.text || data.responses?.[0]?.textAnnotations?.[0]?.description || "";
 }
 
+// ── Building signal keywords (veto cage_only) ──
+const BUILDING_VETO_SIGNALS = [
+  "foundation plan", "footing", "strip footing", "basement wall", "basement",
+  "icf wall", "icf", "slab on grade", "sog", "wire mesh", "wwm",
+  "framing plan", "beam", "joist", "gridlines", "floor levels", "floor plan",
+  "general notes", "column schedule", "wall schedule", "slab", "stair",
+  "grade beam", "raft slab", "retaining wall", "cmu wall",
+];
+
 // ── Main Handler ──
 
 serve(async (req) => {
@@ -79,7 +88,7 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
-    // Quick OCR on first image (or first 2 for better detection)
+    // Quick OCR on first 2 images
     let ocrText = "";
     let accessToken: string | null = null;
     try { accessToken = await getGoogleAccessToken(); } catch (e) { console.error("Vision token failed:", e); }
@@ -90,7 +99,6 @@ serve(async (req) => {
     for (const url of filesToScan) {
       const urlLower = url.toLowerCase().split('?')[0];
       if (urlLower.endsWith('.pdf')) {
-        // For PDFs, send as inline data to Gemini
         try {
           const pdfResp = await fetch(url);
           if (!pdfResp.ok) continue;
@@ -99,17 +107,11 @@ serve(async (req) => {
           contentParts.push({ type: "image_url", image_url: { url: `data:application/pdf;base64,${encodeBase64(buf)}` } });
         } catch {}
       } else {
-        // Check if this is a supported image format
         const supportedImageExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif'];
         const fileExt = urlLower.split('.').pop()?.split('?')[0] || '';
         const isSupportedImage = supportedImageExts.some(ext => ext === `.${fileExt}`);
+        if (!isSupportedImage) { console.log(`Skipping unsupported: .${fileExt}`); continue; }
         
-        if (!isSupportedImage) {
-          console.log(`Skipping unsupported file format: .${fileExt}`);
-          continue;
-        }
-        
-        // Image - run quick OCR + send to Gemini
         contentParts.push({ type: "image_url", image_url: { url } });
         if (accessToken) {
           try {
@@ -123,89 +125,116 @@ serve(async (req) => {
       }
     }
 
-    // Keyword-based confidence boosting
+    // Keyword-based analysis for veto logic
     const ocrLower = ocrText.toLowerCase();
-    const cageKeywords = ["cage", "spiral", "tied assembly", "cage mark", "prefab", "column cage", "cage schedule", "cage height", "cage dia"];
-    const barListKeywords = ["bar list", "bar schedule", "bar mark", "cut length", "qty", "bending schedule"];
+    const cageKeywords = ["cage", "spiral", "tied assembly", "cage mark", "prefab", "column cage", "cage schedule", "cage height", "cage dia", "caisson", "drilled pier", "drilled shaft", "belled"];
+    const barListKeywords = ["bar list", "bar schedule", "bar mark", "cut length", "bending schedule"];
     const infraKeywords = ["bridge", "abutment", "culvert", "mto", "opss", "highway", "barrier"];
     const residentialKeywords = ["icf", "basement", "garage", "sog", "slab on grade", "strip footing"];
     const industrialKeywords = ["equipment pad", "tank", "crane beam", "industrial", "process area"];
+    const commercialKeywords = ["parking", "multi-storey", "elevator", "drop panel", "flat slab", "post-tension"];
     
-    const keywordHints: string[] = [];
-    if (cageKeywords.some(k => ocrLower.includes(k))) keywordHints.push("STRONG cage indicators found in OCR text (keywords: cage, spiral, tied assembly)");
-    if (barListKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Bar list/schedule indicators found in OCR text");
-    if (infraKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Infrastructure indicators found (bridge, MTO, highway)");
-    if (residentialKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Residential indicators found (ICF, basement, SOG)");
-    if (industrialKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Industrial indicators found (equipment pad, tank, crane)");
+    // Count building veto signals found
+    const foundBuildingSignals = BUILDING_VETO_SIGNALS.filter(s => ocrLower.includes(s));
+    const foundCageSignals = cageKeywords.filter(k => ocrLower.includes(k));
+    const foundBarListSignals = barListKeywords.filter(k => ocrLower.includes(k));
 
-    // Build the detection prompt
-    const detectionPrompt = `Analyze these blueprint files and determine the project type.
+    const keywordHints: string[] = [];
+    if (foundCageSignals.length > 0) keywordHints.push(`Cage indicators: ${foundCageSignals.join(", ")}`);
+    if (foundBarListSignals.length > 0) keywordHints.push(`Bar list indicators: ${foundBarListSignals.join(", ")}`);
+    if (infraKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Infrastructure indicators found");
+    if (residentialKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Residential indicators found");
+    if (industrialKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Industrial indicators found");
+    if (commercialKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Commercial indicators found");
+    if (foundBuildingSignals.length > 0) keywordHints.push(`Building signals (veto cage_only): ${foundBuildingSignals.join(", ")}`);
+
+    // Build the detection prompt with Dominance + Veto rules
+    const detectionPrompt = `Analyze these blueprint files and determine the project type using the TWO-LAYER detection system.
 
 ${ocrText ? `## OCR Text Extracted:\n${ocrText}` : "No OCR text available - analyze the images directly."}
 
 ${keywordHints.length > 0 ? `## Keyword Analysis Hints:\n${keywordHints.map(h => `- ${h}`).join("\n")}\n` : ""}
 
-## Category Detection Guide
+## CRITICAL: Dominance + Veto Classification Rule
 
-### CAGE (Prefab Rebar Cages / Column Cages)
-**Strong indicators**: Column cage schedules, "cage" labels anywhere, prefab marks (e.g., C1-CAGE, CAGE-A), tied column assemblies, cage height/diameter callouts, spiral pitch details, shop drawing format showing cage assembly views, cage weight tables.
-**Typical content**: Individual cage detail drawings showing verticals + ties/spirals, cage mark numbers, assembly instructions.
+You MUST output TWO things:
+1. **primaryCategory** — what the overall project IS (residential, commercial, industrial, infrastructure, cage_only, bar_list_only)
+2. **features** — what sub-modules are present (hasCageAssembly, hasBarListTable)
 
-### BAR LIST (Schedule Only — No Drawings)
-**Strong indicators**: No blueprint drawings — just tables with bar marks, sizes (10M, #4), quantities, cut lengths, total weights. May have "Bending Schedule", "Bar List", "Bar Schedule" as title.
-**Typical content**: Tabular data only, no plan/section views.
+### The "Human Rule" for cage_only classification:
+Set primaryCategory = "cage_only" ONLY IF:
+- Cage/caisson pages dominate (>70% of sheets are cage-related)
+- AND zero strong building signals exist (no FOUNDATION PLAN, FOOTING, BASEMENT WALL, SOG, FRAMING PLAN, BEAM, GRIDLINES, FLOOR LEVELS, sheet patterns S0xx/S1xx, GENERAL NOTES, legends, WALL SCHEDULE, etc.)
 
-### RESIDENTIAL
-**Strong indicators**: Strip footings, ICF wall details, basement walls, SOG (slab-on-grade), small residential columns, garage foundations, house plans, light bar sizes (10M-20M predominant).
-**Typical content**: Simple foundation plans, wall sections, small scale.
+If ANY building signals exist alongside cage content:
+- Set primaryCategory to the appropriate building type (residential/commercial/etc.)
+- Set features.hasCageAssembly = true
 
-### COMMERCIAL
-**Strong indicators**: Multi-storey column schedules, flat slab/plate details, drop panels, parking structures, elevator shafts, slab bands, post-tensioning.
-**Typical content**: Floor plans with column grids, beam schedules, multiple levels.
+### Building Signal Veto List (these PREVENT cage_only):
+FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE, SLAB ON GRADE, SOG, WIRE MESH, WWM, FRAMING PLAN, BEAM, JOIST, GRIDLINES, FLOOR LEVELS, GENERAL NOTES, COLUMN SCHEDULE, STAIR, GRADE BEAM, RAFT SLAB, RETAINING WALL, CMU WALL, sheet patterns S0xx/S1xx
 
-### INDUSTRIAL
-**Strong indicators**: Large footings (>3m), heavy bar sizes (25M-55M, #8+), equipment foundations, tank bases/rings, crane beams, process equipment pads, turbine/generator foundations.
-**Typical content**: Heavy isolated footings, massive pile caps, equipment anchor bolt patterns.
+### Category Guide:
+- **cage_only**: ONLY when cage/caisson pages dominate AND no building signals. Pure cage package.
+- **bar_list_only**: No blueprint drawings — just tables with bar marks, sizes, quantities, lengths.
+- **residential**: Strip footings, ICF walls, basement walls, SOG, small columns, house plans.
+- **commercial**: Multi-storey columns, flat slabs, parking, beams, drop panels.
+- **industrial**: Large footings, heavy bars (25M+), equipment pads, tank bases, crane beams.
+- **infrastructure**: Bridge decks, abutments, retaining walls >3m, culverts, highway barriers.
 
-### INFRASTRUCTURE
-**Strong indicators**: Bridge decks, abutments, retaining walls >3m, culverts, highway barriers, MTO/OPSS/DOT references, wingwalls, pier caps (bridge piers).
-**Typical content**: Bridge cross-sections, retaining wall elevations, DOT standard details.
-
-Classify this project into one of these categories based on what you see in the blueprints.`;
+### Feature Detection (independent of primaryCategory):
+- **hasCageAssembly**: true if ANY cage/caisson/drilled pier/spiral/tied assembly content is found ANYWHERE in the set.
+- **hasBarListTable**: true if ANY bar schedule/bending schedule table is found.`;
 
     const tools = [{
       type: "function" as const,
       function: {
         name: "classify_project",
-        description: "Classify the blueprint project type and recommend scope items",
+        description: "Classify the blueprint project type with two-layer detection (primaryCategory + features)",
         parameters: {
           type: "object",
           properties: {
-            category: {
+            primaryCategory: {
               type: "string",
-              enum: ["cage", "industrial", "residential", "commercial", "bar_list", "infrastructure"],
-              description: "Detected project category. cage=prefab rebar cages/column cages, industrial=heavy industrial/equipment foundations, residential=houses/small buildings, commercial=office/retail/multi-storey, bar_list=just a bar schedule/list, infrastructure=bridges/retaining walls/highways"
+              enum: ["cage_only", "bar_list_only", "residential", "commercial", "industrial", "infrastructure"],
+              description: "The overall project type. cage_only ONLY if cage dominates >70% AND no building signals."
+            },
+            features: {
+              type: "object",
+              properties: {
+                hasCageAssembly: { type: "boolean", description: "true if cage/caisson/pier cage content exists anywhere" },
+                hasBarListTable: { type: "boolean", description: "true if bar schedule/bending schedule table exists" },
+              },
+              required: ["hasCageAssembly", "hasBarListTable"],
+            },
+            evidence: {
+              type: "object",
+              properties: {
+                buildingSignals: { type: "array", items: { type: "string" }, description: "Building-type keywords found" },
+                cageSignals: { type: "array", items: { type: "string" }, description: "Cage-related keywords found" },
+                barListSignals: { type: "array", items: { type: "string" }, description: "Bar list keywords found" },
+              },
+              required: ["buildingSignals", "cageSignals", "barListSignals"],
             },
             recommendedScope: {
               type: "array",
-              items: { type: "string", enum: ["FOOTING", "GRADE_BEAM", "RAFT_SLAB", "PIER", "BEAM", "COLUMN", "SLAB", "STAIR", "WALL", "RETAINING_WALL", "ICF_WALL", "CMU_WALL", "WIRE_MESH"] },
+              items: { type: "string", enum: ["FOOTING", "GRADE_BEAM", "RAFT_SLAB", "PIER", "BEAM", "COLUMN", "SLAB", "STAIR", "WALL", "RETAINING_WALL", "ICF_WALL", "CMU_WALL", "WIRE_MESH", "CAGE"] },
               description: "Which element types are relevant for this project"
             },
             detectedStandard: {
               type: "string",
               enum: ["canadian_metric", "us_imperial", "unknown"],
-              description: "Detected measurement standard. canadian_metric if you see M-sizes (10M, 15M, 20M), metric units, CSA references. us_imperial if you see # sizes (#3, #4), imperial units, ACI references."
+              description: "Detected measurement standard"
             },
-            confidence: {
+            confidencePrimary: {
               type: "number",
-              description: "Confidence in classification from 0 to 1"
+              description: "Confidence in primaryCategory classification from 0 to 1"
             },
             reasoning: {
               type: "string",
-              description: "Brief explanation of why this category was chosen (1-2 sentences)"
+              description: "Brief explanation of classification (1-2 sentences)"
             }
           },
-          required: ["category", "recommendedScope", "detectedStandard", "confidence", "reasoning"],
+          required: ["primaryCategory", "features", "evidence", "recommendedScope", "detectedStandard", "confidencePrimary", "reasoning"],
           additionalProperties: false,
         }
       }
@@ -219,7 +248,7 @@ Classify this project into one of these categories based on what you see in the 
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         messages: [
-          { role: "system", content: "You are a structural engineering blueprint classifier. Analyze blueprints quickly and classify the project type. Use the classify_project tool to return your classification." },
+          { role: "system", content: "You are a structural engineering blueprint classifier implementing the Dominance + Veto detection system. Use the classify_project tool. NEVER set cage_only if building signals are present." },
           { role: "user", content: userContent },
         ],
         tools,
@@ -230,35 +259,77 @@ Classify this project into one of these categories based on what you see in the 
     if (!response.ok) {
       const errText = await response.text();
       console.error("AI gateway error:", response.status, errText);
-      // Return a fallback instead of erroring
-      return new Response(JSON.stringify({
-        category: "commercial",
-        recommendedScope: ["FOOTING", "GRADE_BEAM", "RAFT_SLAB", "PIER", "BEAM", "COLUMN", "SLAB", "STAIR", "WALL", "RETAINING_WALL", "ICF_WALL", "CMU_WALL", "WIRE_MESH"],
-        detectedStandard: "unknown",
-        confidence: 0,
-        reasoning: "Detection failed, defaulting to all elements",
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify(buildFallbackResult()), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const aiData = await response.json();
     const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
     
     if (toolCall?.function?.arguments) {
-      const result = JSON.parse(toolCall.function.arguments);
-      console.log("Project type detected:", result);
+      let result = JSON.parse(toolCall.function.arguments);
+      
+      // ── Server-side Veto Logic ──
+      // If AI returned cage_only but our keyword analysis found building signals, override
+      if (result.primaryCategory === "cage_only" && foundBuildingSignals.length > 0) {
+        console.log("VETO: Overriding cage_only because building signals found:", foundBuildingSignals);
+        // Determine strongest building category from keywords
+        const residentialCount = residentialKeywords.filter(k => ocrLower.includes(k)).length;
+        const commercialCount = commercialKeywords.filter(k => ocrLower.includes(k)).length;
+        const industrialCount = industrialKeywords.filter(k => ocrLower.includes(k)).length;
+        const infraCount = infraKeywords.filter(k => ocrLower.includes(k)).length;
+        
+        const maxCount = Math.max(residentialCount, commercialCount, industrialCount, infraCount);
+        if (maxCount === 0 || residentialCount === maxCount) {
+          result.primaryCategory = "residential";
+        } else if (commercialCount === maxCount) {
+          result.primaryCategory = "commercial";
+        } else if (industrialCount === maxCount) {
+          result.primaryCategory = "industrial";
+        } else {
+          result.primaryCategory = "infrastructure";
+        }
+        result.features = { ...result.features, hasCageAssembly: true };
+        result.reasoning = `[VETO OVERRIDE] ${result.reasoning}. Building signals found: ${foundBuildingSignals.join(", ")}`;
+      }
+
+      // Ensure features object exists
+      if (!result.features) {
+        result.features = { hasCageAssembly: false, hasBarListTable: false };
+      }
+      if (!result.evidence) {
+        result.evidence = { buildingSignals: foundBuildingSignals, cageSignals: foundCageSignals, barListSignals: foundBarListSignals };
+      }
+
+      // ── Backward-compatible fields ──
+      // Map primaryCategory to old `category` field for transition
+      const categoryMap: Record<string, string> = {
+        cage_only: "cage",
+        bar_list_only: "bar_list",
+        residential: "residential",
+        commercial: "commercial",
+        industrial: "industrial",
+        infrastructure: "infrastructure",
+      };
+      result.category = categoryMap[result.primaryCategory] || result.primaryCategory;
+      result.confidence = result.confidencePrimary;
+
+      console.log("Project type detected (V2):", JSON.stringify({
+        primaryCategory: result.primaryCategory,
+        features: result.features,
+        evidence: result.evidence,
+        vetoApplied: foundBuildingSignals.length > 0 && result.reasoning?.includes("[VETO"),
+      }));
+
       return new Response(JSON.stringify(result), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Fallback if tool call didn't work
-    return new Response(JSON.stringify({
-      category: "commercial",
-      recommendedScope: ["FOOTING", "GRADE_BEAM", "RAFT_SLAB", "PIER", "BEAM", "COLUMN", "SLAB", "STAIR", "WALL", "RETAINING_WALL", "ICF_WALL", "CMU_WALL", "WIRE_MESH"],
-      detectedStandard: "unknown",
-      confidence: 0,
-      reasoning: "Could not parse detection result, defaulting to all elements",
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify(buildFallbackResult()), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
 
   } catch (e) {
     console.error("detect-project-type error:", e);
@@ -267,3 +338,17 @@ Classify this project into one of these categories based on what you see in the 
     });
   }
 });
+
+function buildFallbackResult() {
+  return {
+    primaryCategory: "commercial",
+    features: { hasCageAssembly: false, hasBarListTable: false },
+    evidence: { buildingSignals: [], cageSignals: [], barListSignals: [] },
+    recommendedScope: ["FOOTING", "GRADE_BEAM", "RAFT_SLAB", "PIER", "BEAM", "COLUMN", "SLAB", "STAIR", "WALL", "RETAINING_WALL", "ICF_WALL", "CMU_WALL", "WIRE_MESH"],
+    detectedStandard: "unknown",
+    confidencePrimary: 0,
+    confidence: 0,
+    reasoning: "Detection failed, defaulting to all elements",
+    category: "commercial",
+  };
+}
