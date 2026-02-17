@@ -974,74 +974,132 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 }}
               />
             </div>
-          ) : (validationData || importedBarList) ? (
-            <div className="py-2">
-              <Tabs defaultValue={
-                (scopeData?.primaryCategory === "cage_only" || scopeData?.primaryCategory === "bar_list_only")
-                  ? "barlist"
-                  : validationData ? "cards" : "barlist"
-              } className="w-full">
-                <TabsList className="w-full mb-3 h-9 rounded-xl bg-muted p-1">
-                  {validationData && (
-                    <TabsTrigger value="cards" className="flex-1 text-xs rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">
-                      Cards
-                    </TabsTrigger>
-                  )}
-                  {(quoteResult?.quote?.bar_list || importedBarList) && (
-                    <TabsTrigger value="barlist" className="flex-1 text-xs rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">
-                      Bar List
-                    </TabsTrigger>
-                  )}
-                  {(quoteResult?.quote?.bar_list || importedBarList)?.some((b: any) => b.shape_code && b.shape_code !== "straight" && b.shape_code !== "closed") && (
-                    <TabsTrigger value="bending" className="flex-1 text-xs rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">
-                      Bending
-                    </TabsTrigger>
-                  )}
-                </TabsList>
-                {validationData && (
-                  <TabsContent value="cards">
-                    <ValidationResults
-                      elements={validationData.elements}
-                      summary={validationData.summary}
-                      questions={validationData.questions || []}
-                      quoteResult={quoteResult}
-                      onAnswerQuestion={handleAnswerQuestion}
-                      onRequestQuote={handleRequestQuote}
-                      scopeData={scopeData}
-                      onShowOnDrawing={handleShowOnDrawing}
-                      onToggleViewer={() => setShowBlueprintViewer((v) => !v)}
-                      showViewer={showBlueprintViewer}
-                      selectedElementId={selectedElementId}
-                      hasDrawingData={hasDrawingData}
-                      onStartReview={() => {
-                        setReviewMode(true);
-                        setShowBlueprintViewer(true);
-                      }}
-                    />
-                  </TabsContent>
+          ) : (validationData || importedBarList) ? (() => {
+            // Compute estimation group flags
+            const elements = validationData?.elements || [];
+            const hasLoose = elements.some((e: any) => !e.estimation_group || e.estimation_group === "LOOSE_REBAR");
+            const hasCage = elements.some((e: any) => e.estimation_group === "CAGE_ASSEMBLY");
+            const hasBothGroups = hasLoose && hasCage;
+
+            // Filter elements by active group
+            const filteredElements = estimationGroupFilter === "all"
+              ? elements
+              : elements.filter((e: any) =>
+                  estimationGroupFilter === "cage"
+                    ? e.estimation_group === "CAGE_ASSEMBLY"
+                    : !e.estimation_group || e.estimation_group === "LOOSE_REBAR"
+                );
+
+            // Filter bar list by group
+            const rawBarList = quoteResult?.quote?.bar_list || importedBarList || [];
+            const filteredBarList = estimationGroupFilter === "all"
+              ? rawBarList
+              : rawBarList.filter((b: any) =>
+                  estimationGroupFilter === "cage"
+                    ? b.estimation_group === "CAGE_ASSEMBLY"
+                    : !b.estimation_group || b.estimation_group === "LOOSE_REBAR"
+                );
+
+            // Recompute summary from filtered elements
+            const filteredSummary = validationData?.summary
+              ? {
+                  ...validationData.summary,
+                  total_elements: filteredElements.length,
+                  total_weight_kg: filteredElements.reduce((sum: number, e: any) => sum + (e.weight_kg || 0), 0),
+                }
+              : null;
+
+            const isCageOrBarListOnly = scopeData?.primaryCategory === "cage_only" || scopeData?.primaryCategory === "bar_list_only";
+            const showCardsTab = !isCageOrBarListOnly && filteredElements.some((e: any) => !e.estimation_group || e.estimation_group === "LOOSE_REBAR");
+            const showBarListTab = filteredBarList.length > 0;
+            const showBendingTab = filteredBarList.some((b: any) => b.shape_code && b.shape_code !== "straight" && b.shape_code !== "closed");
+
+            const defaultTab = isCageOrBarListOnly ? "barlist" : (showCardsTab ? "cards" : "barlist");
+
+            return (
+              <div className="py-2">
+                {/* Estimation group filter chips */}
+                {hasBothGroups && (
+                  <div className="flex gap-2 mb-3">
+                    {(["all", "loose", "cage"] as const).map((group) => (
+                      <button
+                        key={group}
+                        onClick={() => setEstimationGroupFilter(group)}
+                        className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors ${
+                          estimationGroupFilter === group
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "bg-muted text-muted-foreground border-border hover:bg-accent"
+                        }`}
+                      >
+                        {group === "all" ? "All" : group === "loose" ? "Loose Rebar" : "Cage Assembly"}
+                      </button>
+                    ))}
+                  </div>
                 )}
-                {(quoteResult?.quote?.bar_list || importedBarList) && (
-                  <TabsContent value="barlist">
-                    <BarListTable
-                      barList={quoteResult?.quote?.bar_list || importedBarList || []}
-                      onShowOnDrawing={handleShowOnDrawing}
-                      selectedElementId={selectedElementId}
-                      onImport={(data) => setImportedBarList(data)}
-                    />
-                  </TabsContent>
-                )}
-                {(quoteResult?.quote?.bar_list || importedBarList) && (
-                  <TabsContent value="bending">
-                    <BendingScheduleTable
-                      barList={quoteResult?.quote?.bar_list || importedBarList || []}
-                      onShowOnDrawing={handleShowOnDrawing}
-                      selectedElementId={selectedElementId}
-                    />
-                  </TabsContent>
-                )}
-              </Tabs>
-            </div>
-          ) : null}
+
+                <Tabs defaultValue={defaultTab} className="w-full">
+                  <TabsList className="w-full mb-3 h-9 rounded-xl bg-muted p-1">
+                    {showCardsTab && (
+                      <TabsTrigger value="cards" className="flex-1 text-xs rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">
+                        Cards
+                      </TabsTrigger>
+                    )}
+                    {showBarListTab && (
+                      <TabsTrigger value="barlist" className="flex-1 text-xs rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">
+                        Bar List
+                      </TabsTrigger>
+                    )}
+                    {showBendingTab && (
+                      <TabsTrigger value="bending" className="flex-1 text-xs rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">
+                        Bending
+                      </TabsTrigger>
+                    )}
+                  </TabsList>
+                  {showCardsTab && validationData && (
+                    <TabsContent value="cards">
+                      <ValidationResults
+                        elements={filteredElements}
+                        summary={filteredSummary}
+                        questions={validationData.questions || []}
+                        quoteResult={quoteResult}
+                        onAnswerQuestion={handleAnswerQuestion}
+                        onRequestQuote={handleRequestQuote}
+                        scopeData={scopeData}
+                        onShowOnDrawing={handleShowOnDrawing}
+                        onToggleViewer={() => setShowBlueprintViewer((v) => !v)}
+                        showViewer={showBlueprintViewer}
+                        selectedElementId={selectedElementId}
+                        hasDrawingData={hasDrawingData}
+                        onStartReview={() => {
+                          setReviewMode(true);
+                          setShowBlueprintViewer(true);
+                        }}
+                      />
+                    </TabsContent>
+                  )}
+                  {showBarListTab && (
+                    <TabsContent value="barlist">
+                      <BarListTable
+                        barList={filteredBarList}
+                        onShowOnDrawing={handleShowOnDrawing}
+                        selectedElementId={selectedElementId}
+                        onImport={(data) => setImportedBarList(data)}
+                      />
+                    </TabsContent>
+                  )}
+                  {showBendingTab && (
+                    <TabsContent value="bending">
+                      <BendingScheduleTable
+                        barList={filteredBarList}
+                        onShowOnDrawing={handleShowOnDrawing}
+                        selectedElementId={selectedElementId}
+                      />
+                    </TabsContent>
+                  )}
+                </Tabs>
+              </div>
+            );
+          })() : null}
 
           {/* Scope Definition Panel */}
           {showScopePanel && !scopeData && !calculationMode && (
