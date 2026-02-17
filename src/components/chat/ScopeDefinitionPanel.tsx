@@ -5,7 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowRight, Info, Sparkles, AlertTriangle } from "lucide-react";
+import { ArrowRight, Info, Sparkles, AlertTriangle, RotateCcw } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 const SCOPE_ITEMS = [
   { id: "FOOTING", label: "Footings", category: "Foundation" },
@@ -31,13 +32,16 @@ const REBAR_COATING_TYPES = [
   { id: "stainless_steel", label: "Stainless Steel" },
 ] as const;
 
-const CATEGORY_LABELS: Record<string, string> = {
-  cage: "Cage Project",
-  industrial: "Industrial",
+const PRIMARY_CATEGORY_LABELS: Record<string, string> = {
+  cage_only: "Cage Only",
+  bar_list_only: "Bar List Only",
   residential: "Residential",
   commercial: "Commercial",
-  bar_list: "Bar List",
+  industrial: "Industrial",
   infrastructure: "Infrastructure",
+  // Legacy mapping
+  cage: "Cage Project",
+  bar_list: "Bar List",
 };
 
 const STANDARD_LABELS: Record<string, string> = {
@@ -45,6 +49,11 @@ const STANDARD_LABELS: Record<string, string> = {
   us_imperial: "US Imperial (ACI)",
   unknown: "Unknown",
 };
+
+// Scope items locked for cage_only projects
+const CAGE_ONLY_SCOPE = ["CAGE", "COLUMN", "PIER"];
+// Recommended scope for residential
+const RESIDENTIAL_SCOPE = ["FOOTING", "WALL", "ICF_WALL", "SLAB", "WIRE_MESH", "CAGE"];
 
 export interface ScopeData {
   scopeItems: string[];
@@ -54,9 +63,19 @@ export interface ScopeData {
   rebarCoating: string;
   detectedCategory?: string;
   detectedStandard?: string;
+  // V2 fields
+  primaryCategory?: string;
+  features?: { hasCageAssembly: boolean; hasBarListTable: boolean };
 }
 
+// V2 detection result with backward compatibility
 export interface DetectionResult {
+  // V2 fields
+  primaryCategory?: string;
+  features?: { hasCageAssembly: boolean; hasBarListTable: boolean };
+  evidence?: { buildingSignals: string[]; cageSignals: string[]; barListSignals: string[] };
+  confidencePrimary?: number;
+  // Legacy fields (backward compat)
   category: string;
   recommendedScope: string[];
   detectedStandard: string;
@@ -71,32 +90,71 @@ interface ScopeDefinitionPanelProps {
   isDetecting?: boolean;
 }
 
+// Helper to normalize detection result to V2 format
+function normalizeDetection(d: DetectionResult): DetectionResult & { primaryCategory: string; features: { hasCageAssembly: boolean; hasBarListTable: boolean } } {
+  const primaryCategory = d.primaryCategory || (d.category === "cage" ? "cage_only" : d.category === "bar_list" ? "bar_list_only" : d.category);
+  const features = d.features || {
+    hasCageAssembly: d.category === "cage" || primaryCategory === "cage_only",
+    hasBarListTable: d.category === "bar_list" || primaryCategory === "bar_list_only",
+  };
+  return { ...d, primaryCategory, features };
+}
+
 const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, disabled, detectionResult, isDetecting }) => {
   const [selectedItems, setSelectedItems] = useState<string[]>(SCOPE_ITEMS.map((s) => s.id));
   const [clientName, setClientName] = useState("");
   const [projectType, setProjectType] = useState("");
   const [deviations, setDeviations] = useState("");
   const [rebarCoating, setRebarCoating] = useState("black_steel");
+  const [includeCageModule, setIncludeCageModule] = useState(true);
+  const [scopeLocked, setScopeLocked] = useState(false);
+
+  const normalized = detectionResult ? normalizeDetection(detectionResult) : null;
+  const isCageOnly = normalized?.primaryCategory === "cage_only";
+  const isBarListOnly = normalized?.primaryCategory === "bar_list_only";
 
   // Apply detection results when they arrive
   useEffect(() => {
-    if (detectionResult) {
-      if (detectionResult.recommendedScope && detectionResult.recommendedScope.length > 0) {
-        setSelectedItems(detectionResult.recommendedScope);
-      }
-      if (detectionResult.category) {
-        setProjectType(detectionResult.category);
-      }
+    if (!normalized) return;
+
+    if (isCageOnly) {
+      setSelectedItems(CAGE_ONLY_SCOPE);
+      setScopeLocked(true);
+    } else if (isBarListOnly) {
+      setSelectedItems([]);
+      setScopeLocked(true);
+    } else if (normalized.primaryCategory === "residential") {
+      setSelectedItems(RESIDENTIAL_SCOPE);
+      setScopeLocked(false);
+    } else if (normalized.recommendedScope && normalized.recommendedScope.length > 0) {
+      setSelectedItems(normalized.recommendedScope);
+      setScopeLocked(false);
+    }
+
+    if (normalized.primaryCategory) {
+      // Map V2 primaryCategory back to project type dropdown value
+      const typeMap: Record<string, string> = {
+        cage_only: "cage", bar_list_only: "bar_list",
+        residential: "residential", commercial: "commercial",
+        industrial: "industrial", infrastructure: "infrastructure",
+      };
+      setProjectType(typeMap[normalized.primaryCategory] || normalized.primaryCategory);
+    }
+
+    if (normalized.features?.hasCageAssembly && !isCageOnly) {
+      setIncludeCageModule(true);
     }
   }, [detectionResult]);
 
   const toggleItem = (id: string) => {
+    if (scopeLocked) return;
     setSelectedItems((prev) =>
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
     );
   };
 
   const toggleAll = () => {
+    if (scopeLocked) return;
     if (selectedItems.length === SCOPE_ITEMS.length) {
       setSelectedItems([]);
     } else {
@@ -104,16 +162,26 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
     }
   };
 
+  const resetToAll = () => {
+    setScopeLocked(false);
+    setSelectedItems(SCOPE_ITEMS.map((s) => s.id));
+  };
+
   const handleProceed = () => {
-    if (selectedItems.length === 0) return;
+    if (selectedItems.length === 0 && !isBarListOnly) return;
     onProceed({
       scopeItems: selectedItems,
       clientName,
       projectType,
       deviations,
       rebarCoating,
-      detectedCategory: detectionResult?.category,
-      detectedStandard: detectionResult?.detectedStandard,
+      detectedCategory: normalized?.category,
+      detectedStandard: normalized?.detectedStandard,
+      primaryCategory: normalized?.primaryCategory,
+      features: {
+        hasCageAssembly: isCageOnly || (includeCageModule && !!normalized?.features?.hasCageAssembly),
+        hasBarListTable: isBarListOnly || !!normalized?.features?.hasBarListTable,
+      },
     });
   };
 
@@ -122,6 +190,9 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
     acc[item.category].push(item);
     return acc;
   }, {});
+
+  const effectiveConfidence = normalized?.confidencePrimary ?? normalized?.confidence ?? 0;
+  const showCageToggle = !isCageOnly && !isBarListOnly && normalized?.features?.hasCageAssembly;
 
   return (
     <div className="rounded-xl border-2 border-primary/20 bg-card overflow-hidden">
@@ -143,43 +214,57 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
           </div>
         )}
 
-        {detectionResult && detectionResult.confidence > 0 && (
+        {normalized && effectiveConfidence > 0 && (
           <div className="rounded-lg border border-primary/25 bg-primary/5 p-3 space-y-2">
             <div className="flex items-start gap-2">
               <Sparkles className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
               <div className="flex-1">
-                <p className="text-xs font-semibold text-foreground">
-                  Detected: <span className="text-primary">{CATEGORY_LABELS[detectionResult.category] || detectionResult.category}</span>
-                  {detectionResult.detectedStandard !== "unknown" && (
-                    <span className="text-muted-foreground font-normal"> — {STANDARD_LABELS[detectionResult.detectedStandard]}</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-xs font-semibold text-foreground">
+                    Detected: <span className="text-primary">{PRIMARY_CATEGORY_LABELS[normalized.primaryCategory] || normalized.primaryCategory}</span>
+                  </p>
+                  {/* Feature badges */}
+                  {normalized.features?.hasCageAssembly && !isCageOnly && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-orange-400/50 text-orange-600 dark:text-orange-400">
+                      + Cage Assembly
+                    </Badge>
                   )}
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">{detectionResult.reasoning}</p>
+                  {normalized.features?.hasBarListTable && !isBarListOnly && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-blue-400/50 text-blue-600 dark:text-blue-400">
+                      + Bar List
+                    </Badge>
+                  )}
+                </div>
+                {normalized.detectedStandard !== "unknown" && (
+                  <p className="text-[11px] text-muted-foreground mt-0.5">{STANDARD_LABELS[normalized.detectedStandard]}</p>
+                )}
+                <p className="text-[11px] text-muted-foreground mt-0.5">{normalized.reasoning}</p>
                 <div className="flex items-center gap-2 mt-1.5">
                   <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
                     <div
                       className="h-full rounded-full bg-primary transition-all"
-                      style={{ width: `${Math.round(detectionResult.confidence * 100)}%` }}
+                      style={{ width: `${Math.round(effectiveConfidence * 100)}%` }}
                     />
                   </div>
-                  <span className="text-[10px] text-muted-foreground font-medium">{Math.round(detectionResult.confidence * 100)}% confidence</span>
+                  <span className="text-[10px] text-muted-foreground font-medium">{Math.round(effectiveConfidence * 100)}% confidence</span>
                 </div>
               </div>
             </div>
+
             {/* Category-specific guidance */}
-            {detectionResult.category === "cage" && (
+            {isCageOnly && (
               <div className="flex items-start gap-2 rounded-md bg-accent/50 p-2 mt-1">
                 <Info className="h-3.5 w-3.5 text-primary flex-shrink-0 mt-0.5" />
-                <p className="text-[11px] text-muted-foreground">Cage project — estimator will focus on cage assemblies (verticals, ties, spirals, cage marks).</p>
+                <p className="text-[11px] text-muted-foreground">Cage-only project — scope locked to cage assemblies (verticals, ties, spirals).</p>
               </div>
             )}
-            {detectionResult.category === "bar_list" && (
+            {isBarListOnly && (
               <div className="flex items-start gap-2 rounded-md bg-accent/50 p-2 mt-1">
                 <Info className="h-3.5 w-3.5 text-primary flex-shrink-0 mt-0.5" />
                 <p className="text-[11px] text-muted-foreground">Bar list detected — will parse schedule tables directly for bar marks, sizes, quantities, and lengths.</p>
               </div>
             )}
-            {detectionResult.detectedStandard === "canadian_metric" && (
+            {normalized.detectedStandard === "canadian_metric" && (
               <div className="flex items-start gap-2 rounded-md bg-accent/50 p-2 mt-1">
                 <AlertTriangle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0 mt-0.5" />
                 <p className="text-[11px] text-muted-foreground">Canadian metric detected — RSIC standard practice rules will be applied automatically.</p>
@@ -199,41 +284,89 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
           </div>
         )}
 
+        {/* Cage Assembly Toggle (for non-cage_only projects with cage content) */}
+        {showCageToggle && (
+          <div className="flex items-center gap-3 rounded-lg border border-orange-400/30 bg-orange-50/50 dark:bg-orange-950/20 p-3">
+            <Checkbox
+              checked={includeCageModule}
+              onCheckedChange={(checked) => setIncludeCageModule(!!checked)}
+              className="h-4 w-4"
+            />
+            <div className="flex-1">
+              <p className="text-xs font-semibold text-foreground">Include Cage Assembly module</p>
+              <p className="text-[10px] text-muted-foreground">Cage/caisson details detected. Process cage assemblies alongside main estimation.</p>
+            </div>
+          </div>
+        )}
+
         {/* Element Types by Category */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <Label className="text-xs font-semibold text-foreground uppercase tracking-wider">Element Types</Label>
-            <button type="button" onClick={toggleAll} className="text-xs text-primary hover:underline font-medium">
-              {selectedItems.length === SCOPE_ITEMS.length ? "Deselect All" : "Select All"}
-            </button>
-          </div>
-          <div className="space-y-3">
-            {Object.entries(categories).map(([cat, items]) => (
-              <div key={cat}>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5 px-1">{cat}</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                  {items.map((item) => (
-                    <label
-                      key={item.id}
-                      className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs cursor-pointer transition-all ${
-                        selectedItems.includes(item.id)
-                          ? "border-primary/40 bg-primary/5 text-foreground"
-                          : "border-border hover:bg-accent/50 text-muted-foreground"
-                      }`}
-                    >
-                      <Checkbox
-                        checked={selectedItems.includes(item.id)}
-                        onCheckedChange={() => toggleItem(item.id)}
-                        className="h-3.5 w-3.5"
-                      />
-                      <span>{item.label}</span>
-                    </label>
-                  ))}
-                </div>
+        {!isBarListOnly && (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <Label className="text-xs font-semibold text-foreground uppercase tracking-wider">Element Types</Label>
+              <div className="flex items-center gap-3">
+                {scopeLocked && (
+                  <button type="button" onClick={resetToAll} className="flex items-center gap-1 text-xs text-primary hover:underline font-medium">
+                    <RotateCcw className="h-3 w-3" />
+                    Reset to all
+                  </button>
+                )}
+                {!scopeLocked && (
+                  <button type="button" onClick={toggleAll} className="text-xs text-primary hover:underline font-medium">
+                    {selectedItems.length === SCOPE_ITEMS.length ? "Deselect All" : "Select All"}
+                  </button>
+                )}
               </div>
-            ))}
+            </div>
+            <div className="space-y-3">
+              {Object.entries(categories).map(([cat, items]) => (
+                <div key={cat}>
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5 px-1">{cat}</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {items.map((item) => {
+                      const isDisabled = scopeLocked && isCageOnly && !CAGE_ONLY_SCOPE.includes(item.id);
+                      return (
+                        <label
+                          key={item.id}
+                          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-all ${
+                            isDisabled
+                              ? "border-border bg-muted/30 text-muted-foreground/40 cursor-not-allowed opacity-50"
+                              : selectedItems.includes(item.id)
+                                ? "border-primary/40 bg-primary/5 text-foreground cursor-pointer"
+                                : "border-border hover:bg-accent/50 text-muted-foreground cursor-pointer"
+                          }`}
+                        >
+                          <Checkbox
+                            checked={selectedItems.includes(item.id)}
+                            onCheckedChange={() => toggleItem(item.id)}
+                            disabled={isDisabled}
+                            className="h-3.5 w-3.5"
+                          />
+                          <span>{item.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {scopeLocked && isCageOnly && (
+              <p className="text-[10px] text-muted-foreground italic mt-2 px-1">
+                Scope locked for cage-only project. Click "Reset to all" to override.
+              </p>
+            )}
           </div>
-        </div>
+        )}
+
+        {/* Bar list only note */}
+        {isBarListOnly && (
+          <div className="flex items-start gap-2 rounded-lg bg-blue-50/50 dark:bg-blue-950/20 border border-blue-400/30 p-3">
+            <Info className="h-4 w-4 text-blue-500 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-muted-foreground">
+              Bar list project — elements will be parsed directly from the schedule table. No element type selection needed.
+            </p>
+          </div>
+        )}
 
         {/* Rebar Coating */}
         <div>
@@ -305,10 +438,13 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
         {/* Proceed Button */}
         <Button
           onClick={handleProceed}
-          disabled={disabled || selectedItems.length === 0 || isDetecting}
+          disabled={disabled || (selectedItems.length === 0 && !isBarListOnly) || isDetecting}
           className="w-full gap-2 h-10 rounded-xl font-semibold"
         >
-          Proceed with {selectedItems.length} element type{selectedItems.length !== 1 ? "s" : ""}
+          {isBarListOnly
+            ? "Proceed with Bar List parsing"
+            : `Proceed with ${selectedItems.length} element type${selectedItems.length !== 1 ? "s" : ""}`
+          }
           <ArrowRight className="h-4 w-4" />
         </Button>
       </div>

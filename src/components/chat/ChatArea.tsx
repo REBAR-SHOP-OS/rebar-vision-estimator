@@ -218,7 +218,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           "Content-Type": "application/json",
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ messages: chatMessages, mode, fileUrls, knowledgeContext, scope: scopeDataRef.current }),
+        body: JSON.stringify({ messages: chatMessages, mode, fileUrls, knowledgeContext, scope: scopeDataRef.current, primaryCategory: scopeDataRef.current?.primaryCategory, features: scopeDataRef.current?.features }),
       });
 
       if (!resp.ok) {
@@ -503,7 +503,19 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     });
 
     try {
-      const chatHistory = [{ role: "user", content: `I've uploaded my blueprint files. Please begin the ${mode === "smart" ? "complete automatic" : "step-by-step"} estimation process.` }];
+      // Build category-specific initial message
+      const primaryCat = scopeData?.primaryCategory;
+      let initialInstruction = `I've uploaded my blueprint files. Please begin the ${mode === "smart" ? "complete automatic" : "step-by-step"} estimation process.`;
+      
+      if (primaryCat === "cage_only") {
+        initialInstruction = "Begin cage assembly estimation — focus on verticals, ties, and spirals. This is a cage-only project.";
+      } else if (primaryCat === "bar_list_only") {
+        initialInstruction = "Parse the bar schedule table and calculate weights. This is a bar list project.";
+      } else if (scopeData?.features?.hasCageAssembly) {
+        initialInstruction = `I've uploaded my blueprint files. Begin full ${mode === "smart" ? "automatic" : "step-by-step"} estimation. Also process cage assemblies found in the set.`;
+      }
+
+      const chatHistory = [{ role: "user", content: initialInstruction }];
 
       const fullContent = await streamAIResponse(chatHistory, mode, uploadedFiles);
 
@@ -963,7 +975,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             </div>
           ) : (validationData || importedBarList) ? (
             <div className="py-2">
-              <Tabs defaultValue={validationData ? "cards" : "barlist"} className="w-full">
+              <Tabs defaultValue={
+                (scopeData?.primaryCategory === "cage_only" || scopeData?.primaryCategory === "bar_list_only")
+                  ? "barlist"
+                  : validationData ? "cards" : "barlist"
+              } className="w-full">
                 <TabsList className="w-full mb-3 h-9 rounded-xl bg-muted p-1">
                   {validationData && (
                     <TabsTrigger value="cards" className="flex-1 text-xs rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">
