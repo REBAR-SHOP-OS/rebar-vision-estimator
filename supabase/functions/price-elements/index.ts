@@ -55,12 +55,26 @@ function getWeightPerFt(size: string): number {
   return 0;
 }
 
+interface BarLine {
+  mark?: string;
+  size: string;
+  multiplier?: number;
+  qty: number;
+  length_mm?: number;
+  length_ft?: number;
+  shape?: string;
+  info?: string;
+  sheet_ref?: string;
+  weight_kg?: number;
+}
+
 interface ElementTruth {
   element_id: string;
   element_type: string;
   truth: {
     vertical_bars?: { size: string; qty: number };
     ties?: { size: string; spacing_mm: number };
+    bar_lines?: BarLine[];
     laps?: Record<string, any>;
     grade?: string;
     coating?: string;
@@ -74,38 +88,90 @@ interface ElementTruth {
   status: "READY" | "FLAGGED" | "BLOCKED";
 }
 
+// Get metric mass in kg/m for a bar size
+function getMassKgPerM(size: string): number {
+  if (METRIC_REBAR_MASS[size]) return METRIC_REBAR_MASS[size];
+  // Imperial: convert lb/ft to kg/m  (1 lb/ft ≈ 1.48816 kg/m)
+  if (REBAR_WEIGHT[size]) return REBAR_WEIGHT[size] * 1.48816;
+  const imp = METRIC_TO_IMPERIAL[size];
+  if (imp && REBAR_WEIGHT[imp]) return REBAR_WEIGHT[imp] * 1.48816;
+  return 0;
+}
+
 function calculateElementWeight(truth: ElementTruth["truth"], elementType: string): {
   weight_lbs: number;
+  weight_kg: number;
   breakdown: Record<string, number>;
-  bar_list_entries: { bar_mark: string; size: string; shape_code: string; qty: number; length_ft: number; weight_lbs: number }[];
+  breakdown_kg: Record<string, number>;
+  bar_list_entries: { bar_mark: string; size: string; shape_code: string; qty: number; length_ft: number; weight_lbs: number; weight_kg: number }[];
 } {
   const breakdown: Record<string, number> = {};
-  let totalWeight = 0;
-  const bar_list_entries: { bar_mark: string; size: string; shape_code: string; qty: number; length_ft: number; weight_lbs: number }[] = [];
+  const breakdown_kg: Record<string, number> = {};
+  let totalWeight_kg = 0;
+  const bar_list_entries: any[] = [];
 
+  // ── PRIMARY PATH: bar_lines array (actual extracted data) ──
+  if (truth.bar_lines && Array.isArray(truth.bar_lines) && truth.bar_lines.length > 0) {
+    for (const line of truth.bar_lines) {
+      const size = line.size;
+      const mult = line.multiplier || 1;
+      const qty = line.qty || 0;
+      let weight_kg = 0;
+
+      // If the AI already computed weight_kg, use it as a cross-check
+      if (line.length_mm && line.length_mm > 0) {
+        const massKgM = getMassKgPerM(size);
+        weight_kg = mult * qty * (line.length_mm / 1000) * massKgM;
+      } else if (line.length_ft && line.length_ft > 0) {
+        const wPerFt = getWeightPerFt(size);
+        const weight_lbs = mult * qty * line.length_ft * wPerFt;
+        weight_kg = weight_lbs * 0.453592;
+      } else if (line.weight_kg && line.weight_kg > 0) {
+        // Fallback: use pre-computed weight from AI
+        weight_kg = line.weight_kg;
+      }
+
+      const key = `${line.info || "bar"}_${size}`;
+      breakdown_kg[key] = (breakdown_kg[key] || 0) + weight_kg;
+      const weight_lbs = weight_kg / 0.453592;
+      breakdown[key] = (breakdown[key] || 0) + weight_lbs;
+      totalWeight_kg += weight_kg;
+
+      const lengthFt = line.length_ft || (line.length_mm ? line.length_mm / 304.8 : 0);
+      bar_list_entries.push({
+        bar_mark: line.mark || "—",
+        size,
+        shape_code: line.shape || "straight",
+        qty: mult * qty,
+        length_ft: Math.round(lengthFt * 100) / 100,
+        weight_lbs: Math.round(weight_lbs * 100) / 100,
+        weight_kg: Math.round(weight_kg * 100) / 100,
+      });
+    }
+
+    const totalWeight_lbs = totalWeight_kg / 0.453592;
+    return { weight_lbs: totalWeight_lbs, weight_kg: totalWeight_kg, breakdown, breakdown_kg, bar_list_entries };
+  }
+
+  // ── FALLBACK PATH: legacy vertical_bars + ties (hardcoded lengths) ──
   const SLAB_TYPES = ["SLAB", "RAFT_SLAB", "SLAB_STRIP"];
-
-  // Hook/bend extensions in inches (standard ACI)
   const HOOK_EXTENSION: Record<string, number> = {
     "#3": 5, "#4": 6, "#5": 7, "#6": 8, "#7": 10, "#8": 11,
     "#9": 13, "#10": 15, "#11": 17, "#14": 22, "#18": 28,
   };
 
   if (SLAB_TYPES.includes(elementType) && truth.area_sqft && truth.mesh_type) {
-    const meshWeightPerSqft = 0.85;
-    const weight = truth.area_sqft * meshWeightPerSqft;
-    breakdown[`mesh_${truth.mesh_type || "standard"}`] = weight;
-    totalWeight += weight;
+    const w = truth.area_sqft * 0.85;
+    breakdown[`mesh_${truth.mesh_type || "standard"}`] = w;
+    totalWeight_kg += w * 0.453592;
   }
 
   if (elementType === "WIRE_MESH" && truth.area_sqft) {
-    const meshWeightPerSqft = 0.85;
-    const weight = truth.area_sqft * meshWeightPerSqft;
-    breakdown["wire_mesh"] = weight;
-    totalWeight += weight;
+    const w = truth.area_sqft * 0.85;
+    breakdown["wire_mesh"] = w;
+    totalWeight_kg += w * 0.453592;
   }
 
-  // Vertical bars weight estimation with developed length
   if (truth.vertical_bars?.size && truth.vertical_bars?.qty) {
     const size = truth.vertical_bars.size;
     const qty = truth.vertical_bars.qty;
@@ -116,41 +182,29 @@ function calculateElementWeight(truth: ElementTruth["truth"], elementType: strin
       STAIR: 8, SLAB: 10, RAFT_SLAB: 10, SLAB_STRIP: 20,
     };
     let lengthFt = lengthDefaults[elementType] || 12;
-
-    // Add developed length for bends/hooks
     const shapeCode = truth.shape_code || "straight";
     if (shapeCode !== "straight") {
       const hookExt = HOOK_EXTENSION[size] || 8;
-      const bendDetails = truth.bend_details || {};
-      const leg1 = (bendDetails.leg1_in || 0) / 12;
-      const leg2 = (bendDetails.leg2_in || 0) / 12;
-      const hookFt = (bendDetails.hook_ext_in || hookExt) / 12;
-      
+      const bd = truth.bend_details || {};
+      const leg1 = (bd.leg1_in || 0) / 12;
+      const leg2 = (bd.leg2_in || 0) / 12;
+      const hookFt = (bd.hook_ext_in || hookExt) / 12;
       if (shapeCode === "L-bend") lengthFt += leg1 + hookFt;
       else if (shapeCode === "U-bend") lengthFt += leg1 + leg2 + hookFt;
       else if (shapeCode === "hook") lengthFt += hookFt;
     }
-
-    // Add splice length if specified
-    if (truth.splice_length_in) {
-      lengthFt += truth.splice_length_in / 12;
-    }
-
+    if (truth.splice_length_in) lengthFt += truth.splice_length_in / 12;
     const weight = weightPerFt * lengthFt * qty;
     breakdown[`vertical_${size}`] = weight;
-    totalWeight += weight;
-    
+    totalWeight_kg += weight * 0.453592;
     bar_list_entries.push({
-      bar_mark: truth.bar_mark || "—",
-      size,
-      shape_code: shapeCode,
-      qty,
+      bar_mark: truth.bar_mark || "—", size, shape_code: shapeCode, qty,
       length_ft: Math.round(lengthFt * 100) / 100,
       weight_lbs: Math.round(weight * 100) / 100,
+      weight_kg: Math.round(weight * 0.453592 * 100) / 100,
     });
   }
 
-  // Ties weight estimation
   if (truth.ties?.size && truth.ties?.spacing_mm) {
     const size = truth.ties.size;
     const weightPerFt = getWeightPerFt(size);
@@ -167,19 +221,21 @@ function calculateElementWeight(truth: ElementTruth["truth"], elementType: strin
     const numTies = Math.ceil(elementHeightMm / truth.ties.spacing_mm);
     const weight = weightPerFt * tiePerimeterFt * numTies;
     breakdown[`ties_${size}`] = weight;
-    totalWeight += weight;
-    
+    totalWeight_kg += weight * 0.453592;
     bar_list_entries.push({
-      bar_mark: "TIE",
-      size,
-      shape_code: "closed",
-      qty: numTies,
+      bar_mark: "TIE", size, shape_code: "closed", qty: numTies,
       length_ft: Math.round(tiePerimeterFt * 100) / 100,
       weight_lbs: Math.round(weight * 100) / 100,
+      weight_kg: Math.round(weight * 0.453592 * 100) / 100,
     });
   }
 
-  return { weight_lbs: totalWeight, breakdown, bar_list_entries };
+  const totalWeight_lbs = totalWeight_kg / 0.453592;
+  // Build breakdown_kg from breakdown
+  for (const [k, v] of Object.entries(breakdown)) {
+    breakdown_kg[k] = v * 0.453592;
+  }
+  return { weight_lbs: totalWeight_lbs, weight_kg: totalWeight_kg, breakdown, breakdown_kg, bar_list_entries };
 }
 
 serve(async (req) => {
@@ -221,25 +277,32 @@ serve(async (req) => {
 
     // For AI Express: hard error if a FLAGGED/BLOCKED is passed without proper separation
     if (quoteMode === "ai_express") {
-      // Calculate only for READY elements
       let totalWeightLbs = 0;
+      let totalWeightKg = 0;
       const elementWeights: any[] = [];
       const sizeBreakdown: Record<string, number> = {};
+      const sizeBreakdownKg: Record<string, number> = {};
       const allBarListEntries: any[] = [];
 
       for (const el of readyElements) {
-        const { weight_lbs, breakdown, bar_list_entries } = calculateElementWeight(el.truth, el.element_type);
+        const { weight_lbs, weight_kg, breakdown, breakdown_kg, bar_list_entries } = calculateElementWeight(el.truth, el.element_type);
         totalWeightLbs += weight_lbs;
+        totalWeightKg += weight_kg;
         elementWeights.push({
           element_id: el.element_id,
           element_type: el.element_type,
           weight_lbs: Math.round(weight_lbs * 100) / 100,
+          weight_kg: Math.round(weight_kg * 100) / 100,
           breakdown,
+          breakdown_kg,
           bar_list_entries,
         });
         allBarListEntries.push(...bar_list_entries.map(b => ({ ...b, element_id: el.element_id, element_type: el.element_type })));
         for (const [key, val] of Object.entries(breakdown)) {
           sizeBreakdown[key] = (sizeBreakdown[key] || 0) + val;
+        }
+        for (const [key, val] of Object.entries(breakdown_kg)) {
+          sizeBreakdownKg[key] = (sizeBreakdownKg[key] || 0) + val;
         }
       }
 
@@ -248,9 +311,12 @@ serve(async (req) => {
           mode: "ai_express",
           quote: {
             total_weight_lbs: Math.round(totalWeightLbs * 100) / 100,
+            total_weight_kg: Math.round(totalWeightKg * 100) / 100,
             total_weight_tons: Math.round((totalWeightLbs / 2000) * 1000) / 1000,
+            total_weight_tonnes: Math.round((totalWeightKg / 1000) * 1000) / 1000,
             elements: elementWeights,
             size_breakdown: sizeBreakdown,
+            size_breakdown_kg: sizeBreakdownKg,
             bar_list: allBarListEntries,
           },
           included_count: readyElements.length,
@@ -265,25 +331,32 @@ serve(async (req) => {
       );
     }
 
-    // Verified mode — all elements must be READY (already checked above)
     let totalWeightLbs = 0;
+    let totalWeightKg = 0;
     const elementWeights: any[] = [];
     const sizeBreakdown: Record<string, number> = {};
+    const sizeBreakdownKg: Record<string, number> = {};
     const allBarListEntries: any[] = [];
 
     for (const el of readyElements) {
-      const { weight_lbs, breakdown, bar_list_entries } = calculateElementWeight(el.truth, el.element_type);
+      const { weight_lbs, weight_kg, breakdown, breakdown_kg, bar_list_entries } = calculateElementWeight(el.truth, el.element_type);
       totalWeightLbs += weight_lbs;
+      totalWeightKg += weight_kg;
       elementWeights.push({
         element_id: el.element_id,
         element_type: el.element_type,
         weight_lbs: Math.round(weight_lbs * 100) / 100,
+        weight_kg: Math.round(weight_kg * 100) / 100,
         breakdown,
+        breakdown_kg,
         bar_list_entries,
       });
       allBarListEntries.push(...bar_list_entries.map(b => ({ ...b, element_id: el.element_id, element_type: el.element_type })));
       for (const [key, val] of Object.entries(breakdown)) {
         sizeBreakdown[key] = (sizeBreakdown[key] || 0) + val;
+      }
+      for (const [key, val] of Object.entries(breakdown_kg)) {
+        sizeBreakdownKg[key] = (sizeBreakdownKg[key] || 0) + val;
       }
     }
 
@@ -292,9 +365,12 @@ serve(async (req) => {
         mode: "verified",
         quote: {
           total_weight_lbs: Math.round(totalWeightLbs * 100) / 100,
+          total_weight_kg: Math.round(totalWeightKg * 100) / 100,
           total_weight_tons: Math.round((totalWeightLbs / 2000) * 1000) / 1000,
+          total_weight_tonnes: Math.round((totalWeightKg / 1000) * 1000) / 1000,
           elements: elementWeights,
           size_breakdown: sizeBreakdown,
+          size_breakdown_kg: sizeBreakdownKg,
           bar_list: allBarListEntries,
         },
         included_count: readyElements.length,
