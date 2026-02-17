@@ -244,6 +244,20 @@ Each element you identify MUST be output as a JSON object following this schema:
     "truth": {
       "vertical_bars": { "size": "#6", "qty": 8 },
       "ties": { "size": "#3", "spacing_mm": 300 },
+      "bar_lines": [
+        {
+          "mark": "20M @ 12\" OC",
+          "size": "20M",
+          "multiplier": 2,
+          "qty": 87,
+          "length_mm": 17437,
+          "length_ft": null,
+          "shape": "straight",
+          "info": "BLL & TUL",
+          "sheet_ref": "S-101",
+          "weight_kg": 7145.16
+        }
+      ],
       "laps": {},
       "grade": "60",
       "coating": "none",
@@ -374,6 +388,34 @@ For FLAGGED elements only:
 - majority_vote_required_matches: 2
 - max_questions_per_job: 3
 - max_questions_per_element: 2
+
+## BAR-LINE-LEVEL EXTRACTION (MANDATORY)
+For every element, you MUST extract EVERY individual bar line you find in the blueprints, schedules, and details.
+Each bar line is a separate row in the estimation spreadsheet. Put them in the "bar_lines" array inside extraction.truth.
+
+A "bar line" is one specification like:
+  "20M @ 12" OC" with multiplier=2, qty=87, length=17437mm
+
+DO NOT summarize. If a raft slab has 12 different bar specifications, output 12 entries in bar_lines.
+If a footing has 3 bar specs (bottom each way + dowels), output 3 entries.
+
+For each bar line extract:
+- mark: the specification text (e.g., "20M @ 12\\" OC")
+- size: bar size (e.g., "20M" or "#5")
+- multiplier: layer multiplier (1 or 2 for top+bottom, or number of identical layers)
+- qty: number of bars in this line
+- length_mm: individual bar length in millimeters (calculate from dimensions, NOT a default)
+- length_ft: individual bar length in feet (if given in imperial; null otherwise)
+- shape: straight, bend, L-bend, U-bend, hook
+- info: placement info (BLL, TUL, BUL, TLL, DOWELS, VERT, HOR, BOT, TOP, EW, LW, SW, etc.)
+- sheet_ref: which sheet/detail this came from (e.g., "S-101")
+- weight_kg: calculated weight for this line = multiplier x qty x (length_mm / 1000) x mass_kg_per_m
+
+CRITICAL: Bar lengths MUST come from the actual blueprint dimensions (slab dimensions, footing widths, wall heights, beam spans, etc.). 
+DO NOT use default lengths. If dimensions are on the drawing, extract and use them.
+For example, if a raft slab is 17437mm x 29566mm, bar lengths should reflect those dimensions minus cover (75mm each side per RSIC).
+
+The vertical_bars and ties fields are kept for backward compatibility but bar_lines is the PRIMARY data source for weight calculation.
 `;
 
 const OUTPUT_FORMAT_INSTRUCTIONS = `

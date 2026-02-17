@@ -29,9 +29,12 @@ interface QuoteResult {
   mode: string;
   quote?: {
     total_weight_lbs: number;
+    total_weight_kg?: number;
     total_weight_tons: number;
+    total_weight_tonnes?: number;
     elements: any[];
     size_breakdown: Record<string, number>;
+    size_breakdown_kg?: Record<string, number>;
   };
   included_count?: number;
   excluded_count?: number;
@@ -318,15 +321,33 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
           </div>
           <div className="grid grid-cols-2 gap-4 text-center">
             <div className="rounded-xl bg-card border border-border p-4">
-              <p className="text-2xl font-bold text-primary">{quoteResult.quote.total_weight_lbs.toLocaleString()} lbs</p>
+              <p className="text-2xl font-bold text-primary">
+                {quoteResult.quote.total_weight_kg
+                  ? `${quoteResult.quote.total_weight_kg.toLocaleString()} kg`
+                  : `${quoteResult.quote.total_weight_lbs.toLocaleString()} lbs`}
+              </p>
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">Total Weight</p>
             </div>
             <div className="rounded-xl bg-card border border-border p-4">
-              <p className="text-2xl font-bold text-primary">{quoteResult.quote.total_weight_tons} tons</p>
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">Total Tons</p>
+              <p className="text-2xl font-bold text-primary">
+                {quoteResult.quote.total_weight_tonnes
+                  ? `${quoteResult.quote.total_weight_tonnes} tonnes`
+                  : `${quoteResult.quote.total_weight_tons} tons`}
+              </p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">Total Tonnes</p>
             </div>
           </div>
-          <SizeBreakdownTable sizeBreakdown={quoteResult.quote.size_breakdown} />
+          {quoteResult.quote.total_weight_kg && (
+            <div className="grid grid-cols-2 gap-4 text-center mt-2">
+              <div className="rounded-lg bg-accent/30 border border-border p-2">
+                <p className="text-sm font-semibold text-muted-foreground">{quoteResult.quote.total_weight_lbs.toLocaleString()} lbs</p>
+              </div>
+              <div className="rounded-lg bg-accent/30 border border-border p-2">
+                <p className="text-sm font-semibold text-muted-foreground">{quoteResult.quote.total_weight_tons} tons</p>
+              </div>
+            </div>
+          )}
+          <SizeBreakdownTable sizeBreakdown={quoteResult.quote.size_breakdown} sizeBreakdownKg={quoteResult.quote.size_breakdown_kg} />
           {quoteResult.excluded && quoteResult.excluded.length > 0 && (
             <div className="mt-3 text-xs text-muted-foreground">
               <p className="font-semibold">Excluded ({quoteResult.excluded_count}):</p>
