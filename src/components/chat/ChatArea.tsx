@@ -74,6 +74,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const [finderReviewMode, setFinderReviewMode] = useState(false);
   const [confirmedFinderCandidates, setConfirmedFinderCandidates] = useState<ReviewedCandidate[]>([]);
   const [importedBarList, setImportedBarList] = useState<any[] | null>(null);
+  const [estimationGroupFilter, setEstimationGroupFilter] = useState<"all" | "loose" | "cage">("all");
   const isMobile = useIsMobile();
   useEffect(() => {
     // Reset state when switching projects
