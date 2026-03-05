@@ -394,7 +394,7 @@ async function probeVision(_integration: typeof integrations[0]) {
   const totalStart = performance.now();
 
   // Stage 1: env var
-  const saKey = Deno.env.get("GOOGLE_VISION_SA_KEY");
+  const saKey = Deno.env.get("GOOGLE_VISION_SA_KEY_V2") || Deno.env.get("GOOGLE_VISION_SA_KEY");
   if (!saKey) {
     return { success: false, failed_stage: "env_check", error: "GOOGLE_VISION_SA_KEY not configured", error_class: "bad_config", stages: { env_check: { status: "failed" } }, latency_ms: 0, resolved_model: "Cloud Vision API v1", gateway_headers: {} };
   }

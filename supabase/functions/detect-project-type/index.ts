@@ -20,7 +20,7 @@ async function importPrivateKey(pem: string): Promise<CryptoKey> {
 }
 
 async function getGoogleAccessToken(): Promise<string> {
-  const saKeyRaw = Deno.env.get("GOOGLE_VISION_SA_KEY");
+  const saKeyRaw = Deno.env.get("GOOGLE_VISION_SA_KEY_V2") || Deno.env.get("GOOGLE_VISION_SA_KEY");
   if (!saKeyRaw) throw new Error("GOOGLE_VISION_SA_KEY not configured");
   
   let sa: any;
