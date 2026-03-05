@@ -100,6 +100,47 @@ function normalizeDetection(d: DetectionResult): DetectionResult & { primaryCate
   return { ...d, primaryCategory, features };
 }
 
+// Exported utility: build ScopeData from a DetectionResult without user interaction
+export function buildScopeFromDetection(d: DetectionResult): ScopeData {
+  const n = normalizeDetection(d);
+  const isCage = n.primaryCategory === "cage_only";
+  const isBarList = n.primaryCategory === "bar_list_only";
+
+  let scopeItems: string[];
+  if (isCage) {
+    scopeItems = [...CAGE_ONLY_SCOPE];
+  } else if (isBarList) {
+    scopeItems = [];
+  } else if (n.primaryCategory === "residential") {
+    scopeItems = [...RESIDENTIAL_SCOPE];
+  } else if (n.recommendedScope?.length) {
+    scopeItems = [...n.recommendedScope];
+  } else {
+    scopeItems = SCOPE_ITEMS.map((s) => s.id);
+  }
+
+  const typeMap: Record<string, string> = {
+    cage_only: "cage", bar_list_only: "bar_list",
+    residential: "residential", commercial: "commercial",
+    industrial: "industrial", infrastructure: "infrastructure",
+  };
+
+  return {
+    scopeItems,
+    clientName: "",
+    projectType: typeMap[n.primaryCategory] || n.primaryCategory,
+    deviations: "",
+    rebarCoating: "black_steel",
+    detectedCategory: n.category,
+    detectedStandard: n.detectedStandard,
+    primaryCategory: n.primaryCategory,
+    features: {
+      hasCageAssembly: isCage || !!n.features?.hasCageAssembly,
+      hasBarListTable: isBarList || !!n.features?.hasBarListTable,
+    },
+  };
+}
+
 const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, disabled, detectionResult, isDetecting }) => {
   const [selectedItems, setSelectedItems] = useState<string[]>(SCOPE_ITEMS.map((s) => s.id));
   const [clientName, setClientName] = useState("");

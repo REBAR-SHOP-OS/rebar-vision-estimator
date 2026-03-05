@@ -45,4 +45,3 @@ The `handleNewProjectFileSelect` already passes files to ChatArea via `initialFi
 - System message clearly states what was auto-detected
 - User can type "stop" or "adjust scope" to interrupt
 - All auto-decisions are logged as system messages in the chat
-

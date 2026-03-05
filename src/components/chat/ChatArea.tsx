@@ -11,7 +11,7 @@ import ValidationResults from "./ValidationResults";
 import ElementReviewPanel, { type ReviewAnswer } from "./ElementReviewPanel";
 import FinderPassReview, { type FinderCandidate, type ReviewedCandidate } from "./FinderPassReview";
 import { type ReviewStatus } from "./DrawingOverlay";
-import ScopeDefinitionPanel, { type ScopeData, type DetectionResult } from "./ScopeDefinitionPanel";
+import ScopeDefinitionPanel, { type ScopeData, type DetectionResult, buildScopeFromDetection } from "./ScopeDefinitionPanel";
 import BlueprintViewer from "./BlueprintViewer";
 import { type OverlayElement } from "./DrawingOverlay";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
@@ -705,12 +705,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       onProjectNameChange?.(firstName);
     }
 
-    // Show scope panel and trigger detection after upload
+    // Trigger detection and auto-proceed if confidence is high
     if (!calculationMode && (uploadedFiles.length + newUrls.length) > 0) {
-      setShowScopePanel(true);
-      // Trigger smart project type detection
       const allUrls = [...uploadedFiles, ...newUrls];
       setIsDetecting(true);
+      setShowScopePanel(true); // show as fallback while detecting
       try {
         const detectResp = await fetch(DETECT_URL, {
           method: "POST",
@@ -721,8 +720,52 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           body: JSON.stringify({ fileUrls: allUrls }),
         });
         if (detectResp.ok) {
-          const result = await detectResp.json();
+          const result: DetectionResult = await detectResp.json();
           setDetectionResult(result);
+
+          const confidence = result.confidencePrimary ?? result.confidence ?? 0;
+          const AUTO_THRESHOLD = 0.7;
+
+          if (confidence >= AUTO_THRESHOLD) {
+            // Auto-proceed: build scope from detection, skip panels, go straight to smart analysis
+            const autoScope = buildScopeFromDetection(result);
+            setScopeData(autoScope);
+            setShowScopePanel(false);
+
+            // Save scope to project
+            if (user) {
+              supabase.from("projects").update({
+                client_name: autoScope.clientName || null,
+                project_type: autoScope.projectType || null,
+                scope_items: autoScope.scopeItems,
+                deviations: autoScope.deviations || null,
+              } as any).eq("id", projectId);
+            }
+
+            // Log auto-detection as system message
+            const categoryLabel = autoScope.primaryCategory === "cage_only" ? "Cage Only"
+              : autoScope.primaryCategory === "bar_list_only" ? "Bar List"
+              : autoScope.projectType || "Unknown";
+            const autoMsg: Message = {
+              id: crypto.randomUUID(),
+              role: "system",
+              content: `🤖 Auto-detected: **${categoryLabel}** project (${Math.round(confidence * 100)}% confidence). Starting Smart estimation... (say "stop" to cancel)`,
+              created_at: new Date().toISOString(),
+            };
+            setMessages((prev) => [...prev, autoMsg]);
+            await supabase.from("messages").insert({
+              project_id: projectId,
+              user_id: user!.id,
+              role: "system",
+              content: autoMsg.content,
+            });
+
+            setIsDetecting(false);
+            // Directly trigger smart mode
+            handleModeSelect("smart");
+            return;
+          }
+          // Low confidence: fall through to manual scope panel
         }
       } catch (err) {
         console.error("Project type detection failed:", err);
