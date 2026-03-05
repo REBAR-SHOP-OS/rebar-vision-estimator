@@ -1,45 +1,30 @@
 
 
-## Plan: Production-Stabilize All AI Routes
+## Plan: Fix Race Condition — Blueprint File URLs Not Passed to AI Analysis
 
-### 1. Replace preview model in `generate-shop-drawing`
-- Change `google/gemini-3-flash-preview` → `google/gemini-2.5-flash` (stable, non-preview)
-- Add `temperature: 0.2` (shop drawings need some creativity for HTML generation but should be consistent)
+### Root Cause
 
-### 2. Add deterministic settings to non-generative routes
-Each AI call gets explicit `temperature`, `top_p`, and `max_tokens`:
+In `src/components/chat/ChatArea.tsx`, when files are uploaded via the auto-upload flow, there is a React state race condition:
 
-| Route | Model | temperature | top_p | max_tokens |
-|---|---|---|---|---|
-| analyze-blueprint | google/gemini-2.5-pro | 0 | 1 | 16384 |
-| detect-project-type | google/gemini-2.5-flash | 0 | 1 | 2048 |
-| extract-learning | google/gemini-2.5-flash-lite | 0 | 1 | 1024 |
-| analyze-outcomes | google/gemini-2.5-flash | 0 | 1 | 4096 |
-| generate-shop-drawing | google/gemini-2.5-flash | 0.2 | 1 | 16384 |
+1. **Line 696**: `setUploadedFiles(prev => [...prev, ...newUrls])` queues a state update
+2. **Line 785**: `handleModeSelect("smart")` is called in the same synchronous execution
+3. **Line 522**: Inside `handleModeSelect`, `uploadedFiles` still holds the **old empty array** because React batches state updates and hasn't re-rendered yet
+4. **Result**: `analyze-blueprint` receives `fileUrls: []` — no blueprints, only knowledge files
 
-### 3. Add `pinned_model` tracking to diagnostics registry
-Each integration entry gets new fields:
-- `pinned_model` — the exact model string used at runtime (same as `model` for now since Lovable gateway resolves aliases)
-- `is_preview` — `true` if model contains "preview"
-- `is_pinned` — `true` (all models are now explicit stable versions)
+This is confirmed by the network request showing `"fileUrls":[]` in the `analyze-blueprint` POST body.
 
-### 4. Guardrails in `/ai-diagnostics`
-- Manifest output includes `is_preview` and `is_pinned` per integration
-- In verify mode: if any production route has `is_preview=true` OR `is_pinned=false`, return HTTP 500
-- Update `validateIntegrations()` to check for preview models
+### Fix
 
-### 5. Audit logging helper
-Create a shared `logAiCall()` function pattern. Each edge function logs after every AI call:
-```
-{ route, provider, gateway, pinned_model, latency_ms, success, fallback_used }
-```
-Using `console.log(JSON.stringify({...}))` so it appears in edge function logs.
+Pass the `newUrls` (or combined `allUrls`) directly to `handleModeSelect` instead of relying on stale React state. Two changes needed:
+
+1. **Modify `handleModeSelect`** to accept an optional `fileUrlsOverride?: string[]` parameter
+2. **In `streamAIResponse` call** (line 522), use `fileUrlsOverride ?? uploadedFiles` so the override takes precedence
+3. **At line 785** (auto-detection auto-proceed), pass `allUrls` to `handleModeSelect("smart")` so the freshly-uploaded URLs are used directly
 
 ### Files to modify
-1. **`supabase/functions/generate-shop-drawing/index.ts`** — swap model, add temperature/top_p/max_tokens, add audit log
-2. **`supabase/functions/analyze-blueprint/index.ts`** — add temperature:0, top_p:1, max_tokens:16384, add audit log
-3. **`supabase/functions/detect-project-type/index.ts`** — add temperature:0, top_p:1, max_tokens:2048, add audit log
-4. **`supabase/functions/extract-learning/index.ts`** — add temperature:0, top_p:1, max_tokens:1024, add audit log
-5. **`supabase/functions/analyze-outcomes/index.ts`** — add temperature:0, top_p:1, max_tokens:4096, add audit log
-6. **`supabase/functions/ai-diagnostics/index.ts`** — update registry with pinned_model/is_preview/is_pinned, add guardrail in verify mode
+
+- **`src/components/chat/ChatArea.tsx`** — 3 small edits:
+  1. Add `fileUrlsOverride` parameter to `handleModeSelect` (line ~480)
+  2. Use `fileUrlsOverride ?? uploadedFiles` in `streamAIResponse` call (line ~522)
+  3. Pass `allUrls` at auto-proceed call site (line ~785)
 
