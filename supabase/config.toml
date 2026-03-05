@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.send-review-invite]
 verify_jwt = false
+
+[functions.analyze-outcomes]
+verify_jwt = false
