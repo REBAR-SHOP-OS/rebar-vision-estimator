@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Brain, Upload, Trash2, FileText, Plus, Loader2, GraduationCap, Lightbulb } from "lucide-react";
+import { Brain, Upload, Trash2, FileText, Plus, Loader2, GraduationCap, Lightbulb, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -18,6 +18,7 @@ import * as XLSX from "xlsx";
 
 interface KnowledgeItem {
   id: string;
+  user_id: string;
   title: string | null;
   content: string | null;
   file_path: string | null;
@@ -166,6 +167,20 @@ const BrainKnowledgeDialog: React.FC = () => {
       toast.error("Failed to delete");
     } else {
       setItems((prev) => prev.filter((i) => i.id !== item.id));
+    }
+  };
+
+  const updateRule = async (id: string, title: string, content: string) => {
+    const { error } = await supabase
+      .from("agent_knowledge" as any)
+      .update({ title: title.trim() || null, content: content.trim() } as any)
+      .eq("id", id);
+
+    if (error) {
+      toast.error("Failed to update rule");
+    } else {
+      toast.success("Rule updated");
+      loadItems();
     }
   };
 
@@ -390,20 +405,13 @@ const BrainKnowledgeDialog: React.FC = () => {
               items
                 .filter((i) => i.type === "rule")
                 .map((item) => (
-                  <div key={item.id} className="flex items-start gap-2 rounded-md border p-2 text-sm group">
-                    <FileText className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-xs truncate">
-                        {item.title || "Untitled Rule"}
-                      </p>
-                      {item.content && (
-                        <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{item.content}</p>
-                      )}
-                    </div>
-                    <button onClick={() => deleteItem(item)} className="opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive/80 transition-opacity">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+                  <EditableRuleCard
+                    key={item.id}
+                    item={item}
+                    onSave={(title, content) => updateRule(item.id, title, content)}
+                    onDelete={() => deleteItem(item)}
+                    isOwner={item.user_id === user?.id}
+                  />
                 ))
             )}
           </TabsContent>
@@ -587,6 +595,80 @@ const BrainKnowledgeDialog: React.FC = () => {
         </Tabs>
       </DialogContent>
     </Dialog>
+  );
+};
+
+/** Inline-editable rule card */
+const EditableRuleCard: React.FC<{
+  item: KnowledgeItem;
+  onSave: (title: string, content: string) => void;
+  onDelete: () => void;
+  isOwner: boolean;
+}> = ({ item, onSave, onDelete, isOwner }) => {
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(item.title || "");
+  const [editContent, setEditContent] = useState(item.content || "");
+
+  const handleSave = () => {
+    onSave(editTitle, editContent);
+    setEditing(false);
+  };
+
+  const handleCancel = () => {
+    setEditTitle(item.title || "");
+    setEditContent(item.content || "");
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="rounded-md border border-primary/40 p-2 space-y-2">
+        <Input
+          value={editTitle}
+          onChange={(e) => setEditTitle(e.target.value)}
+          placeholder="Rule title (optional)"
+          className="text-xs h-7"
+        />
+        <Textarea
+          value={editContent}
+          onChange={(e) => setEditContent(e.target.value)}
+          rows={3}
+          className="text-xs"
+        />
+        <div className="flex gap-1">
+          <Button size="sm" className="h-6 text-[11px] gap-1" onClick={handleSave}>
+            <Check className="h-3 w-3" /> Save
+          </Button>
+          <Button size="sm" variant="ghost" className="h-6 text-[11px] gap-1" onClick={handleCancel}>
+            <X className="h-3 w-3" /> Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-start gap-2 rounded-md border p-2 text-sm group">
+      <FileText className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-xs truncate">
+          {item.title || "Untitled Rule"}
+        </p>
+        {item.content && (
+          <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{item.content}</p>
+        )}
+      </div>
+      {isOwner && (
+        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={() => setEditing(true)} className="text-muted-foreground hover:text-foreground">
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={onDelete} className="text-destructive hover:text-destructive/80">
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+    </div>
   );
 };
 
