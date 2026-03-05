@@ -7,6 +7,7 @@ const corsHeaders = {
 
 // Rebar weight per foot (lb/ft) — LOCKED
 const REBAR_WEIGHT: Record<string, number> = {
+  "#2": 0.167,  // NOTE: often plain/merchant bar; verify deformation requirement
   "#3": 0.376,
   "#4": 0.668,
   "#5": 1.043,

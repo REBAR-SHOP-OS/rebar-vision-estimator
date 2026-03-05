@@ -17,6 +17,7 @@ export const CSA_METRIC_KG_M: Record<string, number> = {
 
 // Imperial — lb/ft
 export const IMPERIAL_LB_FT: Record<string, number> = {
+  "#2": 0.167,  // NOTE: often plain/merchant bar; verify deformation requirement
   "#3": 0.376,
   "#4": 0.668,
   "#5": 1.043,
