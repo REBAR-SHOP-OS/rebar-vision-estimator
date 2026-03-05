@@ -6,8 +6,9 @@ const corsHeaders = {
 
 const ALLOWED_HOSTS = [
   "rebarshop-24-rebar-shop.odoo.com",
-  "ylfvyurpqplbijjfuuns.supabase.co",   // own project
-  "wqfagcjplpeaxzwoftjn.supabase.co",   // REBAR SHOP OS
+  "ylfvyurpqplbijjfuuns.supabase.co",
+  "wqfagcjplpeaxzwoftjn.supabase.co",
+  "rzqonxnowjrtbueauziu.supabase.co",   // REBAR SHOP OS
 ];
 
 Deno.serve(async (req) => {
