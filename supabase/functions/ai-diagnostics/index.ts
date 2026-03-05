@@ -315,73 +315,151 @@ function classifyHttpStatus(status: number): string {
   return "unknown_error";
 }
 
+type StageStatus = Record<string, unknown>;
+
+interface HttpStageResult {
+  url: string;
+  http_status: number;
+  content_type: string;
+  response_length: number;
+  response_text_first_200: string;
+  parse_attempted: boolean;
+  parse_result: "ok" | "failed" | "skipped_non_json";
+  parsed_data?: unknown;
+}
+
+function safeJsonParse(text: string, contentType: string): { parsed: unknown | null; parse_attempted: boolean; parse_result: "ok" | "failed" | "skipped_non_json" } {
+  const shouldParse = contentType.includes("application/json") || text.trimStart().startsWith("{");
+  if (!shouldParse) return { parsed: null, parse_attempted: false, parse_result: "skipped_non_json" };
+  try {
+    return { parsed: JSON.parse(text), parse_attempted: true, parse_result: "ok" };
+  } catch {
+    return { parsed: null, parse_attempted: true, parse_result: "failed" };
+  }
+}
+
+async function fetchWithDiagnostics(url: string, options: RequestInit, signal: AbortSignal): Promise<HttpStageResult> {
+  const res = await fetch(url, { ...options, signal });
+  const contentType = res.headers.get("content-type") || "";
+  const rawText = await res.text();
+  const { parsed, parse_attempted, parse_result } = safeJsonParse(rawText, contentType);
+  return {
+    url,
+    http_status: res.status,
+    content_type: contentType,
+    response_length: rawText.length,
+    response_text_first_200: rawText.substring(0, 200),
+    parse_attempted,
+    parse_result,
+    parsed_data: parsed,
+  };
+}
+
 async function probeVision(_integration: typeof integrations[0]) {
+  const stages: Record<string, StageStatus> = {};
+  const totalStart = performance.now();
+
+  // Stage 1: env var
   const saKey = Deno.env.get("GOOGLE_VISION_SA_KEY");
-  if (!saKey) return { success: false, error: "GOOGLE_VISION_SA_KEY not configured", latency_ms: 0, resolved_model: "Cloud Vision API v1", gateway_headers: {} };
+  if (!saKey) {
+    return { success: false, failed_stage: "env_check", error: "GOOGLE_VISION_SA_KEY not configured", error_class: "bad_config", stages: { env_check: { status: "failed" } }, latency_ms: 0, resolved_model: "Cloud Vision API v1", gateway_headers: {} };
+  }
 
-  const start = performance.now();
-
-  // Step 1: Parse SA key
+  // Stage 2: SA key parse
   const { parsed: sa, error: parseError, method } = safeParseSAKey(saKey);
   if (!sa) {
-    const latency_ms = Math.round(performance.now() - start);
-    const firstChars = saKey.substring(0, 20).replace(/[^ -~]/g, "?");
-    return { success: false, error: `${parseError} | first_chars: "${firstChars}" | length: ${saKey.length}`, latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { parse_method: method } };
+    stages.sa_key_parse = { status: "failed", detail: parseError, first_chars: saKey.substring(0, 20).replace(/[^ -~]/g, "?"), length: saKey.length, parse_method: method };
+    return { success: false, failed_stage: "sa_key_parse", error: "Not valid JSON service account key", error_class: "bad_config", stages, latency_ms: Math.round(performance.now() - totalStart), resolved_model: "Cloud Vision API v1", gateway_headers: {} };
   }
+  stages.sa_key_parse = { status: "ok", parse_method: method, client_email: sa.client_email ? "configured" : "missing" };
 
-  // Step 2: Get access token via JWT
-  let accessToken: string;
+  // Stage 3: JWT sign
+  let jwt: string;
   try {
-    const jwt = await createGoogleJWT(sa);
-    const tokenResult = await exchangeJWTForToken(jwt);
-    if ("error" in tokenResult) {
-      const latency_ms = Math.round(performance.now() - start);
-      return { success: false, error: tokenResult.error, error_class: "auth_error", latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { parse_method: method } };
-    }
-    accessToken = tokenResult.access_token;
+    jwt = await createGoogleJWT(sa);
+    stages.jwt_sign = { status: "ok" };
   } catch (e) {
-    const latency_ms = Math.round(performance.now() - start);
-    return { success: false, error: e instanceof Error ? e.message : "JWT/token error", error_class: "auth_error", latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { parse_method: method } };
+    stages.jwt_sign = { status: "failed", detail: e instanceof Error ? e.message : "unknown" };
+    return { success: false, failed_stage: "jwt_sign", error: "JWT signing failed", error_class: "auth_error", stages, latency_ms: Math.round(performance.now() - totalStart), resolved_model: "Cloud Vision API v1", gateway_headers: {} };
   }
 
-  // Step 3: Call Vision API with tiny image
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
   try {
-    const visionRes = await fetch("https://vision.googleapis.com/v1/images:annotate", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        requests: [{ image: { content: TINY_PNG_B64 }, features: [{ type: "TEXT_DETECTION", maxResults: 1 }] }],
-      }),
-      signal: controller.signal,
-    });
+    // Stage 4: Token exchange
+    const tokenStart = performance.now();
+    let tokenDiag: HttpStageResult;
+    try {
+      tokenDiag = await fetchWithDiagnostics(
+        "https://oauth2.googleapis.com/token",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+        },
+        controller.signal,
+      );
+    } catch (e) {
+      const isTimeout = e instanceof DOMException && e.name === "AbortError";
+      stages.token_exchange = { status: "failed", detail: e instanceof Error ? e.message : "unknown", error_class: isTimeout ? "timeout" : "network_error" };
+      return { success: false, failed_stage: "token_exchange", error: "Token exchange network error", error_class: isTimeout ? "timeout" : "network_error", stages, latency_ms: Math.round(performance.now() - totalStart), resolved_model: "Cloud Vision API v1", gateway_headers: {} };
+    }
+    const tokenLatency = Math.round(performance.now() - tokenStart);
 
-    const latency_ms = Math.round(performance.now() - start);
-    const contentType = visionRes.headers.get("content-type") || "";
-    const rawText = await visionRes.text();
-
-    if (!visionRes.ok) {
-      const error_class = classifyHttpStatus(visionRes.status);
-      return { success: false, error: `HTTP ${visionRes.status}`, error_class, latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { http_status: String(visionRes.status), content_type: contentType, response_snippet: rawText.substring(0, 200), parse_method: method } };
+    if (tokenDiag.http_status !== 200 || tokenDiag.parse_result !== "ok") {
+      stages.token_exchange = { status: "failed", latency_ms: tokenLatency, url: tokenDiag.url, http_status: tokenDiag.http_status, content_type: tokenDiag.content_type, response_length: tokenDiag.response_length, response_text_first_200: tokenDiag.response_text_first_200, parse_attempted: tokenDiag.parse_attempted, parse_result: tokenDiag.parse_result };
+      const errClass = tokenDiag.parse_result !== "ok" ? "non_json_response" : classifyHttpStatus(tokenDiag.http_status);
+      return { success: false, failed_stage: "token_exchange", error: `Token exchange HTTP ${tokenDiag.http_status}`, error_class: errClass, stages, latency_ms: Math.round(performance.now() - totalStart), resolved_model: "Cloud Vision API v1", gateway_headers: {} };
     }
 
-    if (!contentType.includes("application/json")) {
-      return { success: false, error: "Non-JSON response from Vision API", error_class: "non_json_response", latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { http_status: String(visionRes.status), content_type: contentType, response_snippet: rawText.substring(0, 200), parse_method: method } };
+    const tokenData = tokenDiag.parsed_data as Record<string, unknown>;
+    if (!tokenData?.access_token) {
+      stages.token_exchange = { status: "failed", latency_ms: tokenLatency, detail: "No access_token in response", http_status: 200 };
+      return { success: false, failed_stage: "token_exchange", error: "No access_token in token response", error_class: "auth_error", stages, latency_ms: Math.round(performance.now() - totalStart), resolved_model: "Cloud Vision API v1", gateway_headers: {} };
+    }
+    stages.token_exchange = { status: "ok", latency_ms: tokenLatency, http_status: 200 };
+    const accessToken = tokenData.access_token as string;
+
+    // Stage 5: Vision API call
+    const visionStart = performance.now();
+    let visionDiag: HttpStageResult;
+    try {
+      visionDiag = await fetchWithDiagnostics(
+        "https://vision.googleapis.com/v1/images:annotate",
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ requests: [{ image: { content: TINY_PNG_B64 }, features: [{ type: "TEXT_DETECTION", maxResults: 1 }] }] }),
+        },
+        controller.signal,
+      );
+    } catch (e) {
+      const isTimeout = e instanceof DOMException && e.name === "AbortError";
+      stages.vision_call = { status: "failed", detail: e instanceof Error ? e.message : "unknown", error_class: isTimeout ? "timeout" : "network_error" };
+      return { success: false, failed_stage: "vision_call", error: "Vision API network error", error_class: isTimeout ? "timeout" : "network_error", stages, latency_ms: Math.round(performance.now() - totalStart), resolved_model: "Cloud Vision API v1", gateway_headers: {} };
+    }
+    const visionLatency = Math.round(performance.now() - visionStart);
+
+    if (visionDiag.http_status !== 200) {
+      const errClass = classifyHttpStatus(visionDiag.http_status);
+      stages.vision_call = { status: "failed", latency_ms: visionLatency, url: visionDiag.url, http_status: visionDiag.http_status, content_type: visionDiag.content_type, response_length: visionDiag.response_length, response_text_first_200: visionDiag.response_text_first_200, parse_attempted: visionDiag.parse_attempted, parse_result: visionDiag.parse_result };
+      return { success: false, failed_stage: "vision_call", error: `Vision API HTTP ${visionDiag.http_status}`, error_class: errClass, stages, latency_ms: Math.round(performance.now() - totalStart), resolved_model: "Cloud Vision API v1", gateway_headers: {} };
     }
 
-    let data: Record<string, unknown>;
-    try { data = JSON.parse(rawText); } catch { return { success: false, error: "Failed to parse Vision response JSON", error_class: "non_json_response", latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { content_type: contentType, response_snippet: rawText.substring(0, 200), parse_method: method } }; }
-
-    if (Array.isArray(data.responses)) {
-      return { success: true, latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { parse_method: method, client_email: sa.client_email ? "configured" : "missing", response_count: String((data.responses as unknown[]).length) }, error: null };
+    if (visionDiag.parse_result !== "ok") {
+      stages.vision_call = { status: "failed", latency_ms: visionLatency, http_status: 200, content_type: visionDiag.content_type, response_length: visionDiag.response_length, response_text_first_200: visionDiag.response_text_first_200, parse_attempted: visionDiag.parse_attempted, parse_result: visionDiag.parse_result };
+      return { success: false, failed_stage: "vision_call", error: "Vision API returned non-JSON", error_class: "non_json_response", stages, latency_ms: Math.round(performance.now() - totalStart), resolved_model: "Cloud Vision API v1", gateway_headers: {} };
     }
 
-    return { success: false, error: "Missing 'responses' array in Vision API response", latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { parse_method: method, response_snippet: rawText.substring(0, 200) } };
-  } catch (e) {
-    const latency_ms = Math.round(performance.now() - start);
-    const isTimeout = e instanceof DOMException && e.name === "AbortError";
-    return { success: false, error: e instanceof Error ? e.message : "Unknown", error_class: isTimeout ? "timeout" : "network_error", latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { parse_method: method } };
+    const visionData = visionDiag.parsed_data as Record<string, unknown>;
+    if (Array.isArray(visionData?.responses)) {
+      stages.vision_call = { status: "ok", latency_ms: visionLatency, http_status: 200, response_count: (visionData.responses as unknown[]).length };
+      return { success: true, failed_stage: null, stages, latency_ms: Math.round(performance.now() - totalStart), resolved_model: "Cloud Vision API v1", gateway_headers: {}, error: null };
+    }
+
+    stages.vision_call = { status: "failed", latency_ms: visionLatency, http_status: 200, detail: "Missing 'responses' array", response_text_first_200: visionDiag.response_text_first_200 };
+    return { success: false, failed_stage: "vision_call", error: "Missing 'responses' array in Vision response", error_class: "bad_request", stages, latency_ms: Math.round(performance.now() - totalStart), resolved_model: "Cloud Vision API v1", gateway_headers: {} };
   } finally {
     clearTimeout(timeout);
   }
