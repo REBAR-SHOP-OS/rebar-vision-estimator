@@ -228,6 +228,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
       const preExtractedText: any[] = [];
       const scannedPdfPageImageUrls: string[] = [];
+      // Vision OCR text collected client-side (one image at a time via ocr-image function)
+      const clientOcrResults: { image_name: string; ocr_results: any[] }[] = [];
 
       if (pdfUrls.length > 0) {
         console.log(`Pre-extracting text from ${pdfUrls.length} PDF(s) sequentially...`);
@@ -243,7 +245,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               preExtractedText.push(data);
               console.log(`Extracted ${data.total_pages || 0} pages, has_text_layer: ${data.has_text_layer}, skipped_reason: ${data.skipped_reason || 'none'}`);
 
-              // If PDF is scanned/skipped, render pages to images client-side
+              // If PDF is scanned/skipped, render pages to images client-side then OCR each
               const isScanned = data.has_text_layer === false || data.skipped_reason;
               if (isScanned) {
                 console.log(`[OCR Routing] PDF is scanned/skipped. Rendering pages to images client-side...`);
@@ -255,10 +257,29 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                       console.log(`[OCR Routing] Rendering page ${current}/${total}...`);
                     },
                   });
+                  console.log(`[OCR Routing] ${pageImages.length} page images uploaded. Running Vision OCR on each...`);
+                  
+                  // OCR each page image individually via the lightweight ocr-image edge function
                   for (const img of pageImages) {
                     scannedPdfPageImageUrls.push(img.signedUrl);
+                    try {
+                      console.log(`[OCR Routing] OCR page ${img.pageNumber}...`);
+                      const { data: ocrData, error: ocrErr } = await supabase.functions.invoke('ocr-image', {
+                        body: { image_url: img.signedUrl },
+                      });
+                      if (ocrErr) {
+                        console.error(`[OCR Routing] OCR failed for page ${img.pageNumber}:`, ocrErr);
+                      } else if (ocrData?.ocr_results) {
+                        clientOcrResults.push({
+                          image_name: `page_${img.pageNumber}.png`,
+                          ocr_results: ocrData.ocr_results,
+                        });
+                        console.log(`[OCR Routing] OCR page ${img.pageNumber} done — ${ocrData.ocr_results.reduce((s: number, r: any) => s + (r.blocks?.length || 0), 0)} blocks`);
+                      }
+                    } catch (ocrErr) {
+                      console.error(`[OCR Routing] OCR error for page ${img.pageNumber}:`, ocrErr);
+                    }
                   }
-                  console.log(`[OCR Routing] ${pageImages.length} page images uploaded for Vision OCR.`);
                 } catch (renderErr) {
                   console.error(`[OCR Routing] Client-side PDF rendering failed:`, renderErr);
                 }
@@ -281,6 +302,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           mode,
           fileUrls: [...nonPdfUrls, ...scannedPdfPageImageUrls], // non-PDF files + rendered scanned PDF page images
           pre_extracted_text: preExtractedText, // pre-extracted PDF text
+          pre_ocr_results: clientOcrResults, // Vision OCR results already collected client-side
           knowledgeContext,
           scope: scopeDataRef.current,
           primaryCategory: scopeDataRef.current?.primaryCategory,
