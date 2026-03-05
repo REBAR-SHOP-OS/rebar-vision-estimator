@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { decode as decodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
-import { getDocument } from "https://esm.sh/pdfjs-serverless@0.4.1";
+import { getDocument } from "https://esm.sh/pdfjs-serverless";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
