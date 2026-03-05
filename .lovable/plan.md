@@ -1,41 +1,68 @@
 
 
-## Plan: Implement Audited Master Prompt Rev A
+## Plan: ERP Pipeline Learning Sync + Click-to-Dig Lead Detail Panel
 
-This upgrades the `analyze-blueprint` edge function's Master Prompt from the current v2026-03-05 to **Rev A** (the audited version), incorporating all hardening actions from the audit report.
+### What We're Building
 
-### Changes
+Two features that turn completed ERP pipeline leads into learning data for the estimator:
 
-**1. Replace `MASTER_PROMPT` constant** (lines 299-798 in `analyze-blueprint/index.ts`)
+1. **Lead Detail Edge Function** (`fetch-lead-details`) — fetches a single lead's full payload from the Rebar Shop OS database: lead fields, chatter/messages (via `lead_messages` or `mail.message` in Odoo), and attachments with download URLs.
 
-Replace the entire prompt with the Rev A version from the audit. Key additions:
-- `units_context` requirement at Stage 0 (METRIC / IMPERIAL / MIXED_CONFIRMED / UNKNOWN!)
-- Explicit `view_type` and `region_ref` in evidence requirements
-- SSLW-1 custom rule (regional stock-length + waste isolation) embedded in Stage 5.5
-- R12 strict separation enforced: `evidence_refs >= 1` on drawing-spec items, no `assumptions` field allowed
-- OCR tie-break policy: confidence-winner with minor-diff normalization
-- Deterministic rounding rules section
-- JSON schema constraints section (REBAR_ESTIMATE_V1 top-level keys)
+2. **Click-to-Dig Side Panel** (`LeadDetailPanel`) — when a user clicks a lead row in `CrmSyncPanel`, a slide-out panel shows: chatter timeline, attachments list with preview links, extracted summary, and a "Use as Estimation Context" button that pushes the case into the active estimator session.
 
-**2. Update `REBAR_WEIGHT_TABLE`** (lines 862-877)
+3. **Force Sync / Learn from Pipeline** (`learn-from-pipeline`) — an edge function that queries leads in outcome stages (`delivered_pickup_done`, `won`, `no_rebars_out_of_scope`), builds `case_record` objects (lead fields + files metadata + outcome label), and stores them as `learned` entries in `agent_knowledge`.
 
-Add `#2: 0.167 lb/ft` with the note about plain/merchant bar verification.
+4. **Agent Brain Rule** — auto-insert the "ERP Pipeline Sync + Click-to-Dig Learning" rule into `agent_knowledge` so the AI knows how to use pipeline cases.
 
-**3. Update `CANADIAN_METRIC_TABLE`** (lines 879-912)
+### Architecture Reality Check
 
-Add explicit stock lengths per CBSA/RSIC (6m/12m/18m), Grade 400R/W and 500R/W with weldability note, and CBSA standard length reference.
+The Rebar Shop OS backend is a **Supabase database** at `rzqonxnowjrtbueauziu.supabase.co`, not Odoo directly (the Odoo connection is only used for file attachments via `proxy-crm-file`). So:
 
-**4. Update `src/lib/rebar-weights.ts`**
+- Lead list, chatter, and files metadata are queryable via the Supabase client with the existing anon key
+- We need to discover what tables exist for chatter/messages on that remote DB — the `lead_messages` or `lead_notes` table name needs to be confirmed
+- File binary downloads for Odoo-hosted attachments still go through `proxy-crm-file`
 
-Add `#2` to `IMPERIAL_LB_FT` table for consistency with the locked weight table.
+### Technical Details
 
-**5. Update `supabase/functions/price-elements/index.ts`**
+**1. New Edge Function: `fetch-lead-details`**
 
-Add `#2` to `REBAR_WEIGHT` table for consistency.
+Queries the remote Rebar Shop OS Supabase for a single lead by ID:
+- `leads` table: full row with customer join
+- `lead_files` table: all attachments for the lead
+- `lead_messages` or equivalent: chatter/notes timeline (needs table name — will attempt `lead_messages` and gracefully degrade)
+- Returns structured JSON with lead, attachments, and messages
 
-### Scope
-- 3 files modified
-- No database migrations
-- No UI changes
-- No new dependencies
+**2. New Edge Function: `learn-from-pipeline`**
+
+- Queries leads in learning stages: `delivered_pickup_done`, `won`, `no_rebars_out_of_scope`
+- For each, builds a case_record with: lead_id, title, customer, stage, timestamps, files metadata, outcome label (SUCCESS/FAIL)
+- Upserts into `agent_knowledge` with `type = 'learned'`, deduplicating by lead_id in content
+- Returns count of new cases learned
+
+**3. New Component: `LeadDetailPanel`**
+
+- Slide-out Sheet triggered by clicking a lead row in `CrmSyncPanel`
+- Sections: Lead Info, Chatter Timeline (chronological), Attachments (with download/preview), Actions
+- "Use as Estimation Context" button calls `onStartEstimationWithFiles` with lead data
+- "Learn from This Lead" button calls `learn-from-pipeline` for a single lead
+
+**4. CrmSyncPanel Updates**
+
+- Add click handler on lead rows to open `LeadDetailPanel`
+- Add "Force Sync Learning" button in header that calls `learn-from-pipeline` for all outcome-stage leads
+- Add learning stages to the stage color map
+
+**5. Config**
+
+- Add `fetch-lead-details` and `learn-from-pipeline` to `supabase/config.toml` with `verify_jwt = false`
+
+### Files
+
+- **New**: `supabase/functions/fetch-lead-details/index.ts`
+- **New**: `supabase/functions/learn-from-pipeline/index.ts`
+- **New**: `src/components/crm/LeadDetailPanel.tsx`
+- **Modified**: `src/components/crm/CrmSyncPanel.tsx` (click-to-dig + force sync button)
+- **Modified**: `supabase/config.toml` (2 new function entries)
+
+No database migrations needed — uses existing `agent_knowledge` table for learned cases.
 
