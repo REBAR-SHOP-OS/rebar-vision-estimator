@@ -477,7 +477,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     }
   };
 
-  const handleModeSelect = async (mode: "smart" | "step-by-step") => {
+  const handleModeSelect = async (mode: "smart" | "step-by-step", fileUrlsOverride?: string[]) => {
     if (!user) return;
     setShowModePicker(false);
     setCalculationMode(mode);
@@ -519,7 +519,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
       const chatHistory = [{ role: "user", content: initialInstruction }];
 
-      const fullContent = await streamAIResponse(chatHistory, mode, uploadedFiles);
+      const fullContent = await streamAIResponse(chatHistory, mode, fileUrlsOverride ?? uploadedFiles);
 
       // Trigger learning extraction
       triggerLearning([...chatHistory, { role: "assistant", content: fullContent }]);
@@ -782,7 +782,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
             setIsDetecting(false);
             // Directly trigger smart mode
-            handleModeSelect("smart");
+            handleModeSelect("smart", [...uploadedFiles, ...newUrls]);
             return;
           }
           // Low confidence: fall through to manual scope panel
