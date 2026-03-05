@@ -1448,6 +1448,7 @@ Before outputting your final answer, you MUST:
               console.log(`PDF ${sizeMB.toFixed(1)}MB exceeds inline limit (${MAX_PDF_INLINE_MB}MB), using text extraction only for this file`);
             }
             pdfCount++;
+          } catch (err) { console.error("PDF processing error:", err); }
         } else {
           // Check if this is a supported image format
           const supportedImageExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif'];
