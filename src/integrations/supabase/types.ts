@@ -266,6 +266,48 @@ export type Database = {
           },
         ]
       }
+      notifications: {
+        Row: {
+          body: string | null
+          channel: string
+          created_at: string | null
+          id: string
+          metadata: Json | null
+          notification_type: string
+          project_id: string
+          recipient_email: string
+          recipient_name: string | null
+          status: string | null
+          subject: string | null
+        }
+        Insert: {
+          body?: string | null
+          channel?: string
+          created_at?: string | null
+          id?: string
+          metadata?: Json | null
+          notification_type: string
+          project_id: string
+          recipient_email: string
+          recipient_name?: string | null
+          status?: string | null
+          subject?: string | null
+        }
+        Update: {
+          body?: string | null
+          channel?: string
+          created_at?: string | null
+          id?: string
+          metadata?: Json | null
+          notification_type?: string
+          project_id?: string
+          recipient_email?: string
+          recipient_name?: string | null
+          status?: string | null
+          subject?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null

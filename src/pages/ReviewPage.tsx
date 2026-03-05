@@ -88,6 +88,31 @@ const ReviewPage: React.FC = () => {
         .update({ status: "commented" })
         .eq("id", share.id);
 
+      // Notify project owner about new comment
+      try {
+        await fetch(
+          `${supabaseUrl}/functions/v1/notify-reviewer`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${supabaseAnonKey}`,
+            },
+            body: JSON.stringify({
+              project_id: share.project_id,
+              recipient_email: "neel@rebar.shop",
+              recipient_name: "Neel",
+              notification_type: "comment_received",
+              subject: `💬 ${authorName.trim()} commented on your review — Rebar Shop`,
+              body: `${authorName.trim()} left a comment on the ${share.review_type === "quote_approval" ? "quote approval" : "estimation review"}:\n\n"${commentText.trim().slice(0, 200)}"`,
+              share_url: window.location.href,
+            }),
+          }
+        );
+      } catch (notifyErr) {
+        console.error("Owner notification failed (non-blocking):", notifyErr);
+      }
+
       setSubmitted(true);
       setCommentText("");
 
