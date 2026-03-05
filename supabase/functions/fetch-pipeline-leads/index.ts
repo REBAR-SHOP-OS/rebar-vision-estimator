@@ -69,13 +69,28 @@ Deno.serve(async (req) => {
     const leadsWithFiles = (leads || []).map((lead: any) => {
       const files = filesByLead[lead.id] || [];
       const attachments = files.map((f: any) => {
-        let url = f.file_url || null;
-        if (f.storage_path && !url) {
+        let url: string | null = null;
+
+        // Prefer storage path (direct public download, no auth needed)
+        if (f.storage_path) {
           url = `${REBAR_URL}/storage/v1/object/public/lead-files/${f.storage_path}`;
         }
-        if (!url && f.odoo_id) {
+        // Use odoo-file-proxy for Odoo-hosted files (requires session auth)
+        else if (f.odoo_id) {
           url = `${REBAR_URL}/functions/v1/odoo-file-proxy?id=${f.odoo_id}`;
         }
+        // Extract content ID from Odoo URLs and route through proxy
+        else if (f.file_url && f.file_url.includes("odoo.com/web/content/")) {
+          const match = f.file_url.match(/\/web\/content\/(\d+)/);
+          if (match) {
+            url = `${REBAR_URL}/functions/v1/odoo-file-proxy?id=${match[1]}`;
+          }
+        }
+        // Fallback to file_url if it's a non-Odoo URL
+        else if (f.file_url) {
+          url = f.file_url;
+        }
+
         return {
           name: f.file_name || "file",
           size: f.file_size_bytes || 0,
