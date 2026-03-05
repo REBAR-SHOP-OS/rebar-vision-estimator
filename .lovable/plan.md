@@ -1,111 +1,49 @@
 
 
-## Plan: Shop Drawing Search Database with CRM Integration
+## Plan: Expose App as MCP Server for ChatGPT
 
-This is a large system. The plan is split into 4 phases, each delivering usable value. Given Lovable's constraints (React frontend, Supabase/Postgres backend via Edge Functions), we use **PostgreSQL full-text search + JSONB + GIN indexes** as the primary search engine, with pgvector as an optional future addition.
+Based on the screenshot, you want to register your app as a Custom Tool (MCP server) in ChatGPT so GPT can read and write your shop drawing data. This requires creating an MCP-compatible edge function that ChatGPT can call.
 
-### What Already Exists
+### What gets built
 
-Your project already has strong foundations:
-- `document_versions` (SHA-256 hashing, file tracking)
-- `drawing_sets` + `sheet_revisions` (revision chains, title block metadata)
-- `reconciliation_records` (audit trail)
-- `symbol_lexicon` (rebar notation patterns)
-- `extract-pdf-text` edge function (PDF text + table extraction)
-- CRM pipeline integration (fetch-pipeline-leads, proxy-crm-file)
+**1. New edge function: `supabase/functions/mcp-server/index.ts`**
 
-### Phase 1: Search Schema + Index Population
+An MCP Streamable HTTP server using `mcp-lite` that exposes your existing capabilities as tools ChatGPT can call:
 
-**Database migration** -- new tables and indexes:
+| Tool name | Description | Read/Write |
+|---|---|---|
+| `search_drawings` | Search shop drawings by query, bar mark, project, revision | Read |
+| `list_projects` | List all projects for the authenticated user | Read |
+| `get_drawing_details` | Get full details of a specific drawing version | Read |
+| `get_pipeline_deals` | List CRM pipeline deals with files | Read |
+| `create_project` | Create a new estimation project | Write |
+| `upload_and_analyze` | Accept a file URL, download it, and trigger the estimation pipeline | Write |
+| `update_drawing_status` | Update revision label or issue status on a drawing | Write |
 
-```text
-logical_drawings
-├── id (uuid PK)
-├── project_id → projects
-├── user_id
-├── sheet_id (text, e.g. "S-201")
-├── discipline (text)
-├── drawing_type (text)
-├── unique(user_id, project_id, sheet_id, drawing_type)
+**2. Authentication approach**
 
-drawing_search_index
-├── id (uuid PK)
-├── user_id
-├── logical_drawing_id → logical_drawings
-├── document_version_id → document_versions
-├── sheet_revision_id → sheet_revisions
-├── project_id → projects
-├── page_number (int)
-├── extracted_entities (jsonb) -- bar_marks[], schedule_rows[], etc.
-├── raw_text (text)
-├── search_tsv (tsvector) -- GIN-indexed for FTS
-├── bar_marks (text[]) -- GIN-indexed for exact lookups
-├── crm_deal_id (text)
-├── revision_label (text)
-├── issue_status (text)
-├── created_at
-```
+The MCP server will use a simple API key (Bearer token) auth. We will store a `MCP_API_KEY` secret that you generate and paste into ChatGPT's OAuth Client Secret field (or use API Key auth mode in ChatGPT). The edge function validates the Bearer token against this secret.
 
-Add GIN indexes on `search_tsv`, `bar_marks`, and `extracted_entities`.
+**3. Configuration**
 
-RLS: user can only access own rows (`auth.uid() = user_id`).
+- Add `[functions.mcp-server]` to `supabase/config.toml` with `verify_jwt = false` (auth handled internally via API key)
+- Add `MCP_API_KEY` secret via the secrets tool
 
-**Populate on ingestion**: Modify the estimation pipeline (after `extract-pdf-text` runs) to insert rows into `drawing_search_index` with the extracted text, detected bar marks, and title block metadata. This happens in the existing `analyze-blueprint` flow.
+**4. ChatGPT setup**
 
-### Phase 2: Search Edge Function
+Once deployed, you enter in ChatGPT's "New App" dialog:
+- **MCP Server URL**: `https://ylfvyurpqplbijjfuuns.supabase.co/functions/v1/mcp-server`
+- **Authentication**: API Key (or None if you prefer)
+- **API Key**: the value you set for `MCP_API_KEY`
 
-New edge function `search-drawings/index.ts`:
-- Accepts: `{ q, project_id, sheet_id, bar_mark, discipline, drawing_type, revision, crm_deal_id, limit }`
-- Executes hybrid query:
-  1. Structured filters (project, discipline, revision, CRM deal)
-  2. Full-text search via `search_tsv @@ plainto_tsquery(q)`
-  3. Array containment for bar marks: `bar_marks @> ARRAY[bar_mark]`
-- Returns ranked results with highlights via `ts_headline()`
-- Uses `supabase.rpc()` calling a security-definer function for the complex query
+### Technical details
 
-### Phase 3: Search UI
+The edge function uses Hono + mcp-lite (`npm:mcp-lite@^0.10.0`) with `StreamableHttpTransport`. Each tool calls your existing database tables (`drawing_search_index`, `logical_drawings`, `projects`, etc.) via the service role Supabase client. The search tool reuses the existing `search_drawings` RPC function.
 
-New sidebar button "Search Drawings" that opens a search panel:
-- Search bar with type-ahead
-- Filter chips: project, discipline, drawing type, revision, CRM deal
-- Results list showing: sheet ID, revision, project name, matched bar marks, snippet with highlights
-- Click result → opens that project's chat with the drawing focused
-- "Similar drawings" link per result (future: vector similarity)
+### Implementation order
 
-### Phase 4: CRM Backfill + Deduplication
-
-- Extend `fetch-pipeline-leads` to also return historical/closed deals with files
-- Add a "Backfill Search DB" action in the CRM panel that:
-  1. Iterates all CRM deals with files
-  2. Downloads via proxy-crm-file
-  3. Runs extract-pdf-text
-  4. Populates logical_drawings + drawing_search_index
-- Near-duplicate detection: compare SHA-256 for exact dupes; flag files with same sheet_id + different hash as revision candidates
-- Reconciliation UI: surface ambiguities (revision conflicts, missing revisions) via the existing `reconciliation_records` table
-
-### Technical Details
-
-**Database functions needed**:
-- `search_drawings(p_user_id uuid, p_query text, p_filters jsonb, p_limit int)` -- SECURITY DEFINER function that builds the hybrid query, avoiding RLS recursion
-- `upsert_search_index(...)` -- called from edge functions after extraction
-
-**Edge functions**:
-- `search-drawings/index.ts` -- thin wrapper calling the DB function
-- Modifications to `analyze-blueprint/index.ts` -- after extraction, insert into search index
-
-**Frontend components**:
-- `src/components/search/DrawingSearchPanel.tsx` -- main search UI
-- `src/components/search/SearchResultCard.tsx` -- individual result display
-- `src/components/search/SearchFilters.tsx` -- filter controls
-
-**pgvector (future)**: Can be added later for "find similar drawings" by storing text embeddings in a `vector(768)` column on `drawing_search_index`. Not required for Phase 1-3 since structured filters + FTS handle most real queries.
-
-### Implementation Order
-
-1. Database migration (logical_drawings + drawing_search_index + functions + indexes)
-2. Search edge function
-3. Modify analyze-blueprint to populate search index during estimation
-4. Search UI panel
-5. CRM backfill workflow
-6. Deduplication + reconciliation enhancements
+1. Request `MCP_API_KEY` secret from you
+2. Create `mcp-server/index.ts` with all tools
+3. Update `config.toml`
+4. Deploy and provide the URL for ChatGPT registration
 
