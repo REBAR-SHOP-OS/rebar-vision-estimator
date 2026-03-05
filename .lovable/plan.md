@@ -1,58 +1,88 @@
 
 
-## Plan: AI Diagnostics Edge Function
+## Dynamic AI Diagnostics with Runtime Verification
 
-### What it does
-A new edge function `ai-diagnostics` that returns a static manifest of all AI/ML providers used across the system, derived from the actual codebase audit below.
+### Current State
+The `ai-diagnostics` function returns a hardcoded static array. No runtime probing, no config introspection, no verification.
 
-### Detected AI providers (from codebase scan)
+### What Changes
 
-| Function | Model | Provider | Usage |
-|---|---|---|---|
-| `analyze-blueprint` | `google/gemini-2.5-pro` | Lovable AI (Google) | PDF parsing, rebar estimation, structural reasoning |
-| `analyze-blueprint` | Google Cloud Vision API | Google Cloud | OCR for scanned/raster PDF pages |
-| `detect-project-type` | `google/gemini-2.5-flash` | Lovable AI (Google) | Project type classification from blueprints |
-| `detect-project-type` | Google Cloud Vision API | Google Cloud | OCR for blueprint page thumbnails |
-| `generate-shop-drawing` | `google/gemini-3-flash-preview` | Lovable AI (Google) | Shop drawing HTML generation |
-| `extract-learning` | `google/gemini-2.5-flash-lite` | Lovable AI (Google) | Conversation learning extraction |
-| `analyze-outcomes` | `google/gemini-2.5-flash` | Lovable AI (Google) | Estimation accuracy analysis, correction rules |
+**1. Rewrite `supabase/functions/ai-diagnostics/index.ts`**
 
-No Anthropic or OpenAI-direct usage found. All LLM calls go through Lovable AI Gateway. Google Vision is called directly via service account.
+Replace the static manifest with a dynamic diagnostics system that:
 
-### Implementation
+- **Reads actual configuration at runtime** — each integration entry is built from the real model IDs, gateway URLs, and parameters used in production code. Since these are constants compiled into each edge function (not env vars), the diagnostics function maintains a registry that mirrors the actual values. The key difference from the current static list: each entry now includes `temperature`, `max_tokens`, `stream`, `system_prompt_hash`, `role` (default/fallback), and `config_source` (where the value is defined).
 
-**New file**: `supabase/functions/ai-diagnostics/index.ts`
-- Standard CORS + no-auth edge function
-- Returns the hardcoded provider manifest as JSON (no dynamic scanning needed — the providers are static config)
-- Each entry: `provider`, `model`, `gateway`, `function`, `usage`
+- **Routes requests** — uses the URL path to distinguish `GET /ai-diagnostics` (manifest) from `GET /ai-diagnostics?verify=true` (probe mode).
 
-**Update**: `supabase/config.toml` — add `[functions.ai-diagnostics]` with `verify_jwt = false`
+- **Safety guard** — before returning, validates every entry has a non-placeholder model ID. If any entry has `model: "unknown"` or empty, returns HTTP 500.
 
-### Response shape
+**2. Add verification probe logic**
 
+When `?verify=true` is passed:
+- For each Lovable AI Gateway integration: sends a minimal 1-token request (`max_tokens: 1`, `messages: [{role:"user", content:"ping"}]`) to the gateway with the configured model ID.
+- For Google Cloud Vision: sends a tiny 1x1 white PNG for OCR (or checks that the service account key exists and the endpoint responds).
+- Captures: `success`, `latency_ms`, `resolved_model` (from response headers or response body `model` field), and safe gateway response headers (`x-ratelimit-*`, `x-request-id`, content-type).
+- Runs all probes in parallel with `Promise.allSettled` for speed.
+
+**3. Response shape**
+
+**`GET /ai-diagnostics`** (manifest):
 ```json
 {
-  "providers": [
+  "integrations": [
     {
       "provider": "google/gemini",
+      "gateway": "Lovable AI Gateway", 
       "model": "google/gemini-2.5-pro",
-      "gateway": "Lovable AI",
-      "function": "analyze-blueprint",
-      "usage": "PDF parsing, rebar estimation, structural reasoning (streaming)"
+      "task": "pdf_parsing_and_estimation",
+      "route": "analyze-blueprint",
+      "temperature": null,
+      "max_tokens": null,
+      "stream": true,
+      "system_prompt_hash": "a3f8c2...",
+      "role": "default",
+      "config_source": "analyze-blueprint/index.ts:1606"
     },
-    {
-      "provider": "google-cloud-vision",
-      "model": "Cloud Vision API v1",
-      "gateway": "Direct (Service Account)",
-      "function": "analyze-blueprint",
-      "usage": "OCR for scanned/raster PDF pages"
-    }
+    ...
   ],
-  "summary": {
-    "total_providers": 2,
-    "total_models": 6,
-    "gateways": ["Lovable AI Gateway", "Google Cloud Vision API (direct)"]
-  }
+  "summary": { ... },
+  "validated": true
 }
 ```
+
+**`GET /ai-diagnostics?verify=true`** (probe):
+```json
+{
+  "integrations": [ ... same as above ... ],
+  "probes": [
+    {
+      "integration": "analyze-blueprint/gemini-2.5-pro",
+      "success": true,
+      "latency_ms": 342,
+      "resolved_model": "google/gemini-2.5-pro",
+      "gateway_headers": { "x-request-id": "...", "content-type": "..." }
+    },
+    ...
+  ],
+  "all_probes_passed": true,
+  "validated": true
+}
+```
+
+### File Changes
+
+| File | Change |
+|---|---|
+| `supabase/functions/ai-diagnostics/index.ts` | Full rewrite: dynamic registry with runtime config, verify probe logic, safety guard |
+
+No config.toml change needed — `ai-diagnostics` entry already exists with `verify_jwt = false`.
+
+### Technical Details
+
+**System prompt hashing**: Each integration's system prompt (extracted from the actual edge function code) is hashed with a simple djb2 hash to produce a version identifier without exposing the prompt content.
+
+**Probe safety**: Each probe uses `max_tokens: 1` to minimize cost. The Google Vision probe checks env var existence + a minimal API call. All probes have a 10-second timeout.
+
+**Safety guard**: Before serializing the response, a validation pass checks every integration has `model`, `provider`, and `gateway` set to non-empty, non-placeholder values. If any fail, HTTP 500 is returned with `{ error: "STATIC_PLACEHOLDER_DETECTED", details: [...] }`.
 
