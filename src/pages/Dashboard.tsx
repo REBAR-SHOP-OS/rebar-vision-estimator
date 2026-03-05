@@ -378,9 +378,15 @@ const Dashboard: React.FC = () => {
               const downloadedFiles: File[] = [];
               for (const att of attachments) {
                 try {
-                  const resp = await fetch(att.url);
-                  if (!resp.ok) continue;
-                  const blob = await resp.blob();
+                  const { data, error } = await supabase.functions.invoke("proxy-crm-file", {
+                    body: { url: att.url },
+                  });
+                  if (error || !data) {
+                    console.error(`Proxy error for ${att.name}:`, error);
+                    continue;
+                  }
+                  // data is already a Blob when responseType isn't set
+                  const blob = data instanceof Blob ? data : new Blob([data]);
                   downloadedFiles.push(new File([blob], att.name, { type: att.mimeType }));
                 } catch (err) {
                   console.error(`Failed to download ${att.name}:`, err);
