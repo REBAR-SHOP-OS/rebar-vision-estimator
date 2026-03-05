@@ -1,30 +1,27 @@
 
 
-## Plan: Fix Race Condition — Blueprint File URLs Not Passed to AI Analysis
+## Plan: Fix PDF Processing — Blueprint PDFs Silently Dropped
 
 ### Root Cause
+The previous OOM fix (reducing `MAX_PDF_INLINE_MB` to 4 and `MAX_INLINE_PDF_COUNT` to 1) was too aggressive. For a project with two engineering PDFs (Architectural + Structural), both likely exceed 4MB, meaning:
+- Neither is sent as base64 inline to Gemini
+- If both exceed 5MB, text extraction is also skipped
+- The AI only sees the knowledge image (RSIC reference card) — hence "no blueprints found"
 
-In `src/components/chat/ChatArea.tsx`, when files are uploaded via the auto-upload flow, there is a React state race condition:
+### Fix Strategy
+Avoid simultaneous memory-heavy operations. Process PDFs sequentially with a smarter strategy:
 
-1. **Line 696**: `setUploadedFiles(prev => [...prev, ...newUrls])` queues a state update
-2. **Line 785**: `handleModeSelect("smart")` is called in the same synchronous execution
-3. **Line 522**: Inside `handleModeSelect`, `uploadedFiles` still holds the **old empty array** because React batches state updates and hasn't re-rendered yet
-4. **Result**: `analyze-blueprint` receives `fileUrls: []` — no blueprints, only knowledge files
+1. **Increase `MAX_PDF_INLINE_MB` from 4 → 8MB** — allow medium PDFs to be sent to Gemini
+2. **Increase `MAX_INLINE_PDF_COUNT` from 1 → 2** — both blueprint PDFs should be visible
+3. **Skip pdfjs text extraction when sending inline** — avoid running BOTH base64 encoding AND pdfjs on the same PDF (this was the OOM cause)
+4. **Increase `MAX_PDF_TEXT_EXTRACT_MB` from 5 → 10MB** — for PDFs too large for inline, at least extract text
+5. **Free memory between PDFs** — null out buffers after processing each PDF
 
-This is confirmed by the network request showing `"fileUrls":[]` in the `analyze-blueprint` POST body.
+The logic becomes:
+- PDF ≤ 8MB → send as base64 inline to Gemini (skip pdfjs to save memory)
+- PDF 8-10MB → run pdfjs text extraction only (no inline)
+- PDF 10-25MB → download but only log metadata (too large for edge function)
 
-### Fix
-
-Pass the `newUrls` (or combined `allUrls`) directly to `handleModeSelect` instead of relying on stale React state. Two changes needed:
-
-1. **Modify `handleModeSelect`** to accept an optional `fileUrlsOverride?: string[]` parameter
-2. **In `streamAIResponse` call** (line 522), use `fileUrlsOverride ?? uploadedFiles` so the override takes precedence
-3. **At line 785** (auto-detection auto-proceed), pass `allUrls` to `handleModeSelect("smart")` so the freshly-uploaded URLs are used directly
-
-### Files to modify
-
-- **`src/components/chat/ChatArea.tsx`** — 3 small edits:
-  1. Add `fileUrlsOverride` parameter to `handleModeSelect` (line ~480)
-  2. Use `fileUrlsOverride ?? uploadedFiles` in `streamAIResponse` call (line ~522)
-  3. Pass `allUrls` at auto-proceed call site (line ~785)
+### File to modify
+- **`supabase/functions/analyze-blueprint/index.ts`** — adjust constants and reorder the inline-vs-extraction logic to be mutually exclusive per PDF
 
