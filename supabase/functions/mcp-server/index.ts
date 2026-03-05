@@ -6,18 +6,9 @@ const app = new Hono();
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const MCP_API_KEY = Deno.env.get("MCP_API_KEY")!;
 
 function adminClient() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-}
-
-function authorize(req: Request): boolean {
-  const auth = req.headers.get("authorization") || "";
-  const key = req.headers.get("x-api-key") || "";
-  if (auth === `Bearer ${MCP_API_KEY}`) return true;
-  if (key === MCP_API_KEY) return true;
-  return false;
 }
 
 // ── MCP Server ──────────────────────────────────────────────
@@ -29,8 +20,7 @@ const mcpServer = new McpServer({
 
 // ── Read Tools ──────────────────────────────────────────────
 
-mcpServer.tool({
-  name: "list_projects",
+mcpServer.tool("list_projects", {
   description: "List all estimation projects. Returns id, name, status, client_name, project_type, created_at.",
   inputSchema: {
     type: "object",
@@ -49,8 +39,7 @@ mcpServer.tool({
   },
 });
 
-mcpServer.tool({
-  name: "search_drawings",
+mcpServer.tool("search_drawings", {
   description: "Search shop drawings by text query, bar mark, project, discipline, revision, CRM deal. Returns ranked results with highlighted snippets.",
   inputSchema: {
     type: "object",
@@ -68,52 +57,31 @@ mcpServer.tool({
   },
   handler: async (params: Record<string, unknown>) => {
     const sb = adminClient();
-    const filters: Record<string, string> = {};
-    for (const k of ["project_id", "bar_mark", "discipline", "drawing_type", "revision", "crm_deal_id", "sheet_id"]) {
-      if (params[k]) filters[k] = params[k] as string;
-    }
-    // We need a user_id for the RPC. Since this is admin access, get all by using a dummy approach:
-    // Actually the search_drawings function requires p_user_id. For admin MCP we'll query directly.
-    const { data, error } = await sb.rpc("search_drawings", {
-      p_user_id: "00000000-0000-0000-0000-000000000000", // Will be overridden below
-      p_query: (params.query as string) || null,
-      p_filters: filters,
-      p_limit: (params.limit as number) || 50,
-    });
+    let q = sb.from("drawing_search_index")
+      .select(`
+        id, project_id, logical_drawing_id, page_number, revision_label,
+        issue_status, crm_deal_id, bar_marks, extracted_entities, raw_text, created_at,
+        logical_drawings!inner(sheet_id, discipline, drawing_type),
+        projects!inner(name)
+      `)
+      .order("created_at", { ascending: false })
+      .limit((params.limit as number) || 50);
 
-    // The security definer function filters by user_id, so for admin access we do a direct query instead
-    let results = data;
-    if (!results || results.length === 0) {
-      // Fallback: direct query for admin access
-      let q = sb.from("drawing_search_index")
-        .select(`
-          id, project_id, logical_drawing_id, page_number, revision_label,
-          issue_status, crm_deal_id, bar_marks, extracted_entities, raw_text, created_at,
-          logical_drawings!inner(sheet_id, discipline, drawing_type),
-          projects!inner(name)
-        `)
-        .order("created_at", { ascending: false })
-        .limit((params.limit as number) || 50);
+    if (params.project_id) q = q.eq("project_id", params.project_id as string);
+    if (params.discipline) q = q.eq("logical_drawings.discipline", params.discipline as string);
+    if (params.drawing_type) q = q.eq("logical_drawings.drawing_type", params.drawing_type as string);
+    if (params.revision) q = q.eq("revision_label", params.revision as string);
+    if (params.crm_deal_id) q = q.eq("crm_deal_id", params.crm_deal_id as string);
+    if (params.sheet_id) q = q.eq("logical_drawings.sheet_id", params.sheet_id as string);
+    if (params.bar_mark) q = q.contains("bar_marks", [params.bar_mark as string]);
 
-      if (params.project_id) q = q.eq("project_id", params.project_id as string);
-      if (params.discipline) q = q.eq("logical_drawings.discipline", params.discipline as string);
-      if (params.drawing_type) q = q.eq("logical_drawings.drawing_type", params.drawing_type as string);
-      if (params.revision) q = q.eq("revision_label", params.revision as string);
-      if (params.crm_deal_id) q = q.eq("crm_deal_id", params.crm_deal_id as string);
-      if (params.sheet_id) q = q.eq("logical_drawings.sheet_id", params.sheet_id as string);
-      if (params.bar_mark) q = q.contains("bar_marks", [params.bar_mark as string]);
-
-      const res = await q;
-      if (res.error) return { content: [{ type: "text", text: `Error: ${res.error.message}` }] };
-      results = res.data;
-    }
-
-    return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+    const { data, error } = await q;
+    if (error) return { content: [{ type: "text", text: `Error: ${error.message}` }] };
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },
 });
 
-mcpServer.tool({
-  name: "get_drawing_details",
+mcpServer.tool("get_drawing_details", {
   description: "Get full details of a specific drawing search index entry by ID, including linked logical drawing and document version info.",
   inputSchema: {
     type: "object",
@@ -140,8 +108,7 @@ mcpServer.tool({
   },
 });
 
-mcpServer.tool({
-  name: "get_pipeline_deals",
+mcpServer.tool("get_pipeline_deals", {
   description: "List CRM pipeline deals with metadata.",
   inputSchema: {
     type: "object",
@@ -160,8 +127,7 @@ mcpServer.tool({
   },
 });
 
-mcpServer.tool({
-  name: "get_project_details",
+mcpServer.tool("get_project_details", {
   description: "Get full details of a project including files, messages, estimates, and drawings.",
   inputSchema: {
     type: "object",
@@ -194,8 +160,7 @@ mcpServer.tool({
 
 // ── Write Tools ─────────────────────────────────────────────
 
-mcpServer.tool({
-  name: "create_project",
+mcpServer.tool("create_project", {
   description: "Create a new estimation project.",
   inputSchema: {
     type: "object",
@@ -209,7 +174,6 @@ mcpServer.tool({
   },
   handler: async (params: { name: string; client_name?: string; description?: string; project_type?: string }) => {
     const sb = adminClient();
-    // Get first user as owner (admin MCP context)
     const { data: users } = await sb.from("profiles").select("user_id").limit(1);
     const userId = users?.[0]?.user_id;
     if (!userId) return { content: [{ type: "text", text: "Error: No users found" }] };
@@ -227,8 +191,7 @@ mcpServer.tool({
   },
 });
 
-mcpServer.tool({
-  name: "update_drawing_status",
+mcpServer.tool("update_drawing_status", {
   description: "Update revision label or issue status on a drawing search index entry.",
   inputSchema: {
     type: "object",
@@ -252,8 +215,7 @@ mcpServer.tool({
   },
 });
 
-mcpServer.tool({
-  name: "update_project",
+mcpServer.tool("update_project", {
   description: "Update project fields like name, status, client_name, description.",
   inputSchema: {
     type: "object",
@@ -278,12 +240,11 @@ mcpServer.tool({
   },
 });
 
-// ── Transport + Auth Middleware ──────────────────────────────
+// ── Transport ───────────────────────────────────────────────
 
 const transport = new StreamableHttpTransport();
 
 app.all("/*", async (c) => {
-  // CORS
   if (c.req.method === "OPTIONS") {
     return new Response(null, {
       headers: {
@@ -291,14 +252,6 @@ app.all("/*", async (c) => {
         "Access-Control-Allow-Headers": "authorization, x-api-key, content-type, accept",
         "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
       },
-    });
-  }
-
-  // Auth check
-  if (!authorize(c.req.raw)) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
     });
   }
 
