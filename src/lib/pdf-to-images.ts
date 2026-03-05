@@ -34,6 +34,11 @@ export async function renderPdfPagesToImages(
   const totalPages = Math.min(doc.numPages, maxPages);
   console.log(`[pdf-to-images] PDF has ${doc.numPages} pages, rendering ${totalPages}`);
 
+  // Get current user ID for RLS-compliant storage path
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated – cannot upload page images");
+  const userId = user.id;
+
   const results: PdfPageImage[] = [];
   const timestamp = Date.now();
 
@@ -66,7 +71,7 @@ export async function renderPdfPagesToImages(
       canvas.height = 0;
 
       // Upload to Storage
-      const storagePath = `${projectId}/pages/${timestamp}_page_${pageNum}.png`;
+      const storagePath = `${userId}/${projectId}/pages/${timestamp}_page_${pageNum}.png`;
       const { error: uploadError } = await supabase.storage
         .from("blueprints")
         .upload(storagePath, blob, {
