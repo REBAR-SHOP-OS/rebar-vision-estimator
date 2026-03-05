@@ -27,26 +27,12 @@ Deno.serve(async (req) => {
   try {
     const rebarClient = createClient(REBAR_URL, REBAR_ANON_KEY);
 
-    // First, discover what stages exist
-    const { data: allLeads, error: discoverError } = await rebarClient
-      .from("leads")
-      .select("stage")
-      .limit(500);
-
-    console.log("Discover error:", JSON.stringify(discoverError));
-    console.log("All leads count:", allLeads?.length);
-    const uniqueStages = [...new Set((allLeads || []).map((l: any) => l.stage))];
-    console.log("Available stages:", JSON.stringify(uniqueStages));
-
     // Fetch leads from target stages
     const { data: leads, error } = await rebarClient
       .from("leads")
       .select("id, title, stage, expected_value, expected_close_date, priority, probability, source, created_at, customer_id, customers(name, company_name)")
       .in("stage", TARGET_STAGES)
       .order("expected_value", { ascending: false, nullsFirst: false });
-    
-    console.log("Leads error:", JSON.stringify(error));
-    console.log("Leads count:", leads?.length);
 
     if (error) {
       console.error("Failed to fetch leads:", error);
@@ -56,16 +42,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    return new Response(JSON.stringify({ 
-      leads: leads || [],
-      _debug: {
-        discoverError,
-        allLeadsCount: allLeads?.length,
-        uniqueStages,
-        leadsError: error,
-        matchedCount: leads?.length,
-      }
-    }), {
+    return new Response(JSON.stringify({ leads: leads || [] }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
