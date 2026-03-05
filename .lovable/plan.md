@@ -1,59 +1,35 @@
 
 
-## Feature: Share Estimation for Review & Comments
+## Test Results: Share for Review Flow
 
-After an estimation is complete, add the ability to share it with external reviewers (e.g., ben@rebar.shop) who can view the results and leave comments -- all tracked within the project chat.
+### What was verified
 
-### Database Changes
+1. **Review page route (`/review/:token`)** -- Works correctly. Navigating to `/review/test-token-123` shows the expected "Review Not Found" error page with logo and message "This review link is invalid or has expired." This confirms the route is registered and the component renders properly.
 
-**New table: `review_shares`**
-- `id` (uuid, PK)
-- `project_id` (uuid, FK to projects)
-- `user_id` (uuid, owner)
-- `reviewer_email` (text, e.g. ben@rebar.shop)
-- `reviewer_name` (text, nullable)
-- `share_token` (text, unique, for public access link)
-- `status` (text: pending / viewed / commented)
-- `created_at`, `expires_at`
-- RLS: owner can CRUD, anon can SELECT by share_token
+2. **Database tables and RLS** -- Verified via direct query. Both `review_shares` and `review_comments` tables exist with all 6 policies correctly set as **PERMISSIVE** (not restrictive):
+   - `anon` can SELECT shares, UPDATE share status, INSERT comments, and SELECT comments
+   - `authenticated` owner can manage their shares and read their comments
 
-**New table: `review_comments`**
-- `id` (uuid, PK)
-- `share_id` (uuid, FK to review_shares)
-- `author_name` (text)
-- `author_email` (text)
-- `content` (text)
-- `created_at`
-- RLS: anon can INSERT (by valid share_token), owner can SELECT all for their shares
+3. **ShareReviewDialog component** -- Code reviewed. Correctly calls the `send-review-invite` edge function, displays the generated URL, and has a copy-to-clipboard button.
 
-### Edge Function: `send-review-invite`
-- Accepts `project_id`, `reviewer_email`, `reviewer_name`
-- Creates a `review_shares` row with a random `share_token`
-- Sends an email via Supabase Auth's built-in email or a simple SMTP call with a link like: `https://rebar-vision-estimator.lovable.app/review/{share_token}`
-- Returns the share link
+4. **Edge function (`send-review-invite`)** -- Code reviewed. Verifies user auth, creates a share record with a unique token, and returns the share URL.
 
-### New Pages & Components
+### What could NOT be tested
 
-1. **`/review/:token` page** (public, no auth required)
-   - Fetches project estimation data via share_token
-   - Shows read-only view: bar list, size breakdown, totals, scope info
-   - Comment form at the bottom (name, email, comment text)
-   - Comments are saved to `review_comments`
+- **Full end-to-end flow** (creating a share from a completed estimation): The existing project "20 York Valley" is at 0% progress with no completed estimation. Testing the Share for Review button requires a project that has reached the export/results step, which involves uploading and processing blueprints through the full AI pipeline.
 
-2. **Share button in `ExportButtons`**
-   - New "Share for Review" button alongside Export Excel / PDF
-   - Opens a small dialog: enter reviewer email + name, click Send
-   - Calls the `send-review-invite` edge function
-   - Shows the shareable link with a copy button
+- **Comment submission on review page**: Requires a valid share token in the database, which requires first completing the share creation flow above.
 
-3. **Comments indicator in `ChatArea`**
-   - When a share exists, show a badge/notification if new comments arrive
-   - Display review comments inline in the chat as system messages
+### Issues Found
 
-### Implementation Order
-1. Create database tables (`review_shares`, `review_comments`) with RLS
-2. Build the `send-review-invite` edge function
-3. Add the Share dialog to `ExportButtons`
-4. Create the `/review/:token` public page with read-only estimation view + comment form
-5. Show incoming comments in the project chat
+**None blocking.** The infrastructure is correctly set up. The only way to fully test is to:
+1. Complete an estimation in the app
+2. Click "Share for Review" from the export buttons
+3. Enter `ben@rebar.shop` and create the link
+4. Open that link in an incognito window
+5. Submit a comment
+
+### Recommendation
+
+To test end-to-end, you need to run a full estimation on a project first, then use the Share for Review button. Everything on the code and database side is correctly wired up.
 
