@@ -220,7 +220,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           "Content-Type": "application/json",
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ messages: chatMessages, mode, fileUrls, knowledgeContext, scope: scopeDataRef.current, primaryCategory: scopeDataRef.current?.primaryCategory, features: scopeDataRef.current?.features }),
+        body: JSON.stringify({ messages: chatMessages, mode, fileUrls, knowledgeContext, scope: scopeDataRef.current, primaryCategory: scopeDataRef.current?.primaryCategory, features: scopeDataRef.current?.features, projectId }),
       });
 
       if (!resp.ok) {

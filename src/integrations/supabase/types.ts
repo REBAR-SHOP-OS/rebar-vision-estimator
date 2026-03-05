@@ -1145,6 +1145,7 @@ export type Database = {
         }
         Returns: {
           bar_marks: string[]
+          confidence: number
           created_at: string
           crm_deal_id: string
           discipline: string

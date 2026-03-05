@@ -43,6 +43,8 @@ Deno.serve(async (req) => {
       drawing_type = null,
       revision = null,
       crm_deal_id = null,
+      drawing_set_id = null,
+      sort = "relevance",
       limit = 50,
     } = body;
 
@@ -54,6 +56,8 @@ Deno.serve(async (req) => {
     if (drawing_type) filters.drawing_type = drawing_type;
     if (revision) filters.revision = revision;
     if (crm_deal_id) filters.crm_deal_id = crm_deal_id;
+    if (drawing_set_id) filters.drawing_set_id = drawing_set_id;
+    if (sort) filters.sort = sort;
 
     const { data, error } = await supabase.rpc("search_drawings", {
       p_user_id: userId,

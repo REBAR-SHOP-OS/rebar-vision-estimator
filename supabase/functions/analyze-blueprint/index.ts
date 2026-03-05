@@ -1263,7 +1263,22 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, mode, fileUrls, knowledgeContext, scope } = await req.json();
+    const { messages, mode, fileUrls, knowledgeContext, scope, projectId: reqProjectId } = await req.json();
+
+    // Auth: try to get user from authorization header for auto-indexing
+    const authHeader = req.headers.get("authorization");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    let autoIndexUserId: string | null = null;
+    if (authHeader && serviceKey) {
+      try {
+        const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+        const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY") || "");
+        const token = authHeader.replace("Bearer ", "");
+        const { data: { user } } = await anonClient.auth.getUser(token);
+        autoIndexUserId = user?.id || null;
+      } catch {}
+    }
     
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
@@ -1432,6 +1447,50 @@ Before outputting your final answer, you MUST:
                 }
                 pdfNativeAvailable = true;
                 console.log(`PDF-native extraction: ${pdfExtraction.pages.filter(p => !p.is_scanned).length}/${pdfExtraction.total_pages} text pages (processed ${pdfExtraction.pages.length})`);
+
+                // Auto-index extracted pages into search DB
+                if (reqProjectId && autoIndexUserId && serviceKey) {
+                  try {
+                    const { createClient: createSB } = await import("https://esm.sh/@supabase/supabase-js@2");
+                    const svc = createSB(supabaseUrl, serviceKey);
+                    for (const page of pdfExtraction.pages) {
+                      if (page.is_scanned || !page.raw_text?.trim()) continue;
+                      const tb = page.title_block || {};
+                      const barMarkPattern = /\b([A-Z]{1,2}\d{1,3})\b/g;
+                      const barMarks: string[] = [];
+                      let m;
+                      while ((m = barMarkPattern.exec(page.raw_text)) !== null) {
+                        const bm = m[1];
+                        if (!["OF","IN","AT","TO","AS","IS","IT","OR","ON","IF","NO","DO","UP"].includes(bm) && !barMarks.includes(bm)) barMarks.push(bm);
+                      }
+                      // Upsert logical drawing
+                      let ldId: string | null = null;
+                      if (tb.sheet_number) {
+                        const { data: ex } = await svc.from("logical_drawings").select("id")
+                          .eq("user_id", autoIndexUserId).eq("project_id", reqProjectId)
+                          .eq("sheet_id", tb.sheet_number).eq("drawing_type", tb.drawing_type || "").maybeSingle();
+                        if (ex) { ldId = ex.id; }
+                        else {
+                          const { data: cr } = await svc.from("logical_drawings").insert({
+                            user_id: autoIndexUserId, project_id: reqProjectId,
+                            sheet_id: tb.sheet_number, discipline: tb.discipline || null, drawing_type: tb.drawing_type || null,
+                          }).select("id").single();
+                          ldId = cr?.id || null;
+                        }
+                      }
+                      await svc.rpc("upsert_search_index", {
+                        p_user_id: autoIndexUserId, p_project_id: reqProjectId,
+                        p_logical_drawing_id: ldId, p_page_number: page.page_number || null,
+                        p_raw_text: page.raw_text, p_bar_marks: barMarks,
+                        p_extracted_entities: { bar_marks: barMarks, title_block: tb, tables: page.tables || [] },
+                        p_revision_label: tb.revision_code || null,
+                      });
+                    }
+                    console.log(`Auto-indexed ${pdfExtraction.pages.filter(p => !p.is_scanned).length} pages into search DB`);
+                  } catch (indexErr) {
+                    console.error("Auto-index failed (non-blocking):", indexErr);
+                  }
+                }
               } else {
                 console.log("PDF has no text layer — fully scanned, relying on OCR");
               }
