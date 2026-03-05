@@ -1378,8 +1378,8 @@ Before outputting your final answer, you MUST:
     }
     const fileContentParts: any[] = [];
     const MAX_PDF_SIZE_MB = 25; // Allow real-world engineering PDFs (10-30MB)
-    const MAX_PDF_INLINE_MB = 10; // Max size for sending base64 to Gemini Vision (reduced to prevent OOM)
-    const MAX_PDF_TEXT_EXTRACT_MB = 8; // Max size for pdfjs-serverless text extraction (OOM-safe)
+    const MAX_PDF_INLINE_MB = 4; // Max size for sending base64 to Gemini Vision (reduced to prevent OOM in edge functions)
+    const MAX_PDF_TEXT_EXTRACT_MB = 5; // Max size for pdfjs-serverless text extraction (OOM-safe)
     const MAX_PDF_COUNT = 2;
     const MAX_INLINE_PDF_COUNT = 1; // Only send 1 PDF as base64 to Gemini to save memory
     const MAX_PAGES_PER_PDF = 15; // Limit pages for text extraction
@@ -1515,7 +1515,7 @@ Before outputting your final answer, you MUST:
               console.log("PDF sent as base64 for visual analysis:", Math.round(base64.length / 1024), "KB");
               inlinePdfCount++;
             } else if (sizeMB > MAX_PDF_INLINE_MB) {
-              console.log(`PDF ${sizeMB.toFixed(1)}MB exceeds inline limit (${MAX_PDF_INLINE_MB}MB), using text extraction only`);
+              console.log(`PDF ${sizeMB.toFixed(1)}MB exceeds inline limit (${MAX_PDF_INLINE_MB}MB), relying on text extraction + OCR only`);
             } else {
               console.log(`Skipping inline PDF (already sent ${inlinePdfCount}/${MAX_INLINE_PDF_COUNT} inline PDFs to save memory)`);
             }
