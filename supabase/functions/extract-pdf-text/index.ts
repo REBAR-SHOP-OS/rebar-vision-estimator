@@ -83,7 +83,7 @@ serve(async (req) => {
     const { pdf_url, pdf_base64, project_id } = await req.json();
 
     // ── SIZE CHECK: reject files too large for edge function ──
-    const MAX_PDF_SIZE = 5 * 1024 * 1024; // 5MB limit for pdfjs in edge
+    const MAX_PDF_SIZE = 3 * 1024 * 1024; // 3MB limit — larger files handled client-side
     let fileSize = 0;
 
     if (pdf_url) {
@@ -98,7 +98,7 @@ serve(async (req) => {
       }
 
       if (fileSize > MAX_PDF_SIZE) {
-        console.log(`PDF too large (${(fileSize / 1024 / 1024).toFixed(1)}MB > 5MB). Returning scanned-only response.`);
+        console.log(`PDF too large (${(fileSize / 1024 / 1024).toFixed(1)}MB > 3MB). Returning scanned-only response.`);
         // Estimate page count from file size (~400KB per page for engineering PDFs)
         const estimatedPages = Math.max(1, Math.round(fileSize / (400 * 1024)));
         const pages: PdfPageExtraction[] = [];
