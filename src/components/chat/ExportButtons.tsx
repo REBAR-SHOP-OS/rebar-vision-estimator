@@ -1,8 +1,9 @@
 import React, { forwardRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { FileSpreadsheet, FileText, Ruler } from "lucide-react";
+import { FileSpreadsheet, FileText, Ruler, Share2 } from "lucide-react";
 import * as XLSX from "xlsx";
 import ShopDrawingModal from "./ShopDrawingModal";
+import ShareReviewDialog from "./ShareReviewDialog";
 
 // Rebar unit weights in lb/ft
 const REBAR_UNIT_WEIGHT: Record<string, number> = {
@@ -21,6 +22,7 @@ interface ExportButtonsProps {
 
 const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteResult, elements, scopeData, projectId }, ref) => {
   const [shopDrawingOpen, setShopDrawingOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const barList: any[] = quoteResult.quote.bar_list || [];
   const sizeBreakdown: Record<string, number> = quoteResult.quote.size_breakdown || {};
   const totalLbs = quoteResult.quote.total_weight_lbs;
@@ -164,12 +166,25 @@ ${bendHtml}
         <Ruler className="h-4 w-4" />
         Create Shop Drawing
       </Button>
+      <Button
+        variant="outline"
+        onClick={() => setShareOpen(true)}
+        className="w-full gap-2 h-10 rounded-xl font-semibold border-accent/30 text-accent-foreground hover:bg-accent/10"
+      >
+        <Share2 className="h-4 w-4" />
+        Share for Review
+      </Button>
       <ShopDrawingModal
         open={shopDrawingOpen}
         onOpenChange={setShopDrawingOpen}
         quoteResult={quoteResult}
         elements={elements}
         scopeData={scopeData}
+        projectId={projectId}
+      />
+      <ShareReviewDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
         projectId={projectId}
       />
     </div>

@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.fetch-pipeline-leads]
 verify_jwt = false
+
+[functions.send-review-invite]
+verify_jwt = false
