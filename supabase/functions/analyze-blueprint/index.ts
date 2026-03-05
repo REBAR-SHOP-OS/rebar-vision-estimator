@@ -1134,7 +1134,7 @@ serve(async (req) => {
       });
     }
     
-    const { messages, mode, fileUrls, knowledgeContext, scope, projectId: reqProjectId, pre_extracted_text } = body;
+    const { messages, mode, fileUrls, knowledgeContext, scope, projectId: reqProjectId, pre_extracted_text, pre_ocr_results } = body;
 
     // Auth: try to get user from authorization header for auto-indexing
     const authHeader = req.headers.get("authorization");
@@ -1337,8 +1337,7 @@ Before outputting your final answer, you MUST:
       }
     }
 
-    // ── Process image URLs only (small files, safe for memory) ──
-    // PDFs in fileUrls are SKIPPED — they should have been pre-extracted by the client
+    // ── Process image URLs (keep as multimodal parts for Gemini, but skip Vision OCR — done client-side) ──
     const imageUrls: string[] = [];
     for (const url of allFileUrls) {
       const urlLower = url.toLowerCase().split('?')[0];
@@ -1357,8 +1356,31 @@ Before outputting your final answer, you MUST:
       fileContentParts.push({ type: "image_url", image_url: { url } });
     }
 
-    // Run Google Vision OCR on images only (not PDFs)
-    if (imageUrls.length > 0) {
+    // ── Inject pre-collected Vision OCR results (from client-side ocr-image calls) ──
+    if (pre_ocr_results && Array.isArray(pre_ocr_results) && pre_ocr_results.length > 0) {
+      console.log(`Received ${pre_ocr_results.length} pre-OCR'd image results from client`);
+      for (const item of pre_ocr_results) {
+        if (!item.ocr_results || !Array.isArray(item.ocr_results)) continue;
+        visionOcrText += `\n\n## Google Vision OCR Results for image: ${item.image_name || 'image'}\n\n`;
+        for (const pass of item.ocr_results) {
+          visionOcrText += `### OCR Pass ${pass.pass} (${pass.preprocess})\n`;
+          visionOcrText += `**Full Text:**\n\`\`\`\n${pass.fullText}\n\`\`\`\n\n`;
+          if (pass.blocks && pass.blocks.length > 0) {
+            visionOcrText += `**Blocks (${pass.blocks.length} detected):**\n`;
+            for (const block of pass.blocks.slice(0, 50)) {
+              visionOcrText += `- [conf: ${(block.confidence || 0).toFixed(2)}, bbox: [${(block.bbox || []).join(',')}]] "${block.text}"\n`;
+            }
+          }
+          visionOcrText += `\n`;
+        }
+        visionOcrAvailable = true;
+      }
+    }
+
+    // Legacy: Run Vision OCR in-function only for non-PDF images (user-uploaded photos, not scanned PDF pages)
+    // Only process up to 3 images in-function to avoid CPU timeout
+    const nonPageImages = imageUrls.filter(url => !url.includes('/pages/'));
+    if (nonPageImages.length > 0 && !visionOcrAvailable) {
       let accessToken: string | null = null;
       try {
         accessToken = await getGoogleAccessToken();
@@ -1368,7 +1390,8 @@ Before outputting your final answer, you MUST:
       }
 
       if (accessToken) {
-        for (const url of imageUrls) {
+        const imagesToProcess = nonPageImages.slice(0, 3);
+        for (const url of imagesToProcess) {
           try {
             console.log("Running Google Vision Triple OCR on image:", url.substring(0, 60) + "...");
             const imgResponse = await fetch(url);
@@ -1398,7 +1421,7 @@ Before outputting your final answer, you MUST:
         }
       }
     }
-    console.log(`File parts: ${fileContentParts.length} images, Pre-extracted PDFs: ${pre_extracted_text?.length || 0}, Vision OCR: ${visionOcrAvailable}`);
+    console.log(`File parts: ${fileContentParts.length} images, Pre-extracted PDFs: ${pre_extracted_text?.length || 0}, Pre-OCR: ${pre_ocr_results?.length || 0}, Vision OCR: ${visionOcrAvailable}`);
 
     if (fileContentParts.length > 0 && messages.length > 0) {
       const firstUserMsgIndex = messages.findIndex((m: any) => m.role === "user");
