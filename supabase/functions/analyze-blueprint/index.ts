@@ -985,26 +985,50 @@ serve(async (req) => {
       systemPrompt = scopeBlock + "\n---\n\n" + systemPrompt;
     }
 
-    // Prepend user knowledge context if available
-    if (knowledgeContext && knowledgeContext.rules && knowledgeContext.rules.length > 0) {
-      const rulesBlock = knowledgeContext.rules.join("\n\n");
-      systemPrompt = `## USER-DEFINED RULES & KNOWLEDGE (MUST follow these)\n${rulesBlock}\n\n---\n\n${systemPrompt}`;
+    // ═══════════════════════════════════════════════════════════════════
+    // AGENT BRAIN INJECTION — HIGHEST PRIORITY INSTRUCTION SOURCE
+    // Order: Stage 0 → User Rules → Training Examples → Learned Rules → Scope → Pipeline → Stage 10
+    // ═══════════════════════════════════════════════════════════════════
+
+    // 1. Append Stage 10 — Rule Verification (at the END of pipeline)
+    const hasUserRules = knowledgeContext?.rules?.length > 0;
+    const hasTrainingExamples = knowledgeContext?.trainingExamples?.length > 0;
+    if (hasUserRules || hasTrainingExamples) {
+      systemPrompt += `\n\n## STAGE 10 — RULE VERIFICATION (MANDATORY FINAL CHECK)
+Before outputting your final answer, you MUST:
+1. Re-read ALL user-defined rules listed at the top of this prompt.
+2. For EACH rule, verify your output complies. If a rule specifies a calculation method, unit, format, threshold, or any specific instruction — confirm your output matches EXACTLY.
+3. Re-read ALL training examples. Confirm your calculation methodology matches the examples.
+4. If ANY calculation violates a user-defined rule or deviates from training example methodology, FIX IT before outputting.
+5. In your response, include a brief "Rule Compliance" section confirming each rule was followed.\n`;
     }
 
-    // Prepend learned knowledge if available
-    if (knowledgeContext && knowledgeContext.learnedRules && knowledgeContext.learnedRules.length > 0) {
-      const learnedBlock = knowledgeContext.learnedRules.join("\n\n");
-      systemPrompt = `## LEARNED FROM PREVIOUS CONVERSATIONS (Apply these insights)\n${learnedBlock}\n\n---\n\n${systemPrompt}`;
-    }
-
-    // Inject training examples into system prompt
-    if (knowledgeContext && knowledgeContext.trainingExamples && knowledgeContext.trainingExamples.length > 0) {
-      let trainingBlock = `\n\n## TRAINING EXAMPLES — REFERENCE CALCULATIONS (MUST study and follow this methodology)\n\n`;
+    // 2. Prepend Training Examples (BEFORE pipeline, AFTER rules)
+    if (hasTrainingExamples) {
+      let trainingBlock = `## ⚠️ MANDATORY REFERENCE — TRAINING EXAMPLES (Your calculations MUST match this methodology exactly. Any deviation is an ERROR.)\n\n`;
       knowledgeContext.trainingExamples.forEach((ex: { title: string; answerText: string }, idx: number) => {
-        trainingBlock += `### Example ${idx + 1}: ${ex.title}\nThe following is the CORRECT rebar estimation for a real project.\nStudy this carefully and use the SAME methodology, format, and calculation logic for the current project:\n\n${ex.answerText}\n\n---\n\n`;
+        trainingBlock += `### Reference Calculation ${idx + 1}: ${ex.title}\nThis is a VERIFIED CORRECT rebar estimation from a real project.\nYou MUST use the EXACT SAME methodology, format, units, and calculation logic for the current project.\nIf your approach differs from this example in any way, your calculation is WRONG — fix it.\n\n${ex.answerText}\n\n---\n\n`;
       });
-      trainingBlock += `Use the above examples as your PRIMARY reference for calculation methodology.\n`;
-      systemPrompt = systemPrompt + trainingBlock;
+      trainingBlock += `CRITICAL: The above examples are GROUND TRUTH. Match their methodology exactly. Do NOT improvise alternative approaches.\n\n---\n\n`;
+      systemPrompt = trainingBlock + systemPrompt;
+    }
+
+    // 3. Prepend Learned Rules (BEFORE training examples)
+    if (knowledgeContext?.learnedRules?.length > 0) {
+      const learnedBlock = knowledgeContext.learnedRules.join("\n\n");
+      systemPrompt = `## LEARNED FROM PREVIOUS CONVERSATIONS (Apply these insights — they reflect past corrections)\n${learnedBlock}\n\n---\n\n${systemPrompt}`;
+    }
+
+    // 4. Prepend User-Defined Rules (ABSOLUTE HIGHEST PRIORITY — at the very TOP)
+    if (hasUserRules) {
+      const rulesBlock = knowledgeContext.rules.join("\n\n");
+      systemPrompt = `## 🚨 ABSOLUTE RULES — USER-DEFINED (These OVERRIDE ALL other instructions. Follow EXACTLY. NO exceptions.)\n\nCRITICAL INSTRUCTION: The following rules were defined by the user and represent MANDATORY requirements.\nIf ANY built-in rule, default behavior, or standard procedure conflicts with a user-defined rule below, the USER-DEFINED RULE WINS. Always.\nDo NOT summarize, simplify, approximate, or skip any of these rules.\n\n${rulesBlock}\n\n---\n\n${systemPrompt}`;
+    }
+
+    // 5. Prepend Stage 0 — Rule Compliance Check (VERY FIRST THING in prompt)
+    if (hasUserRules || hasTrainingExamples) {
+      const stage0 = `## STAGE 0 — RULE COMPLIANCE CHECK (Execute BEFORE any analysis)\nBefore starting your analysis, you MUST:\n1. Read ALL user-defined rules listed below.\n2. For each rule, confirm you understand it and will follow it EXACTLY.\n3. If a rule specifies a calculation method → use THAT method, not your default.\n4. If a rule specifies units → use THOSE units throughout.\n5. If a rule specifies a format or threshold → match it EXACTLY.\n6. If training examples are provided → your calculations MUST follow the same methodology.\n7. ANY deviation from user rules or training examples is an ERROR that must be corrected.\n\nProceed with analysis only after confirming all rules are understood.\n\n---\n\n`;
+      systemPrompt = stage0 + systemPrompt;
     }
 
     // Build messages array with file context
