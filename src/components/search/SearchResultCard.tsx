@@ -1,6 +1,6 @@
 import React from "react";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Hash, Layers, ShieldCheck, ShieldAlert } from "lucide-react";
+import { FileText, Hash, Layers, ShieldCheck, ShieldAlert, AlertTriangle, GitBranch } from "lucide-react";
 
 export interface SearchResult {
   id: string;
@@ -19,16 +19,23 @@ export interface SearchResult {
   rank: number;
   created_at: string;
   confidence?: number;
+  sha256?: string | null;
+  source_system?: string | null;
+  quality_flags?: string[] | null;
+  needs_review?: boolean;
+  revision_chain_id?: string | null;
 }
 
 interface Props {
   result: SearchResult;
   onClick: (projectId: string) => void;
+  onRevisionChainClick?: (chainId: string) => void;
 }
 
-const SearchResultCard: React.FC<Props> = ({ result, onClick }) => {
+const SearchResultCard: React.FC<Props> = ({ result, onClick, onRevisionChainClick }) => {
   const confidence = result.confidence ?? 1.0;
   const isLowConfidence = confidence < 0.7;
+  const flags = result.quality_flags || [];
 
   return (
     <div
@@ -47,14 +54,12 @@ const SearchResultCard: React.FC<Props> = ({ result, onClick }) => {
           </div>
         </div>
         <div className="flex gap-1 flex-shrink-0 items-center">
-          {/* Confidence indicator */}
           <span className={`flex items-center ${isLowConfidence ? "text-destructive" : "text-muted-foreground"}`}>
-            {isLowConfidence ? (
-              <ShieldAlert className="h-3.5 w-3.5" />
-            ) : (
-              <ShieldCheck className="h-3.5 w-3.5" />
-            )}
+            {isLowConfidence ? <ShieldAlert className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5" />}
           </span>
+          {result.needs_review && (
+            <Badge variant="destructive" className="text-[8px] px-1 py-0">Review</Badge>
+          )}
           {result.discipline && (
             <Badge variant="outline" className="text-[9px] capitalize">{result.discipline}</Badge>
           )}
@@ -63,6 +68,18 @@ const SearchResultCard: React.FC<Props> = ({ result, onClick }) => {
           )}
         </div>
       </div>
+
+      {/* Quality flags */}
+      {flags.length > 0 && (
+        <div className="flex items-center gap-1 flex-wrap">
+          <AlertTriangle className="h-3 w-3 text-amber-500" />
+          {flags.map((f) => (
+            <Badge key={f} variant="outline" className="text-[8px] text-amber-600 border-amber-300">
+              {f.replace(/_/g, " ")}
+            </Badge>
+          ))}
+        </div>
+      )}
 
       {result.bar_marks.length > 0 && (
         <div className="flex items-center gap-1 flex-wrap">
@@ -90,11 +107,20 @@ const SearchResultCard: React.FC<Props> = ({ result, onClick }) => {
             <Layers className="h-2.5 w-2.5" /> CRM: {result.crm_deal_id}
           </span>
         )}
-        {isLowConfidence && (
-          <span className="text-destructive font-medium">
-            {(confidence * 100).toFixed(0)}% confidence
-          </span>
+        {result.source_system && result.source_system !== "upload" && (
+          <Badge variant="outline" className="text-[8px]">{result.source_system}</Badge>
         )}
+        {result.revision_chain_id && onRevisionChainClick && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onRevisionChainClick(result.revision_chain_id!); }}
+            className="flex items-center gap-0.5 text-primary hover:underline"
+          >
+            <GitBranch className="h-2.5 w-2.5" /> Revisions
+          </button>
+        )}
+        <span className={`${isLowConfidence ? "text-destructive font-medium" : ""}`}>
+          {(confidence * 100).toFixed(0)}%
+        </span>
         {result.rank > 0 && <span className="ml-auto">Score: {result.rank.toFixed(3)}</span>}
       </div>
     </div>

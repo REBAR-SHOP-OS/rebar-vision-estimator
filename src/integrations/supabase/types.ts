@@ -1197,12 +1197,17 @@ export type Database = {
           id: string
           issue_status: string
           logical_drawing_id: string
+          needs_review: boolean
           page_number: number
           project_id: string
           project_name: string
+          quality_flags: string[]
           rank: number
+          revision_chain_id: string
           revision_label: string
+          sha256: string
           sheet_id: string
+          source_system: string
         }[]
       }
       upsert_search_index: {
