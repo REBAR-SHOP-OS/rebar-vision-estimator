@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Link2, ExternalLink, X, RefreshCw } from "lucide-react";
+import { Link2, ExternalLink, X, RefreshCw, Zap, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Table,
@@ -51,14 +51,14 @@ interface Project {
 interface CrmSyncPanelProps {
   projects: Project[];
   onClose: () => void;
+  onStartEstimation?: (projectId: string) => void;
 }
-
-const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose }) => {
+const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose, onStartEstimation }) => {
   const { user } = useAuth();
   const [leads, setLeads] = useState<PipelineLead[]>([]);
   const [loading, setLoading] = useState(true);
   const [linkingLeadId, setLinkingLeadId] = useState<string | null>(null);
-
+  const [creatingLeadId, setCreatingLeadId] = useState<string | null>(null);
   useEffect(() => {
     fetchLeads();
   }, []);
@@ -97,6 +97,36 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose }) => {
       toast.success("Lead linked to project");
     }
     setLinkingLeadId(null);
+  };
+
+  const startEstimationFromLead = async (lead: PipelineLead) => {
+    if (!user || !onStartEstimation) return;
+    setCreatingLeadId(lead.id);
+    const projectName = lead.title || lead.customers?.company_name || "New Estimation";
+    const clientName = lead.customers?.company_name || lead.customers?.name || null;
+
+    const { data, error } = await supabase
+      .from("projects")
+      .insert({ user_id: user.id, name: projectName, client_name: clientName })
+      .select()
+      .single();
+
+    if (error) {
+      toast.error("Failed to create project");
+      setCreatingLeadId(null);
+      return;
+    }
+
+    // Link to estimate_outcomes
+    await supabase.from("estimate_outcomes").insert({
+      user_id: user.id,
+      project_id: data.id,
+      crm_deal_id: lead.id,
+    });
+
+    toast.success(`Project "${projectName}" created from lead`);
+    setCreatingLeadId(null);
+    onStartEstimation(data.id);
   };
 
   const getStageInfo = (stage: string) => {
@@ -151,7 +181,7 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose }) => {
                 <TableHead>Stage</TableHead>
                 <TableHead>Priority</TableHead>
                 <TableHead>Close Date</TableHead>
-                <TableHead>Link to Project</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -176,27 +206,41 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose }) => {
                       {lead.expected_close_date || "—"}
                     </TableCell>
                     <TableCell>
-                      {linkingLeadId === lead.id ? (
-                        <Select onValueChange={(val) => linkLeadToProject(lead.id, val)}>
-                          <SelectTrigger className="w-40 h-8 text-xs">
-                            <SelectValue placeholder="Select project" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {projects.map((p) => (
-                              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setLinkingLeadId(lead.id)}
-                          className="gap-1 text-xs"
-                        >
-                          <Link2 className="h-3 w-3" /> Link
-                        </Button>
-                      )}
+                      <div className="flex gap-1">
+                        {onStartEstimation && (
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={() => startEstimationFromLead(lead)}
+                            disabled={creatingLeadId === lead.id}
+                            className="gap-1 text-xs"
+                          >
+                            {creatingLeadId === lead.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
+                            Start
+                          </Button>
+                        )}
+                        {linkingLeadId === lead.id ? (
+                          <Select onValueChange={(val) => linkLeadToProject(lead.id, val)}>
+                            <SelectTrigger className="w-32 h-8 text-xs">
+                              <SelectValue placeholder="Select project" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {projects.map((p) => (
+                                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setLinkingLeadId(lead.id)}
+                            className="gap-1 text-xs"
+                          >
+                            <Link2 className="h-3 w-3" /> Link
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 );

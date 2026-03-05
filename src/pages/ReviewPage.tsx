@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Send, Loader2, MessageSquare, CheckCircle } from "lucide-react";
 import logoImg from "@/assets/logo.png";
+import ReviewReport from "@/components/review/ReviewReport";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
@@ -15,12 +16,10 @@ const anonClient = createClient(supabaseUrl, supabaseAnonKey);
 const ReviewPage: React.FC = () => {
   const { token } = useParams<{ token: string }>();
   const [share, setShare] = useState<any>(null);
-  const [project, setProject] = useState<any>(null);
   const [comments, setComments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Comment form
   const [authorName, setAuthorName] = useState("");
   const [authorEmail, setAuthorEmail] = useState("");
   const [commentText, setCommentText] = useState("");
@@ -34,7 +33,6 @@ const ReviewPage: React.FC = () => {
   const loadShareData = async () => {
     setLoading(true);
     try {
-      // Fetch share by token
       const { data: shareData, error: shareErr } = await anonClient
         .from("review_shares")
         .select("*")
@@ -49,7 +47,6 @@ const ReviewPage: React.FC = () => {
 
       setShare(shareData);
 
-      // Update status to viewed
       if (shareData.status === "pending") {
         await anonClient
           .from("review_shares")
@@ -57,9 +54,6 @@ const ReviewPage: React.FC = () => {
           .eq("id", shareData.id);
       }
 
-      // Fetch project info (public read via the share context — we use service role in edge fn)
-      // For now we show what we have from the share
-      // Fetch comments
       const { data: commentsData } = await anonClient
         .from("review_comments")
         .select("*")
@@ -89,7 +83,6 @@ const ReviewPage: React.FC = () => {
 
       if (insertErr) throw insertErr;
 
-      // Update share status
       await anonClient
         .from("review_shares")
         .update({ status: "commented" })
@@ -98,7 +91,6 @@ const ReviewPage: React.FC = () => {
       setSubmitted(true);
       setCommentText("");
 
-      // Refresh comments
       const { data: commentsData } = await anonClient
         .from("review_comments")
         .select("*")
@@ -133,14 +125,21 @@ const ReviewPage: React.FC = () => {
     );
   }
 
+  const reviewData = share?.review_data;
+  const reviewType = share?.review_type || "estimation_review";
+  const reviewTypeLabel = reviewType === "quote_approval"
+    ? "Quote Approval"
+    : reviewType === "customer_quote"
+    ? "Customer Quotation"
+    : "Estimation Review";
+
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <header className="border-b border-border bg-card px-4 py-3">
         <div className="max-w-3xl mx-auto flex items-center gap-3">
           <img src={logoImg} alt="Logo" className="h-8" />
           <div>
-            <h1 className="text-lg font-bold text-foreground">Estimation Review</h1>
+            <h1 className="text-lg font-bold text-foreground">{reviewTypeLabel}</h1>
             <p className="text-xs text-muted-foreground">
               Shared by the project owner for your feedback
             </p>
@@ -167,8 +166,17 @@ const ReviewPage: React.FC = () => {
                 {new Date(share?.created_at).toLocaleDateString()}
               </span>
             </div>
+            <div>
+              <span className="text-muted-foreground">Type: </span>
+              <span className="font-medium">{reviewTypeLabel}</span>
+            </div>
           </div>
         </div>
+
+        {/* Full estimation report */}
+        {reviewData && Object.keys(reviewData).length > 0 && (
+          <ReviewReport reviewData={reviewData} />
+        )}
 
         {/* Existing comments */}
         {comments.length > 0 && (

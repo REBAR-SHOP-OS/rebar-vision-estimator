@@ -11,14 +11,34 @@ interface ShareReviewDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectId?: string;
+  reviewType?: "estimation_review" | "quote_approval" | "customer_quote";
+  reviewData?: Record<string, unknown>;
+  defaultEmail?: string;
+  defaultName?: string;
 }
 
-const ShareReviewDialog: React.FC<ShareReviewDialogProps> = ({ open, onOpenChange, projectId }) => {
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
+const ShareReviewDialog: React.FC<ShareReviewDialogProps> = ({
+  open, onOpenChange, projectId,
+  reviewType = "estimation_review",
+  reviewData,
+  defaultEmail = "",
+  defaultName = "",
+}) => {
+  const [email, setEmail] = useState(defaultEmail);
+  const [name, setName] = useState(defaultName);
   const [loading, setLoading] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // Reset defaults when dialog opens with new defaults
+  React.useEffect(() => {
+    if (open) {
+      setEmail(defaultEmail);
+      setName(defaultName);
+      setShareUrl(null);
+      setCopied(false);
+    }
+  }, [open, defaultEmail, defaultName]);
 
   const handleSend = async () => {
     if (!email.trim() || !projectId) return;
@@ -37,6 +57,8 @@ const ShareReviewDialog: React.FC<ShareReviewDialogProps> = ({ open, onOpenChang
             project_id: projectId,
             reviewer_email: email.trim(),
             reviewer_name: name.trim() || null,
+            review_type: reviewType,
+            review_data: reviewData || {},
           }),
         }
       );
@@ -69,13 +91,23 @@ const ShareReviewDialog: React.FC<ShareReviewDialogProps> = ({ open, onOpenChang
     onOpenChange(open);
   };
 
+  const reviewTypeLabel = reviewType === "quote_approval"
+    ? "Quote Approval"
+    : reviewType === "customer_quote"
+    ? "Customer Quote"
+    : "Estimation Review";
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Share for Review</DialogTitle>
+          <DialogTitle>Share for {reviewTypeLabel}</DialogTitle>
           <DialogDescription>
-            Send this estimation to a reviewer for feedback and comments.
+            {reviewType === "quote_approval"
+              ? "Send this quotation for internal approval before sending to the customer."
+              : reviewType === "customer_quote"
+              ? "Send the approved quotation to the customer."
+              : "Send this estimation to a reviewer for feedback and comments."}
           </DialogDescription>
         </DialogHeader>
 
