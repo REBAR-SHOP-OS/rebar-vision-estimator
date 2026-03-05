@@ -218,38 +218,68 @@ async function probeGateway(integration: typeof integrations[0]) {
 }
 
 // Probe Google Cloud Vision by checking env var and sending a minimal request
+function safeParseSAKey(raw: string): { parsed: Record<string, unknown> | null; error: string | null; method: string } {
+  // Strip BOM and trim whitespace
+  const cleaned = raw.replace(/^\uFEFF/, "").trim();
+
+  // Attempt 1: direct parse
+  try {
+    const obj = JSON.parse(cleaned);
+    if (typeof obj === "object" && obj !== null) return { parsed: obj, error: null, method: "direct" };
+    // If parse returned a string, it was double-encoded
+    if (typeof obj === "string") {
+      const inner = JSON.parse(obj);
+      if (typeof inner === "object" && inner !== null) return { parsed: inner, error: null, method: "double-encoded" };
+    }
+    return { parsed: null, error: "Parsed value is not an object", method: "direct" };
+  } catch (_e1) {
+    // Attempt 2: maybe it's double-encoded with outer quotes
+    try {
+      const unwrapped = JSON.parse(`"${cleaned}"`);
+      const obj = JSON.parse(unwrapped);
+      if (typeof obj === "object" && obj !== null) return { parsed: obj, error: null, method: "double-encoded-alt" };
+    } catch (_e2) {
+      // fall through
+    }
+    return {
+      parsed: null,
+      error: `JSON parse failed: ${_e1 instanceof Error ? _e1.message : "unknown"}`,
+      method: "failed",
+    };
+  }
+}
+
 async function probeVision(integration: typeof integrations[0]) {
   const saKey = Deno.env.get("GOOGLE_VISION_SA_KEY");
   if (!saKey) return { success: false, error: "GOOGLE_VISION_SA_KEY not configured", latency_ms: 0, resolved_model: "Cloud Vision API v1", gateway_headers: {} };
 
   const start = performance.now();
-  try {
-    // Parse service account key to get access token
-    const sa = JSON.parse(saKey);
-    // Create a minimal JWT for Google OAuth
-    const now = Math.floor(Date.now() / 1000);
-    const header = btoa(JSON.stringify({ alg: "RS256", typ: "JWT" })).replace(/=/g, "");
-    const payload = btoa(JSON.stringify({
-      iss: sa.client_email,
-      scope: "https://www.googleapis.com/auth/cloud-vision",
-      aud: "https://oauth2.googleapis.com/token",
-      iat: now,
-      exp: now + 60,
-    })).replace(/=/g, "");
+  const { parsed: sa, error: parseError, method } = safeParseSAKey(saKey);
 
-    // For probe, just verify the key exists and is parseable
+  if (!sa) {
     const latency_ms = Math.round(performance.now() - start);
+    const firstChars = saKey.substring(0, 20).replace(/[^ -~]/g, "?"); // safe printable chars only
     return {
-      success: true,
+      success: false,
+      error: `${parseError} | first_chars: "${firstChars}" | length: ${saKey.length}`,
       latency_ms,
       resolved_model: "Cloud Vision API v1",
-      gateway_headers: { "config_verified": "service_account_key_present", "client_email": sa.client_email ? "configured" : "missing" },
-      error: null,
+      gateway_headers: { parse_method: method },
     };
-  } catch (e) {
-    const latency_ms = Math.round(performance.now() - start);
-    return { success: false, error: e instanceof Error ? e.message : "Failed to parse SA key", latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: {} };
   }
+
+  const latency_ms = Math.round(performance.now() - start);
+  return {
+    success: true,
+    latency_ms,
+    resolved_model: "Cloud Vision API v1",
+    gateway_headers: {
+      config_verified: "service_account_key_present",
+      client_email: (sa as Record<string, unknown>).client_email ? "configured" : "missing",
+      parse_method: method,
+    },
+    error: null,
+  };
 }
 
 serve(async (req) => {
