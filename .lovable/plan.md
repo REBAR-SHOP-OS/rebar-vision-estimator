@@ -1,23 +1,41 @@
 
 
-## Plan: Fix Storage RLS Path in pdf-to-images.ts
+## Plan: Open Blueprint Viewer in a Dedicated Full-Screen Page
 
-### Problem
-`pdf-to-images.ts` uploads to `${projectId}/pages/...` but the `blueprints` bucket RLS policy requires the first folder segment to be `auth.uid()`. Every upload returns 403.
+The user wants the Blueprint Viewer (circled in red in the screenshot) to open as a **separate, full-screen page** instead of being embedded in a split panel alongside the chat. This gives the viewer more screen space for inspecting blueprints and detected elements.
 
-### Fix
+### Changes
 
-**1. Update `src/lib/pdf-to-images.ts`** (lines ~68-69)
+**1. Create `src/pages/BlueprintViewerPage.tsx`** — New dedicated page
+- Reads viewer state (image URL, elements, selected element, review statuses) from URL query params or a shared context/state store
+- Since React Router doesn't support passing complex objects via navigation, we'll use `sessionStorage` to pass the data
+- Renders `BlueprintViewer` full-screen (100vw × 100vh)
+- The "Close" button navigates back to the dashboard instead of toggling a boolean
 
-- Before the upload loop, call `supabase.auth.getUser()` to get the current user ID
-- Change the storage path from:
-  ```
-  ${projectId}/pages/${timestamp}_page_${pageNum}.png
-  ```
-  to:
-  ```
-  ${userId}/${projectId}/pages/${timestamp}_page_${pageNum}.png
-  ```
+**2. Add route in `src/App.tsx`**
+- Add `/blueprint-viewer` as a protected route pointing to the new page
 
-This is a ~5-line change in one file. No other files need modification since `ChatArea.tsx` already calls the function correctly.
+**3. Update `src/components/chat/ChatArea.tsx`**
+- When `showBlueprintViewer` is triggered, instead of rendering the split panel inline:
+  - Store viewer data (imageUrl, overlayElements, selectedElementId, reviewStatuses) in `sessionStorage`
+  - Navigate to `/blueprint-viewer` using `useNavigate()`
+- Remove the inline `ResizablePanelGroup` rendering of BlueprintViewer (lines ~1448-1487)
+- Keep the mobile stacked view as a fallback option or also redirect to the full page
+
+**4. Update `BlueprintViewer` `onClose` behavior**
+- In the new page context, `onClose` will call `navigate(-1)` to go back to the chat
+
+### Data Flow
+```text
+ChatArea (triggers viewer)
+  → saves elements + imageUrl + selectedId to sessionStorage
+  → navigates to /blueprint-viewer
+
+BlueprintViewerPage
+  → reads from sessionStorage
+  → renders BlueprintViewer full-screen
+  → onClose → navigate back to /
+```
+
+This approach avoids complex state management libraries and keeps the data transfer simple via `sessionStorage`.
 
