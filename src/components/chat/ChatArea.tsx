@@ -19,6 +19,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import BarListTable from "./BarListTable";
 import BendingScheduleTable from "./BendingScheduleTable";
+import ApprovalWorkflow from "./ApprovalWorkflow";
 
 interface Message {
   id: string;
@@ -1097,6 +1098,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                     </TabsContent>
                   )}
                 </Tabs>
+
+                {/* Approval Workflow - shown when quote result exists */}
+                {quoteResult && (
+                  <ApprovalWorkflow
+                    projectId={projectId}
+                    quoteResult={quoteResult}
+                    elements={validationData?.elements || []}
+                    scopeData={scopeData}
+                  />
+                )}
               </div>
             );
           })() : null}

@@ -184,6 +184,47 @@ export type Database = {
           },
         ]
       }
+      follow_ups: {
+        Row: {
+          action: string
+          created_at: string | null
+          due_date: string | null
+          id: string
+          notes: string | null
+          project_id: string
+          status: string | null
+          user_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string | null
+          due_date?: string | null
+          id?: string
+          notes?: string | null
+          project_id: string
+          status?: string | null
+          user_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string | null
+          due_date?: string | null
+          id?: string
+          notes?: string | null
+          project_id?: string
+          status?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "follow_ups_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           content: string
@@ -379,6 +420,8 @@ export type Database = {
           expires_at: string | null
           id: string
           project_id: string
+          review_data: Json | null
+          review_type: string | null
           reviewer_email: string
           reviewer_name: string | null
           share_token: string
@@ -390,6 +433,8 @@ export type Database = {
           expires_at?: string | null
           id?: string
           project_id: string
+          review_data?: Json | null
+          review_type?: string | null
           reviewer_email: string
           reviewer_name?: string | null
           share_token: string
@@ -401,6 +446,8 @@ export type Database = {
           expires_at?: string | null
           id?: string
           project_id?: string
+          review_data?: Json | null
+          review_type?: string | null
           reviewer_email?: string
           reviewer_name?: string | null
           share_token?: string

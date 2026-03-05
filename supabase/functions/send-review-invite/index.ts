@@ -11,7 +11,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { project_id, reviewer_email, reviewer_name } = await req.json();
+    const { project_id, reviewer_email, reviewer_name, review_type, review_data } = await req.json();
 
     if (!project_id || !reviewer_email) {
       return new Response(JSON.stringify({ error: "project_id and reviewer_email are required" }), {
@@ -20,13 +20,11 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Get the user from the auth header
     const authHeader = req.headers.get("Authorization");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Verify the user owns this project
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader || "" } },
@@ -39,10 +37,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Generate a unique share token
     const share_token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "").slice(0, 8);
 
-    // Create the share record
     const { data: share, error: insertError } = await supabase
       .from("review_shares")
       .insert({
@@ -52,6 +48,8 @@ Deno.serve(async (req) => {
         reviewer_name: reviewer_name || null,
         share_token,
         status: "pending",
+        review_type: review_type || "estimation_review",
+        review_data: review_data || {},
       })
       .select()
       .single();

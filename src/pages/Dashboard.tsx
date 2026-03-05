@@ -356,6 +356,13 @@ const Dashboard: React.FC = () => {
           <CrmSyncPanel
             projects={projects.map(p => ({ id: p.id, name: p.name }))}
             onClose={() => setShowCrm(false)}
+            onStartEstimation={(newProjectId) => {
+              loadProjects();
+              setActiveProjectId(newProjectId);
+              setShowCrm(false);
+              setCurrentStep(null);
+              setCalculationMode(null);
+            }}
           />
         ) : activeProjectId ? (
           <ChatArea
