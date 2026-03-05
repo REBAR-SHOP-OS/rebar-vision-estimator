@@ -6,7 +6,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2, BarChart3 } from "lucide-react";
-import CrmSyncPanel from "@/components/crm/CrmSyncPanel";
+import CrmSyncPanel, { type LeadAttachment } from "@/components/crm/CrmSyncPanel";
 import BrainKnowledgeDialog from "@/components/chat/BrainKnowledgeDialog";
 import { toast } from "sonner";
 import OutcomeCapture from "@/components/audit/OutcomeCapture";
@@ -366,6 +366,34 @@ const Dashboard: React.FC = () => {
               setShowCrm(false);
               setCurrentStep(null);
               setCalculationMode(null);
+            }}
+            onStartEstimationWithFiles={async (newProjectId, attachments) => {
+              loadProjects();
+              setShowCrm(false);
+              setCurrentStep(null);
+              setCalculationMode(null);
+
+              // Download CRM files as File objects
+              toast.info(`Fetching ${attachments.length} file(s) from CRM...`);
+              const downloadedFiles: File[] = [];
+              for (const att of attachments) {
+                try {
+                  const resp = await fetch(att.url);
+                  if (!resp.ok) continue;
+                  const blob = await resp.blob();
+                  downloadedFiles.push(new File([blob], att.name, { type: att.mimeType }));
+                } catch (err) {
+                  console.error(`Failed to download ${att.name}:`, err);
+                }
+              }
+
+              if (downloadedFiles.length > 0) {
+                setInitialFiles(downloadedFiles);
+                toast.success(`${downloadedFiles.length} file(s) fetched from CRM — starting auto-estimation`);
+              } else {
+                toast.warning("Could not download CRM files. Upload blueprints manually.");
+              }
+              setActiveProjectId(newProjectId);
             }}
           />
         ) : activeProjectId ? (

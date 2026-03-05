@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Link2, ExternalLink, X, RefreshCw, Zap, Loader2 } from "lucide-react";
+import { Link2, ExternalLink, X, RefreshCw, Zap, Loader2, Paperclip } from "lucide-react";
 import { toast } from "sonner";
 import {
   Table,
@@ -29,6 +29,13 @@ const PIPELINE_STAGES: Record<string, { label: string; color: string }> = {
   qualified: { label: "Qualified", color: "bg-teal-500" },
 };
 
+export interface LeadAttachment {
+  name: string;
+  size: number;
+  mimeType: string;
+  url: string;
+}
+
 interface PipelineLead {
   id: string;
   title: string;
@@ -41,6 +48,7 @@ interface PipelineLead {
   created_at: string;
   customer_id: string | null;
   customers: { name: string; company_name: string | null } | null;
+  attachments: LeadAttachment[];
 }
 
 interface Project {
@@ -52,13 +60,16 @@ interface CrmSyncPanelProps {
   projects: Project[];
   onClose: () => void;
   onStartEstimation?: (projectId: string) => void;
+  onStartEstimationWithFiles?: (projectId: string, files: LeadAttachment[]) => void;
 }
-const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose, onStartEstimation }) => {
+
+const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose, onStartEstimation, onStartEstimationWithFiles }) => {
   const { user } = useAuth();
   const [leads, setLeads] = useState<PipelineLead[]>([]);
   const [loading, setLoading] = useState(true);
   const [linkingLeadId, setLinkingLeadId] = useState<string | null>(null);
   const [creatingLeadId, setCreatingLeadId] = useState<string | null>(null);
+
   useEffect(() => {
     fetchLeads();
   }, []);
@@ -71,7 +82,7 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose, onStartE
         console.error("Failed to fetch pipeline leads:", error);
         toast.error("Failed to fetch pipeline leads");
       } else {
-        setLeads(data?.leads || []);
+        setLeads((data?.leads || []).map((l: any) => ({ ...l, attachments: l.attachments || [] })));
       }
     } catch (err) {
       console.error("Error:", err);
@@ -100,7 +111,7 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose, onStartE
   };
 
   const startEstimationFromLead = async (lead: PipelineLead) => {
-    if (!user || !onStartEstimation) return;
+    if (!user) return;
     setCreatingLeadId(lead.id);
     const projectName = lead.title || lead.customers?.company_name || "New Estimation";
     const clientName = lead.customers?.company_name || lead.customers?.name || null;
@@ -126,7 +137,16 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose, onStartE
 
     toast.success(`Project "${projectName}" created from lead`);
     setCreatingLeadId(null);
-    onStartEstimation(data.id);
+
+    // If lead has attachments, use the new handler that passes files
+    if (lead.attachments.length > 0 && onStartEstimationWithFiles) {
+      onStartEstimationWithFiles(data.id, lead.attachments);
+    } else if (onStartEstimation) {
+      if (lead.attachments.length === 0) {
+        toast.info("No files found in CRM for this lead. Upload blueprints to begin.");
+      }
+      onStartEstimation(data.id);
+    }
   };
 
   const getStageInfo = (stage: string) => {
@@ -180,7 +200,7 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose, onStartE
                 <TableHead>Value</TableHead>
                 <TableHead>Stage</TableHead>
                 <TableHead>Priority</TableHead>
-                <TableHead>Close Date</TableHead>
+                <TableHead>Files</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -202,12 +222,19 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose, onStartE
                       </span>
                     </TableCell>
                     <TableCell>{getPriorityBadge(lead.priority)}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {lead.expected_close_date || "—"}
+                    <TableCell>
+                      {lead.attachments.length > 0 ? (
+                        <Badge variant="secondary" className="gap-1 text-[10px]">
+                          <Paperclip className="h-3 w-3" />
+                          {lead.attachments.length}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">—</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1">
-                        {onStartEstimation && (
+                        {(onStartEstimation || onStartEstimationWithFiles) && (
                           <Button
                             variant="default"
                             size="sm"
