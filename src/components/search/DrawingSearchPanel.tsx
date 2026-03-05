@@ -30,6 +30,7 @@ const DrawingSearchPanel: React.FC<Props> = ({ onClose, onSelectProject }) => {
       if (filters.drawing_type) body.drawing_type = filters.drawing_type;
       if (filters.revision) body.revision = filters.revision;
       if (filters.bar_mark) body.bar_mark = filters.bar_mark;
+      if (filters.sort) body.sort = filters.sort;
 
       const { data, error } = await supabase.functions.invoke("search-drawings", { body });
       if (error) {

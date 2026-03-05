@@ -1,6 +1,6 @@
 import React from "react";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Hash, Layers } from "lucide-react";
+import { FileText, Hash, Layers, ShieldCheck, ShieldAlert } from "lucide-react";
 
 export interface SearchResult {
   id: string;
@@ -18,6 +18,7 @@ export interface SearchResult {
   headline: string | null;
   rank: number;
   created_at: string;
+  confidence?: number;
 }
 
 interface Props {
@@ -26,6 +27,9 @@ interface Props {
 }
 
 const SearchResultCard: React.FC<Props> = ({ result, onClick }) => {
+  const confidence = result.confidence ?? 1.0;
+  const isLowConfidence = confidence < 0.7;
+
   return (
     <div
       className="group rounded-lg border border-border bg-card p-3 space-y-2 cursor-pointer hover:border-primary/40 hover:shadow-sm transition-all"
@@ -42,7 +46,15 @@ const SearchResultCard: React.FC<Props> = ({ result, onClick }) => {
             <p className="text-[11px] text-muted-foreground truncate">{result.project_name || "Unknown Project"}</p>
           </div>
         </div>
-        <div className="flex gap-1 flex-shrink-0">
+        <div className="flex gap-1 flex-shrink-0 items-center">
+          {/* Confidence indicator */}
+          <span className={`flex items-center ${isLowConfidence ? "text-destructive" : "text-muted-foreground"}`}>
+            {isLowConfidence ? (
+              <ShieldAlert className="h-3.5 w-3.5" />
+            ) : (
+              <ShieldCheck className="h-3.5 w-3.5" />
+            )}
+          </span>
           {result.discipline && (
             <Badge variant="outline" className="text-[9px] capitalize">{result.discipline}</Badge>
           )}
@@ -76,6 +88,11 @@ const SearchResultCard: React.FC<Props> = ({ result, onClick }) => {
         {result.crm_deal_id && (
           <span className="flex items-center gap-0.5">
             <Layers className="h-2.5 w-2.5" /> CRM: {result.crm_deal_id}
+          </span>
+        )}
+        {isLowConfidence && (
+          <span className="text-destructive font-medium">
+            {(confidence * 100).toFixed(0)}% confidence
           </span>
         )}
         {result.rank > 0 && <span className="ml-auto">Score: {result.rank.toFixed(3)}</span>}
