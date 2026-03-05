@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.pipeline-crm]
 verify_jwt = false
+
+[functions.fetch-pipeline-leads]
+verify_jwt = false
