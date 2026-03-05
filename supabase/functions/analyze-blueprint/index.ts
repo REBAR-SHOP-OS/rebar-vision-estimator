@@ -265,7 +265,11 @@ async function extractPdfText(pdfBytes: ArrayBuffer, maxPages: number = 999): Pr
 
   try {
     const doc = await getDocument(new Uint8Array(pdfBytes));
-    const totalPages = doc.numPages;
+    const totalPages = doc.numPages || 0;
+    if (!totalPages || isNaN(totalPages)) {
+      console.log("PDF has no parseable pages (numPages is undefined/NaN)");
+      return { pages: [], total_pages: 0, sha256, has_text_layer: false };
+    }
     const pagesToProcess = Math.min(totalPages, maxPages);
     console.log(`PDF has ${totalPages} pages, processing first ${pagesToProcess}`);
 
@@ -1374,8 +1378,10 @@ Before outputting your final answer, you MUST:
     }
     const fileContentParts: any[] = [];
     const MAX_PDF_SIZE_MB = 25; // Allow real-world engineering PDFs (10-30MB)
-    const MAX_PDF_INLINE_MB = 15; // Max size for sending base64 to Gemini Vision
-    const MAX_PDF_COUNT = 3;
+    const MAX_PDF_INLINE_MB = 10; // Max size for sending base64 to Gemini Vision (reduced to prevent OOM)
+    const MAX_PDF_TEXT_EXTRACT_MB = 8; // Max size for pdfjs-serverless text extraction (OOM-safe)
+    const MAX_PDF_COUNT = 2;
+    const MAX_INLINE_PDF_COUNT = 1; // Only send 1 PDF as base64 to Gemini to save memory
     const MAX_PAGES_PER_PDF = 15; // Limit pages for text extraction
     let pdfCount = 0;
 
@@ -1385,6 +1391,7 @@ Before outputting your final answer, you MUST:
     // PDF-native text extraction results
     let pdfNativeText = "";
     let pdfNativeAvailable = false;
+    let inlinePdfCount = 0;
 
     if (allFileUrls.length > 0) {
       // Try to get Google Vision access token
@@ -1415,96 +1422,102 @@ Before outputting your final answer, you MUST:
               continue;
             }
 
-            // ALWAYS extract text first (works for any size up to MAX_PDF_SIZE_MB)
-            try {
-              console.log("Running PDF-native text extraction...");
-              const pdfExtraction = await extractPdfText(pdfBuffer, MAX_PAGES_PER_PDF);
-              if (pdfExtraction.has_text_layer) {
-                pdfNativeText += `\n\n## PDF-NATIVE TEXT EXTRACTION — ${url.split('/').pop()?.split('?')[0] || 'pdf'} (SHA-256: ${pdfExtraction.sha256.substring(0, 16)}...)\n`;
-                pdfNativeText += `Total pages: ${pdfExtraction.total_pages}, Processed: ${pdfExtraction.pages.length}, Text pages: ${pdfExtraction.pages.filter(p => !p.is_scanned).length}, Scanned pages: ${pdfExtraction.pages.filter(p => p.is_scanned).length}\n\n`;
-                for (const page of pdfExtraction.pages) {
-                  if (page.is_scanned) {
-                    pdfNativeText += `### Page ${page.page_number} — SCANNED (no text layer, use OCR)\n\n`;
-                    continue;
-                  }
-                  pdfNativeText += `### Page ${page.page_number}\n`;
-                  if (page.title_block) {
-                    const tb = page.title_block;
-                    if (tb.sheet_number) pdfNativeText += `**Sheet:** ${tb.sheet_number}`;
-                    if (tb.discipline) pdfNativeText += ` | **Discipline:** ${tb.discipline}`;
-                    if (tb.drawing_type) pdfNativeText += ` | **Type:** ${tb.drawing_type}`;
-                    if (tb.scale_raw) pdfNativeText += ` | **Scale:** ${tb.scale_raw}`;
-                    if (tb.revision_code) pdfNativeText += ` | **Rev:** ${tb.revision_code}`;
-                    pdfNativeText += `\n`;
-                  }
-                  if (page.tables.length > 0) {
-                    pdfNativeText += `**Tables detected: ${page.tables.length}**\n`;
-                    for (const table of page.tables) {
-                      pdfNativeText += "```\n" + table.join("\n") + "\n```\n\n";
+            // Only run pdfjs text extraction on smaller files to avoid OOM
+            if (sizeMB <= MAX_PDF_TEXT_EXTRACT_MB) {
+              try {
+                console.log("Running PDF-native text extraction...");
+                const pdfExtraction = await extractPdfText(pdfBuffer, MAX_PAGES_PER_PDF);
+                if (pdfExtraction.has_text_layer) {
+                  pdfNativeText += `\n\n## PDF-NATIVE TEXT EXTRACTION — ${url.split('/').pop()?.split('?')[0] || 'pdf'} (SHA-256: ${pdfExtraction.sha256.substring(0, 16)}...)\n`;
+                  pdfNativeText += `Total pages: ${pdfExtraction.total_pages}, Processed: ${pdfExtraction.pages.length}, Text pages: ${pdfExtraction.pages.filter(p => !p.is_scanned).length}, Scanned pages: ${pdfExtraction.pages.filter(p => p.is_scanned).length}\n\n`;
+                  for (const page of pdfExtraction.pages) {
+                    if (page.is_scanned) {
+                      pdfNativeText += `### Page ${page.page_number} — SCANNED (no text layer, use OCR)\n\n`;
+                      continue;
                     }
+                    pdfNativeText += `### Page ${page.page_number}\n`;
+                    if (page.title_block) {
+                      const tb = page.title_block;
+                      if (tb.sheet_number) pdfNativeText += `**Sheet:** ${tb.sheet_number}`;
+                      if (tb.discipline) pdfNativeText += ` | **Discipline:** ${tb.discipline}`;
+                      if (tb.drawing_type) pdfNativeText += ` | **Type:** ${tb.drawing_type}`;
+                      if (tb.scale_raw) pdfNativeText += ` | **Scale:** ${tb.scale_raw}`;
+                      if (tb.revision_code) pdfNativeText += ` | **Rev:** ${tb.revision_code}`;
+                      pdfNativeText += `\n`;
+                    }
+                    if (page.tables.length > 0) {
+                      pdfNativeText += `**Tables detected: ${page.tables.length}**\n`;
+                      for (const table of page.tables) {
+                        pdfNativeText += "```\n" + table.join("\n") + "\n```\n\n";
+                      }
+                    }
+                    pdfNativeText += `**Full text:**\n\`\`\`\n${page.raw_text}\n\`\`\`\n\n`;
                   }
-                  pdfNativeText += `**Full text:**\n\`\`\`\n${page.raw_text}\n\`\`\`\n\n`;
-                }
-                pdfNativeAvailable = true;
-                console.log(`PDF-native extraction: ${pdfExtraction.pages.filter(p => !p.is_scanned).length}/${pdfExtraction.total_pages} text pages (processed ${pdfExtraction.pages.length})`);
+                  pdfNativeAvailable = true;
+                  console.log(`PDF-native extraction: ${pdfExtraction.pages.filter(p => !p.is_scanned).length}/${pdfExtraction.total_pages} text pages (processed ${pdfExtraction.pages.length})`);
 
-                // Auto-index extracted pages into search DB
-                if (reqProjectId && autoIndexUserId && serviceKey) {
-                  try {
-                    const { createClient: createSB } = await import("https://esm.sh/@supabase/supabase-js@2");
-                    const svc = createSB(supabaseUrl, serviceKey);
-                    for (const page of pdfExtraction.pages) {
-                      if (page.is_scanned || !page.raw_text?.trim()) continue;
-                      const tb = page.title_block || {};
-                      const barMarkPattern = /\b([A-Z]{1,2}\d{1,3})\b/g;
-                      const barMarks: string[] = [];
-                      let m;
-                      while ((m = barMarkPattern.exec(page.raw_text)) !== null) {
-                        const bm = m[1];
-                        if (!["OF","IN","AT","TO","AS","IS","IT","OR","ON","IF","NO","DO","UP"].includes(bm) && !barMarks.includes(bm)) barMarks.push(bm);
-                      }
-                      // Upsert logical drawing
-                      let ldId: string | null = null;
-                      if (tb.sheet_number) {
-                        const { data: ex } = await svc.from("logical_drawings").select("id")
-                          .eq("user_id", autoIndexUserId).eq("project_id", reqProjectId)
-                          .eq("sheet_id", tb.sheet_number).eq("drawing_type", tb.drawing_type || "").maybeSingle();
-                        if (ex) { ldId = ex.id; }
-                        else {
-                          const { data: cr } = await svc.from("logical_drawings").insert({
-                            user_id: autoIndexUserId, project_id: reqProjectId,
-                            sheet_id: tb.sheet_number, discipline: tb.discipline || null, drawing_type: tb.drawing_type || null,
-                          }).select("id").single();
-                          ldId = cr?.id || null;
+                  // Auto-index extracted pages into search DB
+                  if (reqProjectId && autoIndexUserId && serviceKey) {
+                    try {
+                      const { createClient: createSB } = await import("https://esm.sh/@supabase/supabase-js@2");
+                      const svc = createSB(supabaseUrl, serviceKey);
+                      for (const page of pdfExtraction.pages) {
+                        if (page.is_scanned || !page.raw_text?.trim()) continue;
+                        const tb = page.title_block || {};
+                        const barMarkPattern = /\b([A-Z]{1,2}\d{1,3})\b/g;
+                        const barMarks: string[] = [];
+                        let m;
+                        while ((m = barMarkPattern.exec(page.raw_text)) !== null) {
+                          const bm = m[1];
+                          if (!["OF","IN","AT","TO","AS","IS","IT","OR","ON","IF","NO","DO","UP"].includes(bm) && !barMarks.includes(bm)) barMarks.push(bm);
                         }
+                        let ldId: string | null = null;
+                        if (tb.sheet_number) {
+                          const { data: ex } = await svc.from("logical_drawings").select("id")
+                            .eq("user_id", autoIndexUserId).eq("project_id", reqProjectId)
+                            .eq("sheet_id", tb.sheet_number).eq("drawing_type", tb.drawing_type || "").maybeSingle();
+                          if (ex) { ldId = ex.id; }
+                          else {
+                            const { data: cr } = await svc.from("logical_drawings").insert({
+                              user_id: autoIndexUserId, project_id: reqProjectId,
+                              sheet_id: tb.sheet_number, discipline: tb.discipline || null, drawing_type: tb.drawing_type || null,
+                            }).select("id").single();
+                            ldId = cr?.id || null;
+                          }
+                        }
+                        await svc.rpc("upsert_search_index", {
+                          p_user_id: autoIndexUserId, p_project_id: reqProjectId,
+                          p_logical_drawing_id: ldId, p_page_number: page.page_number || null,
+                          p_raw_text: page.raw_text, p_bar_marks: barMarks,
+                          p_extracted_entities: { bar_marks: barMarks, title_block: tb, tables: page.tables || [] },
+                          p_revision_label: tb.revision_code || null,
+                        });
                       }
-                      await svc.rpc("upsert_search_index", {
-                        p_user_id: autoIndexUserId, p_project_id: reqProjectId,
-                        p_logical_drawing_id: ldId, p_page_number: page.page_number || null,
-                        p_raw_text: page.raw_text, p_bar_marks: barMarks,
-                        p_extracted_entities: { bar_marks: barMarks, title_block: tb, tables: page.tables || [] },
-                        p_revision_label: tb.revision_code || null,
-                      });
+                      console.log(`Auto-indexed ${pdfExtraction.pages.filter(p => !p.is_scanned).length} pages into search DB`);
+                    } catch (indexErr) {
+                      console.error("Auto-index failed (non-blocking):", indexErr);
                     }
-                    console.log(`Auto-indexed ${pdfExtraction.pages.filter(p => !p.is_scanned).length} pages into search DB`);
-                  } catch (indexErr) {
-                    console.error("Auto-index failed (non-blocking):", indexErr);
                   }
+                } else {
+                  console.log("PDF has no text layer — fully scanned, relying on OCR");
                 }
-              } else {
-                console.log("PDF has no text layer — fully scanned, relying on OCR");
+              } catch (pdfExtErr) {
+                console.error("PDF-native extraction failed, continuing with visual analysis:", pdfExtErr);
               }
-            } catch (pdfExtErr) {
-              console.error("PDF-native extraction failed, continuing with visual analysis:", pdfExtErr);
+            } else {
+              console.log(`PDF ${sizeMB.toFixed(1)}MB too large for pdfjs extraction (limit ${MAX_PDF_TEXT_EXTRACT_MB}MB), skipping text extraction to save memory`);
             }
 
-            // Send base64 to Gemini Vision only if under inline limit
-            if (sizeMB <= MAX_PDF_INLINE_MB) {
+            // Send base64 to Gemini Vision only if under inline limit AND we haven't hit inline cap
+            if (sizeMB <= MAX_PDF_INLINE_MB && inlinePdfCount < MAX_INLINE_PDF_COUNT) {
               const base64 = encodeBase64(pdfBuffer);
               fileContentParts.push({ type: "image_url", image_url: { url: `data:application/pdf;base64,${base64}` } });
               console.log("PDF sent as base64 for visual analysis:", Math.round(base64.length / 1024), "KB");
+              inlinePdfCount++;
+            } else if (sizeMB > MAX_PDF_INLINE_MB) {
+              console.log(`PDF ${sizeMB.toFixed(1)}MB exceeds inline limit (${MAX_PDF_INLINE_MB}MB), using text extraction only`);
             } else {
-              console.log(`PDF ${sizeMB.toFixed(1)}MB exceeds inline limit (${MAX_PDF_INLINE_MB}MB), using text extraction only for this file`);
+              console.log(`Skipping inline PDF (already sent ${inlinePdfCount}/${MAX_INLINE_PDF_COUNT} inline PDFs to save memory)`);
             }
             pdfCount++;
           } catch (err) { console.error("PDF processing error:", err); }
