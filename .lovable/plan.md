@@ -1,134 +1,48 @@
 
 
-## Plan: Production-Grade Estimator/Detailer — Phased Implementation Within Current Stack
+## Plan: Fully Automated Estimation Pipeline (Upload → Detect → Scope → Analyze)
 
-This is a massive vision document. Let me map what's already built, what can be implemented now within Lovable's React + Supabase Edge Functions stack, and what requires external infrastructure later.
+### Current Flow (requires 4+ manual clicks)
+1. User uploads files → sees Scope Definition Panel → manually confirms scope
+2. User clicks "Proceed" → sees Calculation Mode Picker → picks Smart/Step-by-Step
+3. AI analysis begins
 
-### What Already Exists
+### New "Fully Auto" Flow (zero clicks after upload)
+1. User uploads files
+2. System auto-detects project type (already happens)
+3. System auto-accepts detected scope + defaults to Smart mode
+4. System immediately shows a **confirmation toast/banner**: "Detected: Commercial project, 18.33 tonnes. Auto-analyzing with Smart mode. [Cancel]"
+5. AI analysis streams automatically
+6. User can interrupt/adjust at any time
 
-- **PDF ingestion**: `extract-pdf-text` (pdfjs-serverless) + `analyze-blueprint` (Google Vision OCR + Gemini AI extraction)
-- **9-stage estimation pipeline**: detect-project-type → extraction → validation → pricing → bar list → BBS
-- **Shop drawing generation**: `generate-shop-drawing` edge function + client-side HTML builder
-- **CRM integration**: `fetch-pipeline-leads` pulls from REBAR SHOP OS, `CrmSyncPanel` UI
-- **Approval workflow**: multi-stage review chain (Ben → Neel → Customer) with comment polling
-- **Agent Brain**: `agent_knowledge` table with rules, files, learned insights, training examples
-- **Automatic learning**: extracts takeaways every 5 messages
-- **Notifications**: `notify-reviewer` edge function + `notifications` table
-- **Outcome tracking**: `estimate_outcomes` table with quoted vs actual fields
+### Implementation
 
-### What This Document Adds (Prioritized by Feasibility)
+**1. ChatArea.tsx — Auto-proceed after detection completes**
 
-Given the Lovable stack (React frontend + Supabase Edge Functions + Postgres), here's what we can implement now vs what needs external compute:
+After `setDetectionResult(result)` in `handleFileUpload` (~line 725), instead of just showing the scope panel and waiting, auto-build scope data from detection result and immediately trigger analysis:
 
----
+- If detection confidence >= 0.7: skip scope panel, skip mode picker, auto-set `scopeData` from detection result's `recommendedScope`, auto-set `calculationMode = "smart"`, and call `handleModeSelect("smart")` directly
+- If detection confidence < 0.7: fall back to current manual flow (show scope panel)
+- Show a system message: "🤖 Auto-detected: [category] project. Starting Smart estimation... (say 'stop' to cancel)"
 
-#### Phase 1: Data Audit Foundation (Implementable Now)
+**2. ScopeDefinitionPanel — Add auto-accept helper**
 
-**1. Document versioning with SHA-256 hashing**
-- Already partially done in `extract-pdf-text` (computes `sha256`)
-- Add a `document_versions` table storing hash, provenance, and drawing set linkage
-- Add `drawing_sets` and `sheet_revisions` tables for revision lineage tracking
+Add a static method or exported utility function `buildScopeFromDetection(result: DetectionResult): ScopeData` that creates scope data from a detection result without user interaction.
 
-**2. Estimate versioning and linkage**
-- Add `estimate_versions` table linking estimate snapshots to drawing sets
-- Add `quote_versions` table for issued proposals
-- Modify `estimate_outcomes` to reference `estimate_version_id` and `drawing_set_id`
+**3. Dashboard.tsx — No changes needed**
 
-**3. Data quality / linkage scoring**
-- Add a `linkage_score` column to projects (L0-L3)
-- Edge function to compute linkage completeness per project
+The `handleNewProjectFileSelect` already passes files to ChatArea via `initialFiles`. The auto-flow triggers inside ChatArea after upload completes.
 
-**Database migration** (~6 new tables):
-```sql
--- document_versions: immutable PDF version records
--- drawing_sets: groups of sheets issued together
--- sheet_revisions: per-sheet revision tracking
--- estimate_versions: versioned estimate snapshots
--- quote_versions: issued proposal versions
--- reconciliation_records: human resolution audit trail
-```
+### Files to Modify
 
-#### Phase 2: Enhanced Extraction Pipeline (Implementable Now)
+| File | Change |
+|------|--------|
+| `src/components/chat/ChatArea.tsx` | Add auto-proceed logic after detection, skip scope panel + mode picker when confidence is high |
+| `src/components/chat/ScopeDefinitionPanel.tsx` | Export `buildScopeFromDetection()` utility |
 
-**4. Sheet-level indexing from PDF extraction**
-- Enhance `extract-pdf-text` to also extract title block fields (sheet number, title, revision, scale) using pattern matching on extracted text
-- Store per-sheet metadata in `sheet_revisions`
-
-**5. Symbol lexicon for rebar notation**
-- Create an `agent_knowledge` entry type `lexicon` or a dedicated `symbol_lexicon` table
-- Pre-populate with standard rebar notations (bar sizes, spacing patterns, shape codes)
-- Use in `analyze-blueprint` prompt to improve extraction accuracy
-
-**6. Confidence scoring on extractions**
-- Add confidence fields to extraction outputs (scale_confidence, schedule_completeness)
-- Gate auto-quoting: if confidence < threshold → route to HITL
-
-#### Phase 3: Outcome Learning Loop (Implementable Now)
-
-**7. Outcome capture UI**
-- Add fields to Dashboard for won/lost status, actual costs, change orders
-- Store in `estimate_outcomes` (already exists)
-
-**8. Delta analysis edge function**
-- New edge function `analyze-outcomes` that computes:
-  - Bias (systematic over/under estimation)
-  - Error by project type, estimator, client
-  - Generates "learned rules" from patterns
-- Uses Lovable AI (Gemini) to analyze patterns and produce correction rules
-
-**9. Active learning signals**
-- Track low-confidence extractions in a `review_queue` table
-- Surface them in the UI for human labeling priority
-
-#### Phase 4: Pipeline CRM Deep Integration (Implementable Now)
-
-**10. Full deal lifecycle sync**
-- Enhance `fetch-pipeline-leads` to also pull won/lost outcomes
-- Create a `crm_sync_log` table for audit trail
-- Bi-directional: push estimate results back to CRM deals via Pipeline CRM API
-
-**11. Reconciliation UI**
-- New panel to resolve ambiguous drawing-to-estimate links
-- Store resolution records with audit trail
-
-#### Phase 5: Future (Requires External Compute)
-
-These items need Python/GPU backends and cannot run in Supabase Edge Functions:
-- Mask R-CNN / U-Net symbol detection (needs GPU)
-- LightGBM/XGBoost delta models (needs Python runtime)
-- DXF/IFC generation via ezdxf/IfcOpenShell (needs Python)
-- FAISS vector search (pgvector could be added to Supabase instead)
-- Great Expectations data validation (Python)
-- Airflow orchestration (infrastructure)
-
-For these, the frontend is already decoupled — future microservices can replace edge functions without UI changes.
-
----
-
-### Implementation Order (What to Build First)
-
-1. **Database schema**: `document_versions`, `drawing_sets`, `sheet_revisions`, `estimate_versions`, `quote_versions`, `reconciliation_records` tables with RLS
-2. **Enhanced extract-pdf-text**: extract title block metadata (sheet number, revision, scale) from text patterns
-3. **Symbol lexicon table**: pre-populate rebar notation patterns
-4. **Outcome capture UI**: add won/lost and actual cost fields to project detail view
-5. **Delta analysis function**: edge function using Gemini to analyze estimation accuracy patterns
-6. **Confidence gating**: add thresholds to approval workflow — block auto-issue below confidence
-7. **Reconciliation panel**: UI for linking drawings to estimates with audit trail
-
-### Files to Create/Modify
-
-| Action | File | Purpose |
-|--------|------|---------|
-| Migrate | New migration | 6 tables + RLS policies |
-| Create | `supabase/functions/analyze-outcomes/index.ts` | Delta analysis from outcomes |
-| Edit | `supabase/functions/extract-pdf-text/index.ts` | Title block metadata extraction |
-| Edit | `supabase/functions/analyze-blueprint/index.ts` | Use symbol lexicon in prompts |
-| Edit | `src/components/chat/ApprovalWorkflow.tsx` | Confidence gating UI |
-| Create | `src/components/audit/ReconciliationPanel.tsx` | Drawing-estimate linking UI |
-| Create | `src/components/audit/OutcomeCapture.tsx` | Won/lost + actuals entry |
-| Edit | `src/pages/Dashboard.tsx` | Add outcome capture + reconciliation access |
-
-### Scope Decision Needed
-
-This is a very large roadmap. I recommend starting with **Phase 1 (data audit schema)** + **Phase 3 (outcome capture)** as these create the foundation everything else depends on. Shall I implement all phases sequentially, or focus on a specific phase first?
+### Safety Rails
+- Confidence threshold (0.7) prevents auto-proceeding on ambiguous drawings
+- System message clearly states what was auto-detected
+- User can type "stop" or "adjust scope" to interrupt
+- All auto-decisions are logged as system messages in the chat
 
