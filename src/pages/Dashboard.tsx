@@ -5,11 +5,12 @@ import { useLanguage, LANGUAGES, type Language } from "@/contexts/LanguageContex
 import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2, BarChart3 } from "lucide-react";
+import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2, BarChart3, Search } from "lucide-react";
 import CrmSyncPanel, { type LeadAttachment } from "@/components/crm/CrmSyncPanel";
 import BrainKnowledgeDialog from "@/components/chat/BrainKnowledgeDialog";
 import { toast } from "sonner";
 import OutcomeCapture from "@/components/audit/OutcomeCapture";
+import DrawingSearchPanel from "@/components/search/DrawingSearchPanel";
 import ChatArea from "@/components/chat/ChatArea";
 import StepProgress from "@/components/chat/StepProgress";
 import logoBg from "@/assets/logo.png";
@@ -42,6 +43,7 @@ const Dashboard: React.FC = () => {
   const [calculationMode, setCalculationMode] = useState<"smart" | "step-by-step" | null>(null);
   const [showCrm, setShowCrm] = useState(false);
   const [showOutcomes, setShowOutcomes] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [processingPhase, setProcessingPhase] = useState<string | null>(null);
   const [initialFiles, setInitialFiles] = useState<File[] | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -353,8 +355,18 @@ const Dashboard: React.FC = () => {
           </Button>
         </header>
 
-        {/* Chat or Welcome */}
-        {showOutcomes ? (
+      {/* Chat or Welcome */}
+      {showSearch ? (
+          <DrawingSearchPanel
+            onClose={() => setShowSearch(false)}
+            onSelectProject={(projectId) => {
+              setShowSearch(false);
+              setActiveProjectId(projectId);
+              setCurrentStep(null);
+              setCalculationMode(null);
+            }}
+          />
+        ) : showOutcomes ? (
           <OutcomeCapture projects={projects.map(p => ({ id: p.id, name: p.name }))} />
         ) : showCrm ? (
           <CrmSyncPanel
@@ -464,6 +476,10 @@ const Dashboard: React.FC = () => {
                 <Button onClick={() => setShowOutcomes(true)} variant="outline" size="lg" className="gap-2 h-12 px-6 rounded-xl">
                   <BarChart3 className="h-5 w-5" />
                   Outcomes
+                </Button>
+                <Button onClick={() => setShowSearch(true)} variant="outline" size="lg" className="gap-2 h-12 px-6 rounded-xl">
+                  <Search className="h-5 w-5" />
+                  Search Drawings
                 </Button>
               </div>
             </div>

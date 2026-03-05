@@ -32,3 +32,9 @@ verify_jwt = false
 
 [functions.analyze-outcomes]
 verify_jwt = false
+
+[functions.search-drawings]
+verify_jwt = false
+
+[functions.populate-search-index]
+verify_jwt = false

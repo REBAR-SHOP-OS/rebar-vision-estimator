@@ -191,6 +191,89 @@ export type Database = {
           },
         ]
       }
+      drawing_search_index: {
+        Row: {
+          bar_marks: string[]
+          created_at: string
+          crm_deal_id: string | null
+          document_version_id: string | null
+          extracted_entities: Json
+          id: string
+          issue_status: string | null
+          logical_drawing_id: string | null
+          page_number: number | null
+          project_id: string
+          raw_text: string
+          revision_label: string | null
+          search_tsv: unknown
+          sheet_revision_id: string | null
+          user_id: string
+        }
+        Insert: {
+          bar_marks?: string[]
+          created_at?: string
+          crm_deal_id?: string | null
+          document_version_id?: string | null
+          extracted_entities?: Json
+          id?: string
+          issue_status?: string | null
+          logical_drawing_id?: string | null
+          page_number?: number | null
+          project_id: string
+          raw_text?: string
+          revision_label?: string | null
+          search_tsv?: unknown
+          sheet_revision_id?: string | null
+          user_id: string
+        }
+        Update: {
+          bar_marks?: string[]
+          created_at?: string
+          crm_deal_id?: string | null
+          document_version_id?: string | null
+          extracted_entities?: Json
+          id?: string
+          issue_status?: string | null
+          logical_drawing_id?: string | null
+          page_number?: number | null
+          project_id?: string
+          raw_text?: string
+          revision_label?: string | null
+          search_tsv?: unknown
+          sheet_revision_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "drawing_search_index_document_version_id_fkey"
+            columns: ["document_version_id"]
+            isOneToOne: false
+            referencedRelation: "document_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "drawing_search_index_logical_drawing_id_fkey"
+            columns: ["logical_drawing_id"]
+            isOneToOne: false
+            referencedRelation: "logical_drawings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "drawing_search_index_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "drawing_search_index_sheet_revision_id_fkey"
+            columns: ["sheet_revision_id"]
+            isOneToOne: false
+            referencedRelation: "sheet_revisions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       drawing_sets: {
         Row: {
           created_at: string
@@ -404,6 +487,44 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "follow_ups_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      logical_drawings: {
+        Row: {
+          created_at: string
+          discipline: string | null
+          drawing_type: string | null
+          id: string
+          project_id: string
+          sheet_id: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          discipline?: string | null
+          drawing_type?: string | null
+          id?: string
+          project_id: string
+          sheet_id?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          discipline?: string | null
+          drawing_type?: string | null
+          id?: string
+          project_id?: string
+          sheet_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "logical_drawings_project_id_fkey"
             columns: ["project_id"]
             isOneToOne: false
             referencedRelation: "projects"
@@ -1015,7 +1136,49 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      search_drawings: {
+        Args: {
+          p_filters?: Json
+          p_limit?: number
+          p_query?: string
+          p_user_id: string
+        }
+        Returns: {
+          bar_marks: string[]
+          created_at: string
+          crm_deal_id: string
+          discipline: string
+          drawing_type: string
+          extracted_entities: Json
+          headline: string
+          id: string
+          issue_status: string
+          logical_drawing_id: string
+          page_number: number
+          project_id: string
+          project_name: string
+          rank: number
+          revision_label: string
+          sheet_id: string
+        }[]
+      }
+      upsert_search_index: {
+        Args: {
+          p_bar_marks?: string[]
+          p_crm_deal_id?: string
+          p_document_version_id?: string
+          p_extracted_entities?: Json
+          p_issue_status?: string
+          p_logical_drawing_id: string
+          p_page_number?: number
+          p_project_id: string
+          p_raw_text?: string
+          p_revision_label?: string
+          p_sheet_revision_id?: string
+          p_user_id: string
+        }
+        Returns: string
+      }
     }
     Enums: {
       [_ in never]: never
