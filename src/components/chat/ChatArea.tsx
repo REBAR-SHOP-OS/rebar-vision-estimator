@@ -167,8 +167,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     // Fetch knowledge items
     const { data } = await supabase
       .from("agent_knowledge" as any)
-      .select("*")
-      .eq("user_id", user.id);
+      .select("*");
 
     const rules: string[] = [];
     const knowledgeFileUrls: string[] = [];
@@ -192,8 +191,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     // Fetch training examples
     const { data: trainingData } = await supabase
       .from("agent_training_examples" as any)
-      .select("*")
-      .eq("user_id", user.id);
+      .select("*");
 
     const trainingExamples: { title: string; answerText: string }[] = [];
     if (trainingData && trainingData.length > 0) {

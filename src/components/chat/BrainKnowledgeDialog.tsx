@@ -72,7 +72,6 @@ const BrainKnowledgeDialog: React.FC = () => {
     const { data, error } = await supabase
       .from("agent_knowledge" as any)
       .select("*")
-      .eq("user_id", user!.id)
       .order("created_at", { ascending: false });
 
     if (!error && data) setItems(data as any);
@@ -83,7 +82,6 @@ const BrainKnowledgeDialog: React.FC = () => {
     const { data, error } = await supabase
       .from("agent_training_examples" as any)
       .select("*")
-      .eq("user_id", user!.id)
       .order("created_at", { ascending: false });
 
     if (!error && data) setTrainingExamples(data as any);
