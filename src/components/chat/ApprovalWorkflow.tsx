@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
-import { Send, CheckCircle, MessageSquare, Clock, Loader2, Bell, Mail, Phone } from "lucide-react";
+import { Send, CheckCircle, MessageSquare, Clock, Loader2, Bell, Mail, Phone, AlertTriangle } from "lucide-react";
 import ShareReviewDialog from "./ShareReviewDialog";
 
 interface ApprovalWorkflowProps {
@@ -10,11 +10,15 @@ interface ApprovalWorkflowProps {
   quoteResult: any;
   elements: any[];
   scopeData?: any;
+  confidenceScore?: number;
 }
 
 type WorkflowStage = "estimation_ready" | "sent_to_ben" | "ben_approved" | "sent_to_neel" | "neel_approved" | "sent_to_customer";
 
-const ApprovalWorkflow: React.FC<ApprovalWorkflowProps> = ({ projectId, quoteResult, elements, scopeData }) => {
+const CONFIDENCE_THRESHOLD = 0.85;
+
+const ApprovalWorkflow: React.FC<ApprovalWorkflowProps> = ({ projectId, quoteResult, elements, scopeData, confidenceScore }) => {
+  const belowThreshold = confidenceScore !== undefined && confidenceScore < CONFIDENCE_THRESHOLD;
   const [stage, setStage] = useState<WorkflowStage>("estimation_ready");
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [currentReviewType, setCurrentReviewType] = useState<"estimation_review" | "quote_approval" | "customer_quote">("estimation_review");
@@ -182,10 +186,28 @@ const ApprovalWorkflow: React.FC<ApprovalWorkflowProps> = ({ projectId, quoteRes
     <div className="rounded-xl border border-border bg-card p-4 space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-bold text-foreground">Approval Workflow</h3>
-        <Badge variant="secondary" className="text-[10px]">
-          {stages[currentIdx]?.label}
-        </Badge>
+        <div className="flex items-center gap-2">
+          {confidenceScore !== undefined && (
+            <Badge variant={belowThreshold ? "destructive" : "default"} className="text-[10px]">
+              Confidence: {(confidenceScore * 100).toFixed(0)}%
+            </Badge>
+          )}
+          <Badge variant="secondary" className="text-[10px]">
+            {stages[currentIdx]?.label}
+          </Badge>
+        </div>
       </div>
+
+      {/* Confidence gate warning */}
+      {belowThreshold && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold">Auto-issue blocked — confidence below {(CONFIDENCE_THRESHOLD * 100).toFixed(0)}%</p>
+            <p className="text-muted-foreground mt-0.5">This estimate requires human review before sending to customer. Review flagged elements and resolve uncertainties.</p>
+          </div>
+        </div>
+      )}
 
       {/* Progress bar */}
       <div className="flex items-center gap-1">

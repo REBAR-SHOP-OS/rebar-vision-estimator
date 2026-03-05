@@ -128,6 +128,110 @@ export type Database = {
         }
         Relationships: []
       }
+      document_versions: {
+        Row: {
+          created_at: string
+          file_id: string | null
+          file_name: string | null
+          file_path: string | null
+          id: string
+          is_scanned: boolean | null
+          page_count: number | null
+          pdf_metadata: Json | null
+          project_id: string
+          sha256: string
+          source_system: string | null
+          upload_timestamp: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          file_id?: string | null
+          file_name?: string | null
+          file_path?: string | null
+          id?: string
+          is_scanned?: boolean | null
+          page_count?: number | null
+          pdf_metadata?: Json | null
+          project_id: string
+          sha256: string
+          source_system?: string | null
+          upload_timestamp?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          file_id?: string | null
+          file_name?: string | null
+          file_path?: string | null
+          id?: string
+          is_scanned?: boolean | null
+          page_count?: number | null
+          pdf_metadata?: Json | null
+          project_id?: string
+          sha256?: string
+          source_system?: string | null
+          upload_timestamp?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_versions_file_id_fkey"
+            columns: ["file_id"]
+            isOneToOne: false
+            referencedRelation: "project_files"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_versions_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      drawing_sets: {
+        Row: {
+          created_at: string
+          id: string
+          issue_date: string | null
+          issue_purpose: string | null
+          notes: string | null
+          project_id: string
+          set_name: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          issue_date?: string | null
+          issue_purpose?: string | null
+          notes?: string | null
+          project_id: string
+          set_name?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          issue_date?: string | null
+          issue_purpose?: string | null
+          notes?: string | null
+          project_id?: string
+          set_name?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "drawing_sets_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       estimate_outcomes: {
         Row: {
           actual_cost: number | null
@@ -136,6 +240,8 @@ export type Database = {
           change_orders_total: number | null
           created_at: string | null
           crm_deal_id: string | null
+          drawing_set_id: string | null
+          estimate_version_id: string | null
           id: string
           notes: string | null
           project_id: string | null
@@ -151,6 +257,8 @@ export type Database = {
           change_orders_total?: number | null
           created_at?: string | null
           crm_deal_id?: string | null
+          drawing_set_id?: string | null
+          estimate_version_id?: string | null
           id?: string
           notes?: string | null
           project_id?: string | null
@@ -166,6 +274,8 @@ export type Database = {
           change_orders_total?: number | null
           created_at?: string | null
           crm_deal_id?: string | null
+          drawing_set_id?: string | null
+          estimate_version_id?: string | null
           id?: string
           notes?: string | null
           project_id?: string | null
@@ -176,7 +286,83 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "estimate_outcomes_drawing_set_id_fkey"
+            columns: ["drawing_set_id"]
+            isOneToOne: false
+            referencedRelation: "drawing_sets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "estimate_outcomes_estimate_version_id_fkey"
+            columns: ["estimate_version_id"]
+            isOneToOne: false
+            referencedRelation: "estimate_versions"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "estimate_outcomes_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      estimate_versions: {
+        Row: {
+          assumptions_text: string | null
+          confidence_score: number | null
+          created_at: string
+          currency: string | null
+          drawing_set_ids: string[] | null
+          estimator_notes: string | null
+          id: string
+          issued_at: string | null
+          line_items: Json | null
+          project_id: string
+          status: string | null
+          total_estimated_cost: number | null
+          total_quoted_price: number | null
+          user_id: string
+          version_number: number
+        }
+        Insert: {
+          assumptions_text?: string | null
+          confidence_score?: number | null
+          created_at?: string
+          currency?: string | null
+          drawing_set_ids?: string[] | null
+          estimator_notes?: string | null
+          id?: string
+          issued_at?: string | null
+          line_items?: Json | null
+          project_id: string
+          status?: string | null
+          total_estimated_cost?: number | null
+          total_quoted_price?: number | null
+          user_id: string
+          version_number?: number
+        }
+        Update: {
+          assumptions_text?: string | null
+          confidence_score?: number | null
+          created_at?: string
+          currency?: string | null
+          drawing_set_ids?: string[] | null
+          estimator_notes?: string | null
+          id?: string
+          issued_at?: string | null
+          line_items?: Json | null
+          project_id?: string
+          status?: string | null
+          total_estimated_cost?: number | null
+          total_quoted_price?: number | null
+          user_id?: string
+          version_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "estimate_versions_project_id_fkey"
             columns: ["project_id"]
             isOneToOne: false
             referencedRelation: "projects"
@@ -386,6 +572,7 @@ export type Database = {
           description: string | null
           deviations: string | null
           id: string
+          linkage_score: string | null
           name: string
           project_type: string | null
           scope_items: string[] | null
@@ -399,6 +586,7 @@ export type Database = {
           description?: string | null
           deviations?: string | null
           id?: string
+          linkage_score?: string | null
           name: string
           project_type?: string | null
           scope_items?: string[] | null
@@ -412,6 +600,7 @@ export type Database = {
           description?: string | null
           deviations?: string | null
           id?: string
+          linkage_score?: string | null
           name?: string
           project_type?: string | null
           scope_items?: string[] | null
@@ -420,6 +609,119 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      quote_versions: {
+        Row: {
+          created_at: string
+          currency: string | null
+          estimate_version_id: string
+          exclusions_text: string | null
+          id: string
+          issued_at: string | null
+          project_id: string
+          quoted_price: number | null
+          status: string | null
+          terms_text: string | null
+          user_id: string
+          version_number: number
+        }
+        Insert: {
+          created_at?: string
+          currency?: string | null
+          estimate_version_id: string
+          exclusions_text?: string | null
+          id?: string
+          issued_at?: string | null
+          project_id: string
+          quoted_price?: number | null
+          status?: string | null
+          terms_text?: string | null
+          user_id: string
+          version_number?: number
+        }
+        Update: {
+          created_at?: string
+          currency?: string | null
+          estimate_version_id?: string
+          exclusions_text?: string | null
+          id?: string
+          issued_at?: string | null
+          project_id?: string
+          quoted_price?: number | null
+          status?: string | null
+          terms_text?: string | null
+          user_id?: string
+          version_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_versions_estimate_version_id_fkey"
+            columns: ["estimate_version_id"]
+            isOneToOne: false
+            referencedRelation: "estimate_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_versions_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reconciliation_records: {
+        Row: {
+          automated_reasoning: Json | null
+          candidates: Json | null
+          created_at: string
+          human_resolution: Json | null
+          id: string
+          issue_type: string
+          notes: string | null
+          project_id: string
+          resolved: boolean | null
+          resolved_at: string | null
+          resolved_by: string | null
+          user_id: string
+        }
+        Insert: {
+          automated_reasoning?: Json | null
+          candidates?: Json | null
+          created_at?: string
+          human_resolution?: Json | null
+          id?: string
+          issue_type: string
+          notes?: string | null
+          project_id: string
+          resolved?: boolean | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          user_id: string
+        }
+        Update: {
+          automated_reasoning?: Json | null
+          candidates?: Json | null
+          created_at?: string
+          human_resolution?: Json | null
+          id?: string
+          issue_type?: string
+          notes?: string | null
+          project_id?: string
+          resolved?: boolean | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reconciliation_records_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       review_comments: {
         Row: {
@@ -452,6 +754,56 @@ export type Database = {
             columns: ["share_id"]
             isOneToOne: false
             referencedRelation: "review_shares"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      review_queue: {
+        Row: {
+          confidence: number | null
+          created_at: string
+          id: string
+          item_data: Json | null
+          item_type: string
+          priority: string | null
+          project_id: string
+          resolved_at: string | null
+          resolved_data: Json | null
+          status: string | null
+          user_id: string
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string
+          id?: string
+          item_data?: Json | null
+          item_type: string
+          priority?: string | null
+          project_id: string
+          resolved_at?: string | null
+          resolved_data?: Json | null
+          status?: string | null
+          user_id: string
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string
+          id?: string
+          item_data?: Json | null
+          item_type?: string
+          priority?: string | null
+          project_id?: string
+          resolved_at?: string | null
+          resolved_data?: Json | null
+          status?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "review_queue_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
             referencedColumns: ["id"]
           },
         ]
@@ -506,6 +858,81 @@ export type Database = {
           },
         ]
       }
+      sheet_revisions: {
+        Row: {
+          created_at: string
+          discipline: string | null
+          document_version_id: string | null
+          drawing_set_id: string
+          drawing_type: string | null
+          extraction_metadata: Json | null
+          id: string
+          page_number: number | null
+          revision_code: string | null
+          revision_date: string | null
+          revision_description: string | null
+          scale_confidence: number | null
+          scale_ratio: number | null
+          scale_raw: string | null
+          sheet_number: string | null
+          sheet_title: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          discipline?: string | null
+          document_version_id?: string | null
+          drawing_set_id: string
+          drawing_type?: string | null
+          extraction_metadata?: Json | null
+          id?: string
+          page_number?: number | null
+          revision_code?: string | null
+          revision_date?: string | null
+          revision_description?: string | null
+          scale_confidence?: number | null
+          scale_ratio?: number | null
+          scale_raw?: string | null
+          sheet_number?: string | null
+          sheet_title?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          discipline?: string | null
+          document_version_id?: string | null
+          drawing_set_id?: string
+          drawing_type?: string | null
+          extraction_metadata?: Json | null
+          id?: string
+          page_number?: number | null
+          revision_code?: string | null
+          revision_date?: string | null
+          revision_description?: string | null
+          scale_confidence?: number | null
+          scale_ratio?: number | null
+          scale_raw?: string | null
+          sheet_number?: string | null
+          sheet_title?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sheet_revisions_document_version_id_fkey"
+            columns: ["document_version_id"]
+            isOneToOne: false
+            referencedRelation: "document_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sheet_revisions_drawing_set_id_fkey"
+            columns: ["drawing_set_id"]
+            isOneToOne: false
+            referencedRelation: "drawing_sets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shop_drawings: {
         Row: {
           created_at: string
@@ -543,6 +970,45 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      symbol_lexicon: {
+        Row: {
+          context: Json | null
+          created_at: string
+          id: string
+          is_global: boolean | null
+          lexicon_version: string | null
+          meaning: string
+          patterns: string[]
+          symbol_id: string
+          unit_default: string | null
+          user_id: string | null
+        }
+        Insert: {
+          context?: Json | null
+          created_at?: string
+          id?: string
+          is_global?: boolean | null
+          lexicon_version?: string | null
+          meaning: string
+          patterns?: string[]
+          symbol_id: string
+          unit_default?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          context?: Json | null
+          created_at?: string
+          id?: string
+          is_global?: boolean | null
+          lexicon_version?: string | null
+          meaning?: string
+          patterns?: string[]
+          symbol_id?: string
+          unit_default?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
       }
     }
     Views: {
