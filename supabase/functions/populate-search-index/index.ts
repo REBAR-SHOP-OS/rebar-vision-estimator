@@ -6,18 +6,64 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-/** Compute data quality confidence score (0.0 – 1.0) */
-function computeConfidence(page: {
+const EXTRACTION_VERSION = "2026.03.05";
+
+const COMMON_WORDS = new Set([
+  "OF","IN","AT","TO","AS","IS","IT","OR","ON","IF","NO","DO","UP","BY","AN","BE","SO","WE","HE","ME",
+  "MY","US","AM","GO","HA","OK","OH","AH","RE","MM","CM","DIA","THE","AND","FOR","ARE","BUT","NOT",
+]);
+
+/** Expanded bar mark patterns */
+function extractBarMarks(text: string): string[] {
+  const patterns = [
+    /\b([A-Z]{1,2}\d{1,3})\b/g,       // A1, AB12, B200
+    /\bBM[- ]?(\d{1,5})\b/gi,          // BM-001, BM 12, BM001
+    /\b(\d{1,5}[A-Z])\b/g,             // 12A, 200B
+    /\b(#\d{1,3})\b/g,                 // #4, #10
+  ];
+  const marks = new Set<string>();
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const bm = (match[1] || match[0]).toUpperCase().replace(/^BM[- ]?/, "BM");
+      if (!COMMON_WORDS.has(bm) && bm.length <= 8) {
+        marks.add(bm);
+      }
+    }
+  }
+  return Array.from(marks);
+}
+
+/** Compute data quality flags */
+function computeQualityFlags(page: {
   raw_text?: string;
   title_block?: Record<string, string>;
   bar_marks: string[];
   sheet_id: string | null;
-}): number {
+  is_ocr?: boolean;
+}): string[] {
+  const flags: string[] = [];
+  if (page.is_ocr) flags.push("ocr_used");
+  if (!page.sheet_id) flags.push("missing_sheet_id");
+  if (!page.title_block?.scale) flags.push("missing_scale");
+  if (page.bar_marks.length === 0) flags.push("no_bar_marks");
+  if (!page.raw_text || page.raw_text.length < 50) flags.push("sparse_text");
+  return flags;
+}
+
+/** Compute confidence score (0.0 – 1.0) */
+function computeConfidence(flags: string[]): number {
   let score = 1.0;
-  if (page.bar_marks.length === 0) score -= 0.1;
-  if (!page.raw_text || page.raw_text.length < 50) score -= 0.2;
-  if (!page.title_block || Object.keys(page.title_block).length === 0) score -= 0.1;
-  if (!page.sheet_id) score -= 0.2;
+  const penalties: Record<string, number> = {
+    missing_sheet_id: 0.2,
+    missing_scale: 0.1,
+    no_bar_marks: 0.1,
+    sparse_text: 0.2,
+    ocr_used: 0.05,
+  };
+  for (const f of flags) {
+    score -= penalties[f] || 0;
+  }
   return Math.max(0, Math.round(score * 100) / 100);
 }
 
@@ -27,12 +73,12 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get("authorization");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceKey);
 
-    // Get user
+    // Auth
+    const authHeader = req.headers.get("authorization");
     let userId: string | null = null;
     if (authHeader) {
       const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!);
@@ -50,13 +96,16 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const {
       project_id,
-      pages, // array of { page_number, raw_text, title_block, tables }
+      pages,
       document_version_id,
       crm_deal_id,
       drawing_set_id,
+      sha256: doc_sha256,
+      pipeline_file_id,
+      source_system,
+      is_ocr,
     } = body;
 
-    // Hard-block: project_id and pages required
     if (!project_id || !pages || !Array.isArray(pages)) {
       return new Response(JSON.stringify({ error: "project_id and pages[] required" }), {
         status: 400,
@@ -64,30 +113,47 @@ Deno.serve(async (req) => {
       });
     }
 
+    // SHA-256 dedup check
+    if (doc_sha256) {
+      const { data: existing } = await supabase
+        .from("drawing_search_index")
+        .select("id, project_id")
+        .eq("sha256", doc_sha256)
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle();
+
+      if (existing) {
+        return new Response(
+          JSON.stringify({
+            indexed: 0,
+            skipped: pages.length,
+            total: pages.length,
+            conflicts: [],
+            duplicate_of: existing.id,
+            message: `Exact duplicate detected (SHA-256 match). Existing entry: ${existing.id}`,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     let indexed = 0;
     let skipped = 0;
     const conflicts: string[] = [];
+    const qualityIssues: string[] = [];
 
     for (const page of pages) {
       const tb = page.title_block || {};
       const rawText = page.raw_text || "";
 
-      // Hard-block: skip if raw_text is empty
       if (!rawText.trim()) {
         skipped++;
         continue;
       }
 
-      // Extract bar marks from text using regex
-      const barMarkPattern = /\b([A-Z]{1,2}\d{1,3})\b/g;
-      const barMarks: string[] = [];
-      let match;
-      while ((match = barMarkPattern.exec(rawText)) !== null) {
-        const bm = match[1];
-        if (!["OF", "IN", "AT", "TO", "AS", "IS", "IT", "OR", "ON", "IF", "NO", "DO", "UP"].includes(bm)) {
-          if (!barMarks.includes(bm)) barMarks.push(bm);
-        }
-      }
+      // Extract bar marks with expanded patterns
+      const barMarks = extractBarMarks(rawText);
 
       // Upsert logical drawing
       const sheetId = tb.sheet_number || null;
@@ -96,10 +162,9 @@ Deno.serve(async (req) => {
 
       let logicalDrawingId: string | null = null;
       if (sheetId) {
-        // Try to find existing
         const { data: existing } = await supabase
           .from("logical_drawings")
-          .select("id")
+          .select("id, revision_chain_id")
           .eq("user_id", userId)
           .eq("project_id", project_id)
           .eq("sheet_id", sheetId)
@@ -108,7 +173,26 @@ Deno.serve(async (req) => {
 
         if (existing) {
           logicalDrawingId = existing.id;
+
+          // Revision chain: update latest_revision_code
+          const newRevCode = tb.revision_code || null;
+          if (newRevCode) {
+            await supabase
+              .from("logical_drawings")
+              .update({ latest_revision_code: newRevCode })
+              .eq("id", existing.id);
+          }
+
+          // If no revision_chain_id yet, assign one
+          if (!existing.revision_chain_id) {
+            const chainId = crypto.randomUUID();
+            await supabase
+              .from("logical_drawings")
+              .update({ revision_chain_id: chainId })
+              .eq("id", existing.id);
+          }
         } else {
+          const chainId = crypto.randomUUID();
           const { data: created } = await supabase
             .from("logical_drawings")
             .insert({
@@ -117,14 +201,15 @@ Deno.serve(async (req) => {
               sheet_id: sheetId,
               discipline,
               drawing_type: drawingType,
+              revision_chain_id: chainId,
+              latest_revision_code: tb.revision_code || null,
             })
             .select("id")
             .single();
           logicalDrawingId = created?.id || null;
         }
 
-        // Revision conflict detection: check if existing index entries for this
-        // logical drawing have a DIFFERENT revision_label
+        // Revision conflict detection
         const newRevisionLabel = tb.revision_code || null;
         if (logicalDrawingId && newRevisionLabel) {
           const { data: existingEntries } = await supabase
@@ -137,7 +222,6 @@ Deno.serve(async (req) => {
             .limit(1);
 
           if (existingEntries && existingEntries.length > 0) {
-            // Create reconciliation record for revision chain ambiguity
             const conflictNote = `Sheet ${sheetId}: existing rev "${existingEntries[0].revision_label}" vs new rev "${newRevisionLabel}"`;
             conflicts.push(conflictNote);
             await supabase.from("reconciliation_records").insert({
@@ -154,21 +238,40 @@ Deno.serve(async (req) => {
               automated_reasoning: {
                 source: "populate-search-index",
                 action: "indexed_with_conflict",
+                extraction_version: EXTRACTION_VERSION,
               },
             });
           }
         }
+      } else {
+        // Missing sheet ID — create reconciliation record
+        qualityIssues.push(`Page ${page.page_number}: missing sheet_id`);
+        await supabase.from("reconciliation_records").insert({
+          user_id: userId,
+          project_id,
+          issue_type: "MISSING_SHEET_ID",
+          notes: `Page ${page.page_number}: no sheet ID detected in title block`,
+          candidates: { page_number: page.page_number, raw_text_snippet: rawText.slice(0, 200) },
+          automated_reasoning: {
+            source: "populate-search-index",
+            action: "flagged_missing_sheet_id",
+            extraction_version: EXTRACTION_VERSION,
+          },
+        });
       }
 
-      // Compute confidence score
-      const confidence = computeConfidence({
+      // Compute quality flags and confidence
+      const qualityFlags = computeQualityFlags({
         raw_text: rawText,
         title_block: tb,
         bar_marks: barMarks,
         sheet_id: sheetId,
+        is_ocr: is_ocr || page.is_ocr,
       });
+      const confidence = computeConfidence(qualityFlags);
+      const needsReview = qualityFlags.length > 0 && confidence < 0.7;
 
-      // Insert search index entry via RPC
+      // Insert via RPC
       const { error } = await supabase.rpc("upsert_search_index", {
         p_user_id: userId,
         p_project_id: project_id,
@@ -190,36 +293,40 @@ Deno.serve(async (req) => {
       if (error) {
         console.error(`Index page ${page.page_number} error:`, error);
       } else {
-        // Update confidence and drawing_set_id on the inserted row
-        // (RPC doesn't support these new columns yet, so update after)
-        if (confidence < 1.0 || drawing_set_id) {
-          // Get the most recent entry for this page
-          const { data: latest } = await supabase
-            .from("drawing_search_index")
-            .select("id")
-            .eq("user_id", userId)
-            .eq("project_id", project_id)
-            .eq("page_number", page.page_number || 0)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
+        // Update the new columns on the inserted row
+        const { data: latest } = await supabase
+          .from("drawing_search_index")
+          .select("id")
+          .eq("user_id", userId)
+          .eq("project_id", project_id)
+          .eq("page_number", page.page_number || 0)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-          if (latest) {
-            const updateFields: Record<string, unknown> = {};
-            if (confidence < 1.0) updateFields.confidence = confidence;
-            if (drawing_set_id) updateFields.drawing_set_id = drawing_set_id;
-            await supabase
-              .from("drawing_search_index")
-              .update(updateFields)
-              .eq("id", latest.id);
-          }
+        if (latest) {
+          const updateFields: Record<string, unknown> = {
+            confidence,
+            quality_flags: qualityFlags,
+            needs_review: needsReview,
+            extraction_version: EXTRACTION_VERSION,
+            source_system: source_system || "upload",
+          };
+          if (drawing_set_id) updateFields.drawing_set_id = drawing_set_id;
+          if (doc_sha256) updateFields.sha256 = doc_sha256;
+          if (pipeline_file_id) updateFields.pipeline_file_id = pipeline_file_id;
+
+          await supabase
+            .from("drawing_search_index")
+            .update(updateFields)
+            .eq("id", latest.id);
         }
         indexed++;
       }
     }
 
     return new Response(
-      JSON.stringify({ indexed, skipped, total: pages.length, conflicts }),
+      JSON.stringify({ indexed, skipped, total: pages.length, conflicts, quality_issues: qualityIssues }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {

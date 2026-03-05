@@ -2,6 +2,7 @@ import React from "react";
 import { Badge } from "@/components/ui/badge";
 import { X } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 
 export interface SearchFilterValues {
   discipline?: string;
@@ -9,6 +10,9 @@ export interface SearchFilterValues {
   revision?: string;
   bar_mark?: string;
   sort?: string;
+  min_confidence?: number;
+  needs_review?: string;
+  revision_chain_id?: string;
 }
 
 const DISCIPLINES = ["structural", "architectural", "mechanical", "electrical"];
@@ -17,6 +21,7 @@ const SORT_OPTIONS = [
   { value: "relevance", label: "Relevance" },
   { value: "date", label: "Date" },
   { value: "sheet", label: "Sheet ID" },
+  { value: "confidence", label: "Confidence" },
 ];
 
 interface Props {
@@ -29,7 +34,7 @@ const SearchFilters: React.FC<Props> = ({ filters, onChange }) => {
     onChange({ ...filters, [key]: filters[key] === value ? undefined : value });
   };
 
-  const activeCount = Object.entries(filters).filter(([k, v]) => v && k !== "sort").length;
+  const activeCount = Object.entries(filters).filter(([k, v]) => v !== undefined && k !== "sort" && k !== "min_confidence").length;
 
   return (
     <div className="space-y-2">
@@ -37,9 +42,9 @@ const SearchFilters: React.FC<Props> = ({ filters, onChange }) => {
         <div className="flex items-center gap-1 flex-wrap">
           <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Active:</span>
           {Object.entries(filters).map(([key, val]) =>
-            val && key !== "sort" ? (
+            val !== undefined && key !== "sort" && key !== "min_confidence" ? (
               <Badge key={key} variant="secondary" className="text-[10px] gap-1 cursor-pointer" onClick={() => onChange({ ...filters, [key]: undefined })}>
-                {val}
+                {String(val)}
                 <X className="h-2.5 w-2.5" />
               </Badge>
             ) : null
@@ -60,6 +65,33 @@ const SearchFilters: React.FC<Props> = ({ filters, onChange }) => {
             ))}
           </SelectContent>
         </Select>
+      </div>
+
+      {/* Confidence threshold */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Min Confidence</span>
+          <span className="text-[10px] font-mono text-muted-foreground">{((filters.min_confidence ?? 0) * 100).toFixed(0)}%</span>
+        </div>
+        <Slider
+          value={[filters.min_confidence ?? 0]}
+          onValueChange={([v]) => onChange({ ...filters, min_confidence: v })}
+          min={0}
+          max={1}
+          step={0.1}
+          className="w-full"
+        />
+      </div>
+
+      {/* Needs review toggle */}
+      <div className="flex items-center gap-2">
+        <Badge
+          variant={filters.needs_review === "true" ? "default" : "outline"}
+          className="text-[10px] cursor-pointer"
+          onClick={() => toggle("needs_review", "true")}
+        >
+          ⚠ Needs Review Only
+        </Badge>
       </div>
 
       <div className="space-y-1.5">
