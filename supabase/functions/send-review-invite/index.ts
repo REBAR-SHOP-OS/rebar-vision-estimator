@@ -64,6 +64,44 @@ Deno.serve(async (req) => {
 
     const shareUrl = `https://rebar-vision-estimator.lovable.app/review/${share_token}`;
 
+    // Trigger notification (fire-and-forget)
+    try {
+      const totalWeight = review_data?.total_weight_lbs
+        ? `${Number(review_data.total_weight_lbs).toLocaleString()} lbs`
+        : "N/A";
+      const elemCount = review_data?.elements_count || 0;
+      const reviewTypeLabel = review_type === "quote_approval"
+        ? "Quote Approval"
+        : review_type === "customer_quote"
+        ? "Customer Quotation"
+        : "Estimation Review";
+
+      const notifyBody = `A new ${reviewTypeLabel} is ready for your review.\n\n` +
+        `• Total weight: ${totalWeight}\n` +
+        `• Elements: ${elemCount}\n\n` +
+        `Click the link below to review and leave feedback.`;
+
+      await fetch(`${supabaseUrl}/functions/v1/notify-reviewer`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify({
+          project_id,
+          recipient_email: reviewer_email,
+          recipient_name: reviewer_name || reviewer_email,
+          notification_type: review_type === "quote_approval" ? "approval_request" : "review_invite",
+          subject: `${reviewTypeLabel} — Rebar Shop`,
+          body: notifyBody,
+          share_url: shareUrl,
+          recipient_phone: reviewer_email === "neel@rebar.shop" ? (Deno.env.get("NEEL_PHONE") || null) : null,
+        }),
+      });
+    } catch (notifyErr) {
+      console.error("Notification trigger failed (non-blocking):", notifyErr);
+    }
+
     return new Response(JSON.stringify({ share, shareUrl }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

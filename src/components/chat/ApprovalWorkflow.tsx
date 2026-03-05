@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
-import { Send, CheckCircle, MessageSquare, Clock, Loader2 } from "lucide-react";
+import { Send, CheckCircle, MessageSquare, Clock, Loader2, Bell, Mail, Phone } from "lucide-react";
 import ShareReviewDialog from "./ShareReviewDialog";
 
 interface ApprovalWorkflowProps {
@@ -23,6 +23,7 @@ const ApprovalWorkflow: React.FC<ApprovalWorkflowProps> = ({ projectId, quoteRes
   const [comments, setComments] = useState<any[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
   const [activeShareId, setActiveShareId] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<any[]>([]);
 
   // Build review data snapshot
   const buildReviewData = () => {
@@ -129,6 +130,22 @@ const ApprovalWorkflow: React.FC<ApprovalWorkflowProps> = ({ projectId, quoteRes
     checkShares();
   }, [projectId]);
 
+  // Load notifications for this project
+  useEffect(() => {
+    if (!projectId) return;
+    const loadNotifications = async () => {
+      const { data } = await supabase
+        .from("notifications")
+        .select("*")
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: false });
+      if (data) setNotifications(data);
+    };
+    loadNotifications();
+    const interval = setInterval(loadNotifications, 15000);
+    return () => clearInterval(interval);
+  }, [projectId]);
+
   const handleSendToBen = () => {
     setCurrentReviewType("estimation_review");
     setDefaultEmail("ben@rebar.shop");
@@ -214,6 +231,23 @@ const ApprovalWorkflow: React.FC<ApprovalWorkflowProps> = ({ projectId, quoteRes
         </div>
       )}
 
+      {/* Notification status badges */}
+      {notifications.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {notifications.slice(0, 5).map((n) => (
+            <Badge
+              key={n.id}
+              variant={n.status === "sent" ? "default" : "secondary"}
+              className="text-[10px] gap-1"
+            >
+              {n.channel === "sms" ? <Phone className="h-2.5 w-2.5" /> : <Mail className="h-2.5 w-2.5" />}
+              {n.recipient_name || n.recipient_email.split("@")[0]}
+              {n.status === "sent" ? " ✓" : n.status === "logged" ? " 📋" : " ⚠"}
+            </Badge>
+          ))}
+        </div>
+      )}
+
       {/* Action buttons */}
       <div className="flex gap-2 flex-wrap">
         {stage === "estimation_ready" && (
@@ -237,7 +271,8 @@ const ApprovalWorkflow: React.FC<ApprovalWorkflowProps> = ({ projectId, quoteRes
         {(stage === "sent_to_ben" || stage === "sent_to_neel") && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Clock className="h-3 w-3" />
-            Waiting for reviewer response...
+            <Bell className="h-3 w-3 text-primary animate-pulse" />
+            Waiting for reviewer response... (notified via {notifications.some(n => n.status === "sent") ? "email" : "in-app"})
           </div>
         )}
         {stage === "sent_to_customer" && (
