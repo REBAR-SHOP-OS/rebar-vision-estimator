@@ -214,13 +214,55 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       // Fetch user knowledge context
       const knowledgeContext = await fetchKnowledgeContext();
 
+      // ── Pre-extract PDF text client-side (one at a time to avoid OOM in edge functions) ──
+      const pdfUrls: string[] = [];
+      const nonPdfUrls: string[] = [];
+      for (const url of fileUrls) {
+        if (url.toLowerCase().split('?')[0].endsWith('.pdf')) {
+          pdfUrls.push(url);
+        } else {
+          nonPdfUrls.push(url);
+        }
+      }
+
+      const preExtractedText: any[] = [];
+      if (pdfUrls.length > 0) {
+        console.log(`Pre-extracting text from ${pdfUrls.length} PDF(s) sequentially...`);
+        for (const pdfUrl of pdfUrls) {
+          try {
+            console.log(`Extracting text from: ${pdfUrl.substring(0, 60)}...`);
+            const { data, error } = await supabase.functions.invoke('extract-pdf-text', {
+              body: { pdf_url: pdfUrl },
+            });
+            if (error) {
+              console.error(`PDF text extraction failed for ${pdfUrl}:`, error);
+            } else if (data) {
+              preExtractedText.push(data);
+              console.log(`Extracted ${data.total_pages || 0} pages, has_text_layer: ${data.has_text_layer}`);
+            }
+          } catch (err) {
+            console.error(`PDF text extraction error:`, err);
+          }
+        }
+      }
+
       const resp = await fetch(CHAT_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ messages: chatMessages, mode, fileUrls, knowledgeContext, scope: scopeDataRef.current, primaryCategory: scopeDataRef.current?.primaryCategory, features: scopeDataRef.current?.features, projectId }),
+        body: JSON.stringify({
+          messages: chatMessages,
+          mode,
+          fileUrls: nonPdfUrls, // only non-PDF files (images)
+          pre_extracted_text: preExtractedText, // pre-extracted PDF text
+          knowledgeContext,
+          scope: scopeDataRef.current,
+          primaryCategory: scopeDataRef.current?.primaryCategory,
+          features: scopeDataRef.current?.features,
+          projectId,
+        }),
       });
 
       if (!resp.ok) {

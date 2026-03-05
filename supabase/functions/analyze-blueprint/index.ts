@@ -1,7 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { decode as decodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
-import { getDocument } from "https://esm.sh/pdfjs-serverless";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -200,151 +199,6 @@ async function tripleOCR(accessToken: string, imageBase64: string): Promise<OcrP
     extractResult(pass2, 2, "ENHANCED"),
     extractResult(pass3, 3, "ALT_CROP"),
   ];
-}
-
-// ── PDF-Native Text Extraction (pdfjs-serverless) ──
-
-interface TitleBlockMeta {
-  sheet_number: string | null;
-  sheet_title: string | null;
-  revision_code: string | null;
-  scale_raw: string | null;
-  discipline: string | null;
-  drawing_type: string | null;
-}
-
-interface PdfPageExtraction {
-  page_number: number;
-  raw_text: string;
-  tables: string[][];
-  text_blocks: string[];
-  is_scanned: boolean;
-  title_block: TitleBlockMeta | null;
-}
-
-interface PdfExtractionResult {
-  pages: PdfPageExtraction[];
-  total_pages: number;
-  sha256: string;
-  has_text_layer: boolean;
-}
-
-async function hashSHA256(data: ArrayBuffer): Promise<string> {
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
-}
-
-function extractTitleBlockMeta(text: string): TitleBlockMeta {
-  const tb: TitleBlockMeta = { sheet_number: null, sheet_title: null, revision_code: null, scale_raw: null, discipline: null, drawing_type: null };
-  const sheetMatch = text.match(/\b([A-Z]{1,2}[-]?\d{2,4}(?:\.\d+)?)\b/);
-  if (sheetMatch) tb.sheet_number = sheetMatch[1];
-  const scaleMatch = text.match(/(?:SCALE[:\s]*)?(\d+\s*[:/]\s*\d+)/i);
-  if (scaleMatch) tb.scale_raw = scaleMatch[1].trim();
-  const revMatch = text.match(/\bREV(?:ISION)?\.?\s*([A-Z0-9]{1,3})\b/i);
-  if (revMatch) tb.revision_code = revMatch[1];
-  const textUpper = text.toUpperCase();
-  if (/\bSTRUCTURAL\b/.test(textUpper) || /^S[-]?\d/.test(tb.sheet_number || "")) tb.discipline = "structural";
-  else if (/\bARCHITECTURAL\b/.test(textUpper) || /^A[-]?\d/.test(tb.sheet_number || "")) tb.discipline = "architectural";
-  else if (/\bMECHANICAL\b/.test(textUpper) || /^M[-]?\d/.test(tb.sheet_number || "")) tb.discipline = "mechanical";
-  else if (/\bELECTRICAL\b/.test(textUpper) || /^E[-]?\d/.test(tb.sheet_number || "")) tb.discipline = "electrical";
-  if (/\bFOUNDATION\s*PLAN\b/i.test(text)) tb.drawing_type = "foundation_plan";
-  else if (/\bSLAB\s*(?:REINFORCEMENT|REBAR)\b/i.test(text)) tb.drawing_type = "rebar_plan";
-  else if (/\bSCHEDULE\b/i.test(text)) tb.drawing_type = "schedule";
-  else if (/\bDETAIL/i.test(text)) tb.drawing_type = "detail";
-  else if (/\bSECTION/i.test(text)) tb.drawing_type = "section";
-  else if (/\bELEVATION/i.test(text)) tb.drawing_type = "elevation";
-  else if (/\bPLAN\b/i.test(text)) tb.drawing_type = "plan";
-  const titleMatch = text.match(/(?:SHEET\s*TITLE|DRAWING\s*TITLE)[:\s]*(.+)/i);
-  if (titleMatch) tb.sheet_title = titleMatch[1].trim().substring(0, 100);
-  return tb;
-}
-
-async function extractPdfText(pdfBytes: ArrayBuffer, maxPages: number = 999): Promise<PdfExtractionResult> {
-  const sha256 = await hashSHA256(pdfBytes);
-  const pages: PdfPageExtraction[] = [];
-
-  try {
-    const doc = await getDocument(new Uint8Array(pdfBytes));
-    const totalPages = doc.numPages || 0;
-    if (!totalPages || isNaN(totalPages)) {
-      console.log("PDF has no parseable pages (numPages is undefined/NaN)");
-      return { pages: [], total_pages: 0, sha256, has_text_layer: false };
-    }
-    const pagesToProcess = Math.min(totalPages, maxPages);
-    console.log(`PDF has ${totalPages} pages, processing first ${pagesToProcess}`);
-
-    for (let pageNum = 1; pageNum <= pagesToProcess; pageNum++) {
-      try {
-        const page = await doc.getPage(pageNum);
-        const textContent = await page.getTextContent();
-        const items = textContent.items.filter((item: any) => item.str && item.str.trim());
-
-        if (items.length < 3) {
-          pages.push({ page_number: pageNum, raw_text: "", tables: [], text_blocks: [], is_scanned: true, title_block: null });
-          continue;
-        }
-
-        // Group by Y-coordinate into rows (3pt threshold)
-        const rowMap = new Map<number, { x: number; text: string; fontSize: number }[]>();
-        for (const item of items) {
-          const y = Math.round((item as any).transform?.[5] ?? 0);
-          const x = (item as any).transform?.[4] ?? 0;
-          const fontSize = (item as any).transform?.[0] ?? 12;
-          // Find existing row within 3pt
-          let matchedY = y;
-          for (const existingY of rowMap.keys()) {
-            if (Math.abs(existingY - y) <= 3) { matchedY = existingY; break; }
-          }
-          if (!rowMap.has(matchedY)) rowMap.set(matchedY, []);
-          rowMap.get(matchedY)!.push({ x, text: (item as any).str, fontSize });
-        }
-
-        // Sort rows top-to-bottom (higher Y = top in PDF coords)
-        const sortedYs = [...rowMap.keys()].sort((a, b) => b - a);
-        const rows: string[] = [];
-        const rowXPositions: number[][] = [];
-
-        for (const y of sortedYs) {
-          const rowItems = rowMap.get(y)!.sort((a, b) => a.x - b.x);
-          rows.push(rowItems.map(r => r.text).join("  "));
-          rowXPositions.push(rowItems.map(r => Math.round(r.x)));
-        }
-
-        // Detect tables: 3+ consecutive rows with similar column count and alignment
-        const tables: string[][] = [];
-        let tableStart = -1;
-        for (let i = 0; i < rows.length - 2; i++) {
-          const colCounts = [rowXPositions[i].length, rowXPositions[i+1]?.length || 0, rowXPositions[i+2]?.length || 0];
-          const similar = colCounts.every(c => c >= 3 && Math.abs(c - colCounts[0]) <= 2);
-          if (similar && tableStart === -1) tableStart = i;
-          else if (!similar && tableStart !== -1) {
-            tables.push(rows.slice(tableStart, i + 1));
-            tableStart = -1;
-          }
-        }
-        if (tableStart !== -1) tables.push(rows.slice(tableStart));
-
-        const rawText = rows.join("\n");
-        const titleBlock = extractTitleBlockMeta(rawText);
-        pages.push({
-          page_number: pageNum,
-          raw_text: rawText,
-          tables: tables,
-          text_blocks: rows,
-          is_scanned: false,
-          title_block: titleBlock,
-        });
-      } catch (pageErr) {
-        console.error(`PDF page ${pageNum} extraction error:`, pageErr);
-        pages.push({ page_number: pageNum, raw_text: "", tables: [], text_blocks: [], is_scanned: true, title_block: null });
-      }
-    }
-
-    return { pages, total_pages: totalPages, sha256, has_text_layer: pages.some(p => !p.is_scanned) };
-  } catch (err) {
-    console.error("pdfjs-serverless extraction failed:", err);
-    return { pages: [], total_pages: 0, sha256, has_text_layer: false };
-  }
 }
 
 // ── Atomic Truth Pipeline: System Prompts ──
@@ -1267,7 +1121,20 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, mode, fileUrls, knowledgeContext, scope, projectId: reqProjectId } = await req.json();
+    const body = await req.json();
+    
+    // Payload size guard — reject if body is too large (50KB limit for text-only payloads)
+    const bodyStr = JSON.stringify(body);
+    const bodySizeKB = new TextEncoder().encode(bodyStr).length / 1024;
+    if (bodySizeKB > 500) {
+      console.error(`Payload too large: ${bodySizeKB.toFixed(1)} KB — rejecting to prevent OOM`);
+      return new Response(JSON.stringify({ error: `Payload too large (${bodySizeKB.toFixed(0)} KB). Pre-extract PDF text client-side before calling analyze-blueprint.` }), {
+        status: 413,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    
+    const { messages, mode, fileUrls, knowledgeContext, scope, projectId: reqProjectId, pre_extracted_text } = body;
 
     // Auth: try to get user from authorization header for auto-indexing
     const authHeader = req.headers.get("authorization");
@@ -1371,230 +1238,167 @@ Before outputting your final answer, you MUST:
       { role: "system", content: systemPrompt },
     ];
 
-    // Process file URLs - download images for Vision OCR, convert PDFs to base64
+    // ═══════════════════════════════════════════════════════════════
+    // FILE PROCESSING — THIN ROUTER (no PDF bytes in memory)
+    // PDFs are pre-extracted by the client via extract-pdf-text
+    // Only images are processed here (small, safe for memory)
+    // ═══════════════════════════════════════════════════════════════
+    
     const allFileUrls = [...(fileUrls || [])];
     if (knowledgeContext && knowledgeContext.fileUrls) {
       allFileUrls.push(...knowledgeContext.fileUrls);
     }
     const fileContentParts: any[] = [];
-    const MAX_PDF_SIZE_MB = 25; // Allow real-world engineering PDFs (10-30MB)
-    const MAX_PDF_INLINE_MB = 8; // Max size for sending base64 to Gemini Vision
-    const MAX_PDF_TEXT_EXTRACT_MB = 22; // Max size for pdfjs text extraction — process ONE at a time with cleanup
-    const MAX_PDF_COUNT = 2;
-    const MAX_INLINE_PDF_COUNT = 2; // Allow both blueprint PDFs to be sent inline
-    const MAX_PAGES_PER_PDF = 10; // Reduced to save memory for large PDFs
-    let pdfCount = 0;
 
     // Google Vision OCR results to inject
     let visionOcrText = "";
     let visionOcrAvailable = false;
-    // PDF-native text extraction results
+    // PDF-native text from pre-extraction
     let pdfNativeText = "";
     let pdfNativeAvailable = false;
-    let inlinePdfCount = 0;
 
-    if (allFileUrls.length > 0) {
-      // Try to get Google Vision access token
+    // ── Inject pre-extracted PDF text (from client-side extract-pdf-text calls) ──
+    if (pre_extracted_text && Array.isArray(pre_extracted_text) && pre_extracted_text.length > 0) {
+      console.log(`Received ${pre_extracted_text.length} pre-extracted PDF text blocks from client`);
+      for (const extraction of pre_extracted_text) {
+        if (!extraction || !extraction.pages) continue;
+        const hasTextLayer = extraction.has_text_layer || extraction.pages?.some((p: any) => !p.is_scanned);
+        if (hasTextLayer) {
+          pdfNativeText += `\n\n## PDF-NATIVE TEXT EXTRACTION (SHA-256: ${(extraction.sha256 || "unknown").substring(0, 16)}...)\n`;
+          pdfNativeText += `Total pages: ${extraction.total_pages || extraction.pages.length}, Text pages: ${extraction.pages.filter((p: any) => !p.is_scanned).length}, Scanned pages: ${extraction.pages.filter((p: any) => p.is_scanned).length}\n\n`;
+          for (const page of extraction.pages) {
+            if (page.is_scanned) {
+              pdfNativeText += `### Page ${page.page_number} — SCANNED (no text layer, use OCR)\n\n`;
+              continue;
+            }
+            pdfNativeText += `### Page ${page.page_number}\n`;
+            if (page.title_block) {
+              const tb = page.title_block;
+              if (tb.sheet_number) pdfNativeText += `**Sheet:** ${tb.sheet_number}`;
+              if (tb.discipline) pdfNativeText += ` | **Discipline:** ${tb.discipline}`;
+              if (tb.drawing_type) pdfNativeText += ` | **Type:** ${tb.drawing_type}`;
+              if (tb.scale_raw) pdfNativeText += ` | **Scale:** ${tb.scale_raw}`;
+              if (tb.revision_code) pdfNativeText += ` | **Rev:** ${tb.revision_code}`;
+              pdfNativeText += `\n`;
+            }
+            if (page.tables && page.tables.length > 0) {
+              pdfNativeText += `**Tables detected: ${page.tables.length}**\n`;
+              for (const table of page.tables) {
+                pdfNativeText += "```\n" + (Array.isArray(table) ? table.join("\n") : String(table)) + "\n```\n\n";
+              }
+            }
+            pdfNativeText += `**Full text:**\n\`\`\`\n${page.raw_text}\n\`\`\`\n\n`;
+          }
+          pdfNativeAvailable = true;
+        }
+        
+        // Auto-index extracted pages into search DB
+        if (reqProjectId && autoIndexUserId && serviceKey && hasTextLayer) {
+          try {
+            const { createClient: createSB } = await import("https://esm.sh/@supabase/supabase-js@2");
+            const svc = createSB(supabaseUrl, serviceKey);
+            for (const page of extraction.pages) {
+              if (page.is_scanned || !page.raw_text?.trim()) continue;
+              const tb = page.title_block || {};
+              const barMarkPattern = /\b([A-Z]{1,2}\d{1,3})\b/g;
+              const barMarks: string[] = [];
+              let m;
+              while ((m = barMarkPattern.exec(page.raw_text)) !== null) {
+                const bm = m[1];
+                if (!["OF","IN","AT","TO","AS","IS","IT","OR","ON","IF","NO","DO","UP"].includes(bm) && !barMarks.includes(bm)) barMarks.push(bm);
+              }
+              let ldId: string | null = null;
+              if (tb.sheet_number) {
+                const { data: ex } = await svc.from("logical_drawings").select("id")
+                  .eq("user_id", autoIndexUserId).eq("project_id", reqProjectId)
+                  .eq("sheet_id", tb.sheet_number).eq("drawing_type", tb.drawing_type || "").maybeSingle();
+                if (ex) { ldId = ex.id; }
+                else {
+                  const { data: cr } = await svc.from("logical_drawings").insert({
+                    user_id: autoIndexUserId, project_id: reqProjectId,
+                    sheet_id: tb.sheet_number, discipline: tb.discipline || null, drawing_type: tb.drawing_type || null,
+                  }).select("id").single();
+                  ldId = cr?.id || null;
+                }
+              }
+              await svc.rpc("upsert_search_index", {
+                p_user_id: autoIndexUserId, p_project_id: reqProjectId,
+                p_logical_drawing_id: ldId, p_page_number: page.page_number || null,
+                p_raw_text: page.raw_text, p_bar_marks: barMarks,
+                p_extracted_entities: { bar_marks: barMarks, title_block: tb, tables: page.tables || [] },
+                p_revision_label: tb.revision_code || null,
+              });
+            }
+            console.log(`Auto-indexed pre-extracted pages into search DB`);
+          } catch (indexErr) {
+            console.error("Auto-index failed (non-blocking):", indexErr);
+          }
+        }
+      }
+    }
+
+    // ── Process image URLs only (small files, safe for memory) ──
+    // PDFs in fileUrls are SKIPPED — they should have been pre-extracted by the client
+    const imageUrls: string[] = [];
+    for (const url of allFileUrls) {
+      const urlLower = url.toLowerCase().split('?')[0];
+      if (urlLower.endsWith('.pdf')) {
+        console.log(`Skipping PDF URL in edge function (must be pre-extracted by client): ${url.substring(0, 60)}...`);
+        continue;
+      }
+      const supportedImageExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif'];
+      const fileExt = urlLower.split('.').pop()?.split('?')[0] || '';
+      const isSupportedImage = supportedImageExts.some(ext => ext === `.${fileExt}`);
+      if (!isSupportedImage) {
+        console.log(`Skipping unsupported file format: .${fileExt}`);
+        continue;
+      }
+      imageUrls.push(url);
+      fileContentParts.push({ type: "image_url", image_url: { url } });
+    }
+
+    // Run Google Vision OCR on images only (not PDFs)
+    if (imageUrls.length > 0) {
       let accessToken: string | null = null;
       try {
         accessToken = await getGoogleAccessToken();
         console.log("Google Vision access token obtained successfully");
       } catch (err) {
-        console.error("Failed to get Google Vision token, falling back to Gemini-only OCR:", err);
+        console.error("Failed to get Google Vision token:", err);
       }
 
-      for (const url of allFileUrls) {
-        const urlLower = url.toLowerCase().split('?')[0];
-        if (urlLower.endsWith('.pdf')) {
-          if (pdfCount >= MAX_PDF_COUNT) {
-            console.log(`Skipping PDF (max ${MAX_PDF_COUNT} reached)`);
-            continue;
-          }
+      if (accessToken) {
+        for (const url of imageUrls) {
           try {
-            // Pre-check size with HEAD request to avoid downloading huge files into memory
-            let sizeMB = 0;
-            try {
-              const headRes = await fetch(url, { method: "HEAD" });
-              const contentLength = headRes.headers.get("content-length");
-              if (contentLength) {
-                sizeMB = parseInt(contentLength) / (1024 * 1024);
-                console.log(`PDF pre-check size (HEAD): ${sizeMB.toFixed(2)} MB`);
-              }
-            } catch (headErr) {
-              console.log("HEAD request failed, will check size after download");
-            }
-
-            // If HEAD gave us a size and it's too large for any processing, skip download entirely
-            if (sizeMB > MAX_PDF_TEXT_EXTRACT_MB && sizeMB > MAX_PDF_INLINE_MB) {
-              console.log(`PDF ${sizeMB.toFixed(1)}MB too large for inline (${MAX_PDF_INLINE_MB}MB) and text extraction (${MAX_PDF_TEXT_EXTRACT_MB}MB), skipping download to save memory`);
-              pdfCount++;
-              continue;
-            }
-            if (sizeMB > MAX_PDF_SIZE_MB) {
-              console.log(`PDF ${sizeMB.toFixed(1)}MB exceeds max size (${MAX_PDF_SIZE_MB}MB), skipping entirely`);
-              continue;
-            }
-
-            console.log("Downloading PDF:", url.substring(0, 80) + "...");
-            const pdfResponse = await fetch(url);
-            if (!pdfResponse.ok) { console.error("PDF download failed:", pdfResponse.status); continue; }
-            let pdfBuffer: ArrayBuffer | null = await pdfResponse.arrayBuffer();
-            sizeMB = pdfBuffer.byteLength / (1024 * 1024);
-            console.log("PDF size:", sizeMB.toFixed(2), "MB");
-            if (sizeMB > MAX_PDF_SIZE_MB) {
-              console.log(`PDF too large (${sizeMB.toFixed(1)}MB > ${MAX_PDF_SIZE_MB}MB), skipping entirely`);
-              pdfBuffer = null;
-              continue;
-            }
-
-            // MUTUALLY EXCLUSIVE: inline base64 OR pdfjs text extraction, never both (prevents OOM)
-            if (sizeMB <= MAX_PDF_INLINE_MB && inlinePdfCount < MAX_INLINE_PDF_COUNT) {
-              // Strategy A: Send as base64 inline to Gemini Vision (skip pdfjs to save memory)
-              const base64 = encodeBase64(new Uint8Array(pdfBuffer));
-              fileContentParts.push({ type: "image_url", image_url: { url: `data:application/pdf;base64,${base64}` } });
-              console.log(`PDF sent as base64 for visual analysis: ${Math.round(base64.length / 1024)} KB (skipping pdfjs to save memory)`);
-              inlinePdfCount++;
-            } else if (sizeMB <= MAX_PDF_TEXT_EXTRACT_MB) {
-              // Strategy B: Too large for inline (or inline cap reached) — extract text only
-              // For large PDFs, reduce page count to save memory
-              const effectiveMaxPages = sizeMB > 15 ? 5 : sizeMB > 10 ? 8 : MAX_PAGES_PER_PDF;
-              console.log(`PDF ${sizeMB.toFixed(1)}MB: using pdfjs text extraction only (max ${effectiveMaxPages} pages)`);
-              try {
-                const pdfExtraction = await extractPdfText(pdfBuffer!, effectiveMaxPages);
-                // Free the PDF buffer immediately after extraction
-                pdfBuffer = null;
-                if (pdfExtraction.has_text_layer) {
-                  pdfNativeText += `\n\n## PDF-NATIVE TEXT EXTRACTION — ${url.split('/').pop()?.split('?')[0] || 'pdf'} (SHA-256: ${pdfExtraction.sha256.substring(0, 16)}...)\n`;
-                  pdfNativeText += `Total pages: ${pdfExtraction.total_pages}, Processed: ${pdfExtraction.pages.length}, Text pages: ${pdfExtraction.pages.filter(p => !p.is_scanned).length}, Scanned pages: ${pdfExtraction.pages.filter(p => p.is_scanned).length}\n\n`;
-                  for (const page of pdfExtraction.pages) {
-                    if (page.is_scanned) {
-                      pdfNativeText += `### Page ${page.page_number} — SCANNED (no text layer, use OCR)\n\n`;
-                      continue;
-                    }
-                    pdfNativeText += `### Page ${page.page_number}\n`;
-                    if (page.title_block) {
-                      const tb = page.title_block;
-                      if (tb.sheet_number) pdfNativeText += `**Sheet:** ${tb.sheet_number}`;
-                      if (tb.discipline) pdfNativeText += ` | **Discipline:** ${tb.discipline}`;
-                      if (tb.drawing_type) pdfNativeText += ` | **Type:** ${tb.drawing_type}`;
-                      if (tb.scale_raw) pdfNativeText += ` | **Scale:** ${tb.scale_raw}`;
-                      if (tb.revision_code) pdfNativeText += ` | **Rev:** ${tb.revision_code}`;
-                      pdfNativeText += `\n`;
-                    }
-                    if (page.tables.length > 0) {
-                      pdfNativeText += `**Tables detected: ${page.tables.length}**\n`;
-                      for (const table of page.tables) {
-                        pdfNativeText += "```\n" + table.join("\n") + "\n```\n\n";
-                      }
-                    }
-                    pdfNativeText += `**Full text:**\n\`\`\`\n${page.raw_text}\n\`\`\`\n\n`;
-                  }
-                  pdfNativeAvailable = true;
-                  console.log(`PDF-native extraction: ${pdfExtraction.pages.filter(p => !p.is_scanned).length}/${pdfExtraction.total_pages} text pages`);
-
-                  // Auto-index extracted pages into search DB
-                  if (reqProjectId && autoIndexUserId && serviceKey) {
-                    try {
-                      const { createClient: createSB } = await import("https://esm.sh/@supabase/supabase-js@2");
-                      const svc = createSB(supabaseUrl, serviceKey);
-                      for (const page of pdfExtraction.pages) {
-                        if (page.is_scanned || !page.raw_text?.trim()) continue;
-                        const tb = page.title_block || {};
-                        const barMarkPattern = /\b([A-Z]{1,2}\d{1,3})\b/g;
-                        const barMarks: string[] = [];
-                        let m;
-                        while ((m = barMarkPattern.exec(page.raw_text)) !== null) {
-                          const bm = m[1];
-                          if (!["OF","IN","AT","TO","AS","IS","IT","OR","ON","IF","NO","DO","UP"].includes(bm) && !barMarks.includes(bm)) barMarks.push(bm);
-                        }
-                        let ldId: string | null = null;
-                        if (tb.sheet_number) {
-                          const { data: ex } = await svc.from("logical_drawings").select("id")
-                            .eq("user_id", autoIndexUserId).eq("project_id", reqProjectId)
-                            .eq("sheet_id", tb.sheet_number).eq("drawing_type", tb.drawing_type || "").maybeSingle();
-                          if (ex) { ldId = ex.id; }
-                          else {
-                            const { data: cr } = await svc.from("logical_drawings").insert({
-                              user_id: autoIndexUserId, project_id: reqProjectId,
-                              sheet_id: tb.sheet_number, discipline: tb.discipline || null, drawing_type: tb.drawing_type || null,
-                            }).select("id").single();
-                            ldId = cr?.id || null;
-                          }
-                        }
-                        await svc.rpc("upsert_search_index", {
-                          p_user_id: autoIndexUserId, p_project_id: reqProjectId,
-                          p_logical_drawing_id: ldId, p_page_number: page.page_number || null,
-                          p_raw_text: page.raw_text, p_bar_marks: barMarks,
-                          p_extracted_entities: { bar_marks: barMarks, title_block: tb, tables: page.tables || [] },
-                          p_revision_label: tb.revision_code || null,
-                        });
-                      }
-                      console.log(`Auto-indexed ${pdfExtraction.pages.filter(p => !p.is_scanned).length} pages into search DB`);
-                    } catch (indexErr) {
-                      console.error("Auto-index failed (non-blocking):", indexErr);
-                    }
-                  }
-                } else {
-                  console.log("PDF has no text layer — fully scanned, relying on OCR");
+            console.log("Running Google Vision Triple OCR on image:", url.substring(0, 60) + "...");
+            const imgResponse = await fetch(url);
+            if (!imgResponse.ok) { console.error("Image download failed:", imgResponse.status); continue; }
+            const imgBuffer = await imgResponse.arrayBuffer();
+            const imgBase64 = encodeBase64(imgBuffer);
+            
+            const ocrResults = await tripleOCR(accessToken, imgBase64);
+            
+            visionOcrText += `\n\n## Google Vision OCR Results for image: ${url.split('/').pop()?.split('?')[0] || 'image'}\n\n`;
+            for (const pass of ocrResults) {
+              visionOcrText += `### OCR Pass ${pass.pass} (${pass.preprocess})\n`;
+              visionOcrText += `**Full Text:**\n\`\`\`\n${pass.fullText}\n\`\`\`\n\n`;
+              if (pass.blocks.length > 0) {
+                visionOcrText += `**Blocks (${pass.blocks.length} detected):**\n`;
+                for (const block of pass.blocks.slice(0, 50)) {
+                  visionOcrText += `- [conf: ${block.confidence.toFixed(2)}, bbox: [${block.bbox.join(',')}]] "${block.text}"\n`;
                 }
-              } catch (pdfExtErr) {
-                console.error("PDF text extraction failed:", pdfExtErr);
               }
-            } else {
-              console.log(`PDF ${sizeMB.toFixed(1)}MB too large for both inline (${MAX_PDF_INLINE_MB}MB) and text extraction (${MAX_PDF_TEXT_EXTRACT_MB}MB), metadata only`);
+              visionOcrText += `\n`;
             }
-
-            // Free memory — release the PDF buffer
-            // @ts-ignore
-            pdfBuffer = null;
-            pdfCount++;
-          } catch (err) { console.error("PDF processing error:", err); }
-        } else {
-          // Check if this is a supported image format
-          const supportedImageExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif'];
-          const fileExt = urlLower.split('.').pop()?.split('?')[0] || '';
-          const isSupportedImage = supportedImageExts.some(ext => ext === `.${fileExt}`);
-          
-          if (!isSupportedImage) {
-            console.log(`Skipping unsupported file format: .${fileExt} — only images and PDFs are supported for visual analysis`);
-            continue;
-          }
-          
-          // Image file - run Vision OCR if token available
-          fileContentParts.push({ type: "image_url", image_url: { url } });
-
-          if (accessToken) {
-            try {
-              console.log("Running Google Vision Triple OCR on image:", url.substring(0, 60) + "...");
-              const imgResponse = await fetch(url);
-              if (!imgResponse.ok) { console.error("Image download failed:", imgResponse.status); continue; }
-              const imgBuffer = await imgResponse.arrayBuffer();
-              const imgBase64 = encodeBase64(imgBuffer);
-              
-              const ocrResults = await tripleOCR(accessToken, imgBase64);
-              
-              visionOcrText += `\n\n## Google Vision OCR Results for image: ${url.split('/').pop()?.split('?')[0] || 'image'}\n\n`;
-              for (const pass of ocrResults) {
-                visionOcrText += `### OCR Pass ${pass.pass} (${pass.preprocess})\n`;
-                visionOcrText += `**Full Text:**\n\`\`\`\n${pass.fullText}\n\`\`\`\n\n`;
-                if (pass.blocks.length > 0) {
-                  visionOcrText += `**Blocks (${pass.blocks.length} detected):**\n`;
-                  for (const block of pass.blocks.slice(0, 50)) {
-                    visionOcrText += `- [conf: ${block.confidence.toFixed(2)}, bbox: [${block.bbox.join(',')}]] "${block.text}"\n`;
-                  }
-                }
-                visionOcrText += `\n`;
-              }
-              visionOcrAvailable = true;
-              console.log(`Vision OCR complete for image, ${ocrResults.reduce((s, r) => s + r.blocks.length, 0)} total blocks`);
-            } catch (err) {
-              console.error("Vision OCR failed for image, Gemini will handle OCR:", err);
-            }
+            visionOcrAvailable = true;
+            console.log(`Vision OCR complete for image, ${ocrResults.reduce((s, r) => s + r.blocks.length, 0)} total blocks`);
+          } catch (err) {
+            console.error("Vision OCR failed for image:", err);
           }
         }
       }
-      console.log(`Total file parts: ${fileContentParts.length} (${pdfCount} PDFs), Vision OCR: ${visionOcrAvailable}`);
     }
+    console.log(`File parts: ${fileContentParts.length} images, Pre-extracted PDFs: ${pre_extracted_text?.length || 0}, Vision OCR: ${visionOcrAvailable}`);
 
     if (fileContentParts.length > 0 && messages.length > 0) {
       const firstUserMsgIndex = messages.findIndex((m: any) => m.role === "user");

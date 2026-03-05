@@ -1,5 +1,4 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { getDocument } from "https://esm.sh/pdfjs-serverless@0.4.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -38,11 +37,9 @@ function extractTitleBlock(text: string): TitleBlockMetadata {
     discipline: null, drawing_type: null,
   };
 
-  // Sheet number: S-101, A-201, M-001, etc.
   const sheetMatch = text.match(/\b([A-Z]{1,2}[-]?\d{2,4}(?:\.\d+)?)\b/);
   if (sheetMatch) tb.sheet_number = sheetMatch[1];
 
-  // Scale: 1:50, 1/4"=1'-0", SCALE: 1:100
   const scaleMatch = text.match(/(?:SCALE[:\s]*)?(\d+\s*[:/]\s*\d+(?:['"]\s*=\s*\d+['"]\s*-?\s*\d*['""]?)?)/i);
   if (scaleMatch) {
     tb.scale_raw = scaleMatch[1].trim();
@@ -50,22 +47,18 @@ function extractTitleBlock(text: string): TitleBlockMetadata {
     if (ratioMatch) tb.scale_ratio = parseInt(ratioMatch[1]) / parseInt(ratioMatch[2]);
   }
 
-  // Revision code: REV A, REV. B1, R1, etc.
   const revMatch = text.match(/\bREV(?:ISION)?\.?\s*([A-Z0-9]{1,3})\b/i);
   if (revMatch) tb.revision_code = revMatch[1];
 
-  // Revision date patterns
   const dateMatch = text.match(/\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b/);
   if (dateMatch) tb.revision_date = dateMatch[1];
 
-  // Discipline detection
   const textUpper = text.toUpperCase();
   if (/\bSTRUCTURAL\b/.test(textUpper) || /^S[-]?\d/.test(tb.sheet_number || "")) tb.discipline = "structural";
   else if (/\bARCHITECTURAL\b/.test(textUpper) || /^A[-]?\d/.test(tb.sheet_number || "")) tb.discipline = "architectural";
   else if (/\bMECHANICAL\b/.test(textUpper) || /^M[-]?\d/.test(tb.sheet_number || "")) tb.discipline = "mechanical";
   else if (/\bELECTRICAL\b/.test(textUpper) || /^E[-]?\d/.test(tb.sheet_number || "")) tb.discipline = "electrical";
 
-  // Drawing type detection
   if (/\bFOUNDATION\s*PLAN\b/i.test(text)) tb.drawing_type = "foundation_plan";
   else if (/\bSLAB\s*(?:REINFORCEMENT|REBAR)\s*PLAN\b/i.test(text)) tb.drawing_type = "rebar_plan";
   else if (/\bSCHEDULE\b/i.test(text)) tb.drawing_type = "schedule";
@@ -74,7 +67,6 @@ function extractTitleBlock(text: string): TitleBlockMetadata {
   else if (/\bELEVATION/i.test(text)) tb.drawing_type = "elevation";
   else if (/\bPLAN\b/i.test(text)) tb.drawing_type = "plan";
 
-  // Sheet title: look for common patterns
   const titleMatch = text.match(/(?:SHEET\s*TITLE|DRAWING\s*TITLE)[:\s]*(.+)/i);
   if (titleMatch) tb.sheet_title = titleMatch[1].trim().substring(0, 100);
   else if (tb.drawing_type) tb.sheet_title = tb.drawing_type.replace(/_/g, " ").toUpperCase();
@@ -107,10 +99,31 @@ serve(async (req) => {
     const sha256 = await hashSHA256(pdfBytes);
     const pages: PdfPageExtraction[] = [];
 
+    // Use dynamic import for pdfjs-serverless to get the correct export
+    let getDocument: any;
+    try {
+      const pdfjs = await import("https://esm.sh/pdfjs-serverless@0.4.1");
+      getDocument = pdfjs.getDocument || pdfjs.default?.getDocument;
+      if (!getDocument) {
+        // Try accessing it as default export
+        getDocument = pdfjs.default;
+      }
+    } catch (importErr) {
+      console.error("Failed to import pdfjs-serverless:", importErr);
+      throw new Error("PDF parsing library unavailable");
+    }
+
+    if (!getDocument) {
+      throw new Error("getDocument not found in pdfjs-serverless");
+    }
+
     const doc = await getDocument(new Uint8Array(pdfBytes));
     const totalPages = doc.numPages;
 
-    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+    // Process max 15 pages to stay within memory limits
+    const maxPages = Math.min(totalPages, 15);
+
+    for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
       try {
         const page = await doc.getPage(pageNum);
         const textContent = await page.getTextContent();
@@ -158,7 +171,6 @@ serve(async (req) => {
         }
         if (tableStart !== -1) tables.push(rows.slice(tableStart));
 
-        // Title block metadata extraction via regex
         const fullText = rows.join("\n");
         const titleBlock = extractTitleBlock(fullText);
 
@@ -173,7 +185,7 @@ serve(async (req) => {
       } catch (pageErr) {
         console.error(`Page ${pageNum} error:`, pageErr);
         pages.push({ page_number: pageNum, raw_text: "", tables: [], text_blocks: [], is_scanned: true, title_block: { sheet_number: null, sheet_title: null, revision_code: null, revision_date: null, scale_raw: null, scale_ratio: null, discipline: null, drawing_type: null } });
-        }
+      }
     }
 
     return new Response(JSON.stringify({

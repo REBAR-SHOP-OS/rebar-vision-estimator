@@ -86,6 +86,48 @@ export type Database = {
         }
         Relationships: []
       }
+      analysis_jobs: {
+        Row: {
+          created_at: string | null
+          error: string | null
+          id: string
+          project_id: string | null
+          request_payload: Json | null
+          result: Json | null
+          signed_urls: string[] | null
+          status: string
+          storage_paths: string[] | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          error?: string | null
+          id?: string
+          project_id?: string | null
+          request_payload?: Json | null
+          result?: Json | null
+          signed_urls?: string[] | null
+          status?: string
+          storage_paths?: string[] | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          error?: string | null
+          id?: string
+          project_id?: string | null
+          request_payload?: Json | null
+          result?: Json | null
+          signed_urls?: string[] | null
+          status?: string
+          storage_paths?: string[] | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       crm_deals: {
         Row: {
           close_date: string | null
