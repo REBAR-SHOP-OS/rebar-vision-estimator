@@ -20,8 +20,7 @@ const mcpServer = new McpServer({
 
 // ── Read Tools ──────────────────────────────────────────────
 
-mcpServer.tool({
-  name: "list_projects",
+mcpServer.tool("list_projects", {
   description: "List all estimation projects. Returns id, name, status, client_name, project_type, created_at.",
   inputSchema: {
     type: "object",
@@ -40,8 +39,7 @@ mcpServer.tool({
   },
 });
 
-mcpServer.tool({
-  name: "search_drawings",
+mcpServer.tool("search_drawings", {
   description: "Search shop drawings by text query, bar mark, project, discipline, revision, CRM deal. Returns ranked results with highlighted snippets.",
   inputSchema: {
     type: "object",
@@ -83,8 +81,7 @@ mcpServer.tool({
   },
 });
 
-mcpServer.tool({
-  name: "get_drawing_details",
+mcpServer.tool("get_drawing_details", {
   description: "Get full details of a specific drawing search index entry by ID, including linked logical drawing and document version info.",
   inputSchema: {
     type: "object",
@@ -111,8 +108,7 @@ mcpServer.tool({
   },
 });
 
-mcpServer.tool({
-  name: "get_pipeline_deals",
+mcpServer.tool("get_pipeline_deals", {
   description: "List CRM pipeline deals with metadata.",
   inputSchema: {
     type: "object",
@@ -131,8 +127,7 @@ mcpServer.tool({
   },
 });
 
-mcpServer.tool({
-  name: "get_project_details",
+mcpServer.tool("get_project_details", {
   description: "Get full details of a project including files, messages, estimates, and drawings.",
   inputSchema: {
     type: "object",
@@ -165,8 +160,7 @@ mcpServer.tool({
 
 // ── Write Tools ─────────────────────────────────────────────
 
-mcpServer.tool({
-  name: "create_project",
+mcpServer.tool("create_project", {
   description: "Create a new estimation project.",
   inputSchema: {
     type: "object",
@@ -197,8 +191,7 @@ mcpServer.tool({
   },
 });
 
-mcpServer.tool({
-  name: "update_drawing_status",
+mcpServer.tool("update_drawing_status", {
   description: "Update revision label or issue status on a drawing search index entry.",
   inputSchema: {
     type: "object",
@@ -222,8 +215,7 @@ mcpServer.tool({
   },
 });
 
-mcpServer.tool({
-  name: "update_project",
+mcpServer.tool("update_project", {
   description: "Update project fields like name, status, client_name, description.",
   inputSchema: {
     type: "object",
@@ -251,6 +243,7 @@ mcpServer.tool({
 // ── Transport ───────────────────────────────────────────────
 
 const transport = new StreamableHttpTransport();
+const httpHandler = transport.bind(mcpServer);
 
 app.all("/*", async (c) => {
   if (c.req.method === "OPTIONS") {
@@ -263,7 +256,7 @@ app.all("/*", async (c) => {
     });
   }
 
-  return await transport.handleRequest(c.req.raw, mcpServer);
+  return await httpHandler(c.req.raw);
 });
 
 Deno.serve(app.fetch);
