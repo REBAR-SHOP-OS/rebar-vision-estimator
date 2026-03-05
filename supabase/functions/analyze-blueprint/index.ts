@@ -1378,10 +1378,10 @@ Before outputting your final answer, you MUST:
     }
     const fileContentParts: any[] = [];
     const MAX_PDF_SIZE_MB = 25; // Allow real-world engineering PDFs (10-30MB)
-    const MAX_PDF_INLINE_MB = 4; // Max size for sending base64 to Gemini Vision (reduced to prevent OOM in edge functions)
-    const MAX_PDF_TEXT_EXTRACT_MB = 5; // Max size for pdfjs-serverless text extraction (OOM-safe)
+    const MAX_PDF_INLINE_MB = 8; // Max size for sending base64 to Gemini Vision
+    const MAX_PDF_TEXT_EXTRACT_MB = 10; // Max size for pdfjs-serverless text extraction (for PDFs too large for inline)
     const MAX_PDF_COUNT = 2;
-    const MAX_INLINE_PDF_COUNT = 1; // Only send 1 PDF as base64 to Gemini to save memory
+    const MAX_INLINE_PDF_COUNT = 2; // Allow both blueprint PDFs to be sent inline
     const MAX_PAGES_PER_PDF = 15; // Limit pages for text extraction
     let pdfCount = 0;
 
@@ -1422,10 +1422,17 @@ Before outputting your final answer, you MUST:
               continue;
             }
 
-            // Only run pdfjs text extraction on smaller files to avoid OOM
-            if (sizeMB <= MAX_PDF_TEXT_EXTRACT_MB) {
+            // MUTUALLY EXCLUSIVE: inline base64 OR pdfjs text extraction, never both (prevents OOM)
+            if (sizeMB <= MAX_PDF_INLINE_MB && inlinePdfCount < MAX_INLINE_PDF_COUNT) {
+              // Strategy A: Send as base64 inline to Gemini Vision (skip pdfjs to save memory)
+              const base64 = encodeBase64(new Uint8Array(pdfBuffer));
+              fileContentParts.push({ type: "image_url", image_url: { url: `data:application/pdf;base64,${base64}` } });
+              console.log(`PDF sent as base64 for visual analysis: ${Math.round(base64.length / 1024)} KB (skipping pdfjs to save memory)`);
+              inlinePdfCount++;
+            } else if (sizeMB <= MAX_PDF_TEXT_EXTRACT_MB) {
+              // Strategy B: Too large for inline (or inline cap reached) — extract text only
+              console.log(`PDF ${sizeMB.toFixed(1)}MB: using pdfjs text extraction only (not sent inline)`);
               try {
-                console.log("Running PDF-native text extraction...");
                 const pdfExtraction = await extractPdfText(pdfBuffer, MAX_PAGES_PER_PDF);
                 if (pdfExtraction.has_text_layer) {
                   pdfNativeText += `\n\n## PDF-NATIVE TEXT EXTRACTION — ${url.split('/').pop()?.split('?')[0] || 'pdf'} (SHA-256: ${pdfExtraction.sha256.substring(0, 16)}...)\n`;
@@ -1454,7 +1461,7 @@ Before outputting your final answer, you MUST:
                     pdfNativeText += `**Full text:**\n\`\`\`\n${page.raw_text}\n\`\`\`\n\n`;
                   }
                   pdfNativeAvailable = true;
-                  console.log(`PDF-native extraction: ${pdfExtraction.pages.filter(p => !p.is_scanned).length}/${pdfExtraction.total_pages} text pages (processed ${pdfExtraction.pages.length})`);
+                  console.log(`PDF-native extraction: ${pdfExtraction.pages.filter(p => !p.is_scanned).length}/${pdfExtraction.total_pages} text pages`);
 
                   // Auto-index extracted pages into search DB
                   if (reqProjectId && autoIndexUserId && serviceKey) {
@@ -1502,23 +1509,15 @@ Before outputting your final answer, you MUST:
                   console.log("PDF has no text layer — fully scanned, relying on OCR");
                 }
               } catch (pdfExtErr) {
-                console.error("PDF-native extraction failed, continuing with visual analysis:", pdfExtErr);
+                console.error("PDF text extraction failed:", pdfExtErr);
               }
             } else {
-              console.log(`PDF ${sizeMB.toFixed(1)}MB too large for pdfjs extraction (limit ${MAX_PDF_TEXT_EXTRACT_MB}MB), skipping text extraction to save memory`);
+              console.log(`PDF ${sizeMB.toFixed(1)}MB too large for both inline (${MAX_PDF_INLINE_MB}MB) and text extraction (${MAX_PDF_TEXT_EXTRACT_MB}MB), metadata only`);
             }
 
-            // Send base64 to Gemini Vision only if under inline limit AND we haven't hit inline cap
-            if (sizeMB <= MAX_PDF_INLINE_MB && inlinePdfCount < MAX_INLINE_PDF_COUNT) {
-              const base64 = encodeBase64(pdfBuffer);
-              fileContentParts.push({ type: "image_url", image_url: { url: `data:application/pdf;base64,${base64}` } });
-              console.log("PDF sent as base64 for visual analysis:", Math.round(base64.length / 1024), "KB");
-              inlinePdfCount++;
-            } else if (sizeMB > MAX_PDF_INLINE_MB) {
-              console.log(`PDF ${sizeMB.toFixed(1)}MB exceeds inline limit (${MAX_PDF_INLINE_MB}MB), relying on text extraction + OCR only`);
-            } else {
-              console.log(`Skipping inline PDF (already sent ${inlinePdfCount}/${MAX_INLINE_PDF_COUNT} inline PDFs to save memory)`);
-            }
+            // Free memory — release the PDF buffer
+            // @ts-ignore
+            pdfBuffer = null;
             pdfCount++;
           } catch (err) { console.error("PDF processing error:", err); }
         } else {
