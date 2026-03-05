@@ -1,27 +1,41 @@
 
 
-## Plan: Make All Brain Rules Editable by Any Authenticated User
+## Plan: Implement Audited Master Prompt Rev A
 
-### Problem
-The edit button only appears for rules where `isOwner` is true (i.e., the current user created it). Since the Brain is now shared globally, rules created by other users (like "instruction main") cannot be edited by the current user.
+This upgrades the `analyze-blueprint` edge function's Master Prompt from the current v2026-03-05 to **Rev A** (the audited version), incorporating all hardening actions from the audit report.
 
 ### Changes
 
-**1. Update `EditableRuleCard` in `BrainKnowledgeDialog.tsx`**
-- Show the edit (Pencil) button for all authenticated users, not just the owner
-- Keep delete restricted to owner only (to prevent accidental deletion of others' rules)
+**1. Replace `MASTER_PROMPT` constant** (lines 299-798 in `analyze-blueprint/index.ts`)
 
-**2. Update RLS policy on `agent_knowledge`**
-- Replace the owner-only UPDATE policy with one that allows any authenticated user to update any row
+Replace the entire prompt with the Rev A version from the audit. Key additions:
+- `units_context` requirement at Stage 0 (METRIC / IMPERIAL / MIXED_CONFIRMED / UNKNOWN!)
+- Explicit `view_type` and `region_ref` in evidence requirements
+- SSLW-1 custom rule (regional stock-length + waste isolation) embedded in Stage 5.5
+- R12 strict separation enforced: `evidence_refs >= 1` on drawing-spec items, no `assumptions` field allowed
+- OCR tie-break policy: confidence-winner with minor-diff normalization
+- Deterministic rounding rules section
+- JSON schema constraints section (REBAR_ESTIMATE_V1 top-level keys)
 
-### Database Migration
-```sql
-DROP POLICY IF EXISTS "Users can update their own knowledge" ON public.agent_knowledge;
-CREATE POLICY "Authenticated users can update knowledge"
-ON public.agent_knowledge FOR UPDATE TO authenticated
-USING (true) WITH CHECK (true);
-```
+**2. Update `REBAR_WEIGHT_TABLE`** (lines 862-877)
 
-### UI Change
-Line 661-669: Split edit and delete visibility -- edit shown to all, delete only to owner.
+Add `#2: 0.167 lb/ft` with the note about plain/merchant bar verification.
+
+**3. Update `CANADIAN_METRIC_TABLE`** (lines 879-912)
+
+Add explicit stock lengths per CBSA/RSIC (6m/12m/18m), Grade 400R/W and 500R/W with weldability note, and CBSA standard length reference.
+
+**4. Update `src/lib/rebar-weights.ts`**
+
+Add `#2` to `IMPERIAL_LB_FT` table for consistency with the locked weight table.
+
+**5. Update `supabase/functions/price-elements/index.ts`**
+
+Add `#2` to `REBAR_WEIGHT` table for consistency.
+
+### Scope
+- 3 files modified
+- No database migrations
+- No UI changes
+- No new dependencies
 
