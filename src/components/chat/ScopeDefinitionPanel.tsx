@@ -111,11 +111,8 @@ export function buildScopeFromDetection(d: DetectionResult): ScopeData {
     scopeItems = [...CAGE_ONLY_SCOPE];
   } else if (isBarList) {
     scopeItems = [];
-  } else if (n.primaryCategory === "residential") {
-    scopeItems = [...RESIDENTIAL_SCOPE];
-  } else if (n.recommendedScope?.length) {
-    scopeItems = [...n.recommendedScope];
   } else {
+    // Always include all elements — the AI will extract what it finds
     scopeItems = SCOPE_ITEMS.map((s) => s.id);
   }
 
@@ -164,11 +161,9 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
     } else if (isBarListOnly) {
       setSelectedItems([]);
       setScopeLocked(true);
-    } else if (normalized.primaryCategory === "residential") {
-      setSelectedItems(RESIDENTIAL_SCOPE);
-      setScopeLocked(false);
-    } else if (normalized.recommendedScope && normalized.recommendedScope.length > 0) {
-      setSelectedItems(normalized.recommendedScope);
+    } else {
+      // Always keep all items selected for general categories
+      setSelectedItems(SCOPE_ITEMS.map((s) => s.id));
       setScopeLocked(false);
     }
 
