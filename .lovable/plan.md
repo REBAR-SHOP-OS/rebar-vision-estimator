@@ -1,68 +1,28 @@
 
 
-## Plan: ERP Pipeline Learning Sync + Click-to-Dig Lead Detail Panel
+## Plan: Fix Overlay Visibility — Reduce Marker Sizes and Show Labels on Hover Only
 
-### What We're Building
+### Problem
+The screenshot shows dots, labels, and corner brackets are massively oversized relative to the drawing, causing elements to overlap and obscure the blueprint entirely. The root cause is that all sizes (dot radius 16-20px, label font 13-15px, corner length 20px, stroke widths 2-3px) are fixed in SVG viewBox coordinates which map to the full image resolution (often 3000+ pixels), making them appear enormous.
 
-Two features that turn completed ERP pipeline leads into learning data for the estimator:
+Additionally, labels are always visible for every element, creating a wall of overlapping colored rectangles.
 
-1. **Lead Detail Edge Function** (`fetch-lead-details`) — fetches a single lead's full payload from the Rebar Shop OS database: lead fields, chatter/messages (via `lead_messages` or `mail.message` in Odoo), and attachments with download URLs.
+### Changes (single file: `DrawingOverlay.tsx`)
 
-2. **Click-to-Dig Side Panel** (`LeadDetailPanel`) — when a user clicks a lead row in `CrmSyncPanel`, a slide-out panel shows: chatter timeline, attachments list with preview links, extracted summary, and a "Use as Estimation Context" button that pushes the case into the active estimator session.
+1. **Scale markers to image size** — compute a scale factor from `imageWidth` so sizes adapt:
+   - Dot radius: 4-6 (down from 16-20)
+   - Corner length: 8 (down from 20)
+   - Stroke widths: 1-1.5 (down from 2-3)
+   - Label font: 8-10 (down from 13-15)
+   - Label height: 14 (down from 24)
 
-3. **Force Sync / Learn from Pipeline** (`learn-from-pipeline`) — an edge function that queries leads in outcome stages (`delivered_pickup_done`, `won`, `no_rebars_out_of_scope`), builds `case_record` objects (lead fields + files metadata + outcome label), and stores them as `learned` entries in `agent_knowledge`.
+2. **Labels only on hover/select/active** — hide the label `<g>` unless `isHovered || isSelected || isActive`, so the drawing stays clean at rest.
 
-4. **Agent Brain Rule** — auto-insert the "ERP Pipeline Sync + Click-to-Dig Learning" rule into `agent_knowledge` so the AI knows how to use pipeline cases.
+3. **Reduce dot white stroke** — from 3 to 1.5 so dots don't bleed.
 
-### Architecture Reality Check
+4. **Reduce fill opacity** — default fill from 0.06 to 0.03 so bboxes don't tint the drawing.
 
-The Rebar Shop OS backend is a **Supabase database** at `rzqonxnowjrtbueauziu.supabase.co`, not Odoo directly (the Odoo connection is only used for file attachments via `proxy-crm-file`). So:
-
-- Lead list, chatter, and files metadata are queryable via the Supabase client with the existing anon key
-- We need to discover what tables exist for chatter/messages on that remote DB — the `lead_messages` or `lead_notes` table name needs to be confirmed
-- File binary downloads for Odoo-hosted attachments still go through `proxy-crm-file`
-
-### Technical Details
-
-**1. New Edge Function: `fetch-lead-details`**
-
-Queries the remote Rebar Shop OS Supabase for a single lead by ID:
-- `leads` table: full row with customer join
-- `lead_files` table: all attachments for the lead
-- `lead_messages` or equivalent: chatter/notes timeline (needs table name — will attempt `lead_messages` and gracefully degrade)
-- Returns structured JSON with lead, attachments, and messages
-
-**2. New Edge Function: `learn-from-pipeline`**
-
-- Queries leads in learning stages: `delivered_pickup_done`, `won`, `no_rebars_out_of_scope`
-- For each, builds a case_record with: lead_id, title, customer, stage, timestamps, files metadata, outcome label (SUCCESS/FAIL)
-- Upserts into `agent_knowledge` with `type = 'learned'`, deduplicating by lead_id in content
-- Returns count of new cases learned
-
-**3. New Component: `LeadDetailPanel`**
-
-- Slide-out Sheet triggered by clicking a lead row in `CrmSyncPanel`
-- Sections: Lead Info, Chatter Timeline (chronological), Attachments (with download/preview), Actions
-- "Use as Estimation Context" button calls `onStartEstimationWithFiles` with lead data
-- "Learn from This Lead" button calls `learn-from-pipeline` for a single lead
-
-**4. CrmSyncPanel Updates**
-
-- Add click handler on lead rows to open `LeadDetailPanel`
-- Add "Force Sync Learning" button in header that calls `learn-from-pipeline` for all outcome-stage leads
-- Add learning stages to the stage color map
-
-**5. Config**
-
-- Add `fetch-lead-details` and `learn-from-pipeline` to `supabase/config.toml` with `verify_jwt = false`
-
-### Files
-
-- **New**: `supabase/functions/fetch-lead-details/index.ts`
-- **New**: `supabase/functions/learn-from-pipeline/index.ts`
-- **New**: `src/components/crm/LeadDetailPanel.tsx`
-- **Modified**: `src/components/crm/CrmSyncPanel.tsx` (click-to-dig + force sync button)
-- **Modified**: `supabase/config.toml` (2 new function entries)
-
-No database migrations needed — uses existing `agent_knowledge` table for learned cases.
+### Scope
+- 1 file modified: `src/components/chat/DrawingOverlay.tsx`
+- No backend changes
 
