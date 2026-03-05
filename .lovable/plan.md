@@ -1,32 +1,46 @@
 
 
-## Plan: Fix Scope Restriction in Analysis Prompt
+## Plan: Make Agent Brain Shared Across All Users
 
 ### Problem
-Even though the UI now selects all element types by default, the edge function prompt at line 1163 says **"Only analyze these element types: ... Ignore any elements NOT in this list."** — this hard restriction in the AI prompt is what causes the output to say "strictly limited to CAGE, RETAINING_WALL, and FOOTING." The prompt language forces the AI to ignore everything else.
+Currently, all queries to `agent_knowledge` and `agent_training_examples` filter by `user_id`, meaning each user only sees their own rules, files, training examples, and learned items. The user wants the Brain to be shared — all users should see and benefit from the same knowledge base.
 
-When all 14 scope items are selected, the instruction should guide the AI to look for everything, not restrict it.
+### Changes
 
-### Fix (single file: `supabase/functions/analyze-blueprint/index.ts`)
+**1. Remove `user_id` filter from queries in `BrainKnowledgeDialog.tsx`**
+- `loadItems()`: Remove `.eq("user_id", user!.id)` so all knowledge items are loaded
+- `loadTrainingExamples()`: Remove `.eq("user_id", user!.id)` so all training examples are loaded
+- Inserts still use the current `user_id` (to track who created it), but reads are global
 
-**Change the scope injection logic (lines 1161-1165):**
+**2. Remove `user_id` filter from `fetchKnowledgeContext()` in `ChatArea.tsx`**
+- Line 171: Remove `.eq("user_id", user.id)` from `agent_knowledge` query
+- Line 196: Remove `.eq("user_id", user.id)` from `agent_training_examples` query
 
-- If ALL scope items are selected (or the list is large, e.g. >= 10), change the wording to: "Analyze all structural element types found in the drawings, including but not limited to: ..."
-- Only use restrictive "Only analyze these" / "Ignore any elements NOT in this list" language when the user has explicitly narrowed the scope (small subset selected)
-- Always add: "Treat Cage Assemblies and Loose Rebar as separate estimation groups with independent outputs."
+**3. Update RLS policies on both tables** (database migration)
+- `agent_knowledge`: Add a SELECT policy allowing all authenticated users to read all rows
+- `agent_training_examples`: Add a SELECT policy allowing all authenticated users to read all rows
+- Keep existing INSERT/DELETE policies scoped to `user_id` (only the creator can add/remove)
 
-```typescript
-if (scope.scopeItems && scope.scopeItems.length > 0) {
-  const allSelected = scope.scopeItems.length >= TOTAL_SCOPE_COUNT; // 14
-  if (allSelected) {
-    scopeBlock += `Analyze ALL structural element types found in the drawings.\n`;
-    scopeBlock += `This includes (but is not limited to): ${scope.scopeItems.join(", ")}\n`;
-  } else {
-    scopeBlock += `Focus on these element types: ${scope.scopeItems.join(", ")}\n`;
-    scopeBlock += `Prioritize these elements but also flag any other significant elements discovered.\n`;
-  }
-}
+**4. Update `extract-learning/index.ts`**
+- Remove `user_id` filter from the count check so learned items are managed globally (or keep per-user cleanup — will keep per-user to avoid one user deleting another's learnings)
+
+### RLS Migration SQL
+```sql
+-- Allow all authenticated users to read all knowledge
+DROP POLICY IF EXISTS "Users can view their own knowledge" ON public.agent_knowledge;
+CREATE POLICY "All authenticated users can view knowledge"
+ON public.agent_knowledge FOR SELECT TO authenticated
+USING (true);
+
+-- Allow all authenticated users to read all training examples  
+DROP POLICY IF EXISTS "Users can view their own training examples" ON public.agent_training_examples;
+CREATE POLICY "All authenticated users can view training examples"
+ON public.agent_training_examples FOR SELECT TO authenticated
+USING (true);
 ```
 
-This removes the artificial "Ignore any elements NOT in this list" restriction and lets the AI find everything in the blueprints. The separate cage vs loose rebar grouping is already handled by the category-specific rules injected via `getCategorySpecificRules`.
+### Summary
+- **Reads** become global (all users see all brain content)
+- **Writes/Deletes** stay per-user (only the creator can add or remove their entries)
+- The analysis prompt will include knowledge from all users
 
