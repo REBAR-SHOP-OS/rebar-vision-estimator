@@ -1,46 +1,150 @@
 
 
-## Plan: Make Agent Brain Shared Across All Users
+## Plan: Production-Grade Shop-Drawing Search Database with CRM Integration
 
-### Problem
-Currently, all queries to `agent_knowledge` and `agent_training_examples` filter by `user_id`, meaning each user only sees their own rules, files, training examples, and learned items. The user wants the Brain to be shared — all users should see and benefit from the same knowledge base.
+### Current State Assessment
 
-### Changes
+The project already has foundational pieces in place:
+- **`drawing_search_index`** table with FTS (`search_tsv`), `bar_marks` array, `confidence` scoring, GIN indexes
+- **`logical_drawings`**, **`reconciliation_records`**, **`drawing_sets`**, **`document_versions`**, **`sheet_revisions`** tables
+- **`search-drawings`** and **`populate-search-index`** edge functions with hybrid search (FTS + structured filters)
+- **CRM integration** via `fetch-pipeline-leads` (Odoo/Rebar Shop OS) and `proxy-crm-file` edge functions
+- **UI components**: `DrawingSearchPanel`, `SearchFilters`, `SearchResultCard`, `ReconciliationPanel`, `CrmSyncPanel`
 
-**1. Remove `user_id` filter from queries in `BrainKnowledgeDialog.tsx`**
-- `loadItems()`: Remove `.eq("user_id", user!.id)` so all knowledge items are loaded
-- `loadTrainingExamples()`: Remove `.eq("user_id", user!.id)` so all training examples are loaded
-- Inserts still use the current `user_id` (to track who created it), but reads are global
+The spec references "Pipeline CRM" extensively, but your actual CRM is **Odoo-based (Rebar Shop OS)**. The spec's Pipeline CRM-specific details (API keys, CSV exports, Zapier triggers) don't apply directly — your existing Odoo JSON-RPC integration is already the correct approach.
 
-**2. Remove `user_id` filter from `fetchKnowledgeContext()` in `ChatArea.tsx`**
-- Line 171: Remove `.eq("user_id", user.id)` from `agent_knowledge` query
-- Line 196: Remove `.eq("user_id", user.id)` from `agent_training_examples` query
+Many spec elements (pgvector embeddings, FAISS/Milvus, Python extraction tools like pdfplumber/ezdxf/IfcOpenShell, Airflow/DVC/MLflow, Mask R-CNN/U-Net) are **not implementable** in a Lovable project (no Python backend, no pgvector extension, no GPU compute). The plan below maps the spec's goals to what's achievable.
 
-**3. Update RLS policies on both tables** (database migration)
-- `agent_knowledge`: Add a SELECT policy allowing all authenticated users to read all rows
-- `agent_training_examples`: Add a SELECT policy allowing all authenticated users to read all rows
-- Keep existing INSERT/DELETE policies scoped to `user_id` (only the creator can add/remove)
+---
 
-**4. Update `extract-learning/index.ts`**
-- Remove `user_id` filter from the count check so learned items are managed globally (or keep per-user cleanup — will keep per-user to avoid one user deleting another's learnings)
+### Phase 1: Schema Hardening and Audit-Grade Metadata
 
-### RLS Migration SQL
+**Database migration** to add missing columns from the spec that improve traceability:
+
 ```sql
--- Allow all authenticated users to read all knowledge
-DROP POLICY IF EXISTS "Users can view their own knowledge" ON public.agent_knowledge;
-CREATE POLICY "All authenticated users can view knowledge"
-ON public.agent_knowledge FOR SELECT TO authenticated
-USING (true);
+-- Add provenance and quality columns to drawing_search_index
+ALTER TABLE public.drawing_search_index
+  ADD COLUMN IF NOT EXISTS sha256 text,
+  ADD COLUMN IF NOT EXISTS source_system text DEFAULT 'upload',
+  ADD COLUMN IF NOT EXISTS extraction_version text DEFAULT '2026.03.05',
+  ADD COLUMN IF NOT EXISTS quality_flags text[] DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS needs_review boolean DEFAULT false;
 
--- Allow all authenticated users to read all training examples  
-DROP POLICY IF EXISTS "Users can view their own training examples" ON public.agent_training_examples;
-CREATE POLICY "All authenticated users can view training examples"
-ON public.agent_training_examples FOR SELECT TO authenticated
-USING (true);
+-- Add revision chain tracking to logical_drawings
+ALTER TABLE public.logical_drawings
+  ADD COLUMN IF NOT EXISTS revision_chain_id uuid,
+  ADD COLUMN IF NOT EXISTS latest_revision_code text;
+
+-- Add CRM provenance fields to drawing_search_index
+ALTER TABLE public.drawing_search_index
+  ADD COLUMN IF NOT EXISTS pipeline_file_id text,
+  ADD COLUMN IF NOT EXISTS uploaded_by_user_id text;
+
+-- Add change_orders support to estimate_outcomes
+ALTER TABLE public.estimate_outcomes
+  ADD COLUMN IF NOT EXISTS change_orders jsonb DEFAULT '[]';
 ```
 
-### Summary
-- **Reads** become global (all users see all brain content)
-- **Writes/Deletes** stay per-user (only the creator can add or remove their entries)
-- The analysis prompt will include knowledge from all users
+**Files**: Single migration file.
+
+---
+
+### Phase 2: Enhanced Ingestion Pipeline (`populate-search-index`)
+
+Update the edge function to:
+1. **Accept SHA-256 hash** from the client (computed during PDF upload) and store it for exact dedup
+2. **Near-duplicate detection**: Before inserting, check if same SHA-256 already exists; if so, create a `file_occurrence` link instead of duplicating
+3. **Quality flags**: Compute and store flags like `["ocr_used", "missing_scale", "missing_sheet_id"]`
+4. **Revision chain logic**: Auto-link revisions for the same sheet_id by assigning a shared `revision_chain_id` on `logical_drawings`
+5. **Improved bar mark extraction**: Expand the regex to handle more patterns (`BM-xxx`, numeric-alpha like `12A`)
+6. **Store extraction_version** for reproducibility
+
+**File**: `supabase/functions/populate-search-index/index.ts`
+
+---
+
+### Phase 3: CRM-to-Search-Index Auto-Sync
+
+Update the CRM flow so that when a lead's files are fetched and processed:
+1. After `proxy-crm-file` fetches a file, compute SHA-256 in the browser before upload
+2. Store `crm_deal_id` and `pipeline_file_id` (Odoo attachment ID) on the search index entry
+3. Add a **"Sync CRM Files to Search DB"** button in `CrmSyncPanel` that bulk-indexes all lead attachments
+
+**Files**: `src/components/crm/CrmSyncPanel.tsx`, client-side SHA-256 utility
+
+---
+
+### Phase 4: Enhanced Search with Revision Chain and Change Order Filters
+
+Update `search-drawings` RPC and edge function to support:
+1. **Revision chain retrieval**: New filter `revision_chain_id` to get all revisions of a sheet
+2. **Change order filter**: Filter by linked change orders on estimate_outcomes
+3. **Drawing set filter**: Already partially supported via `drawing_set_id`
+4. **Confidence threshold**: Option to exclude low-confidence results (< 0.7)
+5. **Result explanation**: Return `match_reasons` array explaining why each result matched
+
+Update `SearchFilters` UI to expose revision chain browsing and confidence threshold.
+
+**Files**: 
+- Database migration (update `search_drawings` RPC function)
+- `supabase/functions/search-drawings/index.ts`
+- `src/components/search/SearchFilters.tsx`
+- `src/components/search/SearchResultCard.tsx` (show match reasons, revision chain link)
+
+---
+
+### Phase 5: Reconciliation Workflow Enhancement
+
+Upgrade `ReconciliationPanel` to handle the spec's reconciliation patterns:
+1. **Issue types**: Support `REVISION_CHAIN_AMBIGUOUS`, `MISSING_SHEET_ID`, `DUPLICATE_DETECTED`, `MISSING_DEAL_LINK`, `DRAWING_SET_TO_ESTIMATE_LINK`
+2. **Resolution workflow**: Add resolve/waive actions with notes
+3. **Quality gate**: Show count of unresolved issues blocking "production index" status
+4. **Auto-generated issues**: The ingestion pipeline already creates `REVISION_CHAIN_AMBIGUOUS` records; extend to create records for missing sheet IDs and duplicates
+
+**Files**: `src/components/audit/ReconciliationPanel.tsx`
+
+---
+
+### Phase 6: SHA-256 Client-Side Hashing Utility
+
+Add a utility to compute SHA-256 in the browser using the Web Crypto API, used during PDF upload to enable exact dedup.
+
+**File**: `src/lib/file-hash.ts`
+
+```typescript
+export async function computeSHA256(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, "0")).join("");
+}
+```
+
+---
+
+### What Is NOT Implementable in Lovable
+
+The following spec items require infrastructure outside Lovable's capabilities:
+- **pgvector / embeddings**: Requires Postgres extension not available in Lovable Cloud
+- **Python extraction tools** (pdfplumber, pdfminer, ezdxf, IfcOpenShell, Tesseract, TrOCR, Donut, LayoutParser): No Python runtime
+- **ML models** (Mask R-CNN, U-Net, CLIP, LayoutLMv3, ColBERT, SBERT): No model hosting
+- **Airflow, DVC, MLflow**: No orchestration infrastructure
+- **Great Expectations**: No Python data validation framework
+- **FAISS/Milvus**: No separate vector DB hosting
+- **DXF/IFC parsing**: No native support in browser/Deno
+
+These would need a separate backend service (e.g., a Python API on a cloud VM) that Lovable edge functions could call.
+
+---
+
+### Implementation Order
+
+1. Schema migration (Phase 1) — foundation for everything else
+2. SHA-256 utility (Phase 6) — small, no dependencies
+3. Enhanced ingestion (Phase 2) — uses new schema + hashing
+4. CRM sync (Phase 3) — uses enhanced ingestion
+5. Enhanced search (Phase 4) — uses new schema fields
+6. Reconciliation workflow (Phase 5) — uses all above
+
+Estimated scope: ~6 files modified, 2 new files, 1 database migration.
 
