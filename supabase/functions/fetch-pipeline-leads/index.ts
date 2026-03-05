@@ -70,34 +70,36 @@ Deno.serve(async (req) => {
       const files = filesByLead[lead.id] || [];
       const attachments = files.map((f: any) => {
         let url: string | null = null;
+        let odooId: string | null = null;
 
-        // Prefer storage path (direct public download, no auth needed)
+        // Prefer storage path (direct public download)
         if (f.storage_path) {
           url = `${REBAR_URL}/storage/v1/object/public/lead-files/${f.storage_path}`;
         }
-        // Use odoo-file-proxy for Odoo-hosted files (requires session auth)
+        // Use odoo_id for Odoo-hosted files
         else if (f.odoo_id) {
-          url = `${REBAR_URL}/functions/v1/odoo-file-proxy?id=${f.odoo_id}`;
+          odooId = String(f.odoo_id);
         }
-        // Extract content ID from Odoo URLs and route through proxy
+        // Extract content ID from Odoo URLs
         else if (f.file_url && f.file_url.includes("odoo.com/web/content/")) {
           const match = f.file_url.match(/\/web\/content\/(\d+)/);
-          if (match) {
-            url = `${REBAR_URL}/functions/v1/odoo-file-proxy?id=${match[1]}`;
-          }
+          if (match) odooId = match[1];
         }
-        // Fallback to file_url if it's a non-Odoo URL
+        // Non-Odoo URL fallback
         else if (f.file_url) {
           url = f.file_url;
         }
+
+        if (!url && !odooId) return null;
 
         return {
           name: f.file_name || "file",
           size: f.file_size_bytes || 0,
           mimeType: f.mime_type || "application/octet-stream",
           url,
+          odooId,
         };
-      }).filter((a: any) => a.url);
+      }).filter(Boolean);
 
       return { ...lead, attachments };
     });
