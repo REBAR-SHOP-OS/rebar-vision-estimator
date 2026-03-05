@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
@@ -13,9 +14,7 @@ import ElementReviewPanel, { type ReviewAnswer } from "./ElementReviewPanel";
 import FinderPassReview, { type FinderCandidate, type ReviewedCandidate } from "./FinderPassReview";
 import { type ReviewStatus } from "./DrawingOverlay";
 import ScopeDefinitionPanel, { type ScopeData, type DetectionResult, buildScopeFromDetection } from "./ScopeDefinitionPanel";
-import BlueprintViewer from "./BlueprintViewer";
 import { type OverlayElement } from "./DrawingOverlay";
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import BarListTable from "./BarListTable";
@@ -47,6 +46,7 @@ const PRICE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/price-eleme
 const DETECT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/detect-project-type`;
 
 const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialFilesConsumed, onProjectNameChange, onStepChange, onModeChange }) => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -643,7 +643,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       if (fpCandidates.length > 0) {
         setFinderPassCandidates(fpCandidates);
         setFinderReviewMode(true);
-        setShowBlueprintViewer(true);
+        openBlueprintViewer();
       }
     } catch (err: any) {
       toast.error(err.message || "AI analysis failed");
@@ -713,7 +713,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         if (fpCandidates.length > 0) {
           setFinderPassCandidates(fpCandidates);
           setFinderReviewMode(true);
-          setShowBlueprintViewer(true);
+          openBlueprintViewer();
         }
       } catch (err: any) {
         toast.error(err.message || "AI analysis failed");
@@ -1002,10 +1002,43 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     return statuses;
   }, [reviewMode, reviewStatuses, selectedElementId]);
 
+  // Navigate to full-screen blueprint viewer page
+  const viewerOpenCounter = useRef(0);
+  const openBlueprintViewer = useCallback(() => {
+    if (!uploadedFiles.length) return;
+    viewerOpenCounter.current += 1;
+    const reviewStatusObj: Record<string, string> = {};
+    if (reviewMode) {
+      reviewStatuses.forEach((v, k) => reviewStatusObj[k] = v);
+    }
+    // Use a microtask to ensure state updates (like setSelectedElementId) are flushed
+    setTimeout(() => {
+      sessionStorage.setItem("blueprint-viewer-data", JSON.stringify({
+        imageUrl: uploadedFiles[0] || "",
+        elements: overlayElements,
+        selectedElementId,
+        reviewStatuses: reviewMode ? reviewStatusObj : null,
+      }));
+      navigate("/blueprint-viewer");
+    }, 0);
+  }, [uploadedFiles, overlayElements, selectedElementId, reviewMode, reviewStatuses, navigate]);
+
   const handleShowOnDrawing = useCallback((elementId: string) => {
     setSelectedElementId(elementId);
-    if (!showBlueprintViewer) setShowBlueprintViewer(true);
-  }, [showBlueprintViewer]);
+    // Store data with the new element selected and navigate
+    if (!uploadedFiles.length) return;
+    const reviewStatusObj: Record<string, string> = {};
+    if (reviewMode) {
+      reviewStatuses.forEach((v, k) => reviewStatusObj[k] = v);
+    }
+    sessionStorage.setItem("blueprint-viewer-data", JSON.stringify({
+      imageUrl: uploadedFiles[0] || "",
+      elements: overlayElements,
+      selectedElementId: elementId,
+      reviewStatuses: reviewMode ? reviewStatusObj : null,
+    }));
+    navigate("/blueprint-viewer");
+  }, [uploadedFiles, overlayElements, reviewMode, reviewStatuses, navigate]);
 
   const handleSelectElementFromViewer = useCallback((id: string | null) => {
     setSelectedElementId(id);
@@ -1097,7 +1130,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 }}
                 onSelectElement={(id) => {
                   setSelectedElementId(id);
-                  if (!showBlueprintViewer) setShowBlueprintViewer(true);
+                  if (!showBlueprintViewer) openBlueprintViewer();
                 }}
               />
             </div>
@@ -1128,7 +1161,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 }}
                 onSelectElement={(id) => {
                   setSelectedElementId(id);
-                  if (!showBlueprintViewer) setShowBlueprintViewer(true);
+                  if (!showBlueprintViewer) openBlueprintViewer();
                 }}
                 onAnswersChange={(answersMap) => {
                   // Build review statuses from answers + mark current as active
@@ -1234,13 +1267,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                         onRequestQuote={handleRequestQuote}
                         scopeData={scopeData}
                         onShowOnDrawing={handleShowOnDrawing}
-                        onToggleViewer={() => setShowBlueprintViewer((v) => !v)}
+                        onToggleViewer={() => openBlueprintViewer()}
                         showViewer={showBlueprintViewer}
                         selectedElementId={selectedElementId}
                         hasDrawingData={hasDrawingData}
                         onStartReview={() => {
                           setReviewMode(true);
-                          setShowBlueprintViewer(true);
+                          openBlueprintViewer();
                         }}
                       />
                     </TabsContent>
@@ -1444,47 +1477,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       </div>
     </div>
   );
-
-  // If blueprint viewer is active and not mobile, show split panel
-  if (showBlueprintViewer && hasDrawingData && !isMobile) {
-    return (
-      <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0">
-        <ResizablePanel defaultSize={55} minSize={30}>
-          <BlueprintViewer
-            imageUrl={uploadedFiles[0]}
-            elements={overlayElements}
-            selectedElementId={selectedElementId}
-            onSelectElement={handleSelectElementFromViewer}
-            onClose={() => setShowBlueprintViewer(false)}
-            reviewStatuses={effectiveReviewStatuses}
-          />
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel defaultSize={45} minSize={25}>
-          {chatContent}
-        </ResizablePanel>
-      </ResizablePanelGroup>
-    );
-  }
-
-  // Mobile: stack viewer above chat
-  if (showBlueprintViewer && hasDrawingData && isMobile) {
-    return (
-      <div className="flex flex-col flex-1 min-h-0">
-        <div className="h-[40vh] flex-shrink-0">
-          <BlueprintViewer
-            imageUrl={uploadedFiles[0]}
-            elements={overlayElements}
-            selectedElementId={selectedElementId}
-            onSelectElement={handleSelectElementFromViewer}
-            onClose={() => setShowBlueprintViewer(false)}
-            reviewStatuses={effectiveReviewStatuses}
-          />
-        </div>
-        {chatContent}
-      </div>
-    );
-  }
 
   return chatContent;
 };
