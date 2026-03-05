@@ -84,7 +84,7 @@ serve(async (req) => {
 
     let pdfBytes: ArrayBuffer;
     if (pdf_url) {
-      const res = await fetch(pdf_url);
+      const res = await fetch(pdf_url, { redirect: "follow" });
       if (!res.ok) throw new Error(`Failed to fetch PDF: ${res.status}`);
       pdfBytes = await res.arrayBuffer();
     } else if (pdf_base64) {
@@ -99,25 +99,23 @@ serve(async (req) => {
     const sha256 = await hashSHA256(pdfBytes);
     const pages: PdfPageExtraction[] = [];
 
-    // Use dynamic import for pdfjs-serverless to get the correct export
-    let getDocument: any;
+    // Use dynamic import for pdfjs-serverless
+    let doc: any;
     try {
-      const pdfjs = await import("https://esm.sh/pdfjs-serverless@0.4.1");
-      getDocument = pdfjs.getDocument || pdfjs.default?.getDocument;
+      const pdfjs = await import("https://esm.sh/pdfjs-serverless");
+      const getDocument = pdfjs.getDocument || pdfjs.default?.getDocument || pdfjs.default;
       if (!getDocument) {
-        // Try accessing it as default export
-        getDocument = pdfjs.default;
+        // Log all available exports for debugging
+        console.error("pdfjs-serverless exports:", Object.keys(pdfjs));
+        throw new Error("getDocument not found in pdfjs-serverless");
       }
+      const loadingTask = getDocument(new Uint8Array(pdfBytes));
+      // pdfjs-serverless returns a promise via .promise property
+      doc = loadingTask.promise ? await loadingTask.promise : await loadingTask;
     } catch (importErr) {
-      console.error("Failed to import pdfjs-serverless:", importErr);
-      throw new Error("PDF parsing library unavailable");
+      console.error("Failed to load PDF:", importErr);
+      throw importErr;
     }
-
-    if (!getDocument) {
-      throw new Error("getDocument not found in pdfjs-serverless");
-    }
-
-    const doc = await getDocument(new Uint8Array(pdfBytes));
     const totalPages = doc.numPages;
 
     // Process max 15 pages to stay within memory limits
