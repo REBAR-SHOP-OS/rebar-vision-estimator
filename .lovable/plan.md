@@ -1,23 +1,27 @@
 
 
-## Plan: Fix CRM File Discovery in Edge Function
+## Plan: Fix CRM File Downloads via Server-Side Proxy
 
 ### Problem
-The edge function queries `lead-files` storage bucket at path `{lead_id}/` but returns zero attachments for all leads. The files visible in your CRM chatter (e.g., "110 Mornelle. Slab Strengthening...", "MORNELLE COURT_Estimation File...") are stored somewhere else -- likely in a different table or bucket path from the Odoo sync.
+When clicking "Start" on a CRM lead with attachments, the browser tries to fetch files directly from Odoo URLs (`rebarshop-24-rebar-shop.odoo.com/web/content/...`). These fail due to CORS restrictions -- browsers block cross-origin requests to Odoo. All 4 fetch attempts for "110 Mornelle Court" failed with "Failed to fetch".
 
 ### Solution
-Update `fetch-pipeline-leads` edge function to **discover** where files live by:
+Create a proxy edge function in this project that fetches Odoo files server-side (no CORS issues), then update the Dashboard to route downloads through it.
 
-1. **Try multiple storage buckets** -- list all available buckets in REBAR SHOP OS and check each for files under the lead ID
-2. **Query attachment-related tables** -- try `lead_attachments`, `attachments`, `mail_attachments`, `chatter_attachments`, or similar tables that Odoo sync may have created
-3. **Log what's found** so we can see exactly what tables/buckets exist and where files are
-
-### File to Modify
+### Changes
 
 | File | Change |
 |------|--------|
-| `supabase/functions/fetch-pipeline-leads/index.ts` | Add bucket discovery (list all buckets), try querying common attachment table names, add detailed logging |
+| `supabase/functions/proxy-crm-file/index.ts` | **New** -- accepts a `url` query param, fetches it server-side, streams binary back with correct Content-Type and CORS headers |
+| `supabase/config.toml` | Add `[functions.proxy-crm-file]` with `verify_jwt = false` (public proxy limited to Odoo domain) |
+| `src/pages/Dashboard.tsx` | Change `fetch(att.url)` (line 381) to `supabase.functions.invoke("proxy-crm-file", ...)` passing the Odoo URL, then convert the response to a File object |
 
-### What This Gives Us
-After deploying, the edge function logs will tell us exactly where the chatter files are stored, and we can then wire up the correct query path. This is a one-time discovery step -- once we find the right source, we'll hardcode that path.
+### How the Proxy Works
+- Validates the URL points to the known Odoo instance (`rebarshop-24-rebar-shop.odoo.com`) to prevent open-proxy abuse
+- Fetches the file server-side (no CORS)
+- Returns the binary with proper Content-Type header
+- If Odoo requires session auth, falls back to JSON-RPC via the REBAR SHOP OS `odoo-file-proxy` using the odoo_id extracted from the URL
+
+### Result
+Clicking "Start" on any lead with attachments will successfully download the PDFs and feed them into the auto-estimation pipeline.
 
