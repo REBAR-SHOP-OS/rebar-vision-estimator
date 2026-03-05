@@ -1,45 +1,51 @@
 
 
-## Enhance Agent Brain as Primary Instruction Source for 100% Accurate Calculations
+## Integrate Master Prompt as Core System Prompt in analyze-blueprint
 
-### Current State
-The system already injects Agent Brain knowledge into the AI prompt:
-- **Rules** → prepended as `## USER-DEFINED RULES & KNOWLEDGE (MUST follow these)`
-- **Files** → passed as image URLs alongside blueprints
-- **Training Examples** → appended as `## TRAINING EXAMPLES — REFERENCE CALCULATIONS`
-- **Learned Rules** → prepended as `## LEARNED FROM PREVIOUS CONVERSATIONS`
+### What This Does
+Replaces the current fragmented system prompt constants (`PIPELINE_INSTRUCTIONS`, `SMART_PROJECT_DETECTION`, `RSIC_ESTIMATING_RULES`, `SMART_SYSTEM_PROMPT`, `STEP_BY_STEP_SYSTEM_PROMPT`) with the full **Master Prompt** as the single authoritative instruction source. This ensures the AI follows the complete Zero-Trust, Dual-Analysis, 12-rule protocol for every estimation.
 
-However, the current injection is weak — rules are treated as suggestions rather than overriding instructions, and training examples are appended at the end where they may be deprioritized by the model.
+### Changes to `supabase/functions/analyze-blueprint/index.ts`
 
-### Plan
+**1. Add new constant: `MASTER_PROMPT`**
+- Contains the entire Master Prompt text (Parts 1, 1B, and 2) as provided
+- Placed after the existing `ELEMENT_UNIT_SCHEMA` constant (which is kept -- it defines the JSON output format)
+- The rebar weight tables (`REBAR_WEIGHT_TABLE`, `CANADIAN_METRIC_TABLE`) are kept as separate constants since they're referenced data
 
-**1. Elevate Agent Brain rules to HIGHEST priority in system prompt**
-- Move user rules to the very TOP of the system prompt (before all other instructions)
-- Wrap them with stronger enforcement language: `"ABSOLUTE RULES — These override ALL other instructions. Follow EXACTLY."`
-- Add explicit instruction: `"If any built-in rule conflicts with a user-defined rule, the USER-DEFINED RULE WINS."`
+**2. Replace `SMART_SYSTEM_PROMPT` construction**
+- Currently assembles from: `PIPELINE_INSTRUCTIONS` + `ELEMENT_UNIT_SCHEMA` + `REBAR_WEIGHT_TABLE` + `CANADIAN_METRIC_TABLE` + `SMART_PROJECT_DETECTION` + `RSIC_ESTIMATING_RULES` + `OUTPUT_FORMAT_INSTRUCTIONS`
+- New version: `MASTER_PROMPT` + `ELEMENT_UNIT_SCHEMA` + `REBAR_WEIGHT_TABLE` + `CANADIAN_METRIC_TABLE` + `OUTPUT_FORMAT_INSTRUCTIONS`
+- The Master Prompt subsumes `PIPELINE_INSTRUCTIONS`, `SMART_PROJECT_DETECTION`, and `RSIC_ESTIMATING_RULES`
 
-**2. Elevate training examples priority**
-- Move training examples from end-of-prompt to just after user rules (before the pipeline instructions)
-- Strengthen wording: `"MANDATORY REFERENCE — Your calculations MUST match this methodology exactly. Any deviation is an error."`
+**3. Replace `STEP_BY_STEP_SYSTEM_PROMPT` similarly**
+- Same base but with "execute ONE step at a time" mode instruction appended
 
-**3. Add rule-enforcement verification step**
-- Add a new Stage 0 to the pipeline: "**Stage 0 — Rule Compliance Check**: Before starting analysis, list ALL user-defined rules and confirm you will follow each one. If a rule specifies a calculation method, unit, format, or threshold — use it EXACTLY."
+**4. Keep unchanged:**
+- `ELEMENT_UNIT_SCHEMA` (JSON output schema -- compatible with Master Prompt)
+- `REBAR_WEIGHT_TABLE` and `CANADIAN_METRIC_TABLE` (reference data)
+- `OUTPUT_FORMAT_INSTRUCTIONS` (JSON output markers)
+- `getCategorySpecificRules()` function (category-specific overrides)
+- Agent Brain injection logic (Stage 0 / Stage 10 / rules / training examples)
+- All OCR, PDF extraction, file handling, and API call logic
 
-**4. Add post-calculation cross-check instruction**
-- After Stage 9, add: "**Stage 10 — Rule Verification**: Re-check your output against ALL user-defined rules. If any calculation violates a rule, fix it before outputting."
+**5. Constants removed (subsumed by Master Prompt):**
+- `PIPELINE_INSTRUCTIONS` -- Master Prompt Stages 1-8 + Part 2 cover this
+- `SMART_PROJECT_DETECTION` -- Master Prompt Stage 3 categories cover this
+- `RSIC_ESTIMATING_RULES` -- Master Prompt Stage 5.5 + throughout covers this
 
-### Files to Change
-- `supabase/functions/analyze-blueprint/index.ts` (lines 988-1008): Restructure prompt assembly order and strengthen enforcement language
+### Key Additions from Master Prompt (not in current system)
+- **12 Non-Negotiable Rules** (zero-hallucination, evidence-first, dual-analysis, risk flags, probabilistic ranges)
+- **Stage 2.5 -- Rebar Type Identification** (7 rebar types with mandatory user question)
+- **Stage 8 -- WWM detailed calculation** (overlap rules, sheet size logic, type identification)
+- **Part 1B -- Dual-Analysis** (Drawing-Spec vs Industry-Norm estimates, risk flags, ranges)
+- **Part 2 -- Shop-Drawing Search DB** (ingestion discipline, metadata requirements, search stack)
+- **User-correction override rule** at every stage
 
-### Technical Detail
-The system prompt assembly order will become:
-```
-1. Stage 0 — Rule Compliance preamble
-2. USER-DEFINED RULES (ABSOLUTE — override everything)
-3. TRAINING EXAMPLES (MANDATORY REFERENCE)
-4. LEARNED RULES
-5. PROJECT SCOPE DEFINITION
-6. Standard system prompt (pipeline, schema, tables)
-7. Stage 10 — Rule Verification appendix
-```
+### File: `supabase/functions/analyze-blueprint/index.ts`
+- Lines ~402-531: Remove `PIPELINE_INSTRUCTIONS` (subsumed)
+- Lines ~647-678: Remove `SMART_PROJECT_DETECTION` (subsumed)
+- Lines ~680-728: Remove `RSIC_ESTIMATING_RULES` (subsumed)
+- Lines ~730-770: Rewrite `SMART_SYSTEM_PROMPT` to use `MASTER_PROMPT`
+- Lines ~772-840: Rewrite `STEP_BY_STEP_SYSTEM_PROMPT` to use `MASTER_PROMPT`
+- Add `MASTER_PROMPT` constant (~200 lines of text)
 
