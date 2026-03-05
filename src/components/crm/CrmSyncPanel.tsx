@@ -23,25 +23,10 @@ import {
 
 // Stage definitions from REBAR SHOP OS pipeline
 const PIPELINE_STAGES: Record<string, { label: string; color: string }> = {
-  prospecting: { label: "Prospecting", color: "bg-indigo-500" },
-  new: { label: "New", color: "bg-blue-500" },
-  telephonic_enquiries: { label: "Telephonic Enquiries", color: "bg-cyan-500" },
-  qc_ben: { label: "QC - Ben", color: "bg-lime-500" },
   estimation_ben: { label: "Estimation - Ben", color: "bg-amber-500" },
   estimation_karthick: { label: "Estimation - Karthick", color: "bg-orange-500" },
-  estimation_others: { label: "Estimation - Others", color: "bg-amber-600" },
-  estimation_partha: { label: "Estimation Partha", color: "bg-amber-400" },
   hot_enquiries: { label: "Hot Enquiries", color: "bg-red-500" },
   qualified: { label: "Qualified", color: "bg-teal-500" },
-  rfi: { label: "RFI", color: "bg-green-500" },
-  addendums: { label: "Addendums", color: "bg-yellow-500" },
-  quotation_priority: { label: "Quotation Priority", color: "bg-rose-500" },
-  quotation_bids: { label: "Quotation Bids", color: "bg-pink-500" },
-  shop_drawing: { label: "Shop Drawing", color: "bg-violet-500" },
-  shop_drawing_approval: { label: "Shop Drawing Approval", color: "bg-purple-500" },
-  fabrication_in_shop: { label: "Fabrication In Shop", color: "bg-violet-600" },
-  ready_to_dispatch: { label: "Ready To Dispatch", color: "bg-emerald-400" },
-  out_for_delivery: { label: "Out for Delivery", color: "bg-sky-500" },
 };
 
 interface PipelineLead {
@@ -132,7 +117,7 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose }) => {
       <div className="flex items-center justify-between p-4 border-b border-border">
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-semibold text-foreground">Pipeline Leads</h2>
-          <Badge variant="secondary" className="text-xs">{leads.length} pending</Badge>
+          <Badge variant="secondary" className="text-xs">{leads.length} leads</Badge>
         </div>
         <div className="flex gap-2">
           <Button onClick={fetchLeads} disabled={loading} size="sm" variant="outline" className="gap-1.5">
