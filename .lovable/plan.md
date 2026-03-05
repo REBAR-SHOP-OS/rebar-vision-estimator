@@ -1,65 +1,48 @@
 
 
-## Fix: Stage-Aware Vision Probe with Per-Stage Diagnostics
+## Fix: Support Base64-Encoded SA Key in Vision Probe
 
-### Root Cause
+### Problem
+`GOOGLE_VISION_SA_KEY` contains a 40-char hex string — not a JSON service account key. The `safeParseSAKey` function only tries JSON parsing, so it always fails. The stored value is likely a secret ID/hash, not the actual key content.
 
-The `GOOGLE_VISION_SA_KEY` secret contains a 40-character hex string (likely a SHA1 fingerprint or API key hash), not a JSON service account object. The probe correctly fails at `sa_key_parse` stage, but the error output is confusing because it lacks stage context. The code itself is actually working — it never reaches the Vision API call because parsing fails first. The `latency_ms: 0` is expected since no network call happens.
+### Plan
 
-However, the user wants richer stage-by-stage diagnostics so each probe failure is immediately diagnosable.
+**File**: `supabase/functions/ai-diagnostics/index.ts`
 
-### Changes
+#### 1. Update `safeParseSAKey` to support base64 decoding
+Before attempting JSON parse, check if the string looks like base64 (no `{` prefix, matches base64 charset). If so, decode it first, then JSON parse.
 
-**File**: `supabase/functions/ai-diagnostics/index.ts` — rewrite `probeVision` (lines 318-388)
-
-Replace with a stage-tracking approach:
-
-1. **Stage tracker object** accumulates results per stage:
 ```text
-stages_completed: ["sa_key_parse", "jwt_sign", "token_exchange", "vision_call"]
-failed_stage: "sa_key_parse" | "jwt_sign" | "token_exchange" | "vision_call" | null
+safeParseSAKey flow:
+  ├─ Strip BOM, trim
+  ├─ If starts with "{" → direct JSON parse
+  ├─ Else try base64 decode → then JSON parse (method: "base64")
+  ├─ Else try double-encoded JSON
+  └─ Else fail with descriptive error
 ```
 
-2. **Per HTTP stage** (`token_exchange`, `vision_call`), capture:
-   - `url`, `http_status`, `content_type`, `response_length`, `response_text_first_200`
-   - `parse_attempted`, `parse_result` ("ok" | "failed" | "skipped_non_json")
+#### 2. Add SA key validation after successful parse
+After parsing, validate required fields:
+- `client_email` must be present
+- `private_key` must contain `"-----BEGIN PRIVATE KEY-----"`
+- `token_uri` should be present (or default to Google's)
 
-3. **Safe JSON parse helper**: read as text first, only parse if content-type includes `application/json` OR text starts with `{`
+If invalid, return a clear error: `"SA key parsed but missing required fields (client_email, private_key)"`
 
-4. **Return shape on failure**:
+#### 3. Improve error message for non-JSON/non-base64 input
+When the value is a hex string or other non-key format, return:
 ```json
 {
-  "success": false,
-  "failed_stage": "sa_key_parse",
-  "error": "Not valid JSON service account key",
+  "error": "GOOGLE_VISION_SA_KEY is not a valid service account key. Expected JSON or base64-encoded JSON. Got 40-char hex string.",
   "error_class": "bad_config",
-  "stages": {
-    "sa_key_parse": { "status": "failed", "detail": "40-char hex, not JSON", "first_chars": "534a...", "length": 40 }
-  },
-  "latency_ms": 0
+  "hint": "Store the full JSON content from your Google Cloud service account file, or base64-encode it."
 }
 ```
 
-5. **Return shape on success**:
-```json
-{
-  "success": true,
-  "failed_stage": null,
-  "stages": {
-    "sa_key_parse": { "status": "ok", "parse_method": "direct" },
-    "jwt_sign": { "status": "ok" },
-    "token_exchange": { "status": "ok", "http_status": 200, "latency_ms": 150 },
-    "vision_call": { "status": "ok", "http_status": 200, "response_count": 1, "latency_ms": 280 }
-  },
-  "latency_ms": 430
-}
-```
-
-### Note on Root Cause
-
-The Vision probes will continue to fail until the `GOOGLE_VISION_SA_KEY` secret is updated with a real JSON service account key (starts with `{"type":"service_account",...}`). The current value is a 40-char hex string. This fix ensures the failure is clearly reported with actionable diagnostics.
+#### 4. Action needed from user
+The core issue is that `GOOGLE_VISION_SA_KEY` doesn't contain the actual key. The user needs to update it with the real JSON content (or base64 of it). The code changes make the error message actionable and add base64 support for when they do update it.
 
 | File | Change |
 |---|---|
-| `supabase/functions/ai-diagnostics/index.ts` | Rewrite `probeVision` with stage tracking, per-stage HTTP diagnostics, safe JSON parsing |
+| `supabase/functions/ai-diagnostics/index.ts` | Update `safeParseSAKey` to try base64 decode, add SA key field validation, improve error messages |
 
