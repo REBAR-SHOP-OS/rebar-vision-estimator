@@ -249,37 +249,142 @@ function safeParseSAKey(raw: string): { parsed: Record<string, unknown> | null; 
   }
 }
 
-async function probeVision(integration: typeof integrations[0]) {
+// 1x1 transparent PNG as base64
+const TINY_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQABNjN9GQAAAABJRUSErkJggg==";
+
+function base64url(data: Uint8Array): string {
+  return btoa(String.fromCharCode(...data))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function createGoogleJWT(sa: Record<string, unknown>): Promise<string> {
+  const header = { alg: "RS256", typ: "JWT" };
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: sa.client_email,
+    scope: "https://www.googleapis.com/auth/cloud-vision",
+    aud: "https://oauth2.googleapis.com/token",
+    iat: now,
+    exp: now + 300,
+  };
+
+  const enc = new TextEncoder();
+  const headerB64 = base64url(enc.encode(JSON.stringify(header)));
+  const payloadB64 = base64url(enc.encode(JSON.stringify(payload)));
+  const signingInput = `${headerB64}.${payloadB64}`;
+
+  // Import RSA private key
+  const pemBody = (sa.private_key as string)
+    .replace(/-----BEGIN PRIVATE KEY-----/, "")
+    .replace(/-----END PRIVATE KEY-----/, "")
+    .replace(/\s/g, "");
+  const keyBytes = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
+
+  const cryptoKey = await crypto.subtle.importKey(
+    "pkcs8", keyBytes,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false, ["sign"]
+  );
+
+  const signature = new Uint8Array(
+    await crypto.subtle.sign("RSASSA-PKCS1-v1_5", cryptoKey, enc.encode(signingInput))
+  );
+
+  return `${signingInput}.${base64url(signature)}`;
+}
+
+async function exchangeJWTForToken(jwt: string): Promise<{ access_token: string } | { error: string }> {
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    return { error: `Token exchange HTTP ${res.status}: ${t.substring(0, 200)}` };
+  }
+  const data = await res.json();
+  if (!data.access_token) return { error: "No access_token in response" };
+  return { access_token: data.access_token };
+}
+
+function classifyHttpStatus(status: number): string {
+  if (status === 401 || status === 403) return "auth_error";
+  if (status === 429) return "quota_error";
+  if (status === 400) return "bad_request";
+  return "unknown_error";
+}
+
+async function probeVision(_integration: typeof integrations[0]) {
   const saKey = Deno.env.get("GOOGLE_VISION_SA_KEY");
   if (!saKey) return { success: false, error: "GOOGLE_VISION_SA_KEY not configured", latency_ms: 0, resolved_model: "Cloud Vision API v1", gateway_headers: {} };
 
   const start = performance.now();
-  const { parsed: sa, error: parseError, method } = safeParseSAKey(saKey);
 
+  // Step 1: Parse SA key
+  const { parsed: sa, error: parseError, method } = safeParseSAKey(saKey);
   if (!sa) {
     const latency_ms = Math.round(performance.now() - start);
-    const firstChars = saKey.substring(0, 20).replace(/[^ -~]/g, "?"); // safe printable chars only
-    return {
-      success: false,
-      error: `${parseError} | first_chars: "${firstChars}" | length: ${saKey.length}`,
-      latency_ms,
-      resolved_model: "Cloud Vision API v1",
-      gateway_headers: { parse_method: method },
-    };
+    const firstChars = saKey.substring(0, 20).replace(/[^ -~]/g, "?");
+    return { success: false, error: `${parseError} | first_chars: "${firstChars}" | length: ${saKey.length}`, latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { parse_method: method } };
   }
 
-  const latency_ms = Math.round(performance.now() - start);
-  return {
-    success: true,
-    latency_ms,
-    resolved_model: "Cloud Vision API v1",
-    gateway_headers: {
-      config_verified: "service_account_key_present",
-      client_email: (sa as Record<string, unknown>).client_email ? "configured" : "missing",
-      parse_method: method,
-    },
-    error: null,
-  };
+  // Step 2: Get access token via JWT
+  let accessToken: string;
+  try {
+    const jwt = await createGoogleJWT(sa);
+    const tokenResult = await exchangeJWTForToken(jwt);
+    if ("error" in tokenResult) {
+      const latency_ms = Math.round(performance.now() - start);
+      return { success: false, error: tokenResult.error, error_class: "auth_error", latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { parse_method: method } };
+    }
+    accessToken = tokenResult.access_token;
+  } catch (e) {
+    const latency_ms = Math.round(performance.now() - start);
+    return { success: false, error: e instanceof Error ? e.message : "JWT/token error", error_class: "auth_error", latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { parse_method: method } };
+  }
+
+  // Step 3: Call Vision API with tiny image
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const visionRes = await fetch("https://vision.googleapis.com/v1/images:annotate", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requests: [{ image: { content: TINY_PNG_B64 }, features: [{ type: "TEXT_DETECTION", maxResults: 1 }] }],
+      }),
+      signal: controller.signal,
+    });
+
+    const latency_ms = Math.round(performance.now() - start);
+    const contentType = visionRes.headers.get("content-type") || "";
+    const rawText = await visionRes.text();
+
+    if (!visionRes.ok) {
+      const error_class = classifyHttpStatus(visionRes.status);
+      return { success: false, error: `HTTP ${visionRes.status}`, error_class, latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { http_status: String(visionRes.status), content_type: contentType, response_snippet: rawText.substring(0, 200), parse_method: method } };
+    }
+
+    if (!contentType.includes("application/json")) {
+      return { success: false, error: "Non-JSON response from Vision API", error_class: "non_json_response", latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { http_status: String(visionRes.status), content_type: contentType, response_snippet: rawText.substring(0, 200), parse_method: method } };
+    }
+
+    let data: Record<string, unknown>;
+    try { data = JSON.parse(rawText); } catch { return { success: false, error: "Failed to parse Vision response JSON", error_class: "non_json_response", latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { content_type: contentType, response_snippet: rawText.substring(0, 200), parse_method: method } }; }
+
+    if (Array.isArray(data.responses)) {
+      return { success: true, latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { parse_method: method, client_email: sa.client_email ? "configured" : "missing", response_count: String((data.responses as unknown[]).length) }, error: null };
+    }
+
+    return { success: false, error: "Missing 'responses' array in Vision API response", latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { parse_method: method, response_snippet: rawText.substring(0, 200) } };
+  } catch (e) {
+    const latency_ms = Math.round(performance.now() - start);
+    const isTimeout = e instanceof DOMException && e.name === "AbortError";
+    return { success: false, error: e instanceof Error ? e.message : "Unknown", error_class: isTimeout ? "timeout" : "network_error", latency_ms, resolved_model: "Cloud Vision API v1", gateway_headers: { parse_method: method } };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 serve(async (req) => {
