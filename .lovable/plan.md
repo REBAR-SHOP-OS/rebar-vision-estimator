@@ -1,47 +1,32 @@
 
 
-## Plan: Make Scope Include All Elements by Default
+## Plan: Fix Scope Restriction in Analysis Prompt
 
 ### Problem
-When "Smart Calculation" auto-proceeds (high confidence), `buildScopeFromDetection()` uses the AI's `recommendedScope` array, which only contains the few elements the AI detected (e.g., CAGE, RETAINING_WALL, FOOTING). This causes the analysis to ignore other element types that may exist in the blueprints.
+Even though the UI now selects all element types by default, the edge function prompt at line 1163 says **"Only analyze these element types: ... Ignore any elements NOT in this list."** — this hard restriction in the AI prompt is what causes the output to say "strictly limited to CAGE, RETAINING_WALL, and FOOTING." The prompt language forces the AI to ignore everything else.
 
-The same issue exists in the interactive `ScopeDefinitionPanel` — when `recommendedScope` arrives, it replaces the default "all selected" state with only the detected subset.
+When all 14 scope items are selected, the instruction should guide the AI to look for everything, not restrict it.
 
-### Root Cause
-- `buildScopeFromDetection()` (line 116-117): For non-cage, non-residential projects, it uses `recommendedScope` instead of all items.
-- `ScopeDefinitionPanel` useEffect (line 170-172): Same logic — sets selected items to only `recommendedScope`.
+### Fix (single file: `supabase/functions/analyze-blueprint/index.ts`)
 
-### Fix (single file: `src/components/chat/ScopeDefinitionPanel.tsx`)
+**Change the scope injection logic (lines 1161-1165):**
 
-**1. `buildScopeFromDetection()`** — For general building categories (commercial, industrial, infrastructure), always return ALL scope items. Only restrict for `cage_only` and `bar_list_only`.
+- If ALL scope items are selected (or the list is large, e.g. >= 10), change the wording to: "Analyze all structural element types found in the drawings, including but not limited to: ..."
+- Only use restrictive "Only analyze these" / "Ignore any elements NOT in this list" language when the user has explicitly narrowed the scope (small subset selected)
+- Always add: "Treat Cage Assemblies and Loose Rebar as separate estimation groups with independent outputs."
 
 ```typescript
-// Change lines 114-119 from:
-} else if (n.primaryCategory === "residential") {
-  scopeItems = [...RESIDENTIAL_SCOPE];
-} else if (n.recommendedScope?.length) {
-  scopeItems = [...n.recommendedScope];
-} else {
-  scopeItems = SCOPE_ITEMS.map((s) => s.id);
-}
-
-// To:
-} else {
-  // Always include all elements — the AI will extract what it finds
-  scopeItems = SCOPE_ITEMS.map((s) => s.id);
+if (scope.scopeItems && scope.scopeItems.length > 0) {
+  const allSelected = scope.scopeItems.length >= TOTAL_SCOPE_COUNT; // 14
+  if (allSelected) {
+    scopeBlock += `Analyze ALL structural element types found in the drawings.\n`;
+    scopeBlock += `This includes (but is not limited to): ${scope.scopeItems.join(", ")}\n`;
+  } else {
+    scopeBlock += `Focus on these element types: ${scope.scopeItems.join(", ")}\n`;
+    scopeBlock += `Prioritize these elements but also flag any other significant elements discovered.\n`;
+  }
 }
 ```
 
-**2. `useEffect` in ScopeDefinitionPanel** — Remove the `recommendedScope` branch so the panel keeps all items selected by default for non-special categories.
-
-```typescript
-// Change lines 167-173: remove the recommendedScope branch
-} else if (normalized.primaryCategory === "residential") {
-  setSelectedItems(RESIDENTIAL_SCOPE);
-  setScopeLocked(false);
-}
-// Remove the else-if for recommendedScope
-```
-
-This ensures the AI always receives the full scope and can find all element types present in the blueprints, rather than being artificially limited to only the ones detected during the quick classification pass.
+This removes the artificial "Ignore any elements NOT in this list" restriction and lets the AI find everything in the blueprints. The separate cage vs loose rebar grouping is already handled by the category-specific rules injected via `getCategorySpecificRules`.
 
