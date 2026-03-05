@@ -71,13 +71,13 @@ async function getGoogleAccessToken(): Promise<string> {
   return (await tokenRes.json()).access_token;
 }
 
-async function callVisionAPI(
+async function callVisionAPIByUrl(
   accessToken: string,
-  imageBase64: string,
+  imageUrl: string,
   features: { type: string; maxResults?: number }[],
   imageContext?: Record<string, unknown>
 ): Promise<any> {
-  const request: any = { image: { content: imageBase64 }, features };
+  const request: any = { image: { source: { imageUri: imageUrl } }, features };
   if (imageContext) request.imageContext = imageContext;
 
   const res = await fetch("https://vision.googleapis.com/v1/images:annotate", {
@@ -153,28 +153,16 @@ serve(async (req) => {
 
     const accessToken = await getGoogleAccessToken();
 
-    // Download image
-    const imgResponse = await fetch(image_url);
-    if (!imgResponse.ok) {
-      return new Response(JSON.stringify({ error: `Image download failed: ${imgResponse.status}` }), {
-        status: 502,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const imgBuffer = await imgResponse.arrayBuffer();
-    const imgBase64 = encodeBase64(imgBuffer);
-
-    // Run 3 OCR passes in parallel
-    const [pass1, pass2, pass3] = await Promise.all([
-      callVisionAPI(accessToken, imgBase64, [{ type: "TEXT_DETECTION" }]),
-      callVisionAPI(accessToken, imgBase64, [{ type: "DOCUMENT_TEXT_DETECTION" }]),
-      callVisionAPI(accessToken, imgBase64, [{ type: "TEXT_DETECTION" }], { languageHints: ["en"] }),
+    // Use imageUri — Vision API fetches the image directly, no download needed in edge function
+    // Run 2 OCR passes (TEXT_DETECTION + DOCUMENT_TEXT_DETECTION) to save CPU
+    const [pass1, pass2] = await Promise.all([
+      callVisionAPIByUrl(accessToken, image_url, [{ type: "TEXT_DETECTION" }]),
+      callVisionAPIByUrl(accessToken, image_url, [{ type: "DOCUMENT_TEXT_DETECTION" }]),
     ]);
 
     const ocrResults: OcrPassResult[] = [
       extractResult(pass1, 1, "STANDARD"),
       extractResult(pass2, 2, "ENHANCED"),
-      extractResult(pass3, 3, "ALT_CROP"),
     ];
 
     const totalBlocks = ocrResults.reduce((s, r) => s + r.blocks.length, 0);
