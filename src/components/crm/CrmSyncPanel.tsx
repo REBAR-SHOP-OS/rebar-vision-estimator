@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Link2, ExternalLink } from "lucide-react";
+import { Link2, ExternalLink, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   Table,
@@ -45,7 +45,6 @@ interface CrmSyncPanelProps {
 const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose }) => {
   const { user } = useAuth();
   const [deals, setDeals] = useState<CrmDeal[]>([]);
-  const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [linkingDealId, setLinkingDealId] = useState<string | null>(null);
 
@@ -56,57 +55,27 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose }) => {
   const loadDeals = async () => {
     setLoading(true);
     const { data, error } = await supabase
-      .from("crm_deals" as any)
+      .from("crm_deals")
       .select("*")
       .order("synced_at", { ascending: false });
 
     if (error) {
       console.error("Failed to load deals:", error);
     } else {
-      setDeals((data as any[]) || []);
+      setDeals((data as CrmDeal[]) || []);
     }
     setLoading(false);
-  };
-
-  const syncDeals = async () => {
-    setSyncing(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch(
-        `https://${import.meta.env.VITE_SUPABASE_PROJECT_ID}.supabase.co/functions/v1/pipeline-crm`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session?.access_token}`,
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          },
-          body: JSON.stringify({ action: "sync_deals" }),
-        }
-      );
-      const result = await res.json();
-      if (result.error) {
-        toast.error(result.error);
-      } else {
-        toast.success(`Synced ${result.synced} deals from Pipeline CRM`);
-        await loadDeals();
-      }
-    } catch (err) {
-      toast.error("Sync failed");
-      console.error(err);
-    }
-    setSyncing(false);
   };
 
   const linkDealToProject = async (dealCrmId: string, projectId: string) => {
     if (!user) return;
     const { error } = await supabase
-      .from("estimate_outcomes" as any)
+      .from("estimate_outcomes")
       .upsert({
         user_id: user.id,
         project_id: projectId,
         crm_deal_id: dealCrmId,
-      } as any, { onConflict: "user_id,project_id" } as any);
+      }, { onConflict: "user_id,project_id" } as any);
 
     if (error) {
       toast.error("Failed to link deal");
@@ -120,14 +89,10 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose }) => {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between p-4 border-b border-border">
-        <h2 className="text-lg font-semibold text-foreground">Pipeline CRM Deals</h2>
-        <div className="flex gap-2">
-          <Button onClick={syncDeals} disabled={syncing} size="sm" variant="outline" className="gap-2">
-            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-            {syncing ? "Syncing..." : "Sync Deals"}
-          </Button>
-          <Button onClick={onClose} size="sm" variant="ghost">Close</Button>
-        </div>
+        <h2 className="text-lg font-semibold text-foreground">CRM Deals</h2>
+        <Button onClick={onClose} size="sm" variant="ghost">
+          <X className="h-4 w-4" />
+        </Button>
       </div>
 
       <div className="flex-1 overflow-auto p-4">
@@ -136,11 +101,7 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose }) => {
         ) : deals.length === 0 ? (
           <div className="text-center py-12 space-y-3">
             <ExternalLink className="h-10 w-10 mx-auto text-muted-foreground" />
-            <p className="text-muted-foreground text-sm">No deals synced yet.</p>
-            <Button onClick={syncDeals} disabled={syncing} size="sm" className="gap-2">
-              <RefreshCw className="h-4 w-4" />
-              Sync from Pipeline CRM
-            </Button>
+            <p className="text-muted-foreground text-sm">No deals found in the database.</p>
           </div>
         ) : (
           <Table>
