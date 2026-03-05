@@ -218,35 +218,69 @@ async function probeGateway(integration: typeof integrations[0]) {
 }
 
 // Probe Google Cloud Vision by checking env var and sending a minimal request
-function safeParseSAKey(raw: string): { parsed: Record<string, unknown> | null; error: string | null; method: string } {
-  // Strip BOM and trim whitespace
+function validateSAKey(obj: Record<string, unknown>): string | null {
+  if (!obj.client_email) return "Missing required field: client_email";
+  if (!obj.private_key) return "Missing required field: private_key";
+  if (typeof obj.private_key === "string" && !obj.private_key.includes("BEGIN PRIVATE KEY")) {
+    return "private_key does not contain 'BEGIN PRIVATE KEY' header";
+  }
+  return null;
+}
+
+function safeParseSAKey(raw: string): { parsed: Record<string, unknown> | null; error: string | null; method: string; hint?: string } {
   const cleaned = raw.replace(/^\uFEFF/, "").trim();
 
-  // Attempt 1: direct parse
-  try {
-    const obj = JSON.parse(cleaned);
-    if (typeof obj === "object" && obj !== null) return { parsed: obj, error: null, method: "direct" };
-    // If parse returned a string, it was double-encoded
-    if (typeof obj === "string") {
-      const inner = JSON.parse(obj);
-      if (typeof inner === "object" && inner !== null) return { parsed: inner, error: null, method: "double-encoded" };
-    }
-    return { parsed: null, error: "Parsed value is not an object", method: "direct" };
-  } catch (_e1) {
-    // Attempt 2: maybe it's double-encoded with outer quotes
+  if (!cleaned) return { parsed: null, error: "Empty value", method: "failed" };
+
+  // Helper: try JSON parse and validate
+  const tryParseAndValidate = (str: string, method: string): { parsed: Record<string, unknown> | null; error: string | null; method: string } | null => {
     try {
-      const unwrapped = JSON.parse(`"${cleaned}"`);
-      const obj = JSON.parse(unwrapped);
-      if (typeof obj === "object" && obj !== null) return { parsed: obj, error: null, method: "double-encoded-alt" };
-    } catch (_e2) {
-      // fall through
-    }
-    return {
-      parsed: null,
-      error: `JSON parse failed: ${_e1 instanceof Error ? _e1.message : "unknown"}`,
-      method: "failed",
-    };
+      const obj = JSON.parse(str);
+      if (typeof obj === "object" && obj !== null) {
+        const valErr = validateSAKey(obj);
+        if (valErr) return { parsed: null, error: `SA key parsed (${method}) but invalid: ${valErr}`, method };
+        return { parsed: obj, error: null, method };
+      }
+      if (typeof obj === "string") {
+        // double-encoded
+        return tryParseAndValidate(obj, "double-encoded");
+      }
+    } catch { /* fall through */ }
+    return null;
+  };
+
+  // Attempt 1: direct JSON (starts with "{")
+  if (cleaned.startsWith("{")) {
+    const result = tryParseAndValidate(cleaned, "direct");
+    if (result) return result;
+    return { parsed: null, error: "Starts with '{' but JSON parse failed", method: "failed" };
   }
+
+  // Attempt 2: base64 decode then JSON parse
+  const isBase64 = /^[A-Za-z0-9+/\r\n]+=*$/.test(cleaned) && cleaned.length > 50;
+  if (isBase64) {
+    try {
+      const decoded = new TextDecoder().decode(Uint8Array.from(atob(cleaned), c => c.charCodeAt(0)));
+      const result = tryParseAndValidate(decoded, "base64");
+      if (result) return result;
+    } catch { /* not valid base64 */ }
+  }
+
+  // Attempt 3: double-encoded with outer quotes
+  try {
+    const unwrapped = JSON.parse(`"${cleaned}"`);
+    const result = tryParseAndValidate(unwrapped, "double-encoded-alt");
+    if (result) return result;
+  } catch { /* fall through */ }
+
+  // Descriptive failure
+  const looks = /^[0-9a-f]+$/i.test(cleaned) ? `${cleaned.length}-char hex string` : `${cleaned.length}-char non-JSON string`;
+  return {
+    parsed: null,
+    error: `GOOGLE_VISION_SA_KEY is not a valid service account key. Expected JSON or base64-encoded JSON. Got ${looks}.`,
+    method: "failed",
+    hint: "Store the full JSON content from your Google Cloud service account .json file, or base64-encode it (recommended to avoid escaping issues).",
+  };
 }
 
 // 1x1 transparent PNG as base64
@@ -366,10 +400,10 @@ async function probeVision(_integration: typeof integrations[0]) {
   }
 
   // Stage 2: SA key parse
-  const { parsed: sa, error: parseError, method } = safeParseSAKey(saKey);
+  const { parsed: sa, error: parseError, method, hint } = safeParseSAKey(saKey);
   if (!sa) {
-    stages.sa_key_parse = { status: "failed", detail: parseError, first_chars: saKey.substring(0, 20).replace(/[^ -~]/g, "?"), length: saKey.length, parse_method: method };
-    return { success: false, failed_stage: "sa_key_parse", error: "Not valid JSON service account key", error_class: "bad_config", stages, latency_ms: Math.round(performance.now() - totalStart), resolved_model: "Cloud Vision API v1", gateway_headers: {} };
+    stages.sa_key_parse = { status: "failed", detail: parseError, first_chars: saKey.substring(0, 20).replace(/[^ -~]/g, "?"), length: saKey.length, parse_method: method, ...(hint ? { hint } : {}) };
+    return { success: false, failed_stage: "sa_key_parse", error: parseError || "Not valid JSON service account key", error_class: "bad_config", stages, latency_ms: Math.round(performance.now() - totalStart), resolved_model: "Cloud Vision API v1", gateway_headers: {} };
   }
   stages.sa_key_parse = { status: "ok", parse_method: method, client_email: sa.client_email ? "configured" : "missing" };
 
