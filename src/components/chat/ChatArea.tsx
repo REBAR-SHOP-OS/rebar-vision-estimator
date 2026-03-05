@@ -766,7 +766,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     const withoutBbox: any[] = [];
 
     validationData.elements.forEach((el: any) => {
-      if (el.regions?.tag_region?.bbox) {
+      const bbox = el.regions?.tag_region?.bbox;
+      const hasBbox = bbox && (bbox[2] - bbox[0]) > 10 && (bbox[3] - bbox[1]) > 10;
+      if (hasBbox) {
         withBbox.push({
           element_id: el.element_id,
           element_type: el.element_type,
