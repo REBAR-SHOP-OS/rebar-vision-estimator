@@ -21,14 +21,38 @@ function getOdooCreds() {
   };
 }
 
+async function authenticateOdoo(odoo: ReturnType<typeof getOdooCreds>): Promise<number> {
+  const resp = await fetch(`${odoo.url}/jsonrpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      method: "call",
+      id: Date.now(),
+      params: {
+        service: "common",
+        method: "authenticate",
+        args: [odoo.db, odoo.login, odoo.apiKey, {}],
+      },
+    }),
+  });
+  const json = await resp.json();
+  console.log("Odoo auth response:", JSON.stringify(json));
+  const uid = json?.result;
+  if (!uid || typeof uid !== "number") {
+    throw new Error(`Odoo authentication failed: ${JSON.stringify(json?.error || json)}`);
+  }
+  return uid;
+}
+
 async function fetchOdooAttachment(odooId: string) {
   const odoo = getOdooCreds();
+  const uid = await authenticateOdoo(odoo);
 
-  // Fetch metadata + binary in parallel via JSON-RPC
   const makeRpc = (fields: string[]) =>
     fetch(`${odoo.url}/jsonrpc`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${odoo.apiKey}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         jsonrpc: "2.0",
         method: "call",
@@ -36,7 +60,7 @@ async function fetchOdooAttachment(odooId: string) {
         params: {
           service: "object",
           method: "execute_kw",
-          args: [odoo.db, 2, odoo.apiKey, "ir.attachment", "read",
+          args: [odoo.db, uid, odoo.apiKey, "ir.attachment", "read",
             [[parseInt(odooId)]], { fields }],
         },
       }),
@@ -47,10 +71,13 @@ async function fetchOdooAttachment(odooId: string) {
     makeRpc(["datas"]),
   ]);
 
+  console.log("Odoo meta response keys:", JSON.stringify({ result: !!metaJson?.result, error: metaJson?.error }));
+  console.log("Odoo data response keys:", JSON.stringify({ result: !!dataJson?.result, hasDatas: !!dataJson?.result?.[0]?.datas, error: dataJson?.error }));
+
   const meta = metaJson?.result?.[0];
   const dataRec = dataJson?.result?.[0];
   if (!meta || !dataRec?.datas) {
-    throw new Error(`Attachment ${odooId} not found or empty`);
+    throw new Error(`Attachment ${odooId} not found or empty. Meta: ${JSON.stringify(metaJson?.error || metaJson?.result)}, Data: ${JSON.stringify(dataJson?.error || 'no datas field')}`);
   }
 
   const binaryStr = atob(dataRec.datas);
