@@ -1,25 +1,40 @@
 
 
-## Fix: MCP Server "Transport not bound to a server" Error
+## Fix: MCP Server -- Two Root Causes
 
-**Root cause**: Two issues in `supabase/functions/mcp-server/index.ts`:
+The edge function logs show two distinct errors:
 
-1. **Wrong `mcpServer.tool()` signature** -- mcp-lite expects a single object `mcpServer.tool({ name, description, inputSchema, handler })`, but the current code uses a two-argument form `mcpServer.tool("name", { ... })`. This causes silent failures during tool registration, leaving the server uninitialized.
+1. **`Cannot read properties of undefined (reading 'inputSchema')`** -- Wrong tool registration signature. mcp-lite expects **two arguments**: `mcpServer.tool("name", { description, inputSchema, handler })`. The current code passes a single object, so mcp-lite treats the object as the name string and `undefined` as the config, crashing on `.inputSchema`.
 
-2. **Missing CORS headers for MCP protocol** -- ChatGPT's MCP client sends `Accept: application/json, text/event-stream` which needs to be allowed.
+2. **`Transport not bound to a server`** -- The transport must be bound to the server before handling requests. The docs show `transport.bind(mcpServer)` returns an HTTP handler. Currently the code calls `transport.handleRequest(req, mcpServer)` without prior binding.
 
-**Changes to `supabase/functions/mcp-server/index.ts`**:
+### Changes to `supabase/functions/mcp-server/index.ts`
 
-1. Rewrite all 8 `mcpServer.tool()` calls from:
-   ```typescript
-   mcpServer.tool("list_projects", { description, inputSchema, handler })
-   ```
-   to:
-   ```typescript
-   mcpServer.tool({ name: "list_projects", description, inputSchema, handler })
-   ```
+**Fix 1 -- Tool registration (all 8 tools):**
+```typescript
+// FROM (broken):
+mcpServer.tool({ name: "list_projects", description, inputSchema, handler })
 
-2. Update CORS `Access-Control-Allow-Headers` to include `accept` header for MCP protocol compatibility.
+// TO (correct per mcp-lite docs):
+mcpServer.tool("list_projects", { description, inputSchema, handler })
+```
 
-All tool handlers and logic remain identical -- only the registration call signature changes.
+**Fix 2 -- Transport binding:**
+```typescript
+// FROM (broken):
+const transport = new StreamableHttpTransport();
+app.all("/*", async (c) => {
+  return await transport.handleRequest(c.req.raw, mcpServer);
+});
+
+// TO (correct per mcp-lite docs):
+const transport = new StreamableHttpTransport();
+const httpHandler = transport.bind(mcpServer);
+app.all("/*", async (c) => {
+  if (c.req.method === "OPTIONS") { /* CORS response */ }
+  return await httpHandler(c.req.raw);
+});
+```
+
+All tool handler logic remains identical. Only the call signatures and transport setup change.
 
