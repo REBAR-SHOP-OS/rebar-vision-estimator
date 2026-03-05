@@ -86,6 +86,104 @@ export type Database = {
         }
         Relationships: []
       }
+      crm_deals: {
+        Row: {
+          close_date: string | null
+          company_name: string | null
+          crm_deal_id: string
+          deal_name: string | null
+          deal_value: number | null
+          id: string
+          metadata: Json | null
+          stage: string | null
+          status: string | null
+          synced_at: string | null
+          user_id: string
+        }
+        Insert: {
+          close_date?: string | null
+          company_name?: string | null
+          crm_deal_id: string
+          deal_name?: string | null
+          deal_value?: number | null
+          id?: string
+          metadata?: Json | null
+          stage?: string | null
+          status?: string | null
+          synced_at?: string | null
+          user_id: string
+        }
+        Update: {
+          close_date?: string | null
+          company_name?: string | null
+          crm_deal_id?: string
+          deal_name?: string | null
+          deal_value?: number | null
+          id?: string
+          metadata?: Json | null
+          stage?: string | null
+          status?: string | null
+          synced_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      estimate_outcomes: {
+        Row: {
+          actual_cost: number | null
+          actual_weight_kg: number | null
+          award_status: string | null
+          change_orders_total: number | null
+          created_at: string | null
+          crm_deal_id: string | null
+          id: string
+          notes: string | null
+          project_id: string | null
+          quoted_price: number | null
+          quoted_weight_kg: number | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          actual_cost?: number | null
+          actual_weight_kg?: number | null
+          award_status?: string | null
+          change_orders_total?: number | null
+          created_at?: string | null
+          crm_deal_id?: string | null
+          id?: string
+          notes?: string | null
+          project_id?: string | null
+          quoted_price?: number | null
+          quoted_weight_kg?: number | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          actual_cost?: number | null
+          actual_weight_kg?: number | null
+          award_status?: string | null
+          change_orders_total?: number | null
+          created_at?: string | null
+          crm_deal_id?: string | null
+          id?: string
+          notes?: string | null
+          project_id?: string | null
+          quoted_price?: number | null
+          quoted_weight_kg?: number | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "estimate_outcomes_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           content: string

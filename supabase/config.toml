@@ -17,3 +17,9 @@ verify_jwt = false
 
 [functions.generate-shop-drawing]
 verify_jwt = false
+
+[functions.extract-pdf-text]
+verify_jwt = false
+
+[functions.pipeline-crm]
+verify_jwt = false

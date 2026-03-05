@@ -5,7 +5,8 @@ import { useLanguage, LANGUAGES, type Language } from "@/contexts/LanguageContex
 import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe } from "lucide-react";
+import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2 } from "lucide-react";
+import CrmSyncPanel from "@/components/crm/CrmSyncPanel";
 import BrainKnowledgeDialog from "@/components/chat/BrainKnowledgeDialog";
 import { toast } from "sonner";
 import ChatArea from "@/components/chat/ChatArea";
@@ -38,6 +39,7 @@ const Dashboard: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<number | null>(null);
   const isMobile = useIsMobile();
   const [calculationMode, setCalculationMode] = useState<"smart" | "step-by-step" | null>(null);
+  const [showCrm, setShowCrm] = useState(false);
   const [processingPhase, setProcessingPhase] = useState<string | null>(null);
   const [initialFiles, setInitialFiles] = useState<File[] | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -350,7 +352,12 @@ const Dashboard: React.FC = () => {
         </header>
 
         {/* Chat or Welcome */}
-        {activeProjectId ? (
+        {showCrm ? (
+          <CrmSyncPanel
+            projects={projects.map(p => ({ id: p.id, name: p.name }))}
+            onClose={() => setShowCrm(false)}
+          />
+        ) : activeProjectId ? (
           <ChatArea
             projectId={activeProjectId}
             initialFiles={initialFiles}
@@ -395,10 +402,16 @@ const Dashboard: React.FC = () => {
                 ))}
               </div>
 
-              <Button onClick={handleNewEstimationClick} disabled={creatingProject} size="lg" className="gap-2 h-12 px-8 rounded-xl font-bold text-base">
-                <Plus className="h-5 w-5" />
-                {t("startNewEstimation")}
-              </Button>
+              <div className="flex gap-3 justify-center flex-wrap">
+                <Button onClick={handleNewEstimationClick} disabled={creatingProject} size="lg" className="gap-2 h-12 px-8 rounded-xl font-bold text-base">
+                  <Plus className="h-5 w-5" />
+                  {t("startNewEstimation")}
+                </Button>
+                <Button onClick={() => setShowCrm(true)} variant="outline" size="lg" className="gap-2 h-12 px-6 rounded-xl">
+                  <Building2 className="h-5 w-5" />
+                  CRM Deals
+                </Button>
+              </div>
             </div>
           </div>
         )}

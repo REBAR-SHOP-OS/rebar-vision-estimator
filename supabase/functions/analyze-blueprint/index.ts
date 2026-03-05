@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { decode as decodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+import { getDocument } from "https://esm.sh/pdfjs-serverless@0.4.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -199,6 +200,108 @@ async function tripleOCR(accessToken: string, imageBase64: string): Promise<OcrP
     extractResult(pass2, 2, "ENHANCED"),
     extractResult(pass3, 3, "ALT_CROP"),
   ];
+}
+
+// ── PDF-Native Text Extraction (pdfjs-serverless) ──
+
+interface PdfPageExtraction {
+  page_number: number;
+  raw_text: string;
+  tables: string[][];
+  text_blocks: string[];
+  is_scanned: boolean;
+}
+
+interface PdfExtractionResult {
+  pages: PdfPageExtraction[];
+  total_pages: number;
+  sha256: string;
+  has_text_layer: boolean;
+}
+
+async function hashSHA256(data: ArrayBuffer): Promise<string> {
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function extractPdfText(pdfBytes: ArrayBuffer): Promise<PdfExtractionResult> {
+  const sha256 = await hashSHA256(pdfBytes);
+  const pages: PdfPageExtraction[] = [];
+
+  try {
+    const doc = await getDocument(new Uint8Array(pdfBytes));
+    const totalPages = doc.numPages;
+
+    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+      try {
+        const page = await doc.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        const items = textContent.items.filter((item: any) => item.str && item.str.trim());
+
+        if (items.length < 3) {
+          pages.push({ page_number: pageNum, raw_text: "", tables: [], text_blocks: [], is_scanned: true });
+          continue;
+        }
+
+        // Group by Y-coordinate into rows (3pt threshold)
+        const rowMap = new Map<number, { x: number; text: string; fontSize: number }[]>();
+        for (const item of items) {
+          const y = Math.round((item as any).transform?.[5] ?? 0);
+          const x = (item as any).transform?.[4] ?? 0;
+          const fontSize = (item as any).transform?.[0] ?? 12;
+          // Find existing row within 3pt
+          let matchedY = y;
+          for (const existingY of rowMap.keys()) {
+            if (Math.abs(existingY - y) <= 3) { matchedY = existingY; break; }
+          }
+          if (!rowMap.has(matchedY)) rowMap.set(matchedY, []);
+          rowMap.get(matchedY)!.push({ x, text: (item as any).str, fontSize });
+        }
+
+        // Sort rows top-to-bottom (higher Y = top in PDF coords)
+        const sortedYs = [...rowMap.keys()].sort((a, b) => b - a);
+        const rows: string[] = [];
+        const rowXPositions: number[][] = [];
+
+        for (const y of sortedYs) {
+          const rowItems = rowMap.get(y)!.sort((a, b) => a.x - b.x);
+          rows.push(rowItems.map(r => r.text).join("  "));
+          rowXPositions.push(rowItems.map(r => Math.round(r.x)));
+        }
+
+        // Detect tables: 3+ consecutive rows with similar column count and alignment
+        const tables: string[][] = [];
+        let tableStart = -1;
+        for (let i = 0; i < rows.length - 2; i++) {
+          const colCounts = [rowXPositions[i].length, rowXPositions[i+1]?.length || 0, rowXPositions[i+2]?.length || 0];
+          const similar = colCounts.every(c => c >= 3 && Math.abs(c - colCounts[0]) <= 2);
+          if (similar && tableStart === -1) tableStart = i;
+          else if (!similar && tableStart !== -1) {
+            tables.push(rows.slice(tableStart, i + 1));
+            tableStart = -1;
+          }
+        }
+        if (tableStart !== -1) tables.push(rows.slice(tableStart));
+
+        const rawText = rows.join("\n");
+        pages.push({
+          page_number: pageNum,
+          raw_text: rawText,
+          tables: tables,
+          text_blocks: rows,
+          is_scanned: false,
+        });
+      } catch (pageErr) {
+        console.error(`PDF page ${pageNum} extraction error:`, pageErr);
+        pages.push({ page_number: pageNum, raw_text: "", tables: [], text_blocks: [], is_scanned: true });
+      }
+    }
+
+    return { pages, total_pages: totalPages, sha256, has_text_layer: pages.some(p => !p.is_scanned) };
+  } catch (err) {
+    console.error("pdfjs-serverless extraction failed:", err);
+    return { pages: [], total_pages: 0, sha256, has_text_layer: false };
+  }
 }
 
 // ── Atomic Truth Pipeline: System Prompts ──
@@ -922,6 +1025,9 @@ serve(async (req) => {
     // Google Vision OCR results to inject
     let visionOcrText = "";
     let visionOcrAvailable = false;
+    // PDF-native text extraction results
+    let pdfNativeText = "";
+    let pdfNativeAvailable = false;
 
     if (allFileUrls.length > 0) {
       // Try to get Google Vision access token
@@ -955,6 +1061,36 @@ serve(async (req) => {
             fileContentParts.push({ type: "image_url", image_url: { url: `data:application/pdf;base64,${base64}` } });
             pdfCount++;
             console.log("PDF converted, base64:", Math.round(base64.length / 1024), "KB");
+
+            // PDF-native text extraction via pdfjs-serverless
+            try {
+              console.log("Running PDF-native text extraction...");
+              const pdfExtraction = await extractPdfText(pdfBuffer);
+              if (pdfExtraction.has_text_layer) {
+                pdfNativeText += `\n\n## PDF-NATIVE TEXT EXTRACTION — ${url.split('/').pop()?.split('?')[0] || 'pdf'} (SHA-256: ${pdfExtraction.sha256.substring(0, 16)}...)\n`;
+                pdfNativeText += `Total pages: ${pdfExtraction.total_pages}, Text pages: ${pdfExtraction.pages.filter(p => !p.is_scanned).length}, Scanned pages: ${pdfExtraction.pages.filter(p => p.is_scanned).length}\n\n`;
+                for (const page of pdfExtraction.pages) {
+                  if (page.is_scanned) {
+                    pdfNativeText += `### Page ${page.page_number} — SCANNED (no text layer, use OCR)\n\n`;
+                    continue;
+                  }
+                  pdfNativeText += `### Page ${page.page_number}\n`;
+                  if (page.tables.length > 0) {
+                    pdfNativeText += `**Tables detected: ${page.tables.length}**\n`;
+                    for (const table of page.tables) {
+                      pdfNativeText += "```\n" + table.join("\n") + "\n```\n\n";
+                    }
+                  }
+                  pdfNativeText += `**Full text:**\n\`\`\`\n${page.raw_text}\n\`\`\`\n\n`;
+                }
+                pdfNativeAvailable = true;
+                console.log(`PDF-native extraction: ${pdfExtraction.pages.filter(p => !p.is_scanned).length}/${pdfExtraction.total_pages} text pages`);
+              } else {
+                console.log("PDF has no text layer — fully scanned, relying on OCR");
+              }
+            } catch (pdfExtErr) {
+              console.error("PDF-native extraction failed, continuing with visual analysis:", pdfExtErr);
+            }
           } catch (err) { console.error("PDF convert error:", err); }
         } else {
           // Check if this is a supported image format
@@ -1008,6 +1144,10 @@ serve(async (req) => {
       for (let i = 0; i < messages.length; i++) {
         if (i === firstUserMsgIndex) {
           let userText = messages[i].content || "Please analyze these blueprints.";
+          // Inject PDF-native text extraction (highest priority)
+          if (pdfNativeAvailable && pdfNativeText) {
+            userText += `\n\n---\n\n# PDF-NATIVE TEXT EXTRACTION (HIGH ACCURACY)\nThe following text was DIRECTLY parsed from the PDF vector/text layer using pdfjs. This is MORE ACCURATE than OCR for dimensions, bar sizes, quantities, and schedule tables. Use it as your PRIMARY data source. Only use OCR/visual analysis to supplement missing information or for scanned pages.\n${pdfNativeText}`;
+          }
           // Inject Vision OCR results into user message
           if (visionOcrAvailable && visionOcrText) {
             userText += `\n\n---\n\n# REAL Google Vision OCR Results (USE THESE — do NOT re-read text from images)\n${visionOcrText}`;
