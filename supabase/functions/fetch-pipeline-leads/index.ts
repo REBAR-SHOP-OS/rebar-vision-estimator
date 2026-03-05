@@ -17,8 +17,6 @@ const TARGET_STAGES = [
   "qualified",
 ];
 
-const LEAD_FILES_TABLE = "lead_files";
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -35,36 +33,59 @@ Deno.serve(async (req) => {
       .order("expected_value", { ascending: false, nullsFirst: false });
 
     if (error) {
-      console.error("Failed to fetch leads:", error);
       return new Response(JSON.stringify({ error: error.message }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // For each lead, check lead_files table for attachments
     const leadIds = (leads || []).map((l: any) => l.id);
-    const { data: allFiles } = await rebarClient
-      .from(LEAD_FILES_TABLE)
-      .select("*")
-      .in("lead_id", leadIds.length > 0 ? leadIds : ["__none__"]);
-
-    // Group files by lead_id
     const filesByLead: Record<string, any[]> = {};
-    for (const file of allFiles || []) {
-      if (!filesByLead[file.lead_id]) filesByLead[file.lead_id] = [];
-      filesByLead[file.lead_id].push(file);
+    let totalFilesFound = 0;
+
+    // Batch lead_files queries in chunks of 30 to stay within URL limits
+    for (let i = 0; i < leadIds.length; i += 30) {
+      const batch = leadIds.slice(i, i + 30);
+      const { data: files, error: filesError } = await rebarClient
+        .from("lead_files")
+        .select("id, lead_id, file_name, file_url, storage_path, mime_type, odoo_id, file_size_bytes")
+        .in("lead_id", batch)
+        .limit(500);
+
+      if (filesError) {
+        console.error(`Files batch error:`, filesError.message);
+        continue;
+      }
+
+      for (const file of files || []) {
+        if (!filesByLead[file.lead_id]) filesByLead[file.lead_id] = [];
+        filesByLead[file.lead_id].push(file);
+        totalFilesFound++;
+      }
     }
 
-    const leadsWithFiles = (leads || []).map((lead: any) => ({
-      ...lead,
-      attachments: (filesByLead[lead.id] || []).map((f: any) => ({
-        name: f.file_name || f.name || "file",
-        size: f.file_size || f.size || 0,
-        mimeType: f.mime_type || f.content_type || "application/octet-stream",
-        url: f.file_url || f.url || f.public_url || null,
-      })),
-    }));
+    console.log(`Total files found: ${totalFilesFound} across ${Object.keys(filesByLead).length} leads`);
+
+    const leadsWithFiles = (leads || []).map((lead: any) => {
+      const files = filesByLead[lead.id] || [];
+      const attachments = files.map((f: any) => {
+        let url = f.file_url || null;
+        if (f.storage_path && !url) {
+          url = `${REBAR_URL}/storage/v1/object/public/lead-files/${f.storage_path}`;
+        }
+        if (!url && f.odoo_id) {
+          url = `${REBAR_URL}/functions/v1/odoo-file-proxy?id=${f.odoo_id}`;
+        }
+        return {
+          name: f.file_name || "file",
+          size: f.file_size_bytes || 0,
+          mimeType: f.mime_type || "application/octet-stream",
+          url,
+        };
+      }).filter((a: any) => a.url);
+
+      return { ...lead, attachments };
+    });
 
     return new Response(JSON.stringify({ leads: leadsWithFiles }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
