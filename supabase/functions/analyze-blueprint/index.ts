@@ -204,12 +204,22 @@ async function tripleOCR(accessToken: string, imageBase64: string): Promise<OcrP
 
 // ── PDF-Native Text Extraction (pdfjs-serverless) ──
 
+interface TitleBlockMeta {
+  sheet_number: string | null;
+  sheet_title: string | null;
+  revision_code: string | null;
+  scale_raw: string | null;
+  discipline: string | null;
+  drawing_type: string | null;
+}
+
 interface PdfPageExtraction {
   page_number: number;
   raw_text: string;
   tables: string[][];
   text_blocks: string[];
   is_scanned: boolean;
+  title_block: TitleBlockMeta | null;
 }
 
 interface PdfExtractionResult {
@@ -224,22 +234,49 @@ async function hashSHA256(data: ArrayBuffer): Promise<string> {
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function extractPdfText(pdfBytes: ArrayBuffer): Promise<PdfExtractionResult> {
+function extractTitleBlockMeta(text: string): TitleBlockMeta {
+  const tb: TitleBlockMeta = { sheet_number: null, sheet_title: null, revision_code: null, scale_raw: null, discipline: null, drawing_type: null };
+  const sheetMatch = text.match(/\b([A-Z]{1,2}[-]?\d{2,4}(?:\.\d+)?)\b/);
+  if (sheetMatch) tb.sheet_number = sheetMatch[1];
+  const scaleMatch = text.match(/(?:SCALE[:\s]*)?(\d+\s*[:/]\s*\d+)/i);
+  if (scaleMatch) tb.scale_raw = scaleMatch[1].trim();
+  const revMatch = text.match(/\bREV(?:ISION)?\.?\s*([A-Z0-9]{1,3})\b/i);
+  if (revMatch) tb.revision_code = revMatch[1];
+  const textUpper = text.toUpperCase();
+  if (/\bSTRUCTURAL\b/.test(textUpper) || /^S[-]?\d/.test(tb.sheet_number || "")) tb.discipline = "structural";
+  else if (/\bARCHITECTURAL\b/.test(textUpper) || /^A[-]?\d/.test(tb.sheet_number || "")) tb.discipline = "architectural";
+  else if (/\bMECHANICAL\b/.test(textUpper) || /^M[-]?\d/.test(tb.sheet_number || "")) tb.discipline = "mechanical";
+  else if (/\bELECTRICAL\b/.test(textUpper) || /^E[-]?\d/.test(tb.sheet_number || "")) tb.discipline = "electrical";
+  if (/\bFOUNDATION\s*PLAN\b/i.test(text)) tb.drawing_type = "foundation_plan";
+  else if (/\bSLAB\s*(?:REINFORCEMENT|REBAR)\b/i.test(text)) tb.drawing_type = "rebar_plan";
+  else if (/\bSCHEDULE\b/i.test(text)) tb.drawing_type = "schedule";
+  else if (/\bDETAIL/i.test(text)) tb.drawing_type = "detail";
+  else if (/\bSECTION/i.test(text)) tb.drawing_type = "section";
+  else if (/\bELEVATION/i.test(text)) tb.drawing_type = "elevation";
+  else if (/\bPLAN\b/i.test(text)) tb.drawing_type = "plan";
+  const titleMatch = text.match(/(?:SHEET\s*TITLE|DRAWING\s*TITLE)[:\s]*(.+)/i);
+  if (titleMatch) tb.sheet_title = titleMatch[1].trim().substring(0, 100);
+  return tb;
+}
+
+async function extractPdfText(pdfBytes: ArrayBuffer, maxPages: number = 999): Promise<PdfExtractionResult> {
   const sha256 = await hashSHA256(pdfBytes);
   const pages: PdfPageExtraction[] = [];
 
   try {
     const doc = await getDocument(new Uint8Array(pdfBytes));
     const totalPages = doc.numPages;
+    const pagesToProcess = Math.min(totalPages, maxPages);
+    console.log(`PDF has ${totalPages} pages, processing first ${pagesToProcess}`);
 
-    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+    for (let pageNum = 1; pageNum <= pagesToProcess; pageNum++) {
       try {
         const page = await doc.getPage(pageNum);
         const textContent = await page.getTextContent();
         const items = textContent.items.filter((item: any) => item.str && item.str.trim());
 
         if (items.length < 3) {
-          pages.push({ page_number: pageNum, raw_text: "", tables: [], text_blocks: [], is_scanned: true });
+          pages.push({ page_number: pageNum, raw_text: "", tables: [], text_blocks: [], is_scanned: true, title_block: null });
           continue;
         }
 
@@ -284,16 +321,18 @@ async function extractPdfText(pdfBytes: ArrayBuffer): Promise<PdfExtractionResul
         if (tableStart !== -1) tables.push(rows.slice(tableStart));
 
         const rawText = rows.join("\n");
+        const titleBlock = extractTitleBlockMeta(rawText);
         pages.push({
           page_number: pageNum,
           raw_text: rawText,
           tables: tables,
           text_blocks: rows,
           is_scanned: false,
+          title_block: titleBlock,
         });
       } catch (pageErr) {
         console.error(`PDF page ${pageNum} extraction error:`, pageErr);
-        pages.push({ page_number: pageNum, raw_text: "", tables: [], text_blocks: [], is_scanned: true });
+        pages.push({ page_number: pageNum, raw_text: "", tables: [], text_blocks: [], is_scanned: true, title_block: null });
       }
     }
 
@@ -1319,8 +1358,10 @@ Before outputting your final answer, you MUST:
       allFileUrls.push(...knowledgeContext.fileUrls);
     }
     const fileContentParts: any[] = [];
-    const MAX_PDF_SIZE_MB = 4;
-    const MAX_PDF_COUNT = 2;
+    const MAX_PDF_SIZE_MB = 25; // Allow real-world engineering PDFs (10-30MB)
+    const MAX_PDF_INLINE_MB = 15; // Max size for sending base64 to Gemini Vision
+    const MAX_PDF_COUNT = 3;
+    const MAX_PAGES_PER_PDF = 15; // Limit pages for text extraction
     let pdfCount = 0;
 
     // Google Vision OCR results to inject
@@ -1348,34 +1389,39 @@ Before outputting your final answer, you MUST:
             continue;
           }
           try {
-            console.log("Downloading PDF for base64:", url.substring(0, 80) + "...");
+            console.log("Downloading PDF:", url.substring(0, 80) + "...");
             const pdfResponse = await fetch(url);
             if (!pdfResponse.ok) { console.error("PDF download failed:", pdfResponse.status); continue; }
             const pdfBuffer = await pdfResponse.arrayBuffer();
             const sizeMB = pdfBuffer.byteLength / (1024 * 1024);
             console.log("PDF size:", sizeMB.toFixed(2), "MB");
             if (sizeMB > MAX_PDF_SIZE_MB) {
-              console.log(`PDF too large (${sizeMB.toFixed(1)}MB > ${MAX_PDF_SIZE_MB}MB), skipping`);
+              console.log(`PDF too large (${sizeMB.toFixed(1)}MB > ${MAX_PDF_SIZE_MB}MB), skipping entirely`);
               continue;
             }
-            const base64 = encodeBase64(pdfBuffer);
-            fileContentParts.push({ type: "image_url", image_url: { url: `data:application/pdf;base64,${base64}` } });
-            pdfCount++;
-            console.log("PDF converted, base64:", Math.round(base64.length / 1024), "KB");
 
-            // PDF-native text extraction via pdfjs-serverless
+            // ALWAYS extract text first (works for any size up to MAX_PDF_SIZE_MB)
             try {
               console.log("Running PDF-native text extraction...");
-              const pdfExtraction = await extractPdfText(pdfBuffer);
+              const pdfExtraction = await extractPdfText(pdfBuffer, MAX_PAGES_PER_PDF);
               if (pdfExtraction.has_text_layer) {
                 pdfNativeText += `\n\n## PDF-NATIVE TEXT EXTRACTION — ${url.split('/').pop()?.split('?')[0] || 'pdf'} (SHA-256: ${pdfExtraction.sha256.substring(0, 16)}...)\n`;
-                pdfNativeText += `Total pages: ${pdfExtraction.total_pages}, Text pages: ${pdfExtraction.pages.filter(p => !p.is_scanned).length}, Scanned pages: ${pdfExtraction.pages.filter(p => p.is_scanned).length}\n\n`;
+                pdfNativeText += `Total pages: ${pdfExtraction.total_pages}, Processed: ${pdfExtraction.pages.length}, Text pages: ${pdfExtraction.pages.filter(p => !p.is_scanned).length}, Scanned pages: ${pdfExtraction.pages.filter(p => p.is_scanned).length}\n\n`;
                 for (const page of pdfExtraction.pages) {
                   if (page.is_scanned) {
                     pdfNativeText += `### Page ${page.page_number} — SCANNED (no text layer, use OCR)\n\n`;
                     continue;
                   }
                   pdfNativeText += `### Page ${page.page_number}\n`;
+                  if (page.title_block) {
+                    const tb = page.title_block;
+                    if (tb.sheet_number) pdfNativeText += `**Sheet:** ${tb.sheet_number}`;
+                    if (tb.discipline) pdfNativeText += ` | **Discipline:** ${tb.discipline}`;
+                    if (tb.drawing_type) pdfNativeText += ` | **Type:** ${tb.drawing_type}`;
+                    if (tb.scale_raw) pdfNativeText += ` | **Scale:** ${tb.scale_raw}`;
+                    if (tb.revision_code) pdfNativeText += ` | **Rev:** ${tb.revision_code}`;
+                    pdfNativeText += `\n`;
+                  }
                   if (page.tables.length > 0) {
                     pdfNativeText += `**Tables detected: ${page.tables.length}**\n`;
                     for (const table of page.tables) {
@@ -1385,14 +1431,23 @@ Before outputting your final answer, you MUST:
                   pdfNativeText += `**Full text:**\n\`\`\`\n${page.raw_text}\n\`\`\`\n\n`;
                 }
                 pdfNativeAvailable = true;
-                console.log(`PDF-native extraction: ${pdfExtraction.pages.filter(p => !p.is_scanned).length}/${pdfExtraction.total_pages} text pages`);
+                console.log(`PDF-native extraction: ${pdfExtraction.pages.filter(p => !p.is_scanned).length}/${pdfExtraction.total_pages} text pages (processed ${pdfExtraction.pages.length})`);
               } else {
                 console.log("PDF has no text layer — fully scanned, relying on OCR");
               }
             } catch (pdfExtErr) {
               console.error("PDF-native extraction failed, continuing with visual analysis:", pdfExtErr);
             }
-          } catch (err) { console.error("PDF convert error:", err); }
+
+            // Send base64 to Gemini Vision only if under inline limit
+            if (sizeMB <= MAX_PDF_INLINE_MB) {
+              const base64 = encodeBase64(pdfBuffer);
+              fileContentParts.push({ type: "image_url", image_url: { url: `data:application/pdf;base64,${base64}` } });
+              console.log("PDF sent as base64 for visual analysis:", Math.round(base64.length / 1024), "KB");
+            } else {
+              console.log(`PDF ${sizeMB.toFixed(1)}MB exceeds inline limit (${MAX_PDF_INLINE_MB}MB), using text extraction only for this file`);
+            }
+            pdfCount++;
         } else {
           // Check if this is a supported image format
           const supportedImageExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif'];
