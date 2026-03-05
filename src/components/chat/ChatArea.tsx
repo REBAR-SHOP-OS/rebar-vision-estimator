@@ -290,6 +290,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           }
         }
       }
+      // Trim OCR results to reduce payload size — keep only fullText (skip verbose blocks)
+      const trimmedOcrResults = clientOcrResults.map(item => ({
+        image_name: item.image_name,
+        ocr_results: item.ocr_results.map((pass: any) => ({
+          pass: pass.pass,
+          engine: pass.engine,
+          preprocess: pass.preprocess,
+          fullText: (pass.fullText || "").substring(0, 4000),
+          blocks: [], // skip blocks to save payload space — fullText is sufficient
+        })),
+      }));
+
+      // Don't send scanned page image URLs if we already have OCR text for them
+      const effectiveImageUrls = trimmedOcrResults.length > 0 ? nonPdfUrls : [...nonPdfUrls, ...scannedPdfPageImageUrls];
 
       const resp = await fetch(CHAT_URL, {
         method: "POST",
@@ -300,9 +314,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         body: JSON.stringify({
           messages: chatMessages,
           mode,
-          fileUrls: [...nonPdfUrls, ...scannedPdfPageImageUrls], // non-PDF files + rendered scanned PDF page images
-          pre_extracted_text: preExtractedText, // pre-extracted PDF text
-          pre_ocr_results: clientOcrResults, // Vision OCR results already collected client-side
+          fileUrls: effectiveImageUrls,
+          pre_extracted_text: preExtractedText,
+          pre_ocr_results: trimmedOcrResults,
           knowledgeContext,
           scope: scopeDataRef.current,
           primaryCategory: scopeDataRef.current?.primaryCategory,
