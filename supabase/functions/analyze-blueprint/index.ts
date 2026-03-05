@@ -1160,8 +1160,17 @@ serve(async (req) => {
     if (scope) {
       let scopeBlock = "\n\n## PROJECT SCOPE DEFINITION (from user)\n";
       if (scope.scopeItems && scope.scopeItems.length > 0) {
-        scopeBlock += `Only analyze these element types: ${scope.scopeItems.join(", ")}\n`;
-        scopeBlock += `Ignore any elements NOT in this list.\n`;
+        const TOTAL_SCOPE_COUNT = 14;
+        const allSelected = scope.scopeItems.length >= TOTAL_SCOPE_COUNT;
+        if (allSelected) {
+          scopeBlock += `Analyze ALL structural element types found in the drawings.\n`;
+          scopeBlock += `This includes (but is not limited to): ${scope.scopeItems.join(", ")}\n`;
+          scopeBlock += `Do NOT restrict or limit element detection — extract every element type present.\n`;
+        } else {
+          scopeBlock += `Focus on these element types: ${scope.scopeItems.join(", ")}\n`;
+          scopeBlock += `Prioritize these elements but also flag any other significant elements discovered.\n`;
+        }
+        scopeBlock += `Treat Cage Assemblies and Loose Rebar as separate estimation groups with independent outputs.\n`;
       }
       if (scope.rebarCoating) scopeBlock += `Rebar Coating Type: ${scope.rebarCoating}\n`;
       if (scope.clientName) scopeBlock += `Client: ${scope.clientName}\n`;
