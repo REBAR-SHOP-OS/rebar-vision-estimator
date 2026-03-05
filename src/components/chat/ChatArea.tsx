@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 import { Button } from "@/components/ui/button";
 import { Paperclip, Send, Loader2, CheckCircle, SlidersHorizontal, Plus, Table, Download, AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle, Upload, FileQuestion, Sparkles } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
@@ -226,6 +227,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       }
 
       const preExtractedText: any[] = [];
+      const scannedPdfPageImageUrls: string[] = [];
+
       if (pdfUrls.length > 0) {
         console.log(`Pre-extracting text from ${pdfUrls.length} PDF(s) sequentially...`);
         for (const pdfUrl of pdfUrls) {
@@ -238,7 +241,28 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               console.error(`PDF text extraction failed for ${pdfUrl}:`, error);
             } else if (data) {
               preExtractedText.push(data);
-              console.log(`Extracted ${data.total_pages || 0} pages, has_text_layer: ${data.has_text_layer}`);
+              console.log(`Extracted ${data.total_pages || 0} pages, has_text_layer: ${data.has_text_layer}, skipped_reason: ${data.skipped_reason || 'none'}`);
+
+              // If PDF is scanned/skipped, render pages to images client-side
+              const isScanned = data.has_text_layer === false || data.skipped_reason;
+              if (isScanned) {
+                console.log(`[OCR Routing] PDF is scanned/skipped. Rendering pages to images client-side...`);
+                try {
+                  const pageImages = await renderPdfPagesToImages(pdfUrl, projectId, {
+                    maxPages: 10,
+                    scale: 1.5,
+                    onProgress: (current, total) => {
+                      console.log(`[OCR Routing] Rendering page ${current}/${total}...`);
+                    },
+                  });
+                  for (const img of pageImages) {
+                    scannedPdfPageImageUrls.push(img.signedUrl);
+                  }
+                  console.log(`[OCR Routing] ${pageImages.length} page images uploaded for Vision OCR.`);
+                } catch (renderErr) {
+                  console.error(`[OCR Routing] Client-side PDF rendering failed:`, renderErr);
+                }
+              }
             }
           } catch (err) {
             console.error(`PDF text extraction error:`, err);
@@ -255,7 +279,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         body: JSON.stringify({
           messages: chatMessages,
           mode,
-          fileUrls: nonPdfUrls, // only non-PDF files (images)
+          fileUrls: [...nonPdfUrls, ...scannedPdfPageImageUrls], // non-PDF files + rendered scanned PDF page images
           pre_extracted_text: preExtractedText, // pre-extracted PDF text
           knowledgeContext,
           scope: scopeDataRef.current,
