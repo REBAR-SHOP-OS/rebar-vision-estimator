@@ -43,6 +43,7 @@ Format each learning as a single clear sentence. If no useful learning can be ex
 Conversation:
 ${messages.map((m: any) => `${m.role}: ${m.content?.substring(0, 500)}`).join("\n\n")}`;
 
+    const aiStart = performance.now();
     const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -55,8 +56,14 @@ ${messages.map((m: any) => `${m.role}: ${m.content?.substring(0, 500)}`).join("\
           { role: "system", content: "Extract concise learnings from conversations. Be brief and actionable." },
           { role: "user", content: extractPrompt },
         ],
+        temperature: 0,
+        top_p: 1,
+        max_tokens: 1024,
       }),
     });
+
+    const aiLatency = Math.round(performance.now() - aiStart);
+    console.log(JSON.stringify({ route: "extract-learning", provider: "google/gemini", gateway: "lovable-ai", pinned_model: "google/gemini-2.5-flash-lite", latency_ms: aiLatency, success: aiResponse.ok, fallback_used: false }));
 
     if (!aiResponse.ok) {
       console.error("AI extraction failed:", aiResponse.status);

@@ -83,6 +83,7 @@ Use professional styling:
 
 Return ONLY the complete HTML document, nothing else. No markdown, no explanation.`;
 
+    const aiStart = performance.now();
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -90,13 +91,19 @@ Return ONLY the complete HTML document, nothing else. No markdown, no explanatio
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "google/gemini-2.5-flash",
         messages: [
           { role: "system", content: "You are a professional rebar detailing engineer. Output only valid HTML documents." },
           { role: "user", content: prompt },
         ],
+        temperature: 0.2,
+        top_p: 1,
+        max_tokens: 16384,
       }),
     });
+
+    const aiLatency = Math.round(performance.now() - aiStart);
+    console.log(JSON.stringify({ route: "generate-shop-drawing", provider: "google/gemini", gateway: "lovable-ai", pinned_model: "google/gemini-2.5-flash", latency_ms: aiLatency, success: response.ok, fallback_used: false }));
 
     if (!response.ok) {
       if (response.status === 429) {

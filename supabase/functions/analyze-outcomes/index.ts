@@ -102,6 +102,7 @@ Format your response as JSON:
 }`;
 
       try {
+        const aiStart = performance.now();
         const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
           method: "POST",
           headers: {
@@ -114,6 +115,9 @@ Format your response as JSON:
               { role: "system", content: "You are a construction estimation expert specializing in rebar takeoff accuracy analysis. Return only valid JSON." },
               { role: "user", content: prompt },
             ],
+            temperature: 0,
+            top_p: 1,
+            max_tokens: 4096,
             tools: [{
               type: "function",
               function: {
@@ -147,6 +151,9 @@ Format your response as JSON:
             tool_choice: { type: "function", function: { name: "provide_analysis" } },
           }),
         });
+
+        const aiLatency = Math.round(performance.now() - aiStart);
+        console.log(JSON.stringify({ route: "analyze-outcomes", provider: "google/gemini", gateway: "lovable-ai", pinned_model: "google/gemini-2.5-flash", latency_ms: aiLatency, success: aiRes.ok, fallback_used: false }));
 
         if (aiRes.ok) {
           const aiData = await aiRes.json();
