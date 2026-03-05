@@ -14,7 +14,7 @@ const ALLOWED_HOSTS = [
 function getOdooCreds() {
   const rawUrl = Deno.env.get("ODOO_URL")!;
   return {
-    url: new URL(rawUrl.trim()).origin,
+    url: new URL(rawUrl.replace(/\s+/g, "")).origin,
     db: Deno.env.get("ODOO_DATABASE")!,
     login: Deno.env.get("ODOO_USERNAME")!,
     apiKey: Deno.env.get("ODOO_API_KEY")!,
