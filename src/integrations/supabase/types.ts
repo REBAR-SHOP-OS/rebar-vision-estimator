@@ -338,6 +338,85 @@ export type Database = {
         }
         Relationships: []
       }
+      review_comments: {
+        Row: {
+          author_email: string
+          author_name: string
+          content: string
+          created_at: string
+          id: string
+          share_id: string
+        }
+        Insert: {
+          author_email: string
+          author_name: string
+          content: string
+          created_at?: string
+          id?: string
+          share_id: string
+        }
+        Update: {
+          author_email?: string
+          author_name?: string
+          content?: string
+          created_at?: string
+          id?: string
+          share_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "review_comments_share_id_fkey"
+            columns: ["share_id"]
+            isOneToOne: false
+            referencedRelation: "review_shares"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      review_shares: {
+        Row: {
+          created_at: string
+          expires_at: string | null
+          id: string
+          project_id: string
+          reviewer_email: string
+          reviewer_name: string | null
+          share_token: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          project_id: string
+          reviewer_email: string
+          reviewer_name?: string | null
+          share_token: string
+          status?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          project_id?: string
+          reviewer_email?: string
+          reviewer_name?: string | null
+          share_token?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "review_shares_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shop_drawings: {
         Row: {
           created_at: string
