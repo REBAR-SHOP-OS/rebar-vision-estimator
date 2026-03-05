@@ -20,7 +20,8 @@ const mcpServer = new McpServer({
 
 // ── Read Tools ──────────────────────────────────────────────
 
-mcpServer.tool("list_projects", {
+mcpServer.tool({
+  name: "list_projects",
   description: "List all estimation projects. Returns id, name, status, client_name, project_type, created_at.",
   inputSchema: {
     type: "object",
@@ -39,7 +40,8 @@ mcpServer.tool("list_projects", {
   },
 });
 
-mcpServer.tool("search_drawings", {
+mcpServer.tool({
+  name: "search_drawings",
   description: "Search shop drawings by text query, bar mark, project, discipline, revision, CRM deal. Returns ranked results with highlighted snippets.",
   inputSchema: {
     type: "object",
@@ -81,7 +83,8 @@ mcpServer.tool("search_drawings", {
   },
 });
 
-mcpServer.tool("get_drawing_details", {
+mcpServer.tool({
+  name: "get_drawing_details",
   description: "Get full details of a specific drawing search index entry by ID, including linked logical drawing and document version info.",
   inputSchema: {
     type: "object",
@@ -108,7 +111,8 @@ mcpServer.tool("get_drawing_details", {
   },
 });
 
-mcpServer.tool("get_pipeline_deals", {
+mcpServer.tool({
+  name: "get_pipeline_deals",
   description: "List CRM pipeline deals with metadata.",
   inputSchema: {
     type: "object",
@@ -127,7 +131,8 @@ mcpServer.tool("get_pipeline_deals", {
   },
 });
 
-mcpServer.tool("get_project_details", {
+mcpServer.tool({
+  name: "get_project_details",
   description: "Get full details of a project including files, messages, estimates, and drawings.",
   inputSchema: {
     type: "object",
@@ -160,7 +165,8 @@ mcpServer.tool("get_project_details", {
 
 // ── Write Tools ─────────────────────────────────────────────
 
-mcpServer.tool("create_project", {
+mcpServer.tool({
+  name: "create_project",
   description: "Create a new estimation project.",
   inputSchema: {
     type: "object",
@@ -191,7 +197,8 @@ mcpServer.tool("create_project", {
   },
 });
 
-mcpServer.tool("update_drawing_status", {
+mcpServer.tool({
+  name: "update_drawing_status",
   description: "Update revision label or issue status on a drawing search index entry.",
   inputSchema: {
     type: "object",
@@ -215,7 +222,8 @@ mcpServer.tool("update_drawing_status", {
   },
 });
 
-mcpServer.tool("update_project", {
+mcpServer.tool({
+  name: "update_project",
   description: "Update project fields like name, status, client_name, description.",
   inputSchema: {
     type: "object",
@@ -249,7 +257,7 @@ app.all("/*", async (c) => {
     return new Response(null, {
       headers: {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "authorization, x-api-key, content-type, accept",
+        "Access-Control-Allow-Headers": "authorization, x-api-key, content-type, accept, x-client-info, apikey",
         "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
       },
     });
