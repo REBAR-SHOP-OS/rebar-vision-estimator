@@ -82,11 +82,68 @@ serve(async (req) => {
   try {
     const { pdf_url, pdf_base64, project_id } = await req.json();
 
+    // ── SIZE CHECK: reject files too large for edge function ──
+    const MAX_PDF_SIZE = 5 * 1024 * 1024; // 5MB limit for pdfjs in edge
+    let fileSize = 0;
+
+    if (pdf_url) {
+      // HEAD request to check size before downloading
+      try {
+        const headRes = await fetch(pdf_url, { method: "HEAD", redirect: "follow" });
+        const cl = headRes.headers.get("content-length");
+        if (cl) fileSize = parseInt(cl, 10);
+        console.log(`PDF size from HEAD: ${(fileSize / 1024 / 1024).toFixed(2)}MB`);
+      } catch (headErr) {
+        console.warn("HEAD request failed, will try download:", headErr);
+      }
+
+      if (fileSize > MAX_PDF_SIZE) {
+        console.log(`PDF too large (${(fileSize / 1024 / 1024).toFixed(1)}MB > 5MB). Returning scanned-only response.`);
+        // Estimate page count from file size (~400KB per page for engineering PDFs)
+        const estimatedPages = Math.max(1, Math.round(fileSize / (400 * 1024)));
+        const pages: PdfPageExtraction[] = [];
+        for (let i = 1; i <= Math.min(estimatedPages, 50); i++) {
+          pages.push({
+            page_number: i, raw_text: "", tables: [], text_blocks: [], is_scanned: true,
+            title_block: { sheet_number: null, sheet_title: null, revision_code: null, revision_date: null, scale_raw: null, scale_ratio: null, discipline: null, drawing_type: null },
+          });
+        }
+        return new Response(JSON.stringify({
+          pages, total_pages: estimatedPages, sha256: "size_skipped_" + fileSize,
+          has_text_layer: false, scanned_pages: pages.map(p => p.page_number),
+          skipped_reason: "file_too_large",
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
     let pdfBytes: ArrayBuffer;
     if (pdf_url) {
       const res = await fetch(pdf_url, { redirect: "follow" });
       if (!res.ok) throw new Error(`Failed to fetch PDF: ${res.status}`);
       pdfBytes = await res.arrayBuffer();
+      fileSize = pdfBytes.byteLength;
+      console.log(`PDF downloaded: ${(fileSize / 1024 / 1024).toFixed(2)}MB`);
+      
+      // Double-check after download
+      if (fileSize > MAX_PDF_SIZE) {
+        console.log(`PDF too large after download. Returning scanned-only response.`);
+        const sha256 = await hashSHA256(pdfBytes);
+        // Free the buffer immediately
+        pdfBytes = new ArrayBuffer(0);
+        const estPages = Math.max(1, Math.round(fileSize / (400 * 1024)));
+        const pages: PdfPageExtraction[] = [];
+        for (let i = 1; i <= Math.min(estPages, 50); i++) {
+          pages.push({
+            page_number: i, raw_text: "", tables: [], text_blocks: [], is_scanned: true,
+            title_block: { sheet_number: null, sheet_title: null, revision_code: null, revision_date: null, scale_raw: null, scale_ratio: null, discipline: null, drawing_type: null },
+          });
+        }
+        return new Response(JSON.stringify({
+          pages, total_pages: estPages, sha256,
+          has_text_layer: false, scanned_pages: pages.map(p => p.page_number),
+          skipped_reason: "file_too_large",
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
     } else if (pdf_base64) {
       const binary = atob(pdf_base64);
       const bytes = new Uint8Array(binary.length);
@@ -105,21 +162,31 @@ serve(async (req) => {
       const pdfjs = await import("https://esm.sh/pdfjs-serverless");
       const getDocument = pdfjs.getDocument || pdfjs.default?.getDocument || pdfjs.default;
       if (!getDocument) {
-        // Log all available exports for debugging
         console.error("pdfjs-serverless exports:", Object.keys(pdfjs));
         throw new Error("getDocument not found in pdfjs-serverless");
       }
       const loadingTask = getDocument(new Uint8Array(pdfBytes));
-      // pdfjs-serverless returns a promise via .promise property
       doc = loadingTask.promise ? await loadingTask.promise : await loadingTask;
     } catch (importErr) {
-      console.error("Failed to load PDF:", importErr);
-      throw importErr;
+      console.error("pdfjs failed, returning scanned response:", importErr);
+      // If pdfjs fails, return scanned-only response instead of crashing
+      const estPages = Math.max(1, Math.round(pdfBytes.byteLength / (400 * 1024)));
+      for (let i = 1; i <= Math.min(estPages, 30); i++) {
+        pages.push({
+          page_number: i, raw_text: "", tables: [], text_blocks: [], is_scanned: true,
+          title_block: { sheet_number: null, sheet_title: null, revision_code: null, revision_date: null, scale_raw: null, scale_ratio: null, discipline: null, drawing_type: null },
+        });
+      }
+      return new Response(JSON.stringify({
+        pages, total_pages: estPages, sha256,
+        has_text_layer: false, scanned_pages: pages.map(p => p.page_number),
+        skipped_reason: "pdfjs_failed",
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     const totalPages = doc.numPages;
 
-    // Process max 15 pages to stay within memory limits
-    const maxPages = Math.min(totalPages, 15);
+    // Process max 10 pages to stay within memory/CPU limits
+    const maxPages = Math.min(totalPages, 10);
 
     for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
       try {
