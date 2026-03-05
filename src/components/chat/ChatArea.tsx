@@ -705,6 +705,26 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       onProjectNameChange?.(firstName);
     }
 
+    // Fire-and-forget: populate search index for uploaded PDFs
+    if (newUrls.length > 0) {
+      (async () => {
+        try {
+          for (const url of newUrls) {
+            if (!url.toLowerCase().split('?')[0].endsWith('.pdf')) continue;
+            const { data: extractData, error: extractErr } = await supabase.functions.invoke("extract-pdf-text", {
+              body: { pdf_url: url, project_id: projectId },
+            });
+            if (extractErr || !extractData?.pages) continue;
+            await supabase.functions.invoke("populate-search-index", {
+              body: { project_id: projectId, pages: extractData.pages },
+            });
+          }
+        } catch (e) {
+          console.error("Search index population failed (non-blocking):", e);
+        }
+      })();
+    }
+
     // Trigger detection and auto-proceed if confidence is high
     if (!calculationMode && (uploadedFiles.length + newUrls.length) > 0) {
       const allUrls = [...uploadedFiles, ...newUrls];
