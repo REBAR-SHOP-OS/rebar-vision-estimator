@@ -3,7 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Link2, ExternalLink, X, RefreshCw, Zap, Loader2, Paperclip } from "lucide-react";
+import { Link2, ExternalLink, X, RefreshCw, Zap, Loader2, Paperclip, BookOpen } from "lucide-react";
+import LeadDetailPanel from "./LeadDetailPanel";
 import { toast } from "sonner";
 import {
   Table,
@@ -27,6 +28,9 @@ const PIPELINE_STAGES: Record<string, { label: string; color: string }> = {
   estimation_karthick: { label: "Estimation - Karthick", color: "bg-orange-500" },
   hot_enquiries: { label: "Hot Enquiries", color: "bg-red-500" },
   qualified: { label: "Qualified", color: "bg-teal-500" },
+  delivered_pickup_done: { label: "Delivered/Pickup Done", color: "bg-green-600" },
+  won: { label: "Won", color: "bg-emerald-500" },
+  no_rebars_out_of_scope: { label: "No Rebars / Out of Scope", color: "bg-slate-500" },
 };
 
 export interface LeadAttachment {
@@ -69,6 +73,8 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose, onStartE
   const [loading, setLoading] = useState(true);
   const [linkingLeadId, setLinkingLeadId] = useState<string | null>(null);
   const [creatingLeadId, setCreatingLeadId] = useState<string | null>(null);
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     fetchLeads();
@@ -170,6 +176,10 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose, onStartE
           <Badge variant="secondary" className="text-xs">{leads.length} leads</Badge>
         </div>
         <div className="flex gap-2">
+          <Button onClick={forceSyncLearning} disabled={syncing} size="sm" variant="outline" className="gap-1.5">
+            {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BookOpen className="h-3.5 w-3.5" />}
+            Force Sync
+          </Button>
           <Button onClick={fetchLeads} disabled={loading} size="sm" variant="outline" className="gap-1.5">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             Refresh
@@ -208,7 +218,7 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose, onStartE
               {leads.map((lead) => {
                 const stageInfo = getStageInfo(lead.stage);
                 return (
-                  <TableRow key={lead.id}>
+                  <TableRow key={lead.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedLeadId(lead.id)}>
                     <TableCell className="font-medium max-w-[200px] truncate">{lead.title || "—"}</TableCell>
                     <TableCell className="text-sm">
                       {lead.customers?.company_name || lead.customers?.name || "—"}
@@ -276,8 +286,28 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose, onStartE
           </Table>
         )}
       </div>
+      <LeadDetailPanel
+        leadId={selectedLeadId}
+        onClose={() => setSelectedLeadId(null)}
+        onStartEstimationWithFiles={onStartEstimationWithFiles}
+      />
     </div>
   );
+
+  function forceSyncLearning() {
+    if (!user) return;
+    setSyncing(true);
+    supabase.functions.invoke("learn-from-pipeline", {
+      body: { user_id: user.id },
+    }).then(({ data, error }) => {
+      if (error) {
+        toast.error("Force sync failed");
+      } else {
+        toast.success(`Learned ${data?.learned || 0} cases from pipeline (${data?.skipped_duplicates || 0} duplicates skipped)`);
+      }
+      setSyncing(false);
+    });
+  }
 };
 
 export default CrmSyncPanel;

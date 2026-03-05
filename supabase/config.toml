@@ -44,3 +44,9 @@ verify_jwt = false
 
 [functions.ocr-image]
 verify_jwt = false
+
+[functions.fetch-lead-details]
+verify_jwt = false
+
+[functions.learn-from-pipeline]
+verify_jwt = false
