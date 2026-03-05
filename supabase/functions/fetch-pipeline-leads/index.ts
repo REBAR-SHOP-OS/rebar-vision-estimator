@@ -6,12 +6,10 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// REBAR SHOP OS publishable credentials
 const REBAR_URL = "https://rzqonxnowjrtbueauziu.supabase.co";
 const REBAR_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6cW9ueG5vd2pydGJ1ZWF1eml1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1ODE2NTMsImV4cCI6MjA4NzE1NzY1M30.3-ryGO4oXzW_4NET5cKYrw0hAI8oY4vvYnuYp5Q6NkY";
 
-// Only fetch from these specific stages
 const TARGET_STAGES = [
   "estimation_ben",
   "estimation_karthick",
@@ -19,7 +17,7 @@ const TARGET_STAGES = [
   "qualified",
 ];
 
-const LEAD_FILES_BUCKET = "lead-files";
+const LEAD_FILES_TABLE = "lead_files";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -44,40 +42,29 @@ Deno.serve(async (req) => {
       });
     }
 
-    // For each lead, check for files in the storage bucket under lead-files/{lead_id}/
-    const leadsWithFiles = await Promise.all(
-      (leads || []).map(async (lead: any) => {
-        try {
-          const { data: files, error: storageError } = await rebarClient.storage
-            .from(LEAD_FILES_BUCKET)
-            .list(lead.id, { limit: 50 });
+    // For each lead, check lead_files table for attachments
+    const leadIds = (leads || []).map((l: any) => l.id);
+    const { data: allFiles } = await rebarClient
+      .from(LEAD_FILES_TABLE)
+      .select("*")
+      .in("lead_id", leadIds.length > 0 ? leadIds : ["__none__"]);
 
-          if (storageError || !files || files.length === 0) {
-            return { ...lead, attachments: [] };
-          }
+    // Group files by lead_id
+    const filesByLead: Record<string, any[]> = {};
+    for (const file of allFiles || []) {
+      if (!filesByLead[file.lead_id]) filesByLead[file.lead_id] = [];
+      filesByLead[file.lead_id].push(file);
+    }
 
-          // Filter out .emptyFolderPlaceholder and build public URLs
-          const attachments = files
-            .filter((f: any) => f.name !== ".emptyFolderPlaceholder")
-            .map((f: any) => {
-              const { data: urlData } = rebarClient.storage
-                .from(LEAD_FILES_BUCKET)
-                .getPublicUrl(`${lead.id}/${f.name}`);
-              return {
-                name: f.name,
-                size: f.metadata?.size || 0,
-                mimeType: f.metadata?.mimetype || "application/octet-stream",
-                url: urlData?.publicUrl || null,
-              };
-            })
-            .filter((a: any) => a.url);
-
-          return { ...lead, attachments };
-        } catch {
-          return { ...lead, attachments: [] };
-        }
-      })
-    );
+    const leadsWithFiles = (leads || []).map((lead: any) => ({
+      ...lead,
+      attachments: (filesByLead[lead.id] || []).map((f: any) => ({
+        name: f.file_name || f.name || "file",
+        size: f.file_size || f.size || 0,
+        mimeType: f.mime_type || f.content_type || "application/octet-stream",
+        url: f.file_url || f.url || f.public_url || null,
+      })),
+    }));
 
     return new Response(JSON.stringify({ leads: leadsWithFiles }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
