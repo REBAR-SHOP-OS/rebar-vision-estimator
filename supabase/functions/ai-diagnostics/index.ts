@@ -21,10 +21,14 @@ const integrations = [
     gateway: "Lovable AI Gateway",
     gateway_url: "https://ai.gateway.lovable.dev/v1/chat/completions",
     model: "google/gemini-2.5-pro",
+    pinned_model: "google/gemini-2.5-pro",
+    is_preview: false,
+    is_pinned: true,
     task: "pdf_parsing_and_estimation",
     route: "analyze-blueprint",
-    temperature: null as number | null,
-    max_tokens: null as number | null,
+    temperature: 0 as number | null,
+    top_p: 1 as number | null,
+    max_tokens: 16384 as number | null,
     stream: true,
     system_prompt: "You are an expert structural/civil engineer and rebar estimator.",
     role: "default" as const,
@@ -36,9 +40,13 @@ const integrations = [
     gateway: "Direct (Service Account)",
     gateway_url: "https://vision.googleapis.com/v1/images:annotate",
     model: "Cloud Vision API v1",
+    pinned_model: "Cloud Vision API v1",
+    is_preview: false,
+    is_pinned: true,
     task: "ocr_scanned_pages",
     route: "analyze-blueprint",
     temperature: null as number | null,
+    top_p: null as number | null,
     max_tokens: null as number | null,
     stream: false,
     system_prompt: "",
@@ -51,10 +59,14 @@ const integrations = [
     gateway: "Lovable AI Gateway",
     gateway_url: "https://ai.gateway.lovable.dev/v1/chat/completions",
     model: "google/gemini-2.5-flash",
+    pinned_model: "google/gemini-2.5-flash",
+    is_preview: false,
+    is_pinned: true,
     task: "project_type_classification",
     route: "detect-project-type",
-    temperature: null as number | null,
-    max_tokens: null as number | null,
+    temperature: 0 as number | null,
+    top_p: 1 as number | null,
+    max_tokens: 2048 as number | null,
     stream: false,
     system_prompt: "You are an expert at classifying construction project types from blueprint pages.",
     role: "default" as const,
@@ -66,9 +78,13 @@ const integrations = [
     gateway: "Direct (Service Account)",
     gateway_url: "https://vision.googleapis.com/v1/images:annotate",
     model: "Cloud Vision API v1",
+    pinned_model: "Cloud Vision API v1",
+    is_preview: false,
+    is_pinned: true,
     task: "ocr_blueprint_thumbnails",
     route: "detect-project-type",
     temperature: null as number | null,
+    top_p: null as number | null,
     max_tokens: null as number | null,
     stream: false,
     system_prompt: "",
@@ -80,11 +96,15 @@ const integrations = [
     provider: "google/gemini",
     gateway: "Lovable AI Gateway",
     gateway_url: "https://ai.gateway.lovable.dev/v1/chat/completions",
-    model: "google/gemini-3-flash-preview",
+    model: "google/gemini-2.5-flash",
+    pinned_model: "google/gemini-2.5-flash",
+    is_preview: false,
+    is_pinned: true,
     task: "shop_drawing_generation",
     route: "generate-shop-drawing",
-    temperature: null as number | null,
-    max_tokens: null as number | null,
+    temperature: 0.2 as number | null,
+    top_p: 1 as number | null,
+    max_tokens: 16384 as number | null,
     stream: false,
     system_prompt: "You are a professional rebar detailing engineer. Output only valid HTML documents.",
     role: "default" as const,
@@ -96,10 +116,14 @@ const integrations = [
     gateway: "Lovable AI Gateway",
     gateway_url: "https://ai.gateway.lovable.dev/v1/chat/completions",
     model: "google/gemini-2.5-flash-lite",
+    pinned_model: "google/gemini-2.5-flash-lite",
+    is_preview: false,
+    is_pinned: true,
     task: "conversation_learning_extraction",
     route: "extract-learning",
-    temperature: null as number | null,
-    max_tokens: null as number | null,
+    temperature: 0 as number | null,
+    top_p: 1 as number | null,
+    max_tokens: 1024 as number | null,
     stream: false,
     system_prompt: "Extract concise learnings from conversations. Be brief and actionable.",
     role: "default" as const,
@@ -111,10 +135,14 @@ const integrations = [
     gateway: "Lovable AI Gateway",
     gateway_url: "https://ai.gateway.lovable.dev/v1/chat/completions",
     model: "google/gemini-2.5-flash",
+    pinned_model: "google/gemini-2.5-flash",
+    is_preview: false,
+    is_pinned: true,
     task: "estimation_accuracy_analysis",
     route: "analyze-outcomes",
-    temperature: null as number | null,
-    max_tokens: null as number | null,
+    temperature: 0 as number | null,
+    top_p: 1 as number | null,
+    max_tokens: 4096 as number | null,
     stream: false,
     system_prompt: "You are a construction estimation expert specializing in rebar takeoff accuracy analysis. Return only valid JSON.",
     role: "default" as const,
@@ -123,8 +151,8 @@ const integrations = [
   },
 ];
 
-// Safety guard: validate no placeholders
-function validateIntegrations() {
+// Safety guard: validate no placeholders and no preview models in production
+function validateIntegrations(strict = false) {
   const failures: string[] = [];
   for (const i of integrations) {
     if (!i.model || i.model === "unknown" || i.model.includes("placeholder")) {
@@ -132,6 +160,14 @@ function validateIntegrations() {
     }
     if (!i.provider) failures.push(`${i.route}/${i.task}: provider is empty`);
     if (!i.gateway) failures.push(`${i.route}/${i.task}: gateway is empty`);
+    if (strict) {
+      if (i.is_preview) {
+        failures.push(`${i.route}/${i.task}: model "${i.model}" is a preview model (not production-stable)`);
+      }
+      if (!i.is_pinned) {
+        failures.push(`${i.route}/${i.task}: model "${i.model}" is not pinned`);
+      }
+    }
   }
   return failures;
 }
@@ -141,9 +177,13 @@ function buildManifest() {
     provider: i.provider,
     gateway: i.gateway,
     model: i.model,
+    pinned_model: i.pinned_model,
+    is_preview: i.is_preview,
+    is_pinned: i.is_pinned,
     task: i.task,
     route: i.route,
     temperature: i.temperature,
+    top_p: i.top_p,
     max_tokens: i.max_tokens,
     stream: i.stream,
     system_prompt_hash: i.system_prompt ? djb2Hash(i.system_prompt) : null,
@@ -504,17 +544,17 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Safety guard
-  const failures = validateIntegrations();
+  const url = new URL(req.url);
+  const verify = url.searchParams.get("verify") === "true";
+
+  // Safety guard — strict mode in verify to catch preview/unpinned models
+  const failures = validateIntegrations(verify);
   if (failures.length > 0) {
     return new Response(JSON.stringify({
-      error: "STATIC_PLACEHOLDER_DETECTED",
+      error: verify ? "PRODUCTION_STABILITY_CHECK_FAILED" : "STATIC_PLACEHOLDER_DETECTED",
       details: failures,
     }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
-
-  const url = new URL(req.url);
-  const verify = url.searchParams.get("verify") === "true";
 
   const manifest = buildManifest();
   const summary = buildSummary();

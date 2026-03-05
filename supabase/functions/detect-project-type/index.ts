@@ -242,6 +242,7 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
 
     const userContent: any[] = [{ type: "text", text: detectionPrompt }, ...contentParts];
 
+    const aiStart = performance.now();
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
@@ -253,8 +254,14 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
         ],
         tools,
         tool_choice: { type: "function", function: { name: "classify_project" } },
+        temperature: 0,
+        top_p: 1,
+        max_tokens: 2048,
       }),
     });
+
+    const aiLatency = Math.round(performance.now() - aiStart);
+    console.log(JSON.stringify({ route: "detect-project-type", provider: "google/gemini", gateway: "lovable-ai", pinned_model: "google/gemini-2.5-flash", latency_ms: aiLatency, success: response.ok, fallback_used: false }));
 
     if (!response.ok) {
       const errText = await response.text();

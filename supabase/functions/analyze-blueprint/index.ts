@@ -1596,6 +1596,7 @@ Before outputting your final answer, you MUST:
       }
     }
 
+    const aiStart = performance.now();
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -1606,8 +1607,14 @@ Before outputting your final answer, you MUST:
         model: "google/gemini-2.5-pro",
         messages: aiMessages,
         stream: true,
+        temperature: 0,
+        top_p: 1,
+        max_tokens: 16384,
       }),
     });
+
+    const aiLatency = Math.round(performance.now() - aiStart);
+    console.log(JSON.stringify({ route: "analyze-blueprint", provider: "google/gemini", gateway: "lovable-ai", pinned_model: "google/gemini-2.5-pro", latency_ms: aiLatency, success: response.ok, fallback_used: false }));
 
     if (!response.ok) {
       if (response.status === 429) {
