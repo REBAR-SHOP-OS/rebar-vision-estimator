@@ -1379,10 +1379,10 @@ Before outputting your final answer, you MUST:
     const fileContentParts: any[] = [];
     const MAX_PDF_SIZE_MB = 25; // Allow real-world engineering PDFs (10-30MB)
     const MAX_PDF_INLINE_MB = 8; // Max size for sending base64 to Gemini Vision
-    const MAX_PDF_TEXT_EXTRACT_MB = 10; // Max size for pdfjs-serverless text extraction (for PDFs too large for inline)
+    const MAX_PDF_TEXT_EXTRACT_MB = 22; // Max size for pdfjs text extraction — process ONE at a time with cleanup
     const MAX_PDF_COUNT = 2;
     const MAX_INLINE_PDF_COUNT = 2; // Allow both blueprint PDFs to be sent inline
-    const MAX_PAGES_PER_PDF = 15; // Limit pages for text extraction
+    const MAX_PAGES_PER_PDF = 10; // Reduced to save memory for large PDFs
     let pdfCount = 0;
 
     // Google Vision OCR results to inject
@@ -1411,14 +1411,39 @@ Before outputting your final answer, you MUST:
             continue;
           }
           try {
+            // Pre-check size with HEAD request to avoid downloading huge files into memory
+            let sizeMB = 0;
+            try {
+              const headRes = await fetch(url, { method: "HEAD" });
+              const contentLength = headRes.headers.get("content-length");
+              if (contentLength) {
+                sizeMB = parseInt(contentLength) / (1024 * 1024);
+                console.log(`PDF pre-check size (HEAD): ${sizeMB.toFixed(2)} MB`);
+              }
+            } catch (headErr) {
+              console.log("HEAD request failed, will check size after download");
+            }
+
+            // If HEAD gave us a size and it's too large for any processing, skip download entirely
+            if (sizeMB > MAX_PDF_TEXT_EXTRACT_MB && sizeMB > MAX_PDF_INLINE_MB) {
+              console.log(`PDF ${sizeMB.toFixed(1)}MB too large for inline (${MAX_PDF_INLINE_MB}MB) and text extraction (${MAX_PDF_TEXT_EXTRACT_MB}MB), skipping download to save memory`);
+              pdfCount++;
+              continue;
+            }
+            if (sizeMB > MAX_PDF_SIZE_MB) {
+              console.log(`PDF ${sizeMB.toFixed(1)}MB exceeds max size (${MAX_PDF_SIZE_MB}MB), skipping entirely`);
+              continue;
+            }
+
             console.log("Downloading PDF:", url.substring(0, 80) + "...");
             const pdfResponse = await fetch(url);
             if (!pdfResponse.ok) { console.error("PDF download failed:", pdfResponse.status); continue; }
-            const pdfBuffer = await pdfResponse.arrayBuffer();
-            const sizeMB = pdfBuffer.byteLength / (1024 * 1024);
+            let pdfBuffer: ArrayBuffer | null = await pdfResponse.arrayBuffer();
+            sizeMB = pdfBuffer.byteLength / (1024 * 1024);
             console.log("PDF size:", sizeMB.toFixed(2), "MB");
             if (sizeMB > MAX_PDF_SIZE_MB) {
               console.log(`PDF too large (${sizeMB.toFixed(1)}MB > ${MAX_PDF_SIZE_MB}MB), skipping entirely`);
+              pdfBuffer = null;
               continue;
             }
 
@@ -1431,9 +1456,13 @@ Before outputting your final answer, you MUST:
               inlinePdfCount++;
             } else if (sizeMB <= MAX_PDF_TEXT_EXTRACT_MB) {
               // Strategy B: Too large for inline (or inline cap reached) — extract text only
-              console.log(`PDF ${sizeMB.toFixed(1)}MB: using pdfjs text extraction only (not sent inline)`);
+              // For large PDFs, reduce page count to save memory
+              const effectiveMaxPages = sizeMB > 15 ? 5 : sizeMB > 10 ? 8 : MAX_PAGES_PER_PDF;
+              console.log(`PDF ${sizeMB.toFixed(1)}MB: using pdfjs text extraction only (max ${effectiveMaxPages} pages)`);
               try {
-                const pdfExtraction = await extractPdfText(pdfBuffer, MAX_PAGES_PER_PDF);
+                const pdfExtraction = await extractPdfText(pdfBuffer!, effectiveMaxPages);
+                // Free the PDF buffer immediately after extraction
+                pdfBuffer = null;
                 if (pdfExtraction.has_text_layer) {
                   pdfNativeText += `\n\n## PDF-NATIVE TEXT EXTRACTION — ${url.split('/').pop()?.split('?')[0] || 'pdf'} (SHA-256: ${pdfExtraction.sha256.substring(0, 16)}...)\n`;
                   pdfNativeText += `Total pages: ${pdfExtraction.total_pages}, Processed: ${pdfExtraction.pages.length}, Text pages: ${pdfExtraction.pages.filter(p => !p.is_scanned).length}, Scanned pages: ${pdfExtraction.pages.filter(p => p.is_scanned).length}\n\n`;
