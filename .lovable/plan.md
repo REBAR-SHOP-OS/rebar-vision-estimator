@@ -1,117 +1,65 @@
 
 
-## Plan: Refactor `analyze-blueprint` to Thin Job Router Pattern
+## Plan: Client-Side PDF Rendering + Thin Edge Function
 
-### Problem
-The `analyze-blueprint` edge function (1,678 lines) downloads PDFs, runs pdfjs text extraction, runs Google Vision OCR, builds a massive prompt, and calls Gemini — all in a single request. This consistently exceeds the ~150MB memory / ~60s CPU limit of Supabase Edge Functions for real-world engineering PDFs.
+### Core Problem
+`extract-pdf-text` crashes (546 WORKER_LIMIT) on large/scanned PDFs because `pdfjs-serverless` exceeds edge function resource limits. For scanned blueprints, text extraction returns empty anyway. The current architecture sends nothing useful to Gemini for these files.
 
-### Architecture Change
+### Key Constraint
+All Supabase Edge Functions share the same ~150MB memory limit. Moving heavy work to a second edge function does not solve OOM. A Render/FastAPI worker cannot be provisioned from Lovable.
+
+### Solution: Render PDF Pages in the Browser
+
+The browser has ample memory and already has `pdfjs-dist` installed + `PdfRenderer.tsx`. The fix is to render scanned PDF pages to PNG images client-side, upload them to Storage, then send image URLs to `analyze-blueprint` (which already handles images via Vision OCR + Gemini).
 
 ```text
-BEFORE (monolith):
-  Client → Edge Function (download PDF + OCR + pdfjs + Gemini stream) → Client
-
-AFTER (job router):
-  Client → upload to Storage → Edge Function (validate + create job row → 202) → Client polls
-                                        ↓
-                              Edge Function "run-analysis" (triggered by client poll or direct call)
-                              reads from Storage, does OCR + Gemini, writes result to DB
+NEW FLOW:
+  Browser renders PDF pages → PNG images → upload to Storage
+  ↓
+  Call analyze-blueprint with { imageUrls: [...page PNGs], pre_extracted_text: [...] }
+  ↓
+  analyze-blueprint: Vision OCR on images + Gemini stream → response
 ```
 
-However, there is a fundamental constraint: **Supabase Edge Functions all share the same memory limits**. Moving heavy work to a second edge function does not solve the OOM. The user's suggestion of a Render worker (Option A) requires external infrastructure we cannot provision here.
+### Changes
 
-**Practical approach that works within Lovable Cloud:**
+**1. New utility: `src/lib/pdf-to-images.ts`**
+- Function `renderPdfPagesToImages(pdfUrl, maxPages=10, scale=1.5)`
+- Uses `pdfjs-dist` (already in browser) to render each page to canvas
+- Converts canvas to PNG blob
+- Uploads each page image to `blueprints` Storage bucket under `{projectId}/pages/`
+- Returns array of signed URLs
+- Sequential rendering (one page at a time) to stay within browser memory
 
-1. **Split the work across multiple sequential edge function calls** from the client, each doing one bounded task:
-   - Call 1: `extract-pdf-text` (already exists) — extracts text from ONE PDF at a time
-   - Call 2: `analyze-blueprint` — receives only text/metadata (no PDF bytes), calls Gemini
+**2. Update `ChatArea.tsx` → `streamAIResponse`**
+- After calling `extract-pdf-text`, check if result shows `has_text_layer === false` or all pages are `is_scanned`
+- For scanned PDFs: call `renderPdfPagesToImages()` to get page image URLs
+- Add those image URLs to `fileUrls` sent to `analyze-blueprint` (they'll get Vision OCR + Gemini visual analysis)
+- For text PDFs: keep current flow (send pre-extracted text)
+- Show progress: "Rendering PDF pages for OCR analysis..."
 
-2. **The edge function becomes a thin router** that never touches PDF bytes:
-   - Accepts `storage_paths` instead of file URLs
-   - Client pre-extracts text via `extract-pdf-text` for each PDF sequentially
-   - `analyze-blueprint` receives extracted text + image URLs only (small payload)
+**3. Update `extract-pdf-text/index.ts`**
+- Reduce `MAX_PDF_SIZE` to **3MB** (only attempt pdfjs on small text-layer PDFs)
+- For files >3MB: immediately return scanned-only response (no download, no pdfjs)
+- This prevents all OOM crashes — large PDFs are handled client-side
 
-### Database Migration
+**4. `analyze-blueprint/index.ts`** — no structural changes needed
+- Already handles image URLs with Vision OCR + Gemini
+- Already accepts `pre_extracted_text`
+- The page images from step 2 flow through the existing image processing path
 
-Create `analysis_jobs` table for async job tracking:
+**5. `analysis_jobs` table** — already exists, no migration needed
 
-```sql
-CREATE TABLE public.analysis_jobs (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL,
-  project_id uuid,
-  storage_paths text[] DEFAULT '{}',
-  signed_urls text[] DEFAULT '{}',
-  status text NOT NULL DEFAULT 'queued'
-    CHECK (status IN ('queued','running','done','failed')),
-  error text,
-  result jsonb,
-  request_payload jsonb DEFAULT '{}',
-  created_at timestamptz DEFAULT now(),
-  updated_at timestamptz DEFAULT now()
-);
-
-ALTER TABLE public.analysis_jobs ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users manage own jobs"
-  ON public.analysis_jobs FOR ALL
-  TO authenticated
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
-```
-
-### Edge Function Changes (`analyze-blueprint/index.ts`)
-
-**Strip out entirely:**
-- `pdfjs-serverless` import and `extractPdfText` function (~90 lines)
-- PDF download/base64/inline logic (~180 lines)
-- Google Vision OCR functions stay (they handle small images, not OOM cause)
-
-**New flow:**
-1. Validate input — reject payloads > 50KB, require `storage_paths` or `pre_extracted_text`
-2. Create `analysis_jobs` row with status `running`
-3. Process only images (small, safe) — no PDF bytes in memory
-4. Accept `pre_extracted_text` (client sends text already extracted by `extract-pdf-text`)
-5. Build Gemini prompt from text + image URLs only
-6. Stream response back, update job to `done` on completion
-7. On error, update job to `failed`
-
-### Frontend Changes (`ChatArea.tsx`)
-
-Update `streamAIResponse` to:
-
-1. **Pre-extract PDF text client-side** — for each PDF URL, call `extract-pdf-text` edge function sequentially (it already exists and handles one PDF at a time safely)
-2. **Send extracted text** to `analyze-blueprint` instead of raw PDF URLs
-3. **Create job record** and poll `analysis_jobs` for status if using async mode
-4. Keep SSE streaming for the Gemini response (no change to UX)
-
-The key payload change:
-```typescript
-// BEFORE: sends raw PDF URLs for edge function to download
-body: { fileUrls: [pdfUrl1, pdfUrl2], messages, ... }
-
-// AFTER: pre-extract text, send only text + image URLs
-const extracted = [];
-for (const url of pdfUrls) {
-  const res = await supabase.functions.invoke('extract-pdf-text', { body: { pdf_url: url } });
-  extracted.push(res.data);
-}
-body: { 
-  pre_extracted_text: extracted,  // text only, no binary
-  imageUrls: [imgUrl1],          // small images only
-  messages, ...
-}
-```
+### Safety
+- Browser renders one page at a time (sequential, not parallel)
+- Max 10 pages rendered to images (configurable)
+- Scale 1.5x (not 2x) to reduce image size
+- Each page PNG uploaded individually, canvas freed after each
+- No PDF binary data ever enters an edge function for large files
+- `extract-pdf-text` returns in <1s for large files (HEAD check only)
 
 ### Files to Create/Modify
-
-1. **SQL Migration** — create `analysis_jobs` table with RLS
-2. **`supabase/functions/analyze-blueprint/index.ts`** — remove all PDF download/pdfjs code, accept `pre_extracted_text` parameter, add 50KB payload guard, add job status tracking
-3. **`src/components/chat/ChatArea.tsx`** — pre-extract PDF text via `extract-pdf-text` calls before calling `analyze-blueprint`, separate PDF URLs from image URLs
-
-### Safety Limits
-- Reject request body > 50KB (after removing PDF bytes, payloads will be ~5-20KB of text)
-- No `Promise.all` over pages inside edge function
-- No PDF `ArrayBuffer` in memory at any point in `analyze-blueprint`
-- Sequential extraction calls from client (one PDF at a time)
+1. **Create** `src/lib/pdf-to-images.ts` — browser-side PDF page renderer + Storage uploader
+2. **Modify** `src/components/chat/ChatArea.tsx` — detect scanned PDFs, render pages client-side, pass image URLs
+3. **Modify** `supabase/functions/extract-pdf-text/index.ts` — lower threshold to 3MB for instant scanned-only response
 
