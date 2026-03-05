@@ -50,8 +50,6 @@ const REVIEW_COLORS: Record<string, string> = {
   active: "#3B82F6",
 };
 
-const CORNER_LEN = 20;
-
 const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
   elements,
   selectedId,
@@ -64,6 +62,10 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
   reviewStatuses,
 }) => {
   if (!imageWidth || !imageHeight) return null;
+
+  // Scale factor: sizes are relative to a 1000px-wide reference
+  const s = imageWidth / 1000;
+  const CORNER_LEN = 8 * s;
 
   const filtered = elements.filter(
     (el) =>
@@ -79,7 +81,6 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
       preserveAspectRatio="none"
       style={{ width: "100%", height: "100%" }}
     >
-      {/* SVG filter for label drop shadow */}
       <defs>
         <filter id="label-shadow" x="-20%" y="-20%" width="140%" height="140%">
           <feDropShadow dx="0" dy="1" stdDeviation="2" floodOpacity="0.5" />
@@ -106,8 +107,8 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
         const cy = y + h / 2;
 
         const cLen = Math.min(CORNER_LEN, w / 3, h / 3);
-        const sw = isActive ? 3 : isSelected ? 3 : isHovered ? 2.5 : 2;
-        const dotR = isSelected || isHovered || isActive ? 20 : 16;
+        const sw = isActive ? 1.5 * s : isSelected ? 1.5 * s : isHovered ? 1.2 * s : 1 * s;
+        const dotR = (isSelected || isHovered || isActive ? 6 : 4) * s;
 
         // Corner bracket paths (L-shapes at each corner)
         const corners = [
@@ -121,10 +122,12 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
           `M${x + cLen},${y + h} L${x},${y + h} L${x},${y + h - cLen}`,
         ];
 
+        const showLabel = isHovered || isSelected || isActive;
         const labelText = `${el.element_id} | ${el.element_type}`;
-        const labelWidth = Math.max(labelText.length * 8 + 20, 80);
-        const labelH = 24;
-        const arrowSize = 6;
+        const fontSize = (isSelected || isHovered || isActive ? 10 : 8) * s;
+        const labelWidth = Math.max(labelText.length * fontSize * 0.6 + 12 * s, 50 * s);
+        const labelH = 14 * s;
+        const arrowSize = 4 * s;
 
         return (
           <g key={el.element_id}>
@@ -154,7 +157,7 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
               ry={4}
               fill={color}
               fillOpacity={
-                isActive ? 0.2 : isSelected ? 0.2 : isHovered ? 0.15 : 0.06
+                isActive ? 0.15 : isSelected ? 0.15 : isHovered ? 0.1 : 0.03
               }
               stroke="none"
               className="pointer-events-none"
@@ -167,7 +170,7 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
                 d={d}
                 fill="none"
                 stroke="white"
-                strokeWidth={sw + 3}
+                strokeWidth={sw + 1.5 * s}
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 opacity={0.7}
@@ -202,7 +205,7 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
               r={dotR}
               fill={color}
               stroke="white"
-              strokeWidth={3}
+              strokeWidth={1.5 * s}
               className="pointer-events-none"
             />
 
@@ -211,41 +214,43 @@ const DrawingOverlay: React.FC<DrawingOverlayProps> = ({
               <circle
                 cx={cx}
                 cy={cy}
-                r={6}
+                r={4 * s}
                 fill={color}
                 opacity={0.4}
                 className="overlay-pulse pointer-events-none"
               />
             )}
 
-            {/* Always-visible label with pointer arrow */}
-            <g filter="url(#label-shadow)" className="pointer-events-none">
-              <rect
-                x={x}
-                y={y - labelH - arrowSize}
-                width={labelWidth}
-                height={labelH}
-                rx={5}
-                fill={color}
-                fillOpacity={isSelected || isHovered || isActive ? 0.95 : 0.75}
-              />
-              <polygon
-                points={`${x + 12 - arrowSize},${y - arrowSize} ${x + 12 + arrowSize},${y - arrowSize} ${x + 12},${y}`}
-                fill={color}
-                fillOpacity={isSelected || isHovered || isActive ? 0.95 : 0.75}
-              />
-              <text
-                x={x + 10}
-                y={y - arrowSize - 7}
-                fill="white"
-                fontSize={isSelected || isHovered || isActive ? 15 : 13}
-                fontWeight={isSelected || isHovered || isActive ? 800 : 600}
-                fontFamily="system-ui, sans-serif"
-                className="select-none"
-              >
-                {labelText}
-              </text>
-            </g>
+            {/* Label with pointer arrow — only on hover/select/active */}
+            {showLabel && (
+              <g filter="url(#label-shadow)" className="pointer-events-none">
+                <rect
+                  x={x}
+                  y={y - labelH - arrowSize}
+                  width={labelWidth}
+                  height={labelH}
+                  rx={3 * s}
+                  fill={color}
+                  fillOpacity={0.92}
+                />
+                <polygon
+                  points={`${x + 8 * s - arrowSize},${y - arrowSize} ${x + 8 * s + arrowSize},${y - arrowSize} ${x + 8 * s},${y}`}
+                  fill={color}
+                  fillOpacity={0.92}
+                />
+                <text
+                  x={x + 6 * s}
+                  y={y - arrowSize - labelH * 0.25}
+                  fill="white"
+                  fontSize={fontSize}
+                  fontWeight={700}
+                  fontFamily="system-ui, sans-serif"
+                  className="select-none"
+                >
+                  {labelText}
+                </text>
+              </g>
+            )}
           </g>
         );
       })}
