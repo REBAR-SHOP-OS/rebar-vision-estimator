@@ -1,28 +1,35 @@
 
 
-## Plan: Fix Overlay Visibility — Reduce Marker Sizes and Show Labels on Hover Only
+## Plan: Embed "Corrected Human Method" Rule into Master Prompt + Agent Brain
 
 ### Problem
-The screenshot shows dots, labels, and corner brackets are massively oversized relative to the drawing, causing elements to overlap and obscure the blueprint entirely. The root cause is that all sizes (dot radius 16-20px, label font 13-15px, corner length 20px, stroke widths 2-3px) are fixed in SVG viewBox coordinates which map to the full image resolution (often 3000+ pixels), making them appear enormous.
+The estimator misses floors, uses broad approximations, skips callout cross-referencing, and omits accessory bars. The uploaded "Manual-Standard-Practice-2018" PDF in Agent Brain should be the source-of-truth for standard assumptions (not guesses).
 
-Additionally, labels are always visible for every element, creating a wall of overlapping colored rectangles.
+### Changes
 
-### Changes (single file: `DrawingOverlay.tsx`)
+**1. Insert Corrected Human Method block in `analyze-blueprint/index.ts`**
 
-1. **Scale markers to image size** — compute a scale factor from `imageWidth` so sizes adapt:
-   - Dot radius: 4-6 (down from 16-20)
-   - Corner length: 8 (down from 20)
-   - Stroke widths: 1-1.5 (down from 2-3)
-   - Label font: 8-10 (down from 13-15)
-   - Label height: 14 (down from 24)
+Insert after `CUSTOM RULES INJECTION` block (line 469) and before `SSLW-1` (line 470). Five enforced behaviors:
 
-2. **Labels only on hover/select/active** — hide the label `<g>` unless `isHovered || isSelected || isActive`, so the drawing stays clean at rest.
+- **Granularity**: Break into plan-defined segments (F1, W1, GB1), no "total perimeter" shortcuts. Each segment gets its own takeoff with evidence refs.
+- **Callout chasing**: Cross-reference all plan callouts to details/schedules/notes. Mark `MISSING_DETAIL!` if not found after searching detail sheets, typical details, and notes.
+- **Standard practice from Manual**: When drawings are ambiguous, assumptions in Industry-Norm mode MUST reference the uploaded "Manual of Standard Practice" file in Agent Brain (not invented defaults). In Drawing/Spec mode, ambiguity stays `UNKNOWN!`.
+- **Accessory bars**: Track chair bars, nosing bars, brick ledge dowels, step bars, edge bars, re-entrant corner bars as separate line items. Drawing/Spec if specified; Industry-Norm if standard practice per Manual.
+- **Coverage ledger**: Output `coverage_ledger` proving every level/sheet group was reviewed (Foundation, Ground, Upper floors, Roof, Site). On revisions, output `revision_change_log` with delta check — flag `POSSIBLE_OMISSION_RECHECK_REQUIRED!` if revision claims missing scope but delta < 2%.
 
-3. **Reduce dot white stroke** — from 3 to 1.5 so dots don't bleed.
+**2. Add `coverage_ledger` to JSON schema required keys** (line 508 area)
 
-4. **Reduce fill opacity** — default fill from 0.06 to 0.03 so bboxes don't tint the drawing.
+Add to the top-level required keys list alongside `meta`, `scope_matrix`, etc.
+
+**3. Seed the rule into `agent_knowledge` via database migration**
+
+Insert one row: `type = 'rule'`, title = "Rebar Estimator — Corrected Human Method", content = the full rule text. This makes it visible in Agent Brain UI and injected into prompts.
+
+### Key difference from previous plan
+Standard practice assumptions are now explicitly tied to the **Manual of Standard Practice PDF** uploaded in Agent Brain Files, not invented by the AI. The prompt will instruct: "When applying Industry-Norm assumptions, reference the Manual of Standard Practice file in the knowledge base. If no such file exists, mark assumptions as `UNVERIFIED_ASSUMPTION!`."
 
 ### Scope
-- 1 file modified: `src/components/chat/DrawingOverlay.tsx`
-- No backend changes
+- 1 file modified: `supabase/functions/analyze-blueprint/index.ts`
+- 1 database migration: seed rule into `agent_knowledge`
+- No UI changes, no new dependencies
 
