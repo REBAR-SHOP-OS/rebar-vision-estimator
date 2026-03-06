@@ -1,10 +1,10 @@
 import React, { forwardRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { FileSpreadsheet, FileText, Ruler, Share2 } from "lucide-react";
-import * as XLSX from "xlsx";
 import ShopDrawingModal from "./ShopDrawingModal";
 import ShareReviewDialog from "./ShareReviewDialog";
 import { getMassKgPerM, kgToLbs } from "@/lib/rebar-weights";
+import { exportExcelFile } from "@/lib/excel-export";
 
 interface ExportButtonsProps {
   quoteResult: any;
@@ -24,113 +24,7 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
   const dateStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
   const handleExcelExport = () => {
-    const wb = XLSX.utils.book_new();
-
-    const coverData: any[][] = [
-      ["REBAR ESTIMATOR PRO"], ["Rebar Estimation Report"], [],
-      ["Project Name", scopeData?.projectName || "—"],
-      ["Client Name", scopeData?.clientName || "—"],
-      ["Project Type", scopeData?.projectType || "—"],
-      ["Date Generated", dateStr],
-      ["Rebar Coating", scopeData?.coatingType || "Black Steel"],
-      [], ["SCOPE ITEMS INCLUDED"],
-      ...(scopeData?.scopeItems || []).map((s: string) => ["  •  " + s]),
-      [], ["DEVIATIONS / NOTES"], [scopeData?.deviations || "None"],
-      [], ["GRAND TOTAL"],
-      ["Total Weight (kg)", Math.round(totalKg * 10) / 10],
-      ["Total Weight (tonnes)", (totalKg / 1000).toFixed(2)],
-      ["Total Weight (lbs)", totalLbs],
-      ["Total Weight (tons)", (totalLbs / 2000).toFixed(2)],
-      [], ["ELEMENT COUNT"],
-      ["Ready", quoteResult.included_count || quoteResult.quote.elements.length],
-      ["Flagged", elements.filter((e: any) => e.status === "FLAGGED").length],
-      ["Excluded", quoteResult.excluded_count || 0],
-    ];
-    const coverWs = XLSX.utils.aoa_to_sheet(coverData);
-    coverWs["!cols"] = [{ wch: 30 }, { wch: 30 }];
-    coverWs["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: 1 } }];
-    XLSX.utils.book_append_sheet(wb, coverWs, "Cover Page");
-
-    const barHeaders = ["Element ID", "Bar Mark", "Size", "Shape Code", "Qty", "Multiplier", "Length (mm)", "Wt (kg/m)", "Weight (kg)", "Weight (lbs)"];
-    const barRows: any[][] = [barHeaders];
-    const grouped: Record<string, any[]> = {};
-    for (const b of barList) { const t = b.element_type || "OTHER"; if (!grouped[t]) grouped[t] = []; grouped[t].push(b); }
-    let grandTotalKg = 0;
-    let grandTotalLbs = 0;
-    for (const [type, bars] of Object.entries(grouped)) {
-      barRows.push([`── ${type} ──`, "", "", "", "", "", "", "", "", ""]);
-      let subtotalKg = 0;
-      let subtotalLbs = 0;
-      for (const b of bars) {
-        const unitWtKgM = getMassKgPerM(b.size);
-        const wtKg = typeof b.weight_kg === "number" ? b.weight_kg : (typeof b.weight_lbs === "number" ? b.weight_lbs * 0.453592 : 0);
-        const wtLbs = typeof b.weight_lbs === "number" ? b.weight_lbs : kgToLbs(wtKg);
-        subtotalKg += wtKg;
-        subtotalLbs += wtLbs;
-        barRows.push([b.element_id, b.bar_mark, b.size, b.shape_code, b.qty, b.multiplier || 1, b.length_mm || (b.length_ft * 304.8), unitWtKgM, Math.round(wtKg * 10) / 10, Math.round(wtLbs * 10) / 10]);
-      }
-      barRows.push(["", "", "", "", "", "", "", `${type} Subtotal`, Math.round(subtotalKg * 10) / 10, Math.round(subtotalLbs * 10) / 10]);
-      barRows.push([]);
-      grandTotalKg += subtotalKg;
-      grandTotalLbs += subtotalLbs;
-    }
-    barRows.push(["", "", "", "", "", "", "", "GRAND TOTAL", Math.round(grandTotalKg * 10) / 10, Math.round(grandTotalLbs * 10) / 10]);
-    const barWs = XLSX.utils.aoa_to_sheet(barRows);
-    barWs["!cols"] = [{ wch: 16 }, { wch: 10 }, { wch: 8 }, { wch: 12 }, { wch: 6 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 14 }];
-    XLSX.utils.book_append_sheet(wb, barWs, "Bar List");
-
-    // Size Summary with kg + lbs
-    const hasSizeKg = Object.keys(sizeBreakdownKg).length > 0;
-    const sizeTotal = Object.values(sizeBreakdown).reduce((a, b) => a + b, 0);
-    const sortedSizes = Object.entries(sizeBreakdown).sort((a, b) => parseInt(a[0].replace("#", "")) - parseInt(b[0].replace("#", "")));
-    const sizeRows: any[][] = [["Rebar Size", "Weight (kg)", "Weight (lbs)", "Percentage (%)"]];
-    for (const [size, weight] of sortedSizes) {
-      const kgVal = hasSizeKg ? (sizeBreakdownKg[size] || weight * 0.453592) : weight * 0.453592;
-      sizeRows.push([size, Math.round(kgVal * 10) / 10, Math.round(weight * 10) / 10, (sizeTotal > 0 ? ((weight / sizeTotal) * 100).toFixed(1) : "0.0") + "%"]);
-    }
-    const totalSizeKg = hasSizeKg ? Object.values(sizeBreakdownKg).reduce((a, b) => a + b, 0) : sizeTotal * 0.453592;
-    sizeRows.push(["TOTAL", Math.round(totalSizeKg * 10) / 10, Math.round(sizeTotal * 10) / 10, "100%"]);
-    const sizeWs = XLSX.utils.aoa_to_sheet(sizeRows);
-    sizeWs["!cols"] = [{ wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 16 }];
-    XLSX.utils.book_append_sheet(wb, sizeWs, "Size Summary");
-
-    const bentBars = barList.filter((b: any) => b.shape_code && b.shape_code !== "straight" && b.shape_code !== "closed");
-    if (bentBars.length > 0) {
-      const bendRows: any[][] = [["Element ID", "Bar Mark", "Size", "Shape Code", "Qty", "Length (mm)", "Weight (kg)", "Weight (lbs)"]];
-      const byShape: Record<string, any[]> = {};
-      for (const b of bentBars) { const sc = b.shape_code || "unknown"; if (!byShape[sc]) byShape[sc] = []; byShape[sc].push(b); }
-      for (const [shape, bars] of Object.entries(byShape)) {
-        bendRows.push([`── ${shape} ──`, "", "", "", "", "", "", ""]);
-        for (const b of bars) {
-          const wtKg = typeof b.weight_kg === "number" ? b.weight_kg : (b.weight_lbs || 0) * 0.453592;
-          bendRows.push([b.element_id, b.bar_mark, b.size, b.shape_code, b.qty, b.length_mm || (b.length_ft * 304.8), Math.round(wtKg * 10) / 10, b.weight_lbs || 0]);
-        }
-        bendRows.push([]);
-      }
-      const bendWs = XLSX.utils.aoa_to_sheet(bendRows);
-      bendWs["!cols"] = [{ wch: 16 }, { wch: 10 }, { wch: 8 }, { wch: 12 }, { wch: 6 }, { wch: 12 }, { wch: 14 }, { wch: 14 }];
-      XLSX.utils.book_append_sheet(wb, bendWs, "Bending Schedule");
-    }
-
-    const elemRows: any[][] = [["Element ID", "Type", "Status", "Confidence (%)", "Weight (kg)", "Weight (lbs)"]];
-    for (const el of elements) {
-      const conf = el.extraction?.confidence !== undefined ? (el.extraction.confidence * 100).toFixed(0) : "—";
-      const wInfo = quoteResult.quote.elements.find((q: any) => q.element_id === el.element_id);
-      const wtLbs = wInfo ? wInfo.weight_lbs : 0;
-      const wtKg = wInfo?.weight_kg || wtLbs * 0.453592;
-      elemRows.push([el.element_id, el.element_type, el.status, conf, Math.round(wtKg * 10) / 10, wtLbs || "—"]);
-    }
-    const elemWs = XLSX.utils.aoa_to_sheet(elemRows);
-    elemWs["!cols"] = [{ wch: 16 }, { wch: 14 }, { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 14 }];
-    XLSX.utils.book_append_sheet(wb, elemWs, "Elements Detail");
-
-    const notesData: any[][] = [["PROJECT NOTES"], [], ["Deviations", scopeData?.deviations || "None"], [], ["Scope Items"], ...(scopeData?.scopeItems || []).map((s: string) => ["  •  " + s]), [], ["Calculation Mode", quoteResult.mode === "ai_express" ? "AI Express" : "Verified"], [], ["DISCLAIMER"], ["This estimation is generated by Rebar Estimator Pro and should be verified by a qualified engineer before use in construction."], ["Generated on " + dateStr]];
-    const notesWs = XLSX.utils.aoa_to_sheet(notesData);
-    notesWs["!cols"] = [{ wch: 20 }, { wch: 60 }];
-    XLSX.utils.book_append_sheet(wb, notesWs, "Notes");
-
-    const projectSlug = (scopeData?.projectName || "rebar-takeoff").replace(/\s+/g, "_");
-    XLSX.writeFile(wb, `${projectSlug}_Estimation_File.xlsx`);
+    exportExcelFile({ quoteResult, elements, scopeData });
   };
 
   const handlePdfExport = () => {
