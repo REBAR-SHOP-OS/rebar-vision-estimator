@@ -31,46 +31,177 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
     const printWindow = window.open("", "_blank");
     if (!printWindow) return;
 
+    // ── Data prep (mirrors excel-export.ts logic) ──
+    const sizeBreakdownKg: Record<string, number> = quoteResult.quote.size_breakdown_kg || {};
+    const sizeBreakdownLbs: Record<string, number> = quoteResult.quote.size_breakdown || {};
+    const hasSizeKg = Object.keys(sizeBreakdownKg).length > 0;
+    const allSizes = new Set([...Object.keys(sizeBreakdownKg), ...Object.keys(sizeBreakdownLbs)]);
+    const sizeEntries: [string, number][] = [];
+    for (const size of allSizes) {
+      const kg = hasSizeKg ? (sizeBreakdownKg[size] || (sizeBreakdownLbs[size] || 0) * 0.453592) : (sizeBreakdownLbs[size] || 0) * 0.453592;
+      if (kg > 0) sizeEntries.push([size, kg]);
+    }
+    sizeEntries.sort((a, b) => parseInt(a[0].replace(/[^0-9]/g, "")) - parseInt(b[0].replace(/[^0-9]/g, "")));
+
+    const elemWeights: Record<string, number> = {};
+    for (const b of barList) {
+      const t = b.element_type || "OTHER";
+      const wtKg = typeof b.weight_kg === "number" ? b.weight_kg : (b.weight_lbs || 0) * 0.453592;
+      elemWeights[t] = (elemWeights[t] || 0) + wtKg;
+    }
+    const elemEntries = Object.entries(elemWeights).sort((a, b) => b[1] - a[1]);
+
+    const totalSizeKg = sizeEntries.reduce((s, e) => s + e[1], 0);
+    const totalElemKg = elemEntries.reduce((s, e) => s + e[1], 0);
+
+    const mmToFtIn = (mm: number): string => {
+      if (!mm) return "";
+      const totalInches = mm / 25.4;
+      const ft = Math.floor(totalInches / 12);
+      const inches = Math.round(totalInches % 12);
+      return ft > 0 ? `${ft}'-${inches}"` : `${inches}"`;
+    };
+
+    // ── Size table HTML ──
+    const sizeRowsHtml = sizeEntries.map(([size, kg]) =>
+      `<tr><td>${size}</td><td>${(Math.round(kg * 10) / 10).toLocaleString()}</td></tr>`
+    ).join("");
+
+    // ── Element table HTML ──
+    const elemRowsHtml = elemEntries.map(([elem, kg], i) =>
+      `<tr><td>${i + 1}</td><td>${elem}</td><td>${(Math.round(kg * 10) / 10).toLocaleString()}</td></tr>`
+    ).join("");
+
+    // ── Bar list rows ──
     const grouped: Record<string, any[]> = {};
     for (const b of barList) { const t = b.element_type || "OTHER"; if (!grouped[t]) grouped[t] = []; grouped[t].push(b); }
-    let barListHtml = ""; let grandTotal = 0;
-    for (const [type, bars] of Object.entries(grouped)) {
-      let subtotal = 0;
-      barListHtml += `<tr class="group-header"><td colspan="8">${type}</td></tr>`;
-      for (const b of bars) {
-        const wtKg = typeof b.weight_kg === "number" ? b.weight_kg : (b.weight_lbs || 0) * 0.453592;
-        const unitWtKgM = getMassKgPerM(b.size);
-        subtotal += wtKg;
-        barListHtml += `<tr><td>${b.element_id}</td><td>${b.bar_mark || "—"}</td><td>${b.size}</td><td>${b.shape_code || "—"}</td><td>${b.qty}${b.multiplier > 1 ? ` ×${b.multiplier}` : ""}</td><td>${(b.length_mm || 0).toLocaleString()}</td><td>${unitWtKgM.toFixed(3)}</td><td>${wtKg.toFixed(1)}</td></tr>`;
+
+    let barRowsHtml = "";
+    let slNo = 1;
+    let grandTotalKg = 0;
+    let grandTotalLenM = 0;
+
+    for (const [elemType, bars] of Object.entries(grouped)) {
+      barRowsHtml += `<tr class="group-header"><td colspan="13">${elemType.toUpperCase()}</td></tr>`;
+      // Sub-group
+      const subGrouped: Record<string, any[]> = {};
+      for (const b of bars) { const k = b.sub_element || b.element_id || ""; if (!subGrouped[k]) subGrouped[k] = []; subGrouped[k].push(b); }
+
+      for (const [subElem, subBars] of Object.entries(subGrouped)) {
+        if (subElem && subElem !== elemType) {
+          barRowsHtml += `<tr class="sub-header"><td colspan="13">${subElem}</td></tr>`;
+        }
+        for (const b of subBars) {
+          const mult = b.multiplier || 1;
+          const qty = b.qty || 0;
+          const lengthMm = b.length_mm || (b.length_ft ? b.length_ft * 304.8 : 0);
+          const totalPieces = qty * mult;
+          const totalLenM = (totalPieces * lengthMm) / 1000;
+          const massKgM = getMassKgPerM(b.size);
+          const wtKg = typeof b.weight_kg === "number" ? b.weight_kg : totalLenM * massKgM;
+          const isBent = b.shape_code && b.shape_code !== "straight" && b.shape_code !== "STRAIGHT";
+          const spacing = b.spacing ? ` @ ${b.spacing}` : "";
+          const desc = b.description || b.bar_mark || "";
+          const identification = `${b.size || ""}${spacing}${desc ? " " + desc : ""}`.trim();
+
+          barRowsHtml += `<tr><td>${slNo}</td><td>${identification}</td><td>${mult}</td><td>${qty}</td><td>${b.size || ""}</td><td>${mmToFtIn(lengthMm)}</td><td>${Math.round(lengthMm).toLocaleString()}</td><td>${isBent ? "BEND BARS" : "STRAIGHT BARS"}</td><td>${b.info1 || b.shape_code || ""}</td><td>${b.info2 || ""}</td><td>${(Math.round(totalLenM * 1000) / 1000).toFixed(3)}</td><td>${(Math.round(wtKg * 10) / 10).toFixed(1)}</td><td>${b.notes || ""}</td></tr>`;
+          slNo++;
+          grandTotalKg += wtKg;
+          grandTotalLenM += totalLenM;
+        }
       }
-      barListHtml += `<tr class="subtotal"><td colspan="7" style="text-align:right">${type} Subtotal</td><td>${subtotal.toFixed(1)} kg</td></tr>`;
-      grandTotal += subtotal;
     }
-    barListHtml += `<tr class="grand-total"><td colspan="7" style="text-align:right">GRAND TOTAL</td><td>${grandTotal.toFixed(1)} kg</td></tr>`;
 
-    const totalKgDisplay = Math.round(totalKg * 10) / 10;
-    const totalTonnes = (totalKg / 1000).toFixed(2);
-
-    const sizeTotal = Object.values(sizeBreakdown).reduce((a, b) => a + b, 0);
-    const hasSizeKg = Object.keys(sizeBreakdownKg).length > 0;
-    const sortedSizes = Object.entries(sizeBreakdown).sort((a, b) => parseInt(a[0].replace("#", "")) - parseInt(b[0].replace("#", "")));
-    const sizeHtml = sortedSizes.map(([size, w]) => {
-      const kgVal = hasSizeKg ? (sizeBreakdownKg[size] || w * 0.453592) : w * 0.453592;
-      return `<tr><td>${size}</td><td>${kgVal.toFixed(1)}</td><td>${sizeTotal > 0 ? ((w / sizeTotal) * 100).toFixed(1) : "0.0"}%</td></tr>`;
-    }).join("") + `<tr class="grand-total"><td>TOTAL</td><td>${totalKgDisplay.toLocaleString()} kg</td><td>100%</td></tr>`;
-
-    const bentBars = barList.filter((b: any) => b.shape_code && b.shape_code !== "straight" && b.shape_code !== "closed");
-    const bendHtml = bentBars.length > 0 ? `<div class="section page-break"><h2>Bending Schedule</h2><table><tr><th>Element</th><th>Bar Mark</th><th>Size</th><th>Shape</th><th>Qty</th><th>Length (mm)</th><th>Weight (kg)</th></tr>${bentBars.map((b: any) => { const wtKg = typeof b.weight_kg === "number" ? b.weight_kg : (b.weight_lbs || 0) * 0.453592; return `<tr><td>${b.element_id}</td><td>${b.bar_mark || "—"}</td><td>${b.size}</td><td>${b.shape_code}</td><td>${b.qty}</td><td>${(b.length_mm || 0).toLocaleString()}</td><td>${wtKg.toFixed(1)}</td></tr>`; }).join("")}</table></div>` : "";
+    // ── Mesh details ──
+    const meshDetails: any[] = quoteResult.quote.mesh_details || scopeData?.meshDetails || [];
+    const meshHtml = meshDetails.length > 0
+      ? meshDetails.map((m: any) => `<tr><td>${m.location || ""}</td><td>${m.mesh_size || ""}</td><td>${m.area_sqft || ""}</td></tr>`).join("")
+      : `<tr><td>N/A</td><td></td><td></td></tr>`;
 
     const html = `<!DOCTYPE html><html><head><title>Rebar Estimation Report</title>
-<style>@page{margin:0.75in;size:letter}*{box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;color:#1a1a2e;margin:0;padding:40px;font-size:12px}.header{border-bottom:3px solid #1a1a2e;padding-bottom:12px;margin-bottom:24px}.header h1{margin:0;font-size:22px;color:#1a1a2e}.header .subtitle{font-size:13px;color:#555;margin-top:4px}.meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;margin-bottom:20px;font-size:12px}.meta-grid .label{font-weight:600;color:#333}.meta-grid .value{color:#555}.summary-boxes{display:flex;gap:24px;margin:20px 0}.summary-box{text-align:center;flex:1;padding:14px;border:1px solid #ddd;border-radius:8px}.summary-box .num{font-size:26px;font-weight:700;color:#1a1a2e}.summary-box .lbl{font-size:10px;color:#777;text-transform:uppercase;letter-spacing:0.5px}.section{margin-top:28px}.page-break{page-break-before:always}h2{font-size:15px;color:#1a1a2e;border-bottom:1px solid #ccc;padding-bottom:4px;margin-bottom:10px}table{width:100%;border-collapse:collapse;margin-bottom:12px;font-size:11px}th{background:#1a1a2e;color:#fff;padding:6px 8px;text-align:left;font-weight:600;font-size:10px;text-transform:uppercase}td{padding:5px 8px;border-bottom:1px solid #eee}tr:nth-child(even){background:#f9f9fb}.group-header td{background:#e8e8f0;font-weight:700;font-size:11px;padding:8px;border-bottom:2px solid #1a1a2e}.subtotal td{background:#f0f0f5;font-weight:600;border-top:1px solid #999}.grand-total td{background:#1a1a2e;color:#fff;font-weight:700;font-size:12px}.footer{margin-top:40px;padding-top:12px;border-top:1px solid #ccc;font-size:9px;color:#999;text-align:center}@media print{.page-break{page-break-before:always}body{padding:0}}</style></head><body>
-<div class="header"><h1>Rebar Estimation Report</h1><div class="subtitle">${scopeData?.projectName || "Project"} — ${dateStr}</div></div>
-<div class="meta-grid"><div><span class="label">Client:</span> <span class="value">${scopeData?.clientName || "—"}</span></div><div><span class="label">Project Type:</span> <span class="value">${scopeData?.projectType || "—"}</span></div><div><span class="label">Mode:</span> <span class="value">${quoteResult.mode === "ai_express" ? "AI Express" : "Verified"}</span></div><div><span class="label">Coating:</span> <span class="value">${scopeData?.coatingType || "Black Steel"}</span></div></div>
-<div class="summary-boxes"><div class="summary-box"><div class="num">${totalKgDisplay.toLocaleString()}</div><div class="lbl">Total Weight (kg)</div></div><div class="summary-box"><div class="num">${totalTonnes}</div><div class="lbl">Tonnes</div></div><div class="summary-box"><div class="num">${quoteResult.included_count || quoteResult.quote.elements.length}</div><div class="lbl">Elements Included</div></div></div>
-<div class="section"><h2>Bar List</h2><table><tr><th>Element</th><th>Bar Mark</th><th>Size</th><th>Shape</th><th>Qty</th><th>Length (mm)</th><th>Wt (kg/m)</th><th>Weight (kg)</th></tr>${barListHtml}</table></div>
-<div class="section page-break"><h2>Size Summary</h2><table><tr><th>Rebar Size</th><th>Weight (kg)</th><th>Percentage</th></tr>${sizeHtml}</table></div>
-${bendHtml}
-<div class="footer">Generated by Rebar Estimator Pro &bull; ${dateStr}</div></body></html>`;
+<style>
+@page{margin:0.6in;size:letter landscape}
+*{box-sizing:border-box}
+body{font-family:'Segoe UI',Arial,sans-serif;color:#1a1a2e;margin:0;padding:30px;font-size:11px}
+.header{margin-bottom:16px}
+.header h1{margin:0;font-size:20px;color:#1a1a2e}
+.meta-row{display:flex;gap:4px;font-size:11px;margin:2px 0}
+.meta-row .label{font-weight:600;min-width:110px}
+.section-title{font-size:16px;font-weight:700;color:#1a1a2e;border-bottom:2px solid #1a1a2e;padding-bottom:4px;margin:18px 0 10px}
+.side-by-side{display:flex;gap:40px;margin-bottom:20px}
+.side-by-side .panel{flex:1}
+.panel h3{font-size:12px;font-weight:700;margin:0 0 6px;text-transform:uppercase;color:#333}
+table{width:100%;border-collapse:collapse;font-size:10px}
+th{background:#1a1a2e;color:#fff;padding:5px 6px;text-align:left;font-weight:600;font-size:9px;text-transform:uppercase}
+td{padding:4px 6px;border-bottom:1px solid #eee}
+tr:nth-child(even){background:#f9f9fb}
+.grand-total td{background:#1a1a2e;color:#fff;font-weight:700}
+.group-header td{background:#e8e8f0;font-weight:700;font-size:10px;border-bottom:2px solid #1a1a2e}
+.sub-header td{background:#f0f0f5;font-weight:600;font-style:italic;font-size:10px}
+.notes-section{margin-top:20px;font-size:11px}
+.notes-section .note-row{display:flex;gap:4px;margin:2px 0}
+.notes-section .note-label{font-weight:600;min-width:130px}
+.page-break{page-break-before:always}
+.footer{margin-top:30px;padding-top:8px;border-top:1px solid #ccc;font-size:9px;color:#999;text-align:center}
+.bar-list-table td,.bar-list-table th{font-size:9px;padding:3px 4px;white-space:nowrap}
+</style></head><body>
+
+<!-- SECTION 1: ESTIMATE SUMMARY -->
+<div class="header"><h1>Rebar Estimation Report</h1></div>
+<div class="meta-row"><span class="label">Project Name :</span><span>${scopeData?.projectName || "—"}</span></div>
+<div class="meta-row"><span class="label">Address :</span><span>${scopeData?.address || ""}</span></div>
+<div class="meta-row"><span class="label">Engineer :</span><span>${scopeData?.engineer || ""}</span></div>
+<div class="meta-row"><span class="label">Customer :</span><span>${scopeData?.clientName || "—"}</span></div>
+<div class="meta-row"><span class="label">Product Line :</span><span>${scopeData?.coatingType || "Black Steel"}</span></div>
+
+<div class="section-title">Estimate Summary</div>
+<div class="side-by-side">
+  <div class="panel">
+    <h3>Weight Summary Report in Kgs</h3>
+    <table><tr><th>Bar Size</th><th>Weight (kg)</th></tr>${sizeRowsHtml}
+    <tr class="grand-total"><td>Grand Total (kg)</td><td>${(Math.round(totalSizeKg * 10) / 10).toLocaleString()}</td></tr>
+    <tr class="grand-total"><td>Grand Total (Tons)</td><td>${(totalSizeKg / 1000).toFixed(2)}</td></tr></table>
+  </div>
+  <div class="panel">
+    <h3>Element wise Summary Report in Kgs</h3>
+    <table><tr><th>S.No.</th><th>Element</th><th>Weight (kg)</th></tr>${elemRowsHtml}
+    <tr class="grand-total"><td></td><td>Grand Total (kg)</td><td>${(Math.round(totalElemKg * 10) / 10).toLocaleString()}</td></tr>
+    <tr class="grand-total"><td></td><td>Grand Total (Tons)</td><td>${(totalElemKg / 1000).toFixed(2)}</td></tr></table>
+  </div>
+</div>
+
+<div class="notes-section">
+  <div class="section-title" style="font-size:13px">Notes</div>
+  <div class="note-row"><span class="note-label">Grade :</span><span>${scopeData?.rebarGrade || "400W"}</span></div>
+  <div class="note-row"><span class="note-label">Lap Length Info :</span><span>${scopeData?.lapLength || "As per Manual of Standard Practice"}</span></div>
+  <div class="note-row"><span class="note-label">Deviations :</span><span>${scopeData?.deviations || "None"}</span></div>
+  <div class="note-row"><span class="note-label">Coating :</span><span>${scopeData?.coatingType || "Black Steel"}</span></div>
+</div>
+
+${scopeData?.scopeItems?.length ? `<div style="margin-top:12px"><strong>SCOPE ITEMS INCLUDED</strong><ul style="margin:4px 0">${scopeData.scopeItems.map((s: string) => `<li>${s}</li>`).join("")}</ul></div>` : ""}
+
+<div style="margin-top:16px">
+  <div class="section-title" style="font-size:13px">Mesh Details</div>
+  <table style="max-width:500px"><tr><th>Location</th><th>Mesh Size</th><th>Total Area (SQFT)</th></tr>${meshHtml}</table>
+</div>
+
+<!-- SECTION 2: BAR LIST -->
+<div class="page-break">
+  <div class="section-title">Bar List — ${scopeData?.projectName || "Project"}</div>
+  <table class="bar-list-table">
+    <tr><th>SL.No.</th><th>Identification</th><th>Mult.</th><th>Qty</th><th>Bar Dia</th><th>Length ft-in</th><th>Length mm</th><th>Bend</th><th>Info 1</th><th>Info 2 (@)</th><th>Total Len (Mtr.)</th><th>Total Wgt kg</th><th>Notes</th></tr>
+    ${barRowsHtml}
+    <tr class="grand-total"><td colspan="10" style="text-align:right">TOTAL WEIGHT</td><td>${(Math.round(grandTotalLenM * 1000) / 1000).toFixed(3)}</td><td>${(Math.round(grandTotalKg * 10) / 10).toFixed(1)}</td><td></td></tr>
+    <tr class="grand-total"><td colspan="10" style="text-align:right">TOTAL (Tons)</td><td></td><td>${(grandTotalKg / 1000).toFixed(2)}</td><td></td></tr>
+  </table>
+  <div style="margin-top:16px">
+    <strong>MESH DETAILS</strong>
+    <table style="max-width:500px;margin-top:4px"><tr><th>Location</th><th>Mesh Size</th><th>Total Area (SQFT)</th></tr>${meshHtml}</table>
+  </div>
+</div>
+
+<div class="footer">Generated by Rebar Estimator Pro &bull; ${dateStr}</div>
+</body></html>`;
 
     printWindow.document.write(html);
     printWindow.document.close();
