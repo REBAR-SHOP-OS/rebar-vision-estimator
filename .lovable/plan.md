@@ -1,35 +1,43 @@
 
 
-## Plan: Embed "Corrected Human Method" Rule into Master Prompt + Agent Brain
+## Plan: Rewrite Excel Export to Match Exact Format
 
 ### Problem
-The estimator misses floors, uses broad approximations, skips callout cross-referencing, and omits accessory bars. The uploaded "Manual-Standard-Practice-2018" PDF in Agent Brain should be the source-of-truth for standard assumptions (not guesses).
+The current Excel export has generic sheets (Cover Page, Bar List, Size Summary, Bending Schedule, Elements Detail, Notes) that don't match the company's actual estimation file format. The uploaded `20_york_2-2.xlsx` shows the exact two-sheet structure needed.
+
+### Target Format (from uploaded file)
+
+**Sheet 1: "Estimate Summary"**
+- Row 1: `Project Name :` | project title (merged across columns)
+- Rows 2-4: Address, Engineer, Customer, Product Line
+- Row 5: blank
+- Row 6: "Estimate Summary" header
+- Left side: **Weight Summary Report in Kgs** — table of sizes (10M, 15M, 20M...) with weight per size, grand total kg + tons
+- Right side (same rows): **Element wise Summary Report in Kgs** — numbered list of element types (RAFT SLAB, WALL, GRADE BEAMS...) with weight per element, grand total kg + tons
+- Below: NOTES section with grade/lap length info
+- Below: MESH DETAILS table (Location, Mesh Size, Total Area SQFT)
+
+**Sheet 2: "Bar List" (the detailed takeoff)**
+- Row 1: `Project:` | project title
+- Column headers: SL.No. | Identification | Multiplier | Qty | Bar Dia | Length in feet inches | Length in millimeters | Bend | Info 1 | Info 2 (@) | Total Length (Mtr.) | Total Wgt kg | Notes
+- Rows grouped by element type headers (RAFT SLAB, WALL, GROUND FLOOR SLAB, GRADE BEAMS, PIERS, CABANA...)
+- Sub-headers for sub-elements (SLAB S1-16" THK, FOUNDATION WALLS, CB-1, etc.)
+- Each bar line: identification string like `20M @ 12" OC`, multiplier, qty, bar dia, lengths, bend type, info fields, total length in meters, total weight kg
+- Bottom: TOTAL WEIGHT row + MESH DETAILS
 
 ### Changes
 
-**1. Insert Corrected Human Method block in `analyze-blueprint/index.ts`**
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handleExcelExport()`:
 
-Insert after `CUSTOM RULES INJECTION` block (line 469) and before `SSLW-1` (line 470). Five enforced behaviors:
+1. **Sheet 1 "Estimate Summary"**: Build AOA with project header rows, then side-by-side weight-by-size and weight-by-element tables using column offsets (size table cols A-B, element table cols F-H), grand totals, notes section with lap lengths from scope data, mesh details if available.
 
-- **Granularity**: Break into plan-defined segments (F1, W1, GB1), no "total perimeter" shortcuts. Each segment gets its own takeoff with evidence refs.
-- **Callout chasing**: Cross-reference all plan callouts to details/schedules/notes. Mark `MISSING_DETAIL!` if not found after searching detail sheets, typical details, and notes.
-- **Standard practice from Manual**: When drawings are ambiguous, assumptions in Industry-Norm mode MUST reference the uploaded "Manual of Standard Practice" file in Agent Brain (not invented defaults). In Drawing/Spec mode, ambiguity stays `UNKNOWN!`.
-- **Accessory bars**: Track chair bars, nosing bars, brick ledge dowels, step bars, edge bars, re-entrant corner bars as separate line items. Drawing/Spec if specified; Industry-Norm if standard practice per Manual.
-- **Coverage ledger**: Output `coverage_ledger` proving every level/sheet group was reviewed (Foundation, Ground, Upper floors, Roof, Site). On revisions, output `revision_change_log` with delta check — flag `POSSIBLE_OMISSION_RECHECK_REQUIRED!` if revision claims missing scope but delta < 2%.
+2. **Sheet 2 "Bar List"**: Build AOA with project header, then 13-column header row matching the exact column layout. Iterate bar_list grouped by element_type, output group headers and sub-element headers, then each bar row with: sequential SL.No., identification string (e.g. `{size} @ {spacing} {description}`), multiplier, qty, bar_dia, length_ft, length_mm, bend type (STRAIGHT BARS / BEND BARS), info1, info2, total_length_m, total_weight_kg, notes. End with TOTAL WEIGHT row and MESH DETAILS.
 
-**2. Add `coverage_ledger` to JSON schema required keys** (line 508 area)
+3. **Remove old sheets**: Drop Cover Page, Elements Detail, Notes, Bending Schedule sheets. Keep only the two sheets.
 
-Add to the top-level required keys list alongside `meta`, `scope_matrix`, etc.
-
-**3. Seed the rule into `agent_knowledge` via database migration**
-
-Insert one row: `type = 'rule'`, title = "Rebar Estimator — Corrected Human Method", content = the full rule text. This makes it visible in Agent Brain UI and injected into prompts.
-
-### Key difference from previous plan
-Standard practice assumptions are now explicitly tied to the **Manual of Standard Practice PDF** uploaded in Agent Brain Files, not invented by the AI. The prompt will instruct: "When applying Industry-Norm assumptions, reference the Manual of Standard Practice file in the knowledge base. If no such file exists, mark assumptions as `UNVERIFIED_ASSUMPTION!`."
+4. **Column widths and merges**: Match the uploaded file's layout with appropriate column widths and header merges.
 
 ### Scope
-- 1 file modified: `supabase/functions/analyze-blueprint/index.ts`
-- 1 database migration: seed rule into `agent_knowledge`
-- No UI changes, no new dependencies
+- 1 file modified: `src/components/chat/ExportButtons.tsx`
+- No backend changes
 
