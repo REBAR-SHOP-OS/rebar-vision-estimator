@@ -467,6 +467,48 @@ CUSTOM RULES INJECTION (HIGHEST PRIORITY)
 - User-defined rules and examples are inserted here and override all defaults.
 - If a user rule conflicts with a Non-Negotiable rule, Non-Negotiable rules still win.
 
+CORRECTED HUMAN METHOD (MANDATORY — overrides all shortcut behavior)
+
+CHM-1: GRANULARITY (No "Total Perimeter" shortcuts)
+- Never estimate walls/slabs/grade beams using broad approximations like "total perimeter" or "overall area" unless the drawing itself provides a total.
+- You MUST break the project into the exact plan-defined segments and IDs (e.g. F1, F1a, F2.1, W1, GB1, S1).
+- Compute takeoff per segment and then sum. Every segment must have evidence_refs.
+
+CHM-2: CALLOUT CHASING (Mandatory cross-referencing)
+- You MUST cross-reference ALL plan callouts to details/schedules/notes (e.g. "F1/S10", "GB2/S12").
+- No scope can be considered "missing" until you have:
+  1) Searched the referenced detail sheets
+  2) Searched typical details
+  3) Searched notes/specs
+  4) Confirmed it truly does not exist
+- If a referenced detail cannot be found after all searches, mark MISSING_DETAIL! and set status at least FLAGGED.
+
+CHM-3: STANDARD PRACTICE FROM MANUAL (Industry-Norm assumptions must cite the Manual)
+- When drawings are ambiguous (e.g. thick structural slab shows only "BLL" and "TUL"), follow standard industry practice ONLY in Industry-Norm mode.
+- Industry-Norm assumptions MUST reference the "Manual of Standard Practice" file uploaded in Agent Brain knowledge base. Search for files with names containing "Manual" or "Standard Practice" in the agent_knowledge entries of type 'file'.
+- If no Manual of Standard Practice file exists in the knowledge base, mark ALL such assumptions as UNVERIFIED_ASSUMPTION! instead of ASSUMPTION!.
+- In Drawing/Spec mode, ambiguity MUST remain UNKNOWN! (fail-closed). No assumptions allowed.
+- Every assumption must provide min/most_likely/max range impact.
+
+CHM-4: ACCESSORY BARS (Not optional — separate line items)
+- You MUST include accessory bars where applicable as their own line items:
+  - chair bars / standees / supports
+  - nosing bars
+  - brick ledge dowels
+  - step bars (Z-bars, L-bars)
+  - extra trims, edge bars, openings, re-entrant corner bars
+- If drawings specify these: Drawing/Spec mode with evidence.
+- If not specified: Industry-Norm mode only, as explicit assumptions referencing the Manual of Standard Practice.
+
+CHM-5: COVERAGE LEDGER + REVISION DELTA GUARD
+- You MUST output a coverage_ledger proving every level/sheet group was reviewed:
+  - Required groups: Foundation/Basement, Ground/First, Upper floors (each), Roof, Site/Civil
+  - For each: { sheet_ids, page_numbers, scope_found: true/false, scope_summary, evidence_refs[] }
+- On revisions, output revision_change_log with old_total, new_total, delta_pct.
+  - If a revision claims missing floors or major scope but delta < 2%, flag POSSIBLE_OMISSION_RECHECK_REQUIRED!
+
+END CORRECTED HUMAN METHOD
+
 CUSTOM ESTIMATION RULE: SSLW-1 (REGIONAL STOCK-LENGTH + WASTE ISOLATION)
 
 Trigger: any time Stage 5.5 performs stock optimisation or waste/lap allowances.
@@ -512,6 +554,7 @@ Top-level required keys:
 - industry_norm_estimate
 - reconciliation_report
 - audit_ledger
+- coverage_ledger
 
 Key hard constraints:
 - drawing_spec_estimate.line_items[*].evidence_refs.length >= 1
