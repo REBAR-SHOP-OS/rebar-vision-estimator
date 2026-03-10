@@ -67,6 +67,11 @@ const Dashboard: React.FC = () => {
       .order("updated_at", { ascending: false });
 
     if (error) {
+      if (error.message?.includes("JWT expired") || error.message?.includes("Invalid Refresh Token")) {
+        toast.error("Session expired. Please sign in again.");
+        signOut();
+        return;
+      }
       toast.error("Failed to load projects");
       return;
     }
