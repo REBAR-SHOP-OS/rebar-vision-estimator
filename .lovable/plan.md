@@ -1,38 +1,48 @@
 
 
-## Plan: Align PDF Export to Match Excel Two-Sheet Layout
+## Plan: Auto-detect and alert on special rebar coatings (epoxy, stainless, galvanized, etc.)
 
 ### Problem
-The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
+The AI prompt already asks the model to identify coating types (Stage 2.5) and the truth schema includes a `coating` field, but:
+1. **No alert is shown** when the AI detects non-standard coating (epoxy, stainless, galvanized) in the blueprint
+2. **ValidationResults and BarListTable** completely ignore the `coating` field — it's never displayed
+3. **Price impact** of special coatings is never flagged (epoxy ~15-25% premium, stainless ~5-8x premium)
 
 ### Changes
 
-**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
+**File 1: `src/components/chat/ValidationResults.tsx`**
+- After the summary stats section, scan all elements for non-"black"/"none" coatings
+- If found, render a prominent alert banner: `⚠️ Special Rebar Detected: Epoxy-Coated (3 elements), Stainless Steel (1 element)` with a note about pricing impact
+- Style with amber/orange background to stand out
 
-Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
+**File 2: `src/components/chat/BarListTable.tsx`**
+- Add a `coating` column (or badge next to the size column) that shows a colored badge when coating is non-standard:
+  - Epoxy → green badge "ECR"
+  - Stainless → blue badge "SS"  
+  - Galvanized → yellow badge "GALV"
+- Add `coating` to the `BarItem` interface
 
-**Section 1: "Estimate Summary"** (page 1)
-- Project header: Project Name, Address, Engineer, Customer, Product Line
-- "Estimate Summary" title
-- Side-by-side tables using CSS grid/flexbox:
-  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
-  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
-- NOTES section: Grade, Lap Length Info, Deviations, Coating
-- Scope Items (if any)
-- MESH DETAILS table
+**File 3: `supabase/functions/validate-elements/index.ts`**
+- Add a new **coating gate** (G6): check if `truth.coating` is non-"none"/"black" and add a warning (not blocking) so users are always reminded
+- Include coating info in the validation `warnings` array: `"Special coating detected: EPOXY — verify pricing applies"`
 
-**Section 2: "Bar List"** (page 2+, page-break-before)
-- Project header
-- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
-- Rows grouped by element type headers (bold row spanning columns)
-- Sub-element sub-headers
-- Bar rows with identification string (`{size} @ {spacing} {description}`)
-- TOTAL WEIGHT + TOTAL (Tons) footer rows
-- MESH DETAILS at bottom
+**File 4: `supabase/functions/analyze-blueprint/index.ts`**
+- In the prompt's Stage 2.5 section, add an explicit instruction: `"CRITICAL: If ANY note, legend, or specification mentions epoxy, stainless, galvanized, MMFX, or any coating/material type, you MUST populate the 'coating' field for EVERY affected element. Default is 'none'. This is a pricing-critical field — never omit it."`
+- In the JSON template example, ensure `coating` field is prominent
 
-The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
+**File 5: `supabase/functions/price-elements/index.ts`**
+- Add coating multipliers to pricing: epoxy ×1.20, galvanized ×1.35, stainless ×6.0
+- Include coating surcharge as a separate line in the quote output
 
-### Scope
-- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
-- No new files, no backend changes
+### Technical Details
+
+Coating detection flows:
+```text
+OCR text → analyze-blueprint (Stage 2.5 extracts coating per element)
+  → truth.coating = "EPOXY" | "STAINLESS" | "GALVANISED" | "none"
+    → validate-elements (G6 warning)
+      → ValidationResults (alert banner)
+      → BarListTable (badge column)
+      → price-elements (multiplier applied)
+```
 
