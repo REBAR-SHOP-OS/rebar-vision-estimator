@@ -268,30 +268,35 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                   });
                   console.log(`[OCR Routing] ${pageImages.length} page images uploaded. Running Vision OCR on each...`);
                   
-                  // OCR each page image individually via the lightweight ocr-image edge function
-                  let ocrFailCount = 0;
-                  for (const img of pageImages) {
-                    scannedPdfPageImageUrls.push(img.signedUrl);
-                    try {
-                      console.log(`[OCR Routing] OCR page ${img.pageNumber}...`);
-                      const { data: ocrData, error: ocrErr } = await supabase.functions.invoke('ocr-image', {
-                        body: { image_url: img.signedUrl },
-                      });
-                      if (ocrErr) {
-                        console.error(`[OCR Routing] OCR failed for page ${img.pageNumber}:`, ocrErr);
-                        ocrFailCount++;
-                      } else if (ocrData?.ocr_results) {
-                        clientOcrResults.push({
-                          image_name: `page_${img.pageNumber}.png`,
-                          ocr_results: ocrData.ocr_results,
-                        });
-                        console.log(`[OCR Routing] OCR page ${img.pageNumber} done — ${ocrData.ocr_results.reduce((s: number, r: any) => s + (r.blocks?.length || 0), 0)} blocks`);
-                      }
-                    } catch (ocrErr) {
-                      console.error(`[OCR Routing] OCR error for page ${img.pageNumber}:`, ocrErr);
-                      ocrFailCount++;
-                    }
-                  }
+                   // OCR each page image in parallel batches of 4
+                   let ocrFailCount = 0;
+                   const OCR_BATCH_SIZE = 4;
+                   for (let i = 0; i < pageImages.length; i += OCR_BATCH_SIZE) {
+                     const batch = pageImages.slice(i, i + OCR_BATCH_SIZE);
+                     const batchResults = await Promise.allSettled(
+                       batch.map(async (img) => {
+                         scannedPdfPageImageUrls.push(img.signedUrl);
+                         console.log(`[OCR Routing] OCR page ${img.pageNumber}...`);
+                         const { data: ocrData, error: ocrErr } = await supabase.functions.invoke('ocr-image', {
+                           body: { image_url: img.signedUrl },
+                         });
+                         if (ocrErr) throw ocrErr;
+                         return { pageNumber: img.pageNumber, ocrData };
+                       })
+                     );
+                     for (const result of batchResults) {
+                       if (result.status === 'fulfilled' && result.value.ocrData?.ocr_results) {
+                         clientOcrResults.push({
+                           image_name: `page_${result.value.pageNumber}.png`,
+                           ocr_results: result.value.ocrData.ocr_results,
+                         });
+                         console.log(`[OCR Routing] OCR page ${result.value.pageNumber} done — ${result.value.ocrData.ocr_results.reduce((s: number, r: any) => s + (r.blocks?.length || 0), 0)} blocks`);
+                       } else {
+                         console.error(`[OCR Routing] OCR failed for batch page:`, result.status === 'rejected' ? result.reason : 'no results');
+                         ocrFailCount++;
+                       }
+                     }
+                   }
                   // P1: Warn if >50% OCR pages failed
                   if (pageImages.length > 0 && ocrFailCount / pageImages.length > 0.5) {
                     toast.warning(`OCR failed on ${ocrFailCount}/${pageImages.length} pages. Results may be incomplete.`);
