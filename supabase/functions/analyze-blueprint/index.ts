@@ -487,6 +487,7 @@ CHM-2: CALLOUT CHASING (Mandatory cross-referencing)
 CHM-3: STANDARD PRACTICE FROM MANUAL (Industry-Norm assumptions must cite the Manual)
 - When drawings are ambiguous (e.g. thick structural slab shows only "BLL" and "TUL"), follow standard industry practice ONLY in Industry-Norm mode.
 - Industry-Norm assumptions MUST reference the "Manual of Standard Practice" file uploaded in Agent Brain knowledge base. Search for files with names containing "Manual" or "Standard Practice" in the agent_knowledge entries of type 'file'.
+- You MUST actively read and reference the Manual of Standard Practice PDF content for EVERY Industry-Norm assumption. Do NOT skip reading the Manual — it is your primary source for standard practice.
 - If no Manual of Standard Practice file exists in the knowledge base, mark ALL such assumptions as UNVERIFIED_ASSUMPTION! instead of ASSUMPTION!.
 - In Drawing/Spec mode, ambiguity MUST remain UNKNOWN! (fail-closed). No assumptions allowed.
 - Every assumption must provide min/most_likely/max range impact.
@@ -1095,6 +1096,13 @@ Before outputting your final answer, you MUST:
     if (hasUserRules || hasTrainingExamples) {
       const stage0 = `## STAGE 0 — RULE COMPLIANCE CHECK (Execute BEFORE any analysis)\nBefore starting your analysis, you MUST:\n1. Read ALL user-defined rules listed below.\n2. For each rule, confirm you understand it and will follow it EXACTLY.\n3. If a rule specifies a calculation method → use THAT method, not your default.\n4. If a rule specifies units → use THOSE units throughout.\n5. If a rule specifies a format or threshold → match it EXACTLY.\n6. If training examples are provided → your calculations MUST follow the same methodology.\n7. ANY deviation from user rules or training examples is an ERROR that must be corrected.\n\nProceed with analysis only after confirming all rules are understood.\n\n---\n\n`;
       systemPrompt = stage0 + systemPrompt;
+    }
+
+    // 6. Inject Brain File Presence Indicator — force AI to consult brain files for all assumptions
+    const brainFileNames = (knowledgeContext?.fileUrls || []).map((f: any) => typeof f === 'string' ? f.split('/').pop() : (f.name || f)).join(', ');
+    if (brainFileNames) {
+      const brainDirective = `\n## 📚 BRAIN KNOWLEDGE FILES AVAILABLE: [${brainFileNames}]\nCRITICAL: You MUST consult these files for ALL assumptions — especially Industry-Norm assumptions.\nIf a file named "Manual" or "Standard Practice" is listed above, you MUST cite specific sections/pages from it for every assumption.\nNever make an assumption without first checking the brain knowledge base files listed above.\nIf the Manual of Standard Practice is NOT listed above, mark ALL Industry-Norm assumptions as UNVERIFIED_ASSUMPTION!\n\n---\n\n`;
+      systemPrompt = brainDirective + systemPrompt;
     }
 
     // Build messages array with file context
