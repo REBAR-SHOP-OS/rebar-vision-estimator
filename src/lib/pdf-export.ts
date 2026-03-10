@@ -176,8 +176,8 @@ ${warningBanner}
 <div class="meta-row"><span class="label">Engineer :</span><span>${scopeData?.engineer || ""}</span></div>
 <div class="meta-row"><span class="label">Customer :</span><span>${scopeData?.clientName || "—"}</span></div>
 <div class="meta-row"><span class="label">Product Line :</span><span>${scopeData?.coatingType || "Black Steel"}</span></div>
-<div class="meta-row"><span class="label">Estimate Date :</span><span>${dateStr}</span></div>
-<div class="meta-row"><span class="label">Estimator Version :</span><span>v2026-03-10 (Rev B — HARDENED)</span></div>
+<div class="meta-row"><span class="label">Estimator :</span><span>${scopeData?.estimator || "—"}</span></div>
+<div class="meta-row"><span class="label">Created Date :</span><span>${dateStr}</span></div>
 
 <div class="section-title">Estimate Summary</div>
 <div class="side-by-side">
