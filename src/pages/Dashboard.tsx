@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import OutcomeCapture from "@/components/audit/OutcomeCapture";
 import DrawingSearchPanel from "@/components/search/DrawingSearchPanel";
 import ChatArea from "@/components/chat/ChatArea";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import StepProgress from "@/components/chat/StepProgress";
 import logoBg from "@/assets/logo.png";
 import {
