@@ -1015,15 +1015,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           created_at: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, msg]);
-      }
 
-      await supabase.from("messages").insert({
-        project_id: projectId,
-        user_id: user.id,
-        role: "user",
-        content: msg.content,
-      });
-    }
+        await supabase.from("messages").insert({
+          project_id: projectId,
+          user_id: user.id,
+          role: "user",
+          content: msg.content,
+        });
+      }
 
     setUploadedFiles((prev) => [...prev, ...newUrls]);
 
