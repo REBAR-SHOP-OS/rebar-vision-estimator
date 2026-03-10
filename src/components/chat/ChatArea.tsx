@@ -675,6 +675,29 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       content: msgContent,
     });
 
+    // If user clicks "Yes, Proceed" and we already have validation data, skip re-analysis and go to pricing
+    if (validationData?.elements && /yes.*proceed|proceed.*next/i.test(msgContent)) {
+      try {
+        const readyCount = validationData.elements.filter((e: any) => e.status === "READY").length;
+        if (readyCount > 0) {
+          const sysMsg: Message = {
+            id: crypto.randomUUID(),
+            role: "system",
+            content: `✅ Proceeding with **${readyCount}** ready element(s). Skipping ${validationData.elements.length - readyCount} blocked/flagged element(s).`,
+            created_at: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, sysMsg]);
+          await runPricing(validationData.elements, "ai_express");
+        } else {
+          toast.error("No elements are ready. Please resolve blocked elements first.");
+        }
+      } catch (err: any) {
+        toast.error(err.message || "Pricing failed");
+      }
+      setLoading(false);
+      return;
+    }
+
     // If no mode selected yet and files exist, show mode picker
     if (!calculationMode && uploadedFiles.length > 0) {
       setShowModePicker(true);
