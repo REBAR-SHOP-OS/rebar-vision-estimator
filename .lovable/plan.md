@@ -1,38 +1,34 @@
 
 
-## Plan: Align PDF Export to Match Excel Two-Sheet Layout
+## Plan: Enforce Brain Knowledge & Manual Usage for All Assumptions
 
 ### Problem
-The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
+The AI sometimes makes assumptions without referencing the Agent Brain knowledge base or the Manual of Standard Practice PDF, even though both are uploaded and injected. The prompt needs stronger, more explicit directives.
 
-### Changes
+### Changes (single file: `supabase/functions/analyze-blueprint/index.ts`)
 
-**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
+#### 1. Add a "BRAIN KNOWLEDGE FILES" directive after the brain injection block (~line 1098)
+Insert a new prompt section that explicitly tells the AI:
+- The Agent Brain knowledge files (especially the Manual of Standard Practice) are **attached and available**
+- For **every** assumption (Industry-Norm or otherwise), the AI **MUST** consult the brain files first
+- If the Manual of Standard Practice is present, cite specific sections/pages from it
+- If the Manual is NOT present, mark assumptions as `UNVERIFIED_ASSUMPTION!`
+- Never make an assumption without checking the brain knowledge base first
 
-Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
+#### 2. Strengthen CHM-3 (~line 487-492)
+Add stronger language:
+- "You MUST actively read and reference the Manual of Standard Practice PDF content for EVERY Industry-Norm assumption"
+- "Do NOT skip reading the Manual — it is your primary source for standard practice"
 
-**Section 1: "Estimate Summary"** (page 1)
-- Project header: Project Name, Address, Engineer, Customer, Product Line
-- "Estimate Summary" title
-- Side-by-side tables using CSS grid/flexbox:
-  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
-  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
-- NOTES section: Grade, Lap Length Info, Deviations, Coating
-- Scope Items (if any)
-- MESH DETAILS table
-
-**Section 2: "Bar List"** (page 2+, page-break-before)
-- Project header
-- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
-- Rows grouped by element type headers (bold row spanning columns)
-- Sub-element sub-headers
-- Bar rows with identification string (`{size} @ {spacing} {description}`)
-- TOTAL WEIGHT + TOTAL (Tons) footer rows
-- MESH DETAILS at bottom
-
-The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
+#### 3. Add a brain file presence indicator in the prompt
+After collecting `knowledgeContext.fileUrls`, inject a line like:
+```
+BRAIN FILES AVAILABLE: [Manual-Standard-Practice.pdf, IMG_9252.jpeg, ...] — YOU MUST CONSULT THESE FOR ALL ASSUMPTIONS.
+```
+This makes the AI explicitly aware the files are there and named.
 
 ### Scope
-- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
-- No new files, no backend changes
+- 1 file modified (~15 lines added/changed)
+- No database or frontend changes
+- Strengthens existing behavior, no new features
 
