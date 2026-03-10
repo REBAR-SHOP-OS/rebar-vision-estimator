@@ -898,27 +898,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
         const fullContent = await streamAIResponse(chatHistory, calculationMode, uploadedFiles);
 
-        // Trigger learning extraction
-        triggerLearning([...chatHistory, { role: "assistant", content: fullContent }]);
-
-        supabase.from("messages").insert({
-          project_id: projectId,
-          user_id: user.id,
-          role: "assistant",
-          content: fullContent,
-        }).then(({ error }) => { if (error) console.error("Failed to save assistant message:", error); });
-
-        // Process Atomic Truth pipeline
-        await processAtomicTruth(fullContent);
-
-        // Check for Finder Pass candidates
-        const fpCandidates = extractFinderPassCandidates(fullContent);
-        if (fpCandidates.length > 0) {
-          setFinderPassCandidates(fpCandidates);
-          setFinderReviewMode(true);
-          openBlueprintViewer();
-        }
+        await handlePostStream(fullContent, chatHistory, calculationMode);
       } catch (err: any) {
+        setSubStep(null);
         if (err.name === "AbortError") {
           toast.error("AI analysis timed out after 5 minutes. Please retry.");
         } else {
@@ -927,6 +909,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       }
     }
 
+    setSubStep(null);
     setLoading(false);
   };
 
