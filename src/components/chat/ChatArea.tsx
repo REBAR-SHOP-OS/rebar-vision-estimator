@@ -389,8 +389,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       abortControllerRef.current = controller;
       const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
 
-      // When OCR results exist, pre_extracted_text is redundant — drop it to save payload
-      const effectivePreExtracted = trimmedOcrResults.length > 0 ? [] : preExtractedText;
+      // Use scopeOverride if provided (scope-by-scope loop), else default
+      const effectiveScope = opts?.scopeOverride || scopeDataRef.current;
 
       const payloadObj = {
           messages: chatMessages,
@@ -399,9 +399,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           pre_extracted_text: effectivePreExtracted,
           pre_ocr_results: trimmedOcrResults,
           knowledgeContext,
-          scope: scopeDataRef.current,
-          primaryCategory: scopeDataRef.current?.primaryCategory,
-          features: scopeDataRef.current?.features,
+          scope: effectiveScope,
+          primaryCategory: effectiveScope?.primaryCategory,
+          features: effectiveScope?.features,
           projectId,
       };
       let payloadStr = JSON.stringify(payloadObj);
