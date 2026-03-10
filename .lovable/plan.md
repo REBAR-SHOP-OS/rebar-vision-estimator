@@ -1,35 +1,38 @@
 
 
-## Plan: Fix Export Tiles Not Appearing After Estimation
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
 
-### Root Cause Analysis
+### Problem
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
-After tracing both the Smart and Step-by-Step flows, there are two issues causing export tiles to not appear reliably:
+### Changes
 
-**Issue 1: Idea cards (bottom input area) — condition too restrictive**
-The "Download PDF" and "Download Excel" idea cards at the bottom of the chat (lines 1989-2000) only appear when:
-- Input is empty AND not loading
-- AND the last assistant message matches a specific regex (confirm question) OR `validationData/quoteResult` exists
-- AND `quoteResult?.quote` is truthy
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-The problem: after step-by-step conversation, the last assistant message might not match `hasConfirmQuestion`, so it falls to the `validationData || quoteResult` branch (line 1994). But if the user types anything in the input box, all idea cards vanish (`!input.trim()` check at line 1974).
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
 
-**Issue 2: Inline ExportButtons scroll visibility**
-The `ExportButtons` component (line 1881) renders inside the results panel after the quote weight summary. Users must scroll down past the validation cards, bar list tabs, and weight summary to reach it. There's no persistent/floating export action.
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
 
-### Fix
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
 
-**1. Always show export idea cards when `quoteResult?.quote` exists** (ChatArea.tsx, ~10 lines)
-Add a dedicated always-visible export card row that shows whenever `quoteResult?.quote` exists, independent of the other conditional logic. Place it above the suggestion cards area so it's always visible.
-
-**2. Add auto-scroll to ExportButtons after quote is set** (ChatArea.tsx, ~5 lines)
-When `quoteResult` is first set (in `processAtomicTruth` and `runPricing`), scroll the export buttons into view using a ref + `scrollIntoView()`.
-
-**3. Ensure idea cards show even during input** (ChatArea.tsx, ~3 lines)  
-For export-specific cards only, relax the `!input.trim()` condition — always show Download PDF/Excel cards when a quote exists, even if the user has text in the input.
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
 ### Scope
-- 1 file modified: `src/components/chat/ChatArea.tsx`
-- ~20 lines changed across 3 locations
-- No backend changes
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
+- No new files, no backend changes
 

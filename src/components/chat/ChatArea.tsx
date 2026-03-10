@@ -1878,7 +1878,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                         {quoteResult.excluded.map((ex: any, i: number) => <p key={i}>• {ex.element_id}: {ex.reason}</p>)}
                       </div>
                     )}
-                    <ExportButtons quoteResult={quoteResult} elements={validationData?.elements || []} scopeData={scopeData} />
+                    <ExportButtons ref={(el) => { if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 300); }} quoteResult={quoteResult} elements={validationData?.elements || []} scopeData={scopeData} />
                   </div>
                 )}
 
@@ -1971,6 +1971,37 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       <div className="border-t border-border bg-background/80 backdrop-blur-sm p-2 sm:p-3">
         <div className="mx-auto max-w-none">
           {/* Suggestion Idea Cards */}
+          {/* Always-visible export cards when quote exists */}
+          {quoteResult?.quote && !loading && (
+            <div className="flex gap-2 overflow-x-auto pb-2 mb-1 scrollbar-none">
+              {[
+                { icon: 'FileText', title: 'Download PDF', description: 'Export PDF report', action: 'exportPdf' as const },
+                { icon: 'FileSpreadsheet', title: 'Download Excel', description: 'Export spreadsheet', action: 'exportExcel' as const },
+              ].map((card) => {
+                const iconMap: Record<string, React.ComponentType<{ className?: string }>> = { FileText, FileSpreadsheet };
+                const IconComp = iconMap[card.icon];
+                return (
+                  <button
+                    key={card.title}
+                    onClick={async () => {
+                      if (card.action === 'exportExcel') {
+                        await exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData });
+                        toast.success("Excel exported");
+                      } else if (card.action === 'exportPdf') {
+                        await exportPdfFile({ quoteResult, elements: validationData?.elements || [], scopeData, projectId });
+                        toast.success("PDF exported");
+                      }
+                    }}
+                    className="flex-shrink-0 flex flex-col items-start gap-1 rounded-xl border border-primary/30 bg-primary/5 p-3 min-w-[110px] sm:min-w-[130px] max-w-[140px] sm:max-w-[160px] text-left hover:border-primary/50 hover:bg-primary/10 transition-colors group"
+                  >
+                    {IconComp && <IconComp className="h-4 w-4 text-primary transition-colors" />}
+                    <span className="text-xs font-semibold text-foreground">{card.title}</span>
+                    <span className="text-[10px] text-muted-foreground leading-tight">{card.description}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           {!input.trim() && !loading && (
             <div className="flex gap-2 overflow-x-auto pb-2 mb-1 scrollbar-none">
               {(() => {
@@ -1986,18 +2017,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                     { icon: 'CheckCircle', title: 'Yes, Proceed', description: 'Continue to next step', sendText: 'Yes, proceed to next stage', autoSend: true },
                     { icon: 'SlidersHorizontal', title: 'Adjust Scope', description: 'Change element types', sendText: 'I need to adjust the scope', autoSend: true },
                     { icon: 'Plus', title: 'Add More', description: 'Include more elements', sendText: 'Add more element types', autoSend: true },
-                    ...(quoteResult?.quote ? [
-                      { icon: 'FileText', title: 'Download PDF', description: 'Export PDF report', sendText: '', action: 'exportPdf' as const },
-                      { icon: 'FileSpreadsheet', title: 'Download Excel', description: 'Export spreadsheet', sendText: '', action: 'exportExcel' as const },
-                    ] : []),
                   ];
                 } else if (validationData || quoteResult) {
                   cards = [
                     { icon: 'Table', title: 'Bar List', description: 'View full rebar table', sendText: 'Show me the bar list' },
-                    ...(quoteResult?.quote ? [
-                      { icon: 'FileText', title: 'Download PDF', description: 'Export PDF report', sendText: '', action: 'exportPdf' as const },
-                      { icon: 'FileSpreadsheet', title: 'Download Excel', description: 'Export spreadsheet', sendText: '', action: 'exportExcel' as const },
-                    ] : []),
                     { icon: 'AlertTriangle', title: 'Review Flags', description: 'Check flagged items', sendText: 'Review flagged elements' },
                     { icon: 'RefreshCw', title: 'Recalculate', description: 'Update with your edits', sendText: 'Recalculate with edits' },
                   ];
