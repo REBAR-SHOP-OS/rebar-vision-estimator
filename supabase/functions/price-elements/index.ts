@@ -167,11 +167,19 @@ function calculateElementWeight(truth: ElementTruth["truth"], elementType: strin
         length_ft: Math.round(lengthFt * 100) / 100,
         weight_lbs: Math.round(weight_lbs * 100) / 100,
         weight_kg: Math.round(weight_kg * 100) / 100,
+        ...(coating ? { coating } : {}),
       });
     }
 
+    // Apply coating multiplier to total
+    totalWeight_kg *= coatingMult;
+    // Recompute breakdowns with multiplier
+    if (coatingMult !== 1.0) {
+      for (const k of Object.keys(breakdown_kg)) breakdown_kg[k] *= coatingMult;
+      for (const k of Object.keys(breakdown)) breakdown[k] *= coatingMult;
+    }
     const totalWeight_lbs = totalWeight_kg / 0.453592;
-    return { weight_lbs: totalWeight_lbs, weight_kg: totalWeight_kg, breakdown, breakdown_kg, bar_list_entries, missing_length_count, missing_length_bars };
+    return { weight_lbs: totalWeight_lbs, weight_kg: totalWeight_kg, breakdown, breakdown_kg, bar_list_entries, missing_length_count, missing_length_bars, ...(coating ? { coating, coating_multiplier: coatingMult } : {}) };
   }
 
   // ── FALLBACK PATH: legacy vertical_bars + ties (hardcoded lengths) ──
