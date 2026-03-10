@@ -730,7 +730,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         role: "assistant",
         content: fullContent,
         metadata: { calculationMode: mode, step: 1 },
-      });
+      }).then(({ error }) => { if (error) console.error("Failed to save assistant message:", error); });
 
       // Process Atomic Truth pipeline (now fast-return with background validation)
       const extracted = await processAtomicTruth(fullContent);
