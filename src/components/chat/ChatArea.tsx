@@ -481,8 +481,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                   },
                 ];
               });
-            } else if (reasoning && !fullContent) {
-              const headerMatch = reasoning.match(/\*\*(.+?)\*\*/);
+            } else if (reasoningText && !fullContent) {
+              const headerMatch = reasoningText.match(/\*\*(.+?)\*\*/);
               const thinkingLabel = headerMatch ? headerMatch[1] : "Analyzing...";
               setMessages((prev) => {
                 const last = prev[prev.length - 1];
