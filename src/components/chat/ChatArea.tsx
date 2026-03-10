@@ -446,7 +446,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       
       return fullContent;
     },
-    [onStepChange]
+    [onStepChange, projectId]
   );
 
   // Fire-and-forget: extract learnings from chat
