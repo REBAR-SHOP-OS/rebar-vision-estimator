@@ -1158,8 +1158,29 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     setStagedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const uploadStagedFiles = async () => {
+  const uploadStagedFiles = async (textInput?: string) => {
     if (stagedFiles.length === 0) return;
+
+    // Capture file metadata for the chat bubble before clearing
+    const fileData: MessageFile[] = stagedFiles.map(f => ({
+      name: f.name,
+      url: URL.createObjectURL(f),
+      type: f.type,
+    }));
+
+    const text = textInput || stagedFiles.map(f => `📎 ${f.name}`).join(", ");
+
+    // Add user message with file thumbnails
+    const userMsg: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: text,
+      created_at: new Date().toISOString(),
+      files: fileData,
+    };
+    setMessages(prev => [...prev, userMsg]);
+    setInput("");
+
     const dt = new DataTransfer();
     stagedFiles.forEach(f => dt.items.add(f));
     setStagedFiles([]);
