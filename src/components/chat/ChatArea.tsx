@@ -617,23 +617,58 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const processAtomicTruth = async (fullContent: string) => {
     const atomicData = extractAtomicTruthJSON(fullContent);
     if (atomicData?.elements && atomicData.elements.length > 0) {
-      await runValidation(atomicData.elements);
+      // Fast-return: set raw data immediately so UI renders
+      setSubStep("parsing");
+      setValidationData({ elements: atomicData.elements, summary: atomicData.summary || null, questions: [] });
+      // Background: run validation and merge results
+      setSubStep("validating");
+      runValidation(atomicData.elements).then(() => {
+        setSubStep("ready");
+        setTimeout(() => setSubStep(null), 2000);
+      });
       return true;
     }
     // P0: Fallback — try to extract any JSON array of elements from the response
+    const fallbackElements = extractFallbackElements(fullContent);
+    if (fallbackElements) {
+      setSubStep("parsing");
+      setValidationData({ elements: fallbackElements, summary: null, questions: [] });
+      setSubStep("validating");
+      runValidation(fallbackElements).then(() => {
+        setSubStep("ready");
+        setTimeout(() => setSubStep(null), 2000);
+      });
+      return true;
+    }
+    console.warn("[processAtomicTruth] No elements found. First 500 chars:", fullContent.substring(0, 500));
+    return false;
+  };
+
+  const extractFallbackElements = (content: string): any[] | null => {
+    // Try ```json blocks
     try {
-      const jsonBlockMatch = fullContent.match(/```json\s*([\s\S]*?)```/);
+      const jsonBlockMatch = content.match(/```json\s*([\s\S]*?)```/);
       if (jsonBlockMatch) {
         const parsed = JSON.parse(jsonBlockMatch[1]);
         const elements = parsed?.elements || (Array.isArray(parsed) ? parsed : null);
         if (elements && elements.length > 0) {
           console.log("[Fallback] Extracted elements from JSON code block:", elements.length);
-          await runValidation(elements);
-          return true;
+          return elements;
         }
       }
-    } catch { /* fallback parse failed */ }
-    return false;
+    } catch { /* */ }
+    // Aggressive: find any JSON object with "elements" array
+    try {
+      const aggMatch = content.match(/\{[\s\S]*?"elements"\s*:\s*\[[\s\S]*?\]\s*[\s\S]*?\}/);
+      if (aggMatch) {
+        const parsed = JSON.parse(aggMatch[0]);
+        if (parsed?.elements?.length > 0) {
+          console.log("[Fallback-aggressive] Extracted elements:", parsed.elements.length);
+          return parsed.elements;
+        }
+      }
+    } catch { /* */ }
+    return null;
   };
 
   const handleModeSelect = async (mode: "smart" | "step-by-step", fileUrlsOverride?: string[]) => {
