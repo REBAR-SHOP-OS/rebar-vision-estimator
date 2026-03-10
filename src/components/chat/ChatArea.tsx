@@ -457,17 +457,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     if (allMessages.length < 3) return;
     messageCountSinceLastLearn.current = 0;
     
-    fetch(LEARN_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-      },
-      body: JSON.stringify({
-        messages: allMessages.slice(-10), // last 10 messages for context
-        userId: user.id,
-      }),
-    }).catch(() => {}); // fire-and-forget
+    supabase.auth.getSession().then(({ data: sess }) => {
+      const token = sess?.session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      fetch(LEARN_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          messages: allMessages.slice(-10),
+          userId: user.id,
+        }),
+      }).catch(() => {});
+    });
   }, [user]);
 
   // ── Atomic Truth Pipeline helpers ──
