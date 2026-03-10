@@ -4,6 +4,7 @@
  */
 import ExcelJS from "exceljs";
 import { getMassKgPerM } from "@/lib/rebar-weights";
+import { getLogoBuffer } from "@/lib/logo-base64";
 
 interface ExportParams {
   quoteResult: any;
