@@ -837,12 +837,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         // Trigger learning extraction
         triggerLearning([...chatHistory, { role: "assistant", content: fullContent }]);
 
-        await supabase.from("messages").insert({
+        supabase.from("messages").insert({
           project_id: projectId,
           user_id: user.id,
           role: "assistant",
           content: fullContent,
-        });
+        }).then(({ error }) => { if (error) console.error("Failed to save assistant message:", error); });
 
         // Process Atomic Truth pipeline
         await processAtomicTruth(fullContent);
