@@ -1,38 +1,38 @@
 
 
-## Plan: Align PDF Export to Match Excel Two-Sheet Layout
+## Plan: PDF Export Weight Fix + Cover Page
 
-### Problem
-The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
+### Problem 1: All weights show "0.0"
 
-### Changes
+**Root cause** — Two locations use `typeof b.weight_kg === "number"` to prefer stored weight. When the backend sends `weight_kg: 0` (or doesn't compute it), this truthy check picks up the zero instead of calculating from length × mass.
 
-**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
+- **Line 38** (element summary): `typeof b.weight_kg === "number" ? b.weight_kg : ...` → uses 0
+- **Line 86** (bar list rows): same pattern → uses 0
 
-Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
+Additionally, the size breakdown tables (`sizeBreakdownKg`, `sizeBreakdownLbs`) may be empty objects, causing the summary panel to show zero.
 
-**Section 1: "Estimate Summary"** (page 1)
-- Project header: Project Name, Address, Engineer, Customer, Product Line
-- "Estimate Summary" title
-- Side-by-side tables using CSS grid/flexbox:
-  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
-  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
-- NOTES section: Grade, Lap Length Info, Deviations, Coating
-- Scope Items (if any)
-- MESH DETAILS table
+**Fix**: Change weight resolution to only use `b.weight_kg` if it's a **positive** number, otherwise compute from `totalLenM * massKgM`. Apply the same fix to the element summary loop. Also recompute summary totals from bar list data as a fallback when the breakdown objects are empty.
 
-**Section 2: "Bar List"** (page 2+, page-break-before)
-- Project header
-- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
-- Rows grouped by element type headers (bold row spanning columns)
-- Sub-element sub-headers
-- Bar rows with identification string (`{size} @ {spacing} {description}`)
-- TOTAL WEIGHT + TOTAL (Tons) footer rows
-- MESH DETAILS at bottom
+### Problem 2: No cover page
 
-The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
+**Fix**: Add a full-page cover before the Estimate Summary section with:
+- Company logo (large, centered)
+- "REBAR ESTIMATION REPORT" title
+- Project name, client, date, engineer
+- Professional styling with page-break-after
+
+### Changes — Single file: `src/lib/pdf-export.ts`
+
+1. **Fix weight_kg fallback** (lines 38 and 86): Change `typeof b.weight_kg === "number"` to `(typeof b.weight_kg === "number" && b.weight_kg > 0)` so zero values trigger recomputation.
+
+2. **Recompute size/element breakdowns from bar list** when the provided breakdown objects are empty — use the computed `wtKg` per bar to build accurate summaries.
+
+3. **Add cover page HTML** before the Estimate Summary section — a centered full-page block with logo, title, and key project metadata, using `page-break-after: always`.
+
+4. **Add CSS** for `.cover-page` styling.
 
 ### Scope
-- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
-- No new files, no backend changes
+- 1 file: `src/lib/pdf-export.ts`
+- ~50 lines changed/added
+- No backend changes
 
