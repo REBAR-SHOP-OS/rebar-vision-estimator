@@ -1,38 +1,26 @@
 
 
-## Plan: Align PDF Export to Match Excel Two-Sheet Layout
+## Plan: Update reporting-and-results knowledge entry
 
-### Problem
-The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
+Update the `features/reporting-and-results` memory entry to accurately reflect the current export format:
 
-### Changes
+- Excel: 2 primary sheets (Estimate Summary, Bar List) + 3 optional power-user sheets (Reconciliation, Audit Trace, Raw JSON)
+- PDF: Same 2-section layout
+- Bar List identification format: `{size} @ {spacing} {description}`
 
-**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
+This is a knowledge/memory update only — no code changes.
 
-Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
+**File: `src/components/chat/BrainKnowledgeDialog.tsx`** or via the Brain Knowledge UI — update the `features/reporting-and-results` entry text to:
 
-**Section 1: "Estimate Summary"** (page 1)
-- Project header: Project Name, Address, Engineer, Customer, Product Line
-- "Estimate Summary" title
-- Side-by-side tables using CSS grid/flexbox:
-  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
-  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
-- NOTES section: Grade, Lap Length Info, Deviations, Coating
-- Scope Items (if any)
-- MESH DETAILS table
-
-**Section 2: "Bar List"** (page 2+, page-break-before)
-- Project header
-- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
-- Rows grouped by element type headers (bold row spanning columns)
-- Sub-element sub-headers
-- Bar rows with identification string (`{size} @ {spacing} {description}`)
-- TOTAL WEIGHT + TOTAL (Tons) footer rows
-- MESH DETAILS at bottom
-
-The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
+> Estimation results are managed via a tabbed interface and finalized through a multi-format export engine (SYSTEM_PATCH v2026.03.UI_EXPORT):
+> - UI Interaction: Structured JSON is hidden in a collapsible "Structured JSON Output" accordion (collapsed by default) with a copy-to-clipboard button and monospace viewer.
+> - Layout: Both Excel and PDF formats mirror a two-section structure: 'Estimate Summary' (project headers and side-by-side weight reports by size and element) and 'Bar List' (a detailed 13-column takeoff table).
+> - Bar List Format: The 'Identification' column follows the specific format: '{size} @ {spacing} {description}'.
+> - Excel Export: Generates a workbook with 2 primary sheets (Estimate Summary, Bar List) plus 3 optional power-user sheets (Reconciliation, Audit Trace, Raw JSON), named '{project_name}_estimate_export.xlsx'.
+> - PDF Export: A professional report ('{project_name}_estimate_report.pdf') using portrait layout by default, with landscape support for table overflow and an optional JSON appendix.
+> - Safety: If an estimate is BLOCKED or FLAGGED, mandatory warning banners are injected into all exports. Action buttons follow the order: View JSON, Export PDF, Export Excel.
 
 ### Scope
-- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
-- No new files, no backend changes
+- 1 database record updated (brain_knowledge table, key `features/reporting-and-results`)
+- No code file changes
 
