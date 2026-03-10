@@ -724,7 +724,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         role: "assistant",
         content: fullContent,
         metadata: { calculationMode: mode, step: 1 },
-      }).then(() => {}).catch(() => {});
+      });
 
       // Process Atomic Truth pipeline (now fast-return with background validation)
       const extracted = await processAtomicTruth(fullContent);
