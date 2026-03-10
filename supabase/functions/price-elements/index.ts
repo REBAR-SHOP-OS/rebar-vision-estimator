@@ -231,6 +231,7 @@ function calculateElementWeight(truth: ElementTruth["truth"], elementType: strin
       length_ft: Math.round(lengthFt * 100) / 100,
       weight_lbs: Math.round(weight * 100) / 100,
       weight_kg: Math.round(weight * 0.453592 * 100) / 100,
+      ...(coating ? { coating } : {}),
     });
   }
 
@@ -256,15 +257,22 @@ function calculateElementWeight(truth: ElementTruth["truth"], elementType: strin
       length_ft: Math.round(tiePerimeterFt * 100) / 100,
       weight_lbs: Math.round(weight * 100) / 100,
       weight_kg: Math.round(weight * 0.453592 * 100) / 100,
+      ...(coating ? { coating } : {}),
     });
   }
 
+  // Apply coating multiplier
+  totalWeight_kg *= coatingMult;
+  if (coatingMult !== 1.0) {
+    for (const k of Object.keys(breakdown_kg)) breakdown_kg[k] *= coatingMult;
+    for (const k of Object.keys(breakdown)) breakdown[k] *= coatingMult;
+  }
   const totalWeight_lbs = totalWeight_kg / 0.453592;
   // Build breakdown_kg from breakdown
   for (const [k, v] of Object.entries(breakdown)) {
-    breakdown_kg[k] = v * 0.453592;
+    if (!breakdown_kg[k]) breakdown_kg[k] = v * 0.453592;
   }
-  return { weight_lbs: totalWeight_lbs, weight_kg: totalWeight_kg, breakdown, breakdown_kg, bar_list_entries, missing_length_count, missing_length_bars };
+  return { weight_lbs: totalWeight_lbs, weight_kg: totalWeight_kg, breakdown, breakdown_kg, bar_list_entries, missing_length_count, missing_length_bars, ...(coating ? { coating, coating_multiplier: coatingMult } : {}) };
 }
 
 serve(async (req) => {
