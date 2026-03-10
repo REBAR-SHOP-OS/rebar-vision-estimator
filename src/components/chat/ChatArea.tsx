@@ -1590,7 +1590,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
                   CheckCircle, SlidersHorizontal, Plus, Table, Download,
                   AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle,
-                  Upload, FileQuestion, Sparkles,
+                  Upload, FileQuestion, Sparkles, FileText, FileSpreadsheet,
                 };
 
                 return cards.map((card) => {
