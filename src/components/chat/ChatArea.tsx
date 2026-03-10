@@ -595,9 +595,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       }
 
       // Mark final step as done
-      onStepChange?.(9);
+      if (!opts?.silent) onStepChange?.(9);
       
-      return fullContent;
+      return { fullContent, preComputed: { effectiveImageUrls, effectivePreExtracted, trimmedOcrResults, knowledgeContext } as PreComputedPdfData };
     },
     [onStepChange, projectId]
   );
