@@ -2012,14 +2012,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             <div className="flex flex-wrap gap-2 rounded-xl border border-border bg-muted/30 p-2">
               {stagedFiles.map((file, i) => (
                 <StagedFileThumb key={i} file={file} index={i} onClick={() => setPreviewFile(file)} onRemove={(idx) => removeStagedFile(idx)} />
-                  ) : (
-                    <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                  )}
-                  <span className="truncate max-w-[120px] text-foreground">{file.name}</span>
-                  <button onClick={(e) => { e.stopPropagation(); removeStagedFile(i); }} className="ml-1 text-muted-foreground hover:text-destructive">
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
               ))}
             </div>
           )}
