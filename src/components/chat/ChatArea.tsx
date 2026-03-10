@@ -809,7 +809,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   };
 
   // Shared post-stream handler for both modes
-  const handlePostStream = async (fullContent: string, chatHistory: { role: string; content: string }[], mode: "smart" | "step-by-step") => {
+  const handlePostStream = async (fullContent: string, chatHistory: { role: string; content: string }[], mode: "smart" | "step-by-step", expectStructuredOutput = true) => {
     // Fire-and-forget: learning extraction + DB save
     triggerLearning([...chatHistory, { role: "assistant", content: fullContent }]);
     supabase.from("messages").insert({
@@ -826,9 +826,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     if (!extracted) {
       setSubStep(null);
       const isIntentionalBlock = /BLOCKED|MISSING_DRAWINGS|no.*project.*drawings|cannot.*produce.*quantities|does not contain.*project-specific/i.test(fullContent);
-      // Suppress warning for conversational follow-ups that aren't full estimations
-      const isConversational = fullContent.length < 3000 && !/%%%ATOMIC_TRUTH_JSON/.test(fullContent) && !/Stage\s+[0-9]/i.test(fullContent) && !/bar_lines|element_type|Element.*Type/i.test(fullContent);
-      if (!isIntentionalBlock && !isConversational) {
+      console.debug("[PostStream] expectStructured:", expectStructuredOutput, "intentionalBlock:", isIntentionalBlock);
+      if (expectStructuredOutput && !isIntentionalBlock) {
         const fallbackMsg: Message = {
           id: crypto.randomUUID(),
           role: "system",
@@ -974,7 +973,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
         const fullContent = await streamAIResponse(chatHistory, calculationMode, uploadedFiles);
 
-        await handlePostStream(fullContent, chatHistory, calculationMode);
+        // Only expect structured output for explicit estimation intents
+        const estimationIntent = /\b(estimate|analyze|recalculate|rerun|re-run|proceed|start.*estimation|run.*takeoff|calculate|compute)\b/i.test(msgContent);
+        console.debug("[SendMessage] intent check:", { msgContent: msgContent.slice(0, 80), estimationIntent });
+        await handlePostStream(fullContent, chatHistory, calculationMode, estimationIntent);
       } catch (err: any) {
         setSubStep(null);
         if (err.name === "AbortError") {
