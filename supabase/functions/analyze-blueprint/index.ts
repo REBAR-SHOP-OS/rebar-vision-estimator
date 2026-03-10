@@ -318,6 +318,8 @@ Then produce a RECONCILIATION_REPORT highlighting gaps, risks, and mismatches.
 
 NON-NEGOTIABLE RULES (FAIL-CLOSED)
 
+IMPORTANT: FAIL-CLOSED applies PER ELEMENT, not per project. If an element lacks critical data, that element is BLOCKED. Other elements with sufficient data MUST still be estimated and output as READY or FLAGGED. A partial estimate with some BLOCKED items is ALWAYS better than no estimate at all.
+
 R1 Zero hallucination: if you cannot prove it from evidence (in drawing/spec mode), write "UNKNOWN!".
 R2 Evidence-first: every drawing/spec-mode quantity MUST reference evidence (sheet/page/region) and store confidence.
 R3 Auditability: every evidence item and every computed line MUST be traceable with SHA-256 placeholders (see AUDIT LEDGER).
