@@ -409,8 +409,43 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
           try {
             const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-            const reasoning = parsed.choices?.[0]?.delta?.reasoning as string | undefined;
+            const delta = parsed.choices?.[0]?.delta ?? {};
+            const content =
+              typeof delta.content === "string"
+                ? delta.content
+                : Array.isArray(delta.content)
+                ? delta.content
+                    .map((part: any) =>
+                      typeof part === "string"
+                        ? part
+                        : part?.text ?? part?.content ?? ""
+                    )
+                    .join("")
+                : undefined;
+
+            const reasoningRaw =
+              (delta as any).reasoning ??
+              (delta as any).reasoning_content ??
+              (delta as any).reasoning_details;
+            const reasoningText =
+              typeof reasoningRaw === "string"
+                ? reasoningRaw
+                : Array.isArray(reasoningRaw)
+                ? reasoningRaw
+                    .map((part: any) =>
+                      typeof part === "string"
+                        ? part
+                        : part?.text ?? part?.content ?? part?.summary ?? ""
+                    )
+                    .join(" ")
+                    .trim()
+                : typeof reasoningRaw === "object" && reasoningRaw !== null
+                ? [reasoningRaw.text, reasoningRaw.content, reasoningRaw.summary]
+                    .filter((v): v is string => typeof v === "string")
+                    .join(" ")
+                    .trim()
+                : "";
+
             if (content) {
               fullContent += content;
               
@@ -446,8 +481,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                   },
                 ];
               });
-            } else if (reasoning && !fullContent) {
-              const headerMatch = reasoning.match(/\*\*(.+?)\*\*/);
+            } else if (reasoningText && !fullContent) {
+              const headerMatch = reasoningText.match(/\*\*(.+?)\*\*/);
               const thinkingLabel = headerMatch ? headerMatch[1] : "Analyzing...";
               setMessages((prev) => {
                 const last = prev[prev.length - 1];
@@ -483,8 +518,41 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           if (jsonStr === "[DONE]") continue;
           try {
             const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-            const reasoning = parsed.choices?.[0]?.delta?.reasoning as string | undefined;
+            const delta = parsed.choices?.[0]?.delta ?? {};
+            const content =
+              typeof delta.content === "string"
+                ? delta.content
+                : Array.isArray(delta.content)
+                ? delta.content
+                    .map((part: any) =>
+                      typeof part === "string"
+                        ? part
+                        : part?.text ?? part?.content ?? ""
+                    )
+                    .join("")
+                : undefined;
+            const reasoningRaw =
+              (delta as any).reasoning ??
+              (delta as any).reasoning_content ??
+              (delta as any).reasoning_details;
+            const reasoningText =
+              typeof reasoningRaw === "string"
+                ? reasoningRaw
+                : Array.isArray(reasoningRaw)
+                ? reasoningRaw
+                    .map((part: any) =>
+                      typeof part === "string"
+                        ? part
+                        : part?.text ?? part?.content ?? part?.summary ?? ""
+                    )
+                    .join(" ")
+                    .trim()
+                : typeof reasoningRaw === "object" && reasoningRaw !== null
+                ? [reasoningRaw.text, reasoningRaw.content, reasoningRaw.summary]
+                    .filter((v): v is string => typeof v === "string")
+                    .join(" ")
+                    .trim()
+                : "";
             if (content) {
               fullContent += content;
               const flushDisplay = fullContent
@@ -494,6 +562,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 .trim();
               setMessages((prev) =>
                 prev.map((m) => (m.id === assistantId ? { ...m, content: flushDisplay } : m))
+              );
+            } else if (reasoningText && !fullContent) {
+              const headerMatch = reasoningText.match(/\*\*(.+?)\*\*/);
+              const thinkingLabel = headerMatch ? headerMatch[1] : "Analyzing...";
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, content: `🧠 *${thinkingLabel}*` } : m))
               );
             }
           } catch {}
