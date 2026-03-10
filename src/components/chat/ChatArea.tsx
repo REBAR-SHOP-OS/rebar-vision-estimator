@@ -469,19 +469,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                   },
                 ];
               });
-            } else if (reasoningText && !fullContent) {
-              const headerMatch = reasoningText.match(/\*\*(.+?)\*\*/);
-              const thinkingLabel = headerMatch ? headerMatch[1] : "Analyzing...";
-              setMessages((prev) => {
-                const last = prev[prev.length - 1];
-                if (last?.id === assistantId) {
-                  return prev.map((m) => (m.id === assistantId ? { ...m, content: `🧠 *${thinkingLabel}*` } : m));
-                }
-                return [
-                  ...prev,
-                  { id: assistantId, role: "assistant" as const, content: `🧠 *${thinkingLabel}*`, created_at: new Date().toISOString() },
-                ];
-              });
             }
           } catch (parseErr) {
             // Only retry if this looks like a partial line (no complete data: prefix)
