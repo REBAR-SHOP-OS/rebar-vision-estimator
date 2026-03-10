@@ -25,7 +25,6 @@ export async function exportPdfFile({ quoteResult, elements, scopeData, projectI
 
   const hasSizeKg = Object.keys(sizeBreakdownKg).length > 0;
   const hasSizeLbs = Object.keys(sizeBreakdownLbs).length > 0;
-  sizeEntries.sort((a, b) => parseInt(a[0].replace(/[^0-9]/g, "")) - parseInt(b[0].replace(/[^0-9]/g, "")));
 
   const elemWeights: Record<string, number> = {};
   const computedSizeKg: Record<string, number> = {};
