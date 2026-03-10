@@ -695,12 +695,17 @@ At the VERY END of your response, output a JSON block wrapped in these exact mar
 %%%ATOMIC_TRUTH_JSON_END%%%
 \`\`\`
 
+### Section 1: Human-Readable Analysis (AFTER the JSON block)
+After the JSON block above, provide your step-by-step analysis with tables, explanations, calculations.
+Use markdown formatting with headers, tables, ⚠️ flags, etc.
+
 IMPORTANT:
 - The JSON must be valid JSON (no trailing commas, no comments)
 - Every element MUST have all required fields per the schema
 - bbox values can be approximate [0,0,0,0] if exact coordinates are unknown
 - timestamps should be ISO8601 format
 - confidence should be a number between 0 and 1
+- ALWAYS output the JSON block FIRST before any analysis text
 `;
 
 const REBAR_WEIGHT_TABLE = `
