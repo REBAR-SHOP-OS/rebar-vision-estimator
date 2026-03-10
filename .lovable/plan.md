@@ -1,57 +1,38 @@
 
 
-## Plan: Fix Empty Chat Bubble — Handle Gemini Reasoning Tokens
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
 
-### Root Cause
-The Gemini 2.5 Pro model sends its response in two phases:
-1. **Reasoning phase**: `delta.content = ""` with actual thinking text in `delta.reasoning`
-2. **Content phase**: `delta.content = "actual response text"`
-
-The streaming parser in `ChatArea.tsx` (line 412) only reads `delta.content`. During the reasoning phase (which can last 30-60+ seconds for complex blueprints), `fullContent` stays empty. The user sees an empty chat bubble with no indication of progress — it looks frozen.
+### Problem
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
 ### Changes
 
-**File: `src/components/chat/ChatArea.tsx`** — 2 changes in the streaming parser
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-#### 1. Show reasoning text as a progress indicator during thinking phase (~line 410-448)
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
 
-When `delta.content` is empty but `delta.reasoning` exists, show a thinking indicator in the message bubble. Don't append reasoning to `fullContent` (that's only for the final content), but update the displayed message with a "Thinking..." status and the reasoning summary.
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
 
-```
-// Inside the SSE parse loop:
-const content = parsed.choices?.[0]?.delta?.content;
-const reasoning = parsed.choices?.[0]?.delta?.reasoning;
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
 
-if (content) {
-  fullContent += content;
-  // ... existing display logic
-} else if (reasoning && !fullContent) {
-  // Still in thinking phase — show progress indicator
-  // Extract the bold header from reasoning (e.g., "**Estimating Rebar Quantities**")
-  const headerMatch = reasoning.match(/\*\*(.+?)\*\*/);
-  const thinkingLabel = headerMatch ? headerMatch[1] : "Analyzing...";
-  setMessages(prev => {
-    const last = prev[prev.length - 1];
-    if (last?.id === assistantId) {
-      return prev.map(m => m.id === assistantId ? { ...m, content: `🧠 *${thinkingLabel}*` } : m);
-    }
-    return [...prev, { id: assistantId, role: "assistant", content: `🧠 *${thinkingLabel}*`, created_at: new Date().toISOString() }];
-  });
-}
-```
-
-#### 2. Apply same logic in the flush section (~line 462-485)
-
-Same dual-check for `content` vs `reasoning` in the buffer flush loop.
-
-### Why this fixes the "freeze"
-- Users immediately see the AI is working ("Estimating Rebar Quantities", "Reviewing the Blueprint Data", etc.)
-- Once actual content starts streaming, it overwrites the thinking indicator
-- `fullContent` only contains real content (not reasoning), so `processAtomicTruth` and `handlePostStream` work correctly
-- No backend changes needed
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
 ### Scope
-- 1 file: `src/components/chat/ChatArea.tsx`
-- ~15 lines changed in the streaming parser
-- No backend changes
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
+- No new files, no backend changes
 

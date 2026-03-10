@@ -410,6 +410,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           try {
             const parsed = JSON.parse(jsonStr);
             const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+            const reasoning = parsed.choices?.[0]?.delta?.reasoning as string | undefined;
             if (content) {
               fullContent += content;
               
@@ -445,6 +446,19 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                   },
                 ];
               });
+            } else if (reasoning && !fullContent) {
+              const headerMatch = reasoning.match(/\*\*(.+?)\*\*/);
+              const thinkingLabel = headerMatch ? headerMatch[1] : "Analyzing...";
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.id === assistantId) {
+                  return prev.map((m) => (m.id === assistantId ? { ...m, content: `🧠 *${thinkingLabel}*` } : m));
+                }
+                return [
+                  ...prev,
+                  { id: assistantId, role: "assistant" as const, content: `🧠 *${thinkingLabel}*`, created_at: new Date().toISOString() },
+                ];
+              });
             }
           } catch (parseErr) {
             // Only retry if this looks like a partial line (no complete data: prefix)
@@ -470,6 +484,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           try {
             const parsed = JSON.parse(jsonStr);
             const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+            const reasoning = parsed.choices?.[0]?.delta?.reasoning as string | undefined;
             if (content) {
               fullContent += content;
               const flushDisplay = fullContent
