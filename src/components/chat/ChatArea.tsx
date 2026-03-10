@@ -1776,10 +1776,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                     </div>
                     {(() => {
                       const q = quoteResult.quote;
-                      const totalLbs = q.total_weight_lbs || 0;
-                      const totalKg = q.total_weight_kg || (totalLbs * 0.453592);
-                      const totalTonnes = q.total_weight_tonnes ?? q.total_tonnes ?? (totalKg > 0 ? totalKg / 1000 : 0);
-                      const totalTons = q.total_weight_tons ?? (totalLbs > 0 ? totalLbs / 2000 : 0);
+                      const totalLbs = Number(q.total_weight_lbs) || 0;
+                      const totalKg = Number(q.total_weight_kg) || (totalLbs * 0.453592);
+                      const rawTonnes = q.total_weight_tonnes ?? q.total_tonnes;
+                      const totalTonnes = (typeof rawTonnes === 'number' && !isNaN(rawTonnes)) ? rawTonnes : (totalKg > 0 ? totalKg / 1000 : 0);
+                      const rawTons = q.total_weight_tons;
+                      const totalTons = (typeof rawTons === 'number' && !isNaN(rawTons)) ? rawTons : (totalLbs > 0 ? totalLbs / 2000 : 0);
                       const showKg = totalKg > 0;
                       return (
                         <>
