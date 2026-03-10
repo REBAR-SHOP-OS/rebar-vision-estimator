@@ -704,6 +704,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     onModeChange?.(mode);
     onStepChange?.(1);
     setLoading(true);
+    setSubStep("parsing");
 
     const modeLabel = mode === "smart" ? "⚡ Smart Calculation" : "📋 Step-by-Step Calculation";
     const modeMsg: Message = {
