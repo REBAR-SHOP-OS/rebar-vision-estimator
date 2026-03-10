@@ -645,16 +645,13 @@ OUTPUT: You must return STRICT JSON ONLY that meets the schema. No prose outside
 const OUTPUT_FORMAT_INSTRUCTIONS = `
 ## OUTPUT FORMAT (MANDATORY)
 
-Your response MUST have TWO sections. OUTPUT SECTION 2 (JSON) FIRST, then Section 1 (human-readable).
+Your response MUST have TWO sections. OUTPUT THE JSON BLOCK FIRST, then the human-readable analysis.
 
-### Section 2: Structured JSON Block (OUTPUT THIS FIRST!)
+### Section 1: Structured JSON Block (OUTPUT THIS FIRST!)
 At the VERY BEGINNING of your response, output a JSON block wrapped in these exact markers.
 This MUST come BEFORE any human-readable analysis.
+Do NOT wrap the markers inside markdown code fences (no triple backticks around them).
 
-### Section 2: Structured JSON Block
-At the VERY END of your response, output a JSON block wrapped in these exact markers:
-
-\`\`\`
 %%%ATOMIC_TRUTH_JSON_START%%%
 {
   "elements": [ ...array of ElementUnit objects... ],
@@ -694,15 +691,15 @@ At the VERY END of your response, output a JSON block wrapped in these exact mar
   }
 }
 %%%ATOMIC_TRUTH_JSON_END%%%
-\`\`\`
 
-### Section 1: Human-Readable Analysis (AFTER the JSON block)
+### Section 2: Human-Readable Analysis (AFTER the JSON block)
 After the JSON block above, provide your step-by-step analysis with tables, explanations, calculations.
 Use markdown formatting with headers, tables, ⚠️ flags, etc.
 
 IMPORTANT:
 - The JSON must be valid JSON (no trailing commas, no comments)
 - Every element MUST have all required fields per the schema
+- Do NOT put the %%%ATOMIC_TRUTH_JSON_START%%% / %%%ATOMIC_TRUTH_JSON_END%%% markers inside code fences
 - bbox values can be approximate [0,0,0,0] if exact coordinates are unknown
 - timestamps should be ISO8601 format
 - confidence should be a number between 0 and 1

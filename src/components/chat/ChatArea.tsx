@@ -77,6 +77,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const [confirmedFinderCandidates, setConfirmedFinderCandidates] = useState<ReviewedCandidate[]>([]);
   const [importedBarList, setImportedBarList] = useState<any[] | null>(null);
   const [estimationGroupFilter, setEstimationGroupFilter] = useState<"all" | "loose" | "cage">("all");
+  const [subStep, setSubStep] = useState<string | null>(null);
   const isMobile = useIsMobile();
   useEffect(() => {
     // Reset state when switching projects
@@ -477,9 +478,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const extractAtomicTruthJSON = (content: string): any | null => {
     const startMarker = "%%%ATOMIC_TRUTH_JSON_START%%%";
     const endMarker = "%%%ATOMIC_TRUTH_JSON_END%%%";
-    const startIdx = content.indexOf(startMarker);
-    const endIdx = content.indexOf(endMarker);
-    if (startIdx === -1 || endIdx === -1) return null;
+    let startIdx = content.indexOf(startMarker);
+    let endIdx = content.indexOf(endMarker);
+    // Fallback: strip markdown code fences and retry
+    if (startIdx === -1 || endIdx === -1) {
+      const stripped = content.replace(/```(?:json)?\s*/g, "").replace(/```/g, "");
+      startIdx = stripped.indexOf(startMarker);
+      endIdx = stripped.indexOf(endMarker);
+      if (startIdx !== -1 && endIdx !== -1) {
+        const jsonStr = stripped.substring(startIdx + startMarker.length, endIdx).trim();
+        try { return JSON.parse(jsonStr); } catch { /* fall through */ }
+      }
+      console.warn("[extractAtomicTruthJSON] Markers not found. First 500 chars:", content.substring(0, 500));
+      return null;
+    }
     const jsonStr = content.substring(startIdx + startMarker.length, endIdx).trim();
     try {
       return JSON.parse(jsonStr);
@@ -606,23 +618,58 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const processAtomicTruth = async (fullContent: string) => {
     const atomicData = extractAtomicTruthJSON(fullContent);
     if (atomicData?.elements && atomicData.elements.length > 0) {
-      await runValidation(atomicData.elements);
+      // Fast-return: set raw data immediately so UI renders
+      setSubStep("parsing");
+      setValidationData({ elements: atomicData.elements, summary: atomicData.summary || null, questions: [] });
+      // Background: run validation and merge results
+      setSubStep("validating");
+      runValidation(atomicData.elements).then(() => {
+        setSubStep("ready");
+        setTimeout(() => setSubStep(null), 2000);
+      });
       return true;
     }
     // P0: Fallback — try to extract any JSON array of elements from the response
+    const fallbackElements = extractFallbackElements(fullContent);
+    if (fallbackElements) {
+      setSubStep("parsing");
+      setValidationData({ elements: fallbackElements, summary: null, questions: [] });
+      setSubStep("validating");
+      runValidation(fallbackElements).then(() => {
+        setSubStep("ready");
+        setTimeout(() => setSubStep(null), 2000);
+      });
+      return true;
+    }
+    console.warn("[processAtomicTruth] No elements found. First 500 chars:", fullContent.substring(0, 500));
+    return false;
+  };
+
+  const extractFallbackElements = (content: string): any[] | null => {
+    // Try ```json blocks
     try {
-      const jsonBlockMatch = fullContent.match(/```json\s*([\s\S]*?)```/);
+      const jsonBlockMatch = content.match(/```json\s*([\s\S]*?)```/);
       if (jsonBlockMatch) {
         const parsed = JSON.parse(jsonBlockMatch[1]);
         const elements = parsed?.elements || (Array.isArray(parsed) ? parsed : null);
         if (elements && elements.length > 0) {
           console.log("[Fallback] Extracted elements from JSON code block:", elements.length);
-          await runValidation(elements);
-          return true;
+          return elements;
         }
       }
-    } catch { /* fallback parse failed */ }
-    return false;
+    } catch { /* */ }
+    // Aggressive: find any JSON object with "elements" array
+    try {
+      const aggMatch = content.match(/\{[\s\S]*?"elements"\s*:\s*\[[\s\S]*?\]\s*[\s\S]*?\}/);
+      if (aggMatch) {
+        const parsed = JSON.parse(aggMatch[0]);
+        if (parsed?.elements?.length > 0) {
+          console.log("[Fallback-aggressive] Extracted elements:", parsed.elements.length);
+          return parsed.elements;
+        }
+      }
+    } catch { /* */ }
+    return null;
   };
 
   const handleModeSelect = async (mode: "smart" | "step-by-step", fileUrlsOverride?: string[]) => {
@@ -669,11 +716,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
       const fullContent = await streamAIResponse(chatHistory, mode, fileUrlsOverride ?? uploadedFiles);
 
-      // Trigger learning extraction
+      // Fire-and-forget: learning extraction + DB save (non-blocking)
       triggerLearning([...chatHistory, { role: "assistant", content: fullContent }]);
-
-      // Save assistant response to DB
-      await supabase.from("messages").insert({
+      supabase.from("messages").insert({
         project_id: projectId,
         user_id: user.id,
         role: "assistant",
@@ -681,7 +726,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         metadata: { calculationMode: mode, step: 1 },
       });
 
-      // Process Atomic Truth pipeline
+      // Process Atomic Truth pipeline (now fast-return with background validation)
       const extracted = await processAtomicTruth(fullContent);
 
       // P0: If no structured data was extracted, show a fallback message
@@ -1439,6 +1484,24 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 <span className="ml-auto font-medium">{uploadProgress.progress}%</span>
               </div>
               <Progress value={uploadProgress.progress} className="h-2" />
+            </div>
+          )}
+
+          {/* Sub-step progress indicator */}
+          {subStep && (
+            <div className="py-2 px-1">
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                {["parsing", "validating", "ready"].map((step, i) => {
+                  const isDone = step === "ready" ? subStep === "ready" : (["parsing", "validating", "ready"].indexOf(subStep) > i);
+                  const isActive = subStep === step;
+                  return (
+                    <span key={step} className={`flex items-center gap-1 ${isActive ? "text-primary font-medium" : isDone ? "text-primary/70" : "text-muted-foreground/50"}`}>
+                      {isDone ? <CheckCircle className="h-3 w-3" /> : isActive ? <Loader2 className="h-3 w-3 animate-spin" /> : <span className="h-3 w-3 rounded-full border border-current inline-block" />}
+                      {step === "parsing" ? "Parsing" : step === "validating" ? "Validating" : "Ready"}
+                    </span>
+                  );
+                })}
+              </div>
             </div>
           )}
 
