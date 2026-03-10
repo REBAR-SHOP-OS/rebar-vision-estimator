@@ -263,7 +263,8 @@ serve(async (req) => {
   }
 
   try {
-    const { elements, allowedTypes, userAnswers } = await req.json();
+    const { elements, allowedTypes, userAnswers, units_context } = await req.json();
+    const globalUnitsContext = units_context || "UNKNOWN!";
 
     if (!elements || !Array.isArray(elements)) {
       return new Response(JSON.stringify({ error: "elements array is required" }), {
