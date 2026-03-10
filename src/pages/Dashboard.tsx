@@ -5,7 +5,7 @@ import { useLanguage, LANGUAGES, type Language } from "@/contexts/LanguageContex
 import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2, BarChart3, Search } from "lucide-react";
+import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2, BarChart3, Search, Loader2 } from "lucide-react";
 import CrmSyncPanel, { type LeadAttachment } from "@/components/crm/CrmSyncPanel";
 import BrainKnowledgeDialog from "@/components/chat/BrainKnowledgeDialog";
 import { toast } from "sonner";
