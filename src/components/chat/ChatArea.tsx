@@ -679,7 +679,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       });
 
       // Process Atomic Truth pipeline
-      await processAtomicTruth(fullContent);
+      const extracted = await processAtomicTruth(fullContent);
+
+      // P0: If no structured data was extracted, show a fallback message
+      if (!extracted) {
+        const fallbackMsg: Message = {
+          id: crypto.randomUUID(),
+          role: "system",
+          content: "⚠️ Estimation completed but structured output was not returned. Please try again or adjust your scope settings.",
+          created_at: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, fallbackMsg]);
+      }
 
       // Check for Finder Pass candidates
       const fpCandidates = extractFinderPassCandidates(fullContent);
@@ -689,7 +700,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         openBlueprintViewer();
       }
     } catch (err: any) {
-      toast.error(err.message || "AI analysis failed");
+      if (err.name === "AbortError") {
+        toast.error("AI analysis timed out after 5 minutes. Please retry.");
+      } else {
+        toast.error(err.message || "AI analysis failed");
+      }
     }
 
     setLoading(false);
