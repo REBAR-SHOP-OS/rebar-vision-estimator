@@ -120,7 +120,10 @@ const Dashboard: React.FC = () => {
 
   const deleteProject = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (deletingProjectId === id) return;
+    setDeletingProjectId(id);
     const { error } = await supabase.from("projects").delete().eq("id", id);
+    setDeletingProjectId(null);
     if (error) {
       toast.error("Failed to delete project");
       return;
