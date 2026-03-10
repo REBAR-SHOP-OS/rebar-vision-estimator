@@ -604,7 +604,22 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     const atomicData = extractAtomicTruthJSON(fullContent);
     if (atomicData?.elements && atomicData.elements.length > 0) {
       await runValidation(atomicData.elements);
+      return true;
     }
+    // P0: Fallback — try to extract any JSON array of elements from the response
+    try {
+      const jsonBlockMatch = fullContent.match(/```json\s*([\s\S]*?)```/);
+      if (jsonBlockMatch) {
+        const parsed = JSON.parse(jsonBlockMatch[1]);
+        const elements = parsed?.elements || (Array.isArray(parsed) ? parsed : null);
+        if (elements && elements.length > 0) {
+          console.log("[Fallback] Extracted elements from JSON code block:", elements.length);
+          await runValidation(elements);
+          return true;
+        }
+      }
+    } catch { /* fallback parse failed */ }
+    return false;
   };
 
   const handleModeSelect = async (mode: "smart" | "step-by-step", fileUrlsOverride?: string[]) => {
