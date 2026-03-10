@@ -436,18 +436,20 @@ const Dashboard: React.FC = () => {
             }}
           />
         ) : activeProjectId ? (
-          <ChatArea
-            projectId={activeProjectId}
-            initialFiles={initialFiles}
-            onInitialFilesConsumed={() => setInitialFiles(null)}
-            onProjectNameChange={(name) => {
-              setProjects((prev) =>
-                prev.map((p) => (p.id === activeProjectId ? { ...p, name } : p))
-              );
-            }}
-            onStepChange={(step) => setCurrentStep(step)}
-            onModeChange={(mode) => setCalculationMode(mode)}
-          />
+          <ErrorBoundary fallbackMessage="Estimation session crashed">
+            <ChatArea
+              projectId={activeProjectId}
+              initialFiles={initialFiles}
+              onInitialFilesConsumed={() => setInitialFiles(null)}
+              onProjectNameChange={(name) => {
+                setProjects((prev) =>
+                  prev.map((p) => (p.id === activeProjectId ? { ...p, name } : p))
+                );
+              }}
+              onStepChange={(step) => setCurrentStep(step)}
+              onModeChange={(mode) => setCalculationMode(mode)}
+            />
+          </ErrorBoundary>
         ) : (
           <div className="flex flex-1 items-center justify-center blueprint-bg-major">
             <div className="max-w-xl mx-auto text-center space-y-8 px-4">
