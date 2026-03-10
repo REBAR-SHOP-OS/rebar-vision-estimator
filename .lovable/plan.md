@@ -1,38 +1,37 @@
 
 
-## Plan: Align PDF Export to Match Excel Two-Sheet Layout
+## Plan: Always Show Quote + Export Buttons at the End (Both Modes)
 
 ### Problem
-The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
+1. The quote result card and export buttons are currently inside the "Cards" tab of `ValidationResults`, so they're hidden when the user switches to Bar List or Bending tabs.
+2. Bug: "undefined tons" appears because line 379 renders `total_weight_tons` without a fallback.
+3. A stray `0` appears (likely `excluded_count` or similar value rendered without a label).
 
 ### Changes
 
-**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
+#### 1. Move Quote + Export section outside the Tabs (`src/components/chat/ChatArea.tsx`)
+Extract the quote result display + ExportButtons from inside `ValidationResults` and render them **after** the `</Tabs>` block (around line 1554), so they're always visible regardless of which tab is active.
 
-Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
+This block will include:
+- The quote header (AI Express / Verified badge)
+- Weight summary boxes (kg/lbs + tonnes/tons)
+- Size breakdown table
+- Export buttons (PDF, Excel, Shop Drawing, Share)
 
-**Section 1: "Estimate Summary"** (page 1)
-- Project header: Project Name, Address, Engineer, Customer, Product Line
-- "Estimate Summary" title
-- Side-by-side tables using CSS grid/flexbox:
-  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
-  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
-- NOTES section: Grade, Lap Length Info, Deviations, Coating
-- Scope Items (if any)
-- MESH DETAILS table
+Rendered condition: `{quoteResult && quoteResult.quote && (...)}`
 
-**Section 2: "Bar List"** (page 2+, page-break-before)
-- Project header
-- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
-- Rows grouped by element type headers (bold row spanning columns)
-- Sub-element sub-headers
-- Bar rows with identification string (`{size} @ {spacing} {description}`)
-- TOTAL WEIGHT + TOTAL (Tons) footer rows
-- MESH DETAILS at bottom
+#### 2. Remove the quote section from `ValidationResults.tsx`
+Remove lines 348–392 (the `{quoteResult && quoteResult.quote && (...)}` block) from `ValidationResults` since it will now live in `ChatArea.tsx` directly.
 
-The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
+#### 3. Fix "undefined tons" bug (`ValidationResults.tsx` → now in `ChatArea.tsx`)
+- Line 379: Change `{quoteResult.quote.total_weight_tons} tons` to `{(quoteResult.quote.total_weight_tons ?? 0).toLocaleString(undefined, {maximumFractionDigits: 2})} tons`
+- Ensure all weight values have proper fallbacks using `?? 0` and `.toLocaleString()`
+
+#### 4. Fix stray "0" display
+Add proper conditional rendering so raw numeric values like `excluded_count` don't render as standalone text when they're 0.
 
 ### Scope
-- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
-- No new files, no backend changes
+- 2 files modified: `ChatArea.tsx`, `ValidationResults.tsx`
+- ~40 lines moved, ~5 lines fixed
+- No backend changes
 
