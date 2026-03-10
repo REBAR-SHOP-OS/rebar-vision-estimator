@@ -24,21 +24,38 @@ export async function exportPdfFile({ quoteResult, elements, scopeData, projectI
   let html = "";
 
   const hasSizeKg = Object.keys(sizeBreakdownKg).length > 0;
-  const allSizes = new Set([...Object.keys(sizeBreakdownKg), ...Object.keys(sizeBreakdownLbs)]);
-  const sizeEntries: [string, number][] = [];
-  for (const size of allSizes) {
-    const kg = hasSizeKg ? (sizeBreakdownKg[size] || (sizeBreakdownLbs[size] || 0) * 0.453592) : (sizeBreakdownLbs[size] || 0) * 0.453592;
-    if (kg > 0) sizeEntries.push([size, kg]);
-  }
-  sizeEntries.sort((a, b) => parseInt(a[0].replace(/[^0-9]/g, "")) - parseInt(b[0].replace(/[^0-9]/g, "")));
+  const hasSizeLbs = Object.keys(sizeBreakdownLbs).length > 0;
 
   const elemWeights: Record<string, number> = {};
+  const computedSizeKg: Record<string, number> = {};
   for (const b of barList) {
     const t = b.element_type || "OTHER";
-    const wtKg = typeof b.weight_kg === "number" ? b.weight_kg : (b.weight_lbs || 0) * 0.453592;
+    const mult = b.multiplier || 1;
+    const qty = b.qty || 0;
+    const lengthMm = b.length_mm || (b.length_ft ? b.length_ft * 304.8 : 0);
+    const totalLenM = (qty * mult * lengthMm) / 1000;
+    const massKgM = getMassKgPerM(b.size);
+    const wtKg = (typeof b.weight_kg === "number" && b.weight_kg > 0) ? b.weight_kg : totalLenM * massKgM;
     elemWeights[t] = (elemWeights[t] || 0) + wtKg;
+    const sz = b.size || "OTHER";
+    computedSizeKg[sz] = (computedSizeKg[sz] || 0) + wtKg;
   }
   const elemEntries = Object.entries(elemWeights).sort((a, b) => b[1] - a[1]);
+
+  const effectiveSizeKg: Record<string, number> = (hasSizeKg || hasSizeLbs)
+    ? (() => {
+        const allSizes = new Set([...Object.keys(sizeBreakdownKg), ...Object.keys(sizeBreakdownLbs)]);
+        const m: Record<string, number> = {};
+        for (const size of allSizes) {
+          const kg = hasSizeKg ? (sizeBreakdownKg[size] || (sizeBreakdownLbs[size] || 0) * 0.453592) : (sizeBreakdownLbs[size] || 0) * 0.453592;
+          if (kg > 0) m[size] = kg;
+        }
+        return Object.keys(m).length > 0 ? m : computedSizeKg;
+      })()
+    : computedSizeKg;
+
+  const sizeEntries: [string, number][] = Object.entries(effectiveSizeKg);
+  sizeEntries.sort((a, b) => parseInt(a[0].replace(/[^0-9]/g, "")) - parseInt(b[0].replace(/[^0-9]/g, "")));
 
   const totalSizeKg = sizeEntries.reduce((s, e) => s + e[1], 0);
   const totalElemKg = elemEntries.reduce((s, e) => s + e[1], 0);
@@ -83,7 +100,7 @@ export async function exportPdfFile({ quoteResult, elements, scopeData, projectI
         const totalPieces = qty * mult;
         const totalLenM = (totalPieces * lengthMm) / 1000;
         const massKgM = getMassKgPerM(b.size);
-        const wtKg = typeof b.weight_kg === "number" ? b.weight_kg : totalLenM * massKgM;
+        const wtKg = (typeof b.weight_kg === "number" && b.weight_kg > 0) ? b.weight_kg : totalLenM * massKgM;
         const isBent = b.shape_code && b.shape_code !== "straight" && b.shape_code !== "STRAIGHT";
         const spacing = b.spacing ? ` @ ${b.spacing}` : "";
         const desc = b.description || b.bar_mark || "";
@@ -173,9 +190,32 @@ tr:nth-child(even){background:#f9f9fb}
 .logo-header{display:flex;align-items:center;gap:14px;margin-bottom:16px;background:#8DB4B4;padding:10px 14px;border:1px solid #7a9e9e}
 .logo-header img{height:50px;width:50px;border-radius:50%;object-fit:cover}
 .logo-header h1{margin:0;font-size:20px;color:#1a1a2e}
+.cover-page{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:90vh;text-align:center;page-break-after:always}
+.cover-page img{width:120px;height:120px;border-radius:50%;object-fit:cover;margin-bottom:24px;box-shadow:0 4px 20px rgba(0,0,0,0.15)}
+.cover-page h1{font-size:32px;font-weight:800;color:#1a1a2e;margin:0 0 8px;text-transform:uppercase;letter-spacing:2px}
+.cover-page h2{font-size:20px;font-weight:600;color:#333;margin:0 0 32px}
+.cover-meta{font-size:13px;color:#555;line-height:2}
+.cover-meta strong{color:#1a1a2e}
+.cover-line{width:80px;height:4px;background:#92D050;border-radius:2px;margin:20px auto}
 </style></head><body>
 
 ${warningBanner}
+
+<!-- COVER PAGE -->
+<div class="cover-page">
+  ${logoDataUri ? `<img src="${logoDataUri}" alt="Logo"/>` : ""}
+  <h1>Rebar Estimation Report</h1>
+  <div class="cover-line"></div>
+  <h2>${scopeData?.projectName || "Project"}</h2>
+  <div class="cover-meta">
+    ${scopeData?.clientName ? `<div><strong>Customer:</strong> ${scopeData.clientName}</div>` : ""}
+    ${scopeData?.engineer ? `<div><strong>Engineer:</strong> ${scopeData.engineer}</div>` : ""}
+    ${scopeData?.address ? `<div><strong>Address:</strong> ${scopeData.address}</div>` : ""}
+    ${scopeData?.estimator ? `<div><strong>Estimator:</strong> ${scopeData.estimator}</div>` : ""}
+    <div><strong>Date:</strong> ${dateStr}</div>
+    ${scopeData?.coatingType ? `<div><strong>Product Line:</strong> ${scopeData.coatingType}</div>` : ""}
+  </div>
+</div>
 
 <!-- SECTION 1: ESTIMATE SUMMARY -->
 <div class="logo-header">${logoDataUri ? `<img src="${logoDataUri}" alt="Logo"/>` : ""}<h1>Rebar Estimation Report</h1></div>
