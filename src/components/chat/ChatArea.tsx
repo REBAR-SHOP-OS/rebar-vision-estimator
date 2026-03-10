@@ -1719,6 +1719,23 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               })()}
             </div>
           )}
+          {stagedFiles.length > 0 && (
+            <div className="flex flex-wrap gap-2 rounded-xl border border-border bg-muted/30 p-2">
+              {stagedFiles.map((file, i) => (
+                <div key={i} className="relative group flex items-center gap-1.5 rounded-lg bg-background border border-border px-2 py-1.5 text-xs">
+                  {file.type.startsWith("image/") ? (
+                    <img src={URL.createObjectURL(file)} alt={file.name} className="h-10 w-10 rounded object-cover flex-shrink-0" />
+                  ) : (
+                    <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                  )}
+                  <span className="truncate max-w-[120px] text-foreground">{file.name}</span>
+                  <button onClick={() => removeStagedFile(i)} className="ml-1 text-muted-foreground hover:text-destructive">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <div
             className={`relative flex items-end gap-2 rounded-2xl border bg-chat-input p-2 shadow-sm transition-colors ${isDragging ? "border-primary ring-2 ring-primary/30" : "border-border"}`}
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
