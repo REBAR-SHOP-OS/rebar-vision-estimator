@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 import { Button } from "@/components/ui/button";
-import { Paperclip, Send, Loader2, CheckCircle, SlidersHorizontal, Plus, Table, Download, AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle, Upload, FileQuestion, Sparkles, FileText, FileSpreadsheet, X, Eye, FileCheck } from "lucide-react";
+import { Paperclip, Send, Loader2, CheckCircle, SlidersHorizontal, Plus, Table, Download, AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle, Upload, FileQuestion, Sparkles, FileText, FileSpreadsheet, X, Eye, FileCheck, Square } from "lucide-react";
 import SizeBreakdownTable from "./SizeBreakdownTable";
 import ExportButtons from "./ExportButtons";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -72,6 +72,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
   const [previewFile, setPreviewFile] = useState<File | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadProgress, setUploadProgress] = useState<{ fileName: string; progress: number } | null>(null);
@@ -351,6 +352,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
       // P1: Add timeout via AbortController (5 minutes)
       const controller = new AbortController();
+      abortControllerRef.current = controller;
       const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
 
       const resp = await fetch(CHAT_URL, {
@@ -1933,21 +1935,33 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               rows={1}
               className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none min-h-[36px] max-h-[200px] py-2"
             />
-            <Button
-              onClick={() => {
-                if (stagedFiles.length > 0) uploadStagedFiles(input.trim());
-                else sendMessage();
-              }}
-              disabled={(!input.trim() && !showModePicker && stagedFiles.length === 0) || loading}
-              size="icon"
-              className="h-9 w-9 flex-shrink-0 rounded-xl"
-            >
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
+            {loading ? (
+              <Button
+                onClick={() => {
+                  abortControllerRef.current?.abort();
+                  setLoading(false);
+                  setSubStep(null);
+                }}
+                size="icon"
+                variant="destructive"
+                className="h-9 w-9 flex-shrink-0 rounded-xl"
+                title="Stop generation"
+              >
+                <Square className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button
+                onClick={() => {
+                  if (stagedFiles.length > 0) uploadStagedFiles(input.trim());
+                  else sendMessage();
+                }}
+                disabled={!input.trim() && !showModePicker && stagedFiles.length === 0}
+                size="icon"
+                className="h-9 w-9 flex-shrink-0 rounded-xl"
+              >
                 <Send className="h-4 w-4" />
-              )}
-            </Button>
+              </Button>
+            )}
           </div>
           <div className="flex items-center justify-center gap-2 mt-2">
             <span className="text-[10px] text-muted-foreground">Powered by AI</span>
