@@ -1131,9 +1131,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     }
     if (files.length > 0) {
       e.preventDefault();
-      const dt = new DataTransfer();
-      files.forEach(f => dt.items.add(f));
-      handleFileUpload({ target: { files: dt.files } } as React.ChangeEvent<HTMLInputElement>);
+      setStagedFiles(prev => [...prev, ...files]);
     }
   };
 
@@ -1141,8 +1139,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files?.length) {
-      handleFileUpload({ target: { files: e.dataTransfer.files } } as React.ChangeEvent<HTMLInputElement>);
+      setStagedFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)]);
     }
+  };
+
+  const removeStagedFile = (index: number) => {
+    setStagedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const uploadStagedFiles = async () => {
+    if (stagedFiles.length === 0) return;
+    const dt = new DataTransfer();
+    stagedFiles.forEach(f => dt.items.add(f));
+    setStagedFiles([]);
+    await handleFileUpload({ target: { files: dt.files } } as React.ChangeEvent<HTMLInputElement>);
   };
 
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
