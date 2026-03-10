@@ -199,7 +199,7 @@ ${warningBanner}
 </div>
 
 <div class="notes-section">
-  <div class="section-title" style="font-size:13px">Notes</div>
+  <div class="notes-header">Notes</div>
   <div class="note-row"><span class="note-label">Grade :</span><span>${scopeData?.rebarGrade || "400W"}</span></div>
   <div class="note-row"><span class="note-label">Deviations :</span><span>${scopeData?.deviations || "None"}</span></div>
   <div class="note-row"><span class="note-label">Coating :</span><span>${scopeData?.coatingType || "Black Steel"}</span></div>
