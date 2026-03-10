@@ -318,11 +318,19 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       // Don't send scanned page image URLs if we already have OCR text for them
       const effectiveImageUrls = trimmedOcrResults.length > 0 ? nonPdfUrls : [...nonPdfUrls, ...scannedPdfPageImageUrls];
 
+      // P1: Get user JWT for auth
+      const { data: sessionData } = await supabase.auth.getSession();
+      const authToken = sessionData?.session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+      // P1: Add timeout via AbortController (5 minutes)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+
       const resp = await fetch(CHAT_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          Authorization: `Bearer ${authToken}`,
         },
         body: JSON.stringify({
           messages: chatMessages,
@@ -336,7 +344,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           features: scopeDataRef.current?.features,
           projectId,
         }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!resp.ok) {
         const errData = await resp.json().catch(() => ({ error: "AI request failed" }));
