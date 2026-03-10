@@ -973,7 +973,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
         const fullContent = await streamAIResponse(chatHistory, calculationMode, uploadedFiles);
 
-        await handlePostStream(fullContent, chatHistory, calculationMode);
+        // Only expect structured output for explicit estimation intents
+        const estimationIntent = /\b(estimate|analyze|recalculate|rerun|re-run|proceed|start.*estimation|run.*takeoff|calculate|compute)\b/i.test(msgContent);
+        console.debug("[SendMessage] intent check:", { msgContent: msgContent.slice(0, 80), estimationIntent });
+        await handlePostStream(fullContent, chatHistory, calculationMode, estimationIntent);
       } catch (err: any) {
         setSubStep(null);
         if (err.name === "AbortError") {
