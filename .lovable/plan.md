@@ -1,38 +1,50 @@
 
 
-## Plan: Align PDF Export to Match Excel Two-Sheet Layout
+## Plan: Add Paste and Drag-and-Drop File Support to Chat Input
 
 ### Problem
-The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
+The chat input area only supports file uploads via the paperclip button. Users cannot paste files/images from clipboard or drag-and-drop files onto the input area.
 
-### Changes
+### Changes (single file: `src/components/chat/ChatArea.tsx`)
 
-**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
+#### 1. Add `onPaste` handler to textarea
+Intercept paste events, extract files from `clipboardData`, and feed them through the existing `handleFileUpload` logic:
 
-Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
+```typescript
+const handlePaste = (e: React.ClipboardEvent) => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  const files: File[] = [];
+  for (const item of Array.from(items)) {
+    if (item.kind === 'file') {
+      const file = item.getAsFile();
+      if (file) files.push(file);
+    }
+  }
+  if (files.length > 0) {
+    e.preventDefault();
+    const dt = new DataTransfer();
+    files.forEach(f => dt.items.add(f));
+    handleFileUpload({ target: { files: dt.files } } as any);
+  }
+};
+```
 
-**Section 1: "Estimate Summary"** (page 1)
-- Project header: Project Name, Address, Engineer, Customer, Product Line
-- "Estimate Summary" title
-- Side-by-side tables using CSS grid/flexbox:
-  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
-  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
-- NOTES section: Grade, Lap Length Info, Deviations, Coating
-- Scope Items (if any)
-- MESH DETAILS table
+#### 2. Add drag-and-drop handlers on the input container div
+Add `onDragOver`, `onDragEnter`, `onDragLeave`, `onDrop` to the input wrapper div (line 1684). Show a visual drop indicator with a state variable `isDragging`:
 
-**Section 2: "Bar List"** (page 2+, page-break-before)
-- Project header
-- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
-- Rows grouped by element type headers (bold row spanning columns)
-- Sub-element sub-headers
-- Bar rows with identification string (`{size} @ {spacing} {description}`)
-- TOTAL WEIGHT + TOTAL (Tons) footer rows
-- MESH DETAILS at bottom
+- `onDragOver`/`onDragEnter`: prevent default, set `isDragging = true`
+- `onDragLeave`: set `isDragging = false`
+- `onDrop`: extract files from `e.dataTransfer.files`, feed through `handleFileUpload`, set `isDragging = false`
+- Apply a highlight border style (`ring-2 ring-primary`) when `isDragging` is true
 
-The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
+#### 3. Wire up
+- Add `const [isDragging, setIsDragging] = useState(false);` state
+- Add `onPaste={handlePaste}` to the textarea element
+- Add drag handlers + conditional styling to the input container div
 
 ### Scope
-- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
-- No new files, no backend changes
+- 1 file modified: `ChatArea.tsx`
+- ~30 lines added
+- No backend changes
 
