@@ -1031,7 +1031,15 @@ serve(async (req) => {
     // Inject scope definition if provided
     if (scope) {
       let scopeBlock = "\n\n## PROJECT SCOPE DEFINITION (from user)\n";
-      if (scope.scopeItems && scope.scopeItems.length > 0) {
+
+      // Scope-by-scope focused pass: override generic scope with focused instruction
+      if (scope.focusCategory && scope.scopeItems && scope.scopeItems.length > 0) {
+        scopeBlock += `FOCUS SCOPE: Analyze ONLY the following element types: ${scope.scopeItems.join(", ")}.\n`;
+        scopeBlock += `Category: ${scope.focusCategory}\n`;
+        scopeBlock += `Ignore ALL other element types for this pass. Output only elements matching these types.\n`;
+        scopeBlock += `Do NOT produce a summary or overview — go straight to detailed element extraction for these types only.\n`;
+        scopeBlock += `Treat Cage Assemblies and Loose Rebar as separate estimation groups with independent outputs.\n`;
+      } else if (scope.scopeItems && scope.scopeItems.length > 0) {
         const TOTAL_SCOPE_COUNT = 14;
         const allSelected = scope.scopeItems.length >= TOTAL_SCOPE_COUNT;
         if (allSelected) {

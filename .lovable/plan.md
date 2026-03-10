@@ -1,56 +1,38 @@
 
 
-## Plan: Scope-by-Scope Iterative Processing for Both Modes
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
 
 ### Problem
-Both Smart and Step-by-Step modes send all scope items in a single AI call, producing massive responses that timeout or miss elements.
-
-### Approach
-For both modes, loop through scope categories sequentially — one AI call per category. Each call focuses on a small set of element types. After all categories complete, merge results via `handlePostStream`. Special project types (cage_only, bar_list_only) keep single-call behavior since they're already focused.
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
 ### Changes
 
-#### 1. `src/components/chat/ScopeDefinitionPanel.tsx`
-- Export `SCOPE_ITEMS` (change `const` → `export const`, line 11)
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-#### 2. `src/components/chat/ChatArea.tsx` — Restructure `handleModeSelect`
-Import `SCOPE_ITEMS` from `ScopeDefinitionPanel`. Replace the single `streamAIResponse` call (lines 922-939) with:
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
 
-- **Special categories** (cage_only, bar_list_only): Keep single-call behavior as-is
-- **General categories** (residential, commercial, industrial, infrastructure, etc.):
-  - Group `scopeData.scopeItems` by category using `SCOPE_ITEMS` → produces groups like `{Foundation: ["FOOTING","GRADE_BEAM",...], Structural: ["BEAM","COLUMN",...], ...}`
-  - Filter to only non-empty groups that have items the user selected
-  - Loop sequentially through each group:
-    1. Add system message: `"📋 Analyzing: {Category} ({n}/{total})"`
-    2. Build focused instruction: `"Analyze ONLY these element types: {list}. Ignore all other elements for this pass."`
-    3. Clone `scopeDataRef.current` with only this category's items in `scopeItems` + add `focusCategory: categoryName`
-    4. Call `streamAIResponse` with this focused scope
-    5. Accumulate the full content from each pass
-    6. Update `subStep` to show category name
-  - After all passes, concatenate accumulated content and run `handlePostStream` once with `expectStructuredOutput: false`
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
 
-#### 3. `supabase/functions/analyze-blueprint/index.ts` — Focused scope prompt
-In the scope injection block (lines 1032-1068), when `scope.focusCategory` is present:
-- Replace the generic scope instructions with: `"FOCUS SCOPE: Analyze ONLY the following element types: {items}. Ignore ALL other element types for this pass. Output only elements matching these types."`
-- Skip the "Analyze ALL" / full-scope logic when focusing
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
 
-### Flow
-```text
-User selects Smart or Step-by-Step
-  │
-  ├─ [cage_only / bar_list_only] → single call (unchanged)
-  │
-  ├─ [general project] → category loop:
-  │   ├─ Foundation → AI call → accumulate
-  │   ├─ Structural → AI call → accumulate
-  │   ├─ Walls → AI call → accumulate
-  │   ├─ Other → AI call → accumulate
-  │   ├─ Assemblies → AI call → accumulate
-  │   └─ Final: merge all → handlePostStream
-```
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
 ### Scope
-- 3 files modified
-- ~80 lines added/changed
-- No database changes
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
+- No new files, no backend changes
 

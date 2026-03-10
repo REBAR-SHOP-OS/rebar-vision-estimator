@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowRight, Info, Sparkles, AlertTriangle, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
-const SCOPE_ITEMS = [
+export const SCOPE_ITEMS = [
   { id: "FOOTING", label: "Footings", category: "Foundation" },
   { id: "GRADE_BEAM", label: "Grade Beams", category: "Foundation" },
   { id: "RAFT_SLAB", label: "Raft Slabs", category: "Foundation" },
