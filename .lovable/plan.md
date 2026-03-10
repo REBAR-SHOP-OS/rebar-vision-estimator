@@ -1,26 +1,39 @@
 
 
-## Plan: Update reporting-and-results knowledge entry
+## Plan: Add Download PDF & Excel Buttons to Confirmation Cards
 
-Update the `features/reporting-and-results` memory entry to accurately reflect the current export format:
+### Problem
+When the AI shows a report with a confirmation question ("do you agree / proceed?"), the user only sees "Yes, Proceed", "Adjust Scope", and "Add More" action cards. The user wants "Download PDF" and "Download Excel" buttons in this same row so they can export the report at this stage.
 
-- Excel: 2 primary sheets (Estimate Summary, Bar List) + 3 optional power-user sheets (Reconciliation, Audit Trace, Raw JSON)
-- PDF: Same 2-section layout
-- Bar List identification format: `{size} @ {spacing} {description}`
+### Changes
 
-This is a knowledge/memory update only — no code changes.
+**File: `src/components/chat/ChatArea.tsx`**
 
-**File: `src/components/chat/BrainKnowledgeDialog.tsx`** or via the Brain Knowledge UI — update the `features/reporting-and-results` entry text to:
+1. Import `exportExcelFile` from `@/lib/excel-export` and add `FileText`, `FileSpreadsheet` to the lucide imports.
 
-> Estimation results are managed via a tabbed interface and finalized through a multi-format export engine (SYSTEM_PATCH v2026.03.UI_EXPORT):
-> - UI Interaction: Structured JSON is hidden in a collapsible "Structured JSON Output" accordion (collapsed by default) with a copy-to-clipboard button and monospace viewer.
-> - Layout: Both Excel and PDF formats mirror a two-section structure: 'Estimate Summary' (project headers and side-by-side weight reports by size and element) and 'Bar List' (a detailed 13-column takeoff table).
-> - Bar List Format: The 'Identification' column follows the specific format: '{size} @ {spacing} {description}'.
-> - Excel Export: Generates a workbook with 2 primary sheets (Estimate Summary, Bar List) plus 3 optional power-user sheets (Reconciliation, Audit Trace, Raw JSON), named '{project_name}_estimate_export.xlsx'.
-> - PDF Export: A professional report ('{project_name}_estimate_report.pdf') using portrait layout by default, with landscape support for table overflow and an optional JSON appendix.
-> - Safety: If an estimate is BLOCKED or FLAGGED, mandatory warning banners are injected into all exports. Action buttons follow the order: View JSON, Export PDF, Export Excel.
+2. In the `hasConfirmQuestion` cards array (~line 1558-1563), add two new cards with a custom `action` type that directly triggers the export functions instead of sending a chat message:
+
+```typescript
+cards = [
+  { icon: 'CheckCircle', title: 'Yes, Proceed', ... },
+  { icon: 'SlidersHorizontal', title: 'Adjust Scope', ... },
+  { icon: 'Plus', title: 'Add More', ... },
+  { icon: 'FileText', title: 'Download PDF', description: 'Export PDF report', sendText: '', action: 'exportPdf' },
+  { icon: 'FileSpreadsheet', title: 'Download Excel', description: 'Export spreadsheet', sendText: '', action: 'exportExcel' },
+];
+```
+
+3. Add `FileText` and `FileSpreadsheet` to the `iconMap` object (~line 1585).
+
+4. Update the card `onClick` handler (~line 1596-1601) to handle the new action types:
+   - `exportPdf`: Call `handlePdfExport()` — extract the inline PDF generation logic from `ExportButtons.tsx` into a shared utility, or replicate a simpler version that uses the current `quoteResult`, `validationData`, and `scopeData` state.
+   - `exportExcel`: Call `exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData })`.
+
+5. Since `quoteResult` may not exist yet at the confirmation stage (it's set after pricing), the export buttons will only render when `quoteResult` is available. Add a condition: only include the download cards if `quoteResult` exists.
+
+6. Update the `IdeaCard` type's `action` union to include `'exportPdf' | 'exportExcel' | 'upload'`.
 
 ### Scope
-- 1 database record updated (brain_knowledge table, key `features/reporting-and-results`)
-- No code file changes
+- 1 file modified: `src/components/chat/ChatArea.tsx`
+- No new files, no backend changes
 
