@@ -226,7 +226,7 @@ ${riskHtml}
 
 <!-- SECTION 2: BAR LIST -->
 <div class="page-break">
-  <div class="section-title">Bar List — ${scopeData?.projectName || "Project"}</div>
+  <div class="proj-header">Bar List — ${scopeData?.projectName || "Project"}</div>
   <table class="bar-list-table">
     <tr><th>SL.No.</th><th>Identification</th><th>Mult.</th><th>Qty</th><th>Bar Dia</th><th>Length ft-in</th><th>Length mm</th><th>Bend</th><th>Info 1</th><th>Info 2 (@)</th><th>Total Len (Mtr.)</th><th>Total Wgt kg</th><th>Notes</th></tr>
     ${barRowsHtml}
