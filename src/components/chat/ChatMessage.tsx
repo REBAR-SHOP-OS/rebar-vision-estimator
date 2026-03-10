@@ -17,7 +17,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     .replace(/#{1,4}\s*Section\s*2[:\s]*Structured\s*JSON\s*Block[^\n]*/gi, "")
     .replace(/#{1,4}\s*Section\s*1[:\s]*Human[- ]Readable\s*Analysis[^\n]*/gi, "")
     .replace(/%%%ATOMIC_TRUTH_JSON_START%%%.+?%%%ATOMIC_TRUTH_JSON_END%%%/gs, "")
+    .replace(/%%%ATOMIC_TRUTH_JSON_START%%%[\s\S]*/g, "")
+    .replace(/```json[\s\S]*?```/g, "")
+    .replace(/\{[^}]*"(?:Estimation Group|Element Type|element_type|element_id|Rebar Size|bar_lines)"[\s\S]*$/gs, "")
     .replace(/```\s*```/g, "")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 
   return (
