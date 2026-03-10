@@ -318,6 +318,8 @@ Then produce a RECONCILIATION_REPORT highlighting gaps, risks, and mismatches.
 
 NON-NEGOTIABLE RULES (FAIL-CLOSED)
 
+IMPORTANT: FAIL-CLOSED applies PER ELEMENT, not per project. If an element lacks critical data, that element is BLOCKED. Other elements with sufficient data MUST still be estimated and output as READY or FLAGGED. A partial estimate with some BLOCKED items is ALWAYS better than no estimate at all.
+
 R1 Zero hallucination: if you cannot prove it from evidence (in drawing/spec mode), write "UNKNOWN!".
 R2 Evidence-first: every drawing/spec-mode quantity MUST reference evidence (sheet/page/region) and store confidence.
 R3 Auditability: every evidence item and every computed line MUST be traceable with SHA-256 placeholders (see AUDIT LEDGER).
@@ -781,6 +783,14 @@ ${CANADIAN_METRIC_TABLE}
 Execute ALL pipeline stages automatically without pausing for user input.
 Analyze every page of every uploaded blueprint exhaustively.
 
+### CRITICAL: NEVER STOP THE PIPELINE
+- If data is missing for some elements (e.g., missing pile schedule, missing detail sheet), mark those specific elements as BLOCKED with status="BLOCKED" and reason="MISSING: [what's missing]".
+- CONTINUE estimating ALL other elements that DO have sufficient data.
+- ALWAYS output the structured JSON (%%%ATOMIC_TRUTH_JSON_START%%%) with whatever elements ARE computable.
+- A partial estimate with BLOCKED items is ALWAYS better than no estimate at all.
+- Do NOT write long explanations about why you stopped. Instead, list blocked items in a brief summary table and proceed.
+- The FAIL-CLOSED rule applies PER ELEMENT, not to the entire project. If 5 of 8 elements have data, estimate those 5 and block 3.
+
 IMPORTANT: Google Vision OCR has already been performed on the uploaded images. The OCR results (text, confidence, bounding boxes) are injected into the user message. Use these REAL OCR results for the Triple OCR stage instead of attempting your own text extraction. Your job is to STRUCTURE and ANALYZE the OCR output, not to re-read the images.
 
 ### Smart Project Type Detection (AUTO-DETECT from blueprints)
@@ -864,6 +874,12 @@ Step 8 — Welded Wire Mesh
 - If user corrects ANY finding, use user's data for ALL subsequent calculations
 - Never argue with corrections
 - DUAL-ANALYSIS: After Step 7, produce Drawing-Spec vs Industry-Norm comparison with Risk Flags
+
+### Handling Missing Data
+- If data is missing for some elements, mark them BLOCKED and continue with remaining elements.
+- Present blocked items clearly to the user and ask if they want to provide the missing data or proceed without those elements.
+- NEVER stop the entire estimation because some elements are blocked.
+- Always produce the structured JSON for elements that ARE computable.
 
 ${OUTPUT_FORMAT_INSTRUCTIONS}
 
