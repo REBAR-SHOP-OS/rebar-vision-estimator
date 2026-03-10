@@ -1,29 +1,38 @@
 
 
-## Plan: Fix False Warning + "undefined tons" Display
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
 
-### Problem 1: False "structured output not returned" warning
-In step-by-step mode, when user sends "yes" or "proceed", the word "proceed" matches the `estimationIntent` regex, so `expectStructured` becomes `true`. But the AI responds conversationally (not with JSON), and the response doesn't match `aiIsAskingQuestion` either — so the warning fires incorrectly.
+### Problem
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
-**Fix**: In `sendMessage` (line 1112-1115), for step-by-step mode, never expect structured output from follow-up messages. Structured output only comes from the initial `handleModeSelect` orchestration, not from conversational follow-ups. Change:
-```typescript
-const expectStructured = calculationMode === "smart" && estimationIntent && !aiIsAskingQuestion;
-```
+### Changes
 
-### Problem 2: "undefined tons" display
-At line 1781, if `q.total_weight_tonnes` is `NaN` (e.g. from dividing undefined/1000), `??` does NOT catch `NaN` — it only catches `null`/`undefined`. So `NaN.toLocaleString()` → `"NaN"`. Similarly if the value is literally the string `"undefined"` from bad data.
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-**Fix**: Add numeric safety to the display values (lines 1779-1782):
-```typescript
-const totalLbs = Number(q.total_weight_lbs) || 0;
-const totalKg = Number(q.total_weight_kg) || (totalLbs * 0.453592);
-const rawTonnes = q.total_weight_tonnes ?? q.total_tonnes;
-const totalTonnes = (typeof rawTonnes === 'number' && !isNaN(rawTonnes)) ? rawTonnes : (totalKg > 0 ? totalKg / 1000 : 0);
-const rawTons = q.total_weight_tons;
-const totalTons = (typeof rawTons === 'number' && !isNaN(rawTons)) ? rawTons : (totalLbs > 0 ? totalLbs / 2000 : 0);
-```
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
+
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
+
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
+
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
 ### Scope
-- 1 file: `src/components/chat/ChatArea.tsx`
-- ~10 lines changed across 2 locations
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
+- No new files, no backend changes
 

@@ -1112,7 +1112,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         // Only expect structured output for explicit estimation intents AND when AI isn't asking a question
         const estimationIntent = /\b(estimate|analyze|recalculate|rerun|re-run|proceed|start.*estimation|run.*takeoff|calculate|compute)\b/i.test(msgContent);
         const aiIsAskingQuestion = /\b(?:question for user|which.*should be|please (?:confirm|select|choose|specify)|stage \d+(?:\.\d+)?:)/i.test(result.fullContent);
-        const expectStructured = estimationIntent && !aiIsAskingQuestion;
+        const expectStructured = calculationMode === "smart" && estimationIntent && !aiIsAskingQuestion;
         console.debug("[SendMessage] intent check:", { msgContent: msgContent.slice(0, 80), estimationIntent, aiIsAskingQuestion, expectStructured });
         await handlePostStream(result.fullContent, chatHistory, calculationMode, expectStructured);
       } catch (err: any) {
@@ -1776,10 +1776,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                     </div>
                     {(() => {
                       const q = quoteResult.quote;
-                      const totalLbs = q.total_weight_lbs || 0;
-                      const totalKg = q.total_weight_kg || (totalLbs * 0.453592);
-                      const totalTonnes = q.total_weight_tonnes ?? q.total_tonnes ?? (totalKg > 0 ? totalKg / 1000 : 0);
-                      const totalTons = q.total_weight_tons ?? (totalLbs > 0 ? totalLbs / 2000 : 0);
+                      const totalLbs = Number(q.total_weight_lbs) || 0;
+                      const totalKg = Number(q.total_weight_kg) || (totalLbs * 0.453592);
+                      const rawTonnes = q.total_weight_tonnes ?? q.total_tonnes;
+                      const totalTonnes = (typeof rawTonnes === 'number' && !isNaN(rawTonnes)) ? rawTonnes : (totalKg > 0 ? totalKg / 1000 : 0);
+                      const rawTons = q.total_weight_tons;
+                      const totalTons = (typeof rawTons === 'number' && !isNaN(rawTons)) ? rawTons : (totalLbs > 0 ? totalLbs / 2000 : 0);
                       const showKg = totalKg > 0;
                       return (
                         <>
