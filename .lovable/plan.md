@@ -1,74 +1,38 @@
 
 
-## Fix: PDF/Excel Export Never Available Because `quoteResult.quote` Is Never Set
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
 
-### Root Cause
+### Problem
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
-There are **two paths** that set `quoteResult`:
+### Changes
 
-1. **Pricing endpoint** (line 612): `setQuoteResult(data)` — returns `{ quote: { bar_list, size_breakdown, total_weight_lbs, ... } }`. This is what exports need.
-2. **Restore/processAtomicTruth** (line 151): `setQuoteResult({ elements, summary })` — has NO `quote` property.
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-The export system checks `quoteResult?.quote` everywhere:
-- Idea cards only show "Download PDF/Excel" when `quoteResult?.quote` exists (lines 1565, 1573)
-- `ExportButtons` directly accesses `quoteResult.quote.bar_list` (line 24)
-- `ValidationResults` guards ExportButtons with `quoteResult && quoteResult.quote` (line 349)
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
 
-**The pricing endpoint is never automatically called after the AI generates estimation data.** So `quoteResult.quote` is always undefined, the export buttons never appear, and the user can never download files.
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
 
-### Fix
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
 
-**Two changes needed:**
-
-#### 1. Auto-run pricing after `processAtomicTruth` extracts elements (ChatArea.tsx)
-
-After `processAtomicTruth` successfully extracts elements (line 872), automatically call `runPricing` so `quoteResult.quote` gets populated:
-
-```typescript
-// After line 872: await processAtomicTruth(fullContent);
-// Add: auto-price if elements were extracted and no quote exists
-if (validationData?.elements?.length > 0 && !quoteResult?.quote) {
-  await runPricing(validationData.elements, calculationMode || 'ai_express');
-}
-```
-
-#### 2. Build `quoteResult.quote` from atomic truth data when pricing endpoint isn't available (ChatArea.tsx)
-
-When restoring from saved messages or when the AI embeds a full bar list in the atomic truth JSON, construct a `quote` object locally from the atomic data so exports work immediately:
-
-In `processAtomicTruth` and the restore path (line 151), if the atomic data contains `summary` with weight/bar_list info, build a synthetic `quote`:
-
-```typescript
-const syntheticQuote = atomicData.summary ? {
-  bar_list: atomicData.elements.flatMap(e => 
-    e.extraction?.truth?.bar_lines?.map(b => ({
-      ...b, element_type: e.element_type, element_id: e.element_id
-    })) || []
-  ),
-  size_breakdown_kg: {},
-  total_weight_kg: atomicData.summary.total_rebar_weight_kg || 0,
-  total_weight_lbs: atomicData.summary.total_rebar_weight_lbs || 0,
-  // ... compute from bar_lines
-} : null;
-
-setQuoteResult({ 
-  elements: atomicData.elements, 
-  summary: atomicData.summary, 
-  quote: syntheticQuote 
-});
-```
-
-#### 3. Add null safety to ExportButtons (ExportButtons.tsx)
-
-Guard against `quoteResult.quote` being undefined to prevent crashes:
-
-```typescript
-const barList: any[] = quoteResult?.quote?.bar_list || [];
-const sizeBreakdown = quoteResult?.quote?.size_breakdown || {};
-// etc.
-```
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
 ### Scope
-- 2 files modified: `ChatArea.tsx` (auto-pricing + synthetic quote), `ExportButtons.tsx` (null safety)
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
 - No new files, no backend changes
 

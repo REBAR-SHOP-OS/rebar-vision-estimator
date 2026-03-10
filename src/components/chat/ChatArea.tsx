@@ -148,7 +148,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         if (atomicData?.elements && atomicData.elements.length > 0) {
           runValidation(atomicData.elements);
           // Restore quote result so Bar List tab persists across reloads
-          setQuoteResult({ elements: atomicData.elements, summary: atomicData.summary || null });
+          const syntheticQuote = buildSyntheticQuote(atomicData.elements, atomicData.summary);
+          setQuoteResult({ elements: atomicData.elements, summary: atomicData.summary || null, quote: syntheticQuote });
         }
       }
     }
@@ -632,12 +633,41 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     }
   };
 
+  const buildSyntheticQuote = (elements: any[], summary: any) => {
+    const barList = elements.flatMap((e: any) =>
+      (e.extraction?.truth?.bar_lines || e.bar_lines || []).map((b: any) => ({
+        ...b,
+        element_type: e.element_type || e.type || "OTHER",
+        element_id: e.element_id || e.id || "",
+      }))
+    );
+    const sizeBreakdownKg: Record<string, number> = {};
+    let totalKg = 0;
+    for (const b of barList) {
+      const wt = typeof b.weight_kg === "number" ? b.weight_kg : (b.weight_lbs || 0) * 0.453592;
+      totalKg += wt;
+      const sz = b.size || "unknown";
+      sizeBreakdownKg[sz] = (sizeBreakdownKg[sz] || 0) + wt;
+    }
+    return {
+      bar_list: barList,
+      size_breakdown_kg: sizeBreakdownKg,
+      size_breakdown: {},
+      total_weight_kg: summary?.total_rebar_weight_kg || totalKg,
+      total_weight_lbs: summary?.total_rebar_weight_lbs || totalKg / 0.453592,
+      mesh_details: summary?.mesh_details || [],
+    };
+  };
+
   const processAtomicTruth = async (fullContent: string) => {
     const atomicData = extractAtomicTruthJSON(fullContent);
     if (atomicData?.elements && atomicData.elements.length > 0) {
       // Fast-return: set raw data immediately so UI renders
       setSubStep("parsing");
       setValidationData({ elements: atomicData.elements, summary: atomicData.summary || null, questions: [] });
+      // Build synthetic quote so export buttons appear immediately
+      const syntheticQuote = buildSyntheticQuote(atomicData.elements, atomicData.summary);
+      setQuoteResult({ elements: atomicData.elements, summary: atomicData.summary || null, quote: syntheticQuote });
       // Background: run validation and merge results
       setSubStep("validating");
       runValidation(atomicData.elements).then(() => {
@@ -651,6 +681,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     if (fallbackElements) {
       setSubStep("parsing");
       setValidationData({ elements: fallbackElements, summary: null, questions: [] });
+      const syntheticQuote = buildSyntheticQuote(fallbackElements, null);
+      setQuoteResult({ elements: fallbackElements, summary: null, quote: syntheticQuote });
       setSubStep("validating");
       runValidation(fallbackElements).then(() => {
         setSubStep("ready");
