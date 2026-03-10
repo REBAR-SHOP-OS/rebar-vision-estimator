@@ -2011,9 +2011,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           {stagedFiles.length > 0 && (
             <div className="flex flex-wrap gap-2 rounded-xl border border-border bg-muted/30 p-2">
               {stagedFiles.map((file, i) => (
-                <div key={i} className="relative group flex items-center gap-1.5 rounded-lg bg-background border border-border px-2 py-1.5 text-xs cursor-pointer hover:ring-1 hover:ring-primary/40 transition-all" onClick={() => setPreviewFile(file)}>
-                  {file.type.startsWith("image/") ? (
-                    <img src={URL.createObjectURL(file)} alt={file.name} className="h-10 w-10 rounded object-cover flex-shrink-0" />
+                <StagedFileThumb key={i} file={file} index={i} onClick={() => setPreviewFile(file)} onRemove={(idx) => removeStagedFile(idx)} />
                   ) : (
                     <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   )}
