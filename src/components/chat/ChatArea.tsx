@@ -1121,10 +1121,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           const AUTO_THRESHOLD = 0.7;
 
           if (confidence >= AUTO_THRESHOLD) {
-            // Auto-proceed: build scope from detection, skip panels, go straight to smart analysis
+            // High confidence: auto-fill scope but let user choose mode
             const autoScope = buildScopeFromDetection(result);
             setScopeData(autoScope);
-            setShowScopePanel(false);
 
             // Save scope to project
             if (user) {
@@ -1143,7 +1142,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             const autoMsg: Message = {
               id: crypto.randomUUID(),
               role: "system",
-              content: `🤖 Auto-detected: **${categoryLabel}** project (${Math.round(confidence * 100)}% confidence). Starting Smart estimation... (say "stop" to cancel)`,
+              content: `🤖 Auto-detected: **${categoryLabel}** project (${Math.round(confidence * 100)}% confidence). Please select your calculation mode below.`,
               created_at: new Date().toISOString(),
             };
             setMessages((prev) => [...prev, autoMsg]);
@@ -1153,11 +1152,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               role: "system",
               content: autoMsg.content,
             });
-
-            setIsDetecting(false);
-            // Directly trigger smart mode
-            handleModeSelect("smart", [...uploadedFiles, ...newUrls]);
-            return;
           }
           // Low confidence: fall through to manual scope panel
         }
