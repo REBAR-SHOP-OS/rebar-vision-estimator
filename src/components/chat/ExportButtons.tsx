@@ -39,11 +39,11 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleExcelExport = () => {
+  const handleExcelExport = async () => {
     if (isBlocked) {
       toast.warning("Estimate is BLOCKED — exporting with warning banner");
     }
-    exportExcelFile({ quoteResult, elements, scopeData });
+    await exportExcelFile({ quoteResult, elements, scopeData });
   };
 
   const handlePdfExport = () => {

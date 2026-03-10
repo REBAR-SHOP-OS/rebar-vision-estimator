@@ -1785,7 +1785,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                             toast.error("Complete estimation first to export");
                             return;
                           }
-                          exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData });
+                          await exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData });
                           toast.success("Excel exported");
                         } else if (card.action === 'exportPdf') {
                           if (!quoteResult?.quote) {
