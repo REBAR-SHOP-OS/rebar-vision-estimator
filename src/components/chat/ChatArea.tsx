@@ -797,7 +797,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           openBlueprintViewer();
         }
       } catch (err: any) {
-        toast.error(err.message || "AI analysis failed");
+        if (err.name === "AbortError") {
+          toast.error("AI analysis timed out after 5 minutes. Please retry.");
+        } else {
+          toast.error(err.message || "AI analysis failed");
+        }
       }
     }
 
