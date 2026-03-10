@@ -4,7 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 import { Button } from "@/components/ui/button";
-import { Paperclip, Send, Loader2, CheckCircle, SlidersHorizontal, Plus, Table, Download, AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle, Upload, FileQuestion, Sparkles } from "lucide-react";
+import { Paperclip, Send, Loader2, CheckCircle, SlidersHorizontal, Plus, Table, Download, AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle, Upload, FileQuestion, Sparkles, FileText, FileSpreadsheet } from "lucide-react";
+import { exportExcelFile } from "@/lib/excel-export";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import ChatMessage from "./ChatMessage";
@@ -1551,7 +1552,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 const lastMsg = messages.filter(m => m.role === 'assistant').slice(-1)[0];
                 const hasConfirmQuestion = lastMsg?.content?.match(/do you agree|confirm|proceed\?|is this correct/i);
 
-                type IdeaCard = { icon: string; title: string; description: string; sendText: string; autoSend?: boolean; action?: 'upload' };
+                type IdeaCard = { icon: string; title: string; description: string; sendText: string; autoSend?: boolean; action?: 'upload' | 'exportPdf' | 'exportExcel' };
 
                 let cards: IdeaCard[] = [];
 
@@ -1560,6 +1561,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                     { icon: 'CheckCircle', title: 'Yes, Proceed', description: 'Continue to next step', sendText: 'Yes, proceed to next stage', autoSend: true },
                     { icon: 'SlidersHorizontal', title: 'Adjust Scope', description: 'Change element types', sendText: 'I need to adjust the scope', autoSend: true },
                     { icon: 'Plus', title: 'Add More', description: 'Include more elements', sendText: 'Add more element types', autoSend: true },
+                    ...(quoteResult ? [
+                      { icon: 'FileText', title: 'Download PDF', description: 'Export PDF report', sendText: '', action: 'exportPdf' as const },
+                      { icon: 'FileSpreadsheet', title: 'Download Excel', description: 'Export spreadsheet', sendText: '', action: 'exportExcel' as const },
+                    ] : []),
                   ];
                 } else if (validationData || quoteResult) {
                   cards = [
@@ -1585,7 +1590,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
                   CheckCircle, SlidersHorizontal, Plus, Table, Download,
                   AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle,
-                  Upload, FileQuestion, Sparkles,
+                  Upload, FileQuestion, Sparkles, FileText, FileSpreadsheet,
                 };
 
                 return cards.map((card) => {
@@ -1596,6 +1601,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                       onClick={() => {
                         if (card.action === 'upload') {
                           fileInputRef.current?.click();
+                        } else if (card.action === 'exportExcel') {
+                          exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData });
+                          toast.success("Excel exported");
+                        } else if (card.action === 'exportPdf') {
+                          sendMessage("Export to PDF");
                         } else if (card.sendText) {
                           sendMessage(card.sendText);
                         }

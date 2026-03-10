@@ -1,39 +1,38 @@
 
 
-## Plan: Add Download PDF & Excel Buttons to Confirmation Cards
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
 
 ### Problem
-When the AI shows a report with a confirmation question ("do you agree / proceed?"), the user only sees "Yes, Proceed", "Adjust Scope", and "Add More" action cards. The user wants "Download PDF" and "Download Excel" buttons in this same row so they can export the report at this stage.
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
 ### Changes
 
-**File: `src/components/chat/ChatArea.tsx`**
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-1. Import `exportExcelFile` from `@/lib/excel-export` and add `FileText`, `FileSpreadsheet` to the lucide imports.
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
 
-2. In the `hasConfirmQuestion` cards array (~line 1558-1563), add two new cards with a custom `action` type that directly triggers the export functions instead of sending a chat message:
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
 
-```typescript
-cards = [
-  { icon: 'CheckCircle', title: 'Yes, Proceed', ... },
-  { icon: 'SlidersHorizontal', title: 'Adjust Scope', ... },
-  { icon: 'Plus', title: 'Add More', ... },
-  { icon: 'FileText', title: 'Download PDF', description: 'Export PDF report', sendText: '', action: 'exportPdf' },
-  { icon: 'FileSpreadsheet', title: 'Download Excel', description: 'Export spreadsheet', sendText: '', action: 'exportExcel' },
-];
-```
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
 
-3. Add `FileText` and `FileSpreadsheet` to the `iconMap` object (~line 1585).
-
-4. Update the card `onClick` handler (~line 1596-1601) to handle the new action types:
-   - `exportPdf`: Call `handlePdfExport()` — extract the inline PDF generation logic from `ExportButtons.tsx` into a shared utility, or replicate a simpler version that uses the current `quoteResult`, `validationData`, and `scopeData` state.
-   - `exportExcel`: Call `exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData })`.
-
-5. Since `quoteResult` may not exist yet at the confirmation stage (it's set after pricing), the export buttons will only render when `quoteResult` is available. Add a condition: only include the download cards if `quoteResult` exists.
-
-6. Update the `IdeaCard` type's `action` union to include `'exportPdf' | 'exportExcel' | 'upload'`.
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
 ### Scope
-- 1 file modified: `src/components/chat/ChatArea.tsx`
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
 - No new files, no backend changes
 
