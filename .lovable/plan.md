@@ -1,38 +1,38 @@
 
 
-## Fix: PDF Export Shows 404, Excel May Crash
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
 
-### Root Cause
-`exportPdfFile` uses `window.open("", "_blank")` then writes HTML to the new window. In the Lovable preview iframe, this popup either gets blocked or routes through React Router, showing a **404 page** instead of the PDF report.
+### Problem
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
-The second screenshot (image-63) shows the AI responding with a markdown download link — this happens when the user types "export PDF" manually in chat instead of clicking the card button. The card buttons are wired correctly now, but the underlying PDF generation is broken.
+### Changes
 
-### Fix
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-**File: `src/lib/pdf-export.ts`** — Replace `window.open` approach with a Blob-based download
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
 
-Instead of opening a new window and writing HTML (which fails in iframe contexts), create an HTML Blob, convert to a downloadable URL, and trigger a download via an anchor click. Then also offer print via an iframe approach.
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
 
-```typescript
-export function exportPdfFile({ quoteResult, elements, scopeData, projectId }: PdfExportParams): void {
-  // ... all existing HTML generation stays the same ...
-  
-  // Replace the window.open approach:
-  const blob = new Blob([html], { type: "text/html" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${projectSlug}_estimate_report.html`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-```
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
 
-This downloads an HTML file that the user can open in any browser and print to PDF (Ctrl+P → Save as PDF). It works reliably in iframes, popups, and all browsers.
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
 ### Scope
-- 1 file modified: `src/lib/pdf-export.ts` — replace last 5 lines (window.open/write/print) with blob download
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
 - No new files, no backend changes
 
