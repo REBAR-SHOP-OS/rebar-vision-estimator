@@ -414,9 +414,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 ];
               });
             }
-          } catch {
-            textBuffer = line + "\n" + textBuffer;
-            break;
+          } catch (parseErr) {
+            // Only retry if this looks like a partial line (no complete data: prefix)
+            // Complete lines that fail JSON parse should be skipped, not block the queue
+            if (line.startsWith("data: ") && jsonStr.length > 0) {
+              console.warn("[SSE] Skipping malformed SSE line:", jsonStr.substring(0, 100));
+            } else {
+              textBuffer = line + "\n" + textBuffer;
+              break;
+            }
           }
         }
       }
