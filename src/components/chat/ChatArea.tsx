@@ -4,7 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 import { Button } from "@/components/ui/button";
-import { Paperclip, Send, Loader2, CheckCircle, SlidersHorizontal, Plus, Table, Download, AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle, Upload, FileQuestion, Sparkles, FileText, FileSpreadsheet, X, Eye } from "lucide-react";
+import { Paperclip, Send, Loader2, CheckCircle, SlidersHorizontal, Plus, Table, Download, AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle, Upload, FileQuestion, Sparkles, FileText, FileSpreadsheet, X, Eye, FileCheck } from "lucide-react";
+import SizeBreakdownTable from "./SizeBreakdownTable";
+import ExportButtons from "./ExportButtons";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { exportExcelFile } from "@/lib/excel-export";
 import { exportPdfFile } from "@/lib/pdf-export";
@@ -1552,6 +1554,52 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                     </TabsContent>
                   )}
                 </Tabs>
+
+                {/* Quote Result - Always visible after tabs */}
+                {quoteResult && quoteResult.quote && (
+                  <div className="p-5 rounded-xl border-2 border-primary bg-primary/5">
+                    <div className="flex items-center gap-2 mb-4">
+                      {quoteResult.mode === "ai_express" ? <Zap className="h-5 w-5 text-primary" /> : <FileCheck className="h-5 w-5 text-primary" />}
+                      <span className="text-sm font-bold text-foreground">{quoteResult.mode === "ai_express" ? "AI Express" : "Verified"} Quote</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 text-center">
+                      <div className="rounded-xl bg-card border border-border p-4">
+                        <p className="text-2xl font-bold text-primary">
+                          {quoteResult.quote.total_weight_kg
+                            ? `${quoteResult.quote.total_weight_kg.toLocaleString(undefined, {maximumFractionDigits: 1})} kg`
+                            : `${(quoteResult.quote.total_weight_lbs || 0).toLocaleString(undefined, {maximumFractionDigits: 1})} lbs`}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">Total Weight</p>
+                      </div>
+                      <div className="rounded-xl bg-card border border-border p-4">
+                        <p className="text-2xl font-bold text-primary">
+                          {(quoteResult.quote.total_weight_tonnes ?? (quoteResult.quote.total_weight_kg ? quoteResult.quote.total_weight_kg / 1000 : null))
+                            ? `${(quoteResult.quote.total_weight_tonnes ?? (quoteResult.quote.total_weight_kg! / 1000)).toLocaleString(undefined, {maximumFractionDigits: 2})} tonnes`
+                            : `${(quoteResult.quote.total_weight_tons ?? ((quoteResult.quote.total_weight_lbs || 0) / 2000)).toLocaleString(undefined, {maximumFractionDigits: 2})} tons`}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">Total Tonnes</p>
+                      </div>
+                    </div>
+                    {quoteResult.quote.total_weight_kg && (
+                      <div className="grid grid-cols-2 gap-4 text-center mt-2">
+                        <div className="rounded-lg bg-accent/30 border border-border p-2">
+                          <p className="text-sm font-semibold text-muted-foreground">{(quoteResult.quote.total_weight_lbs || 0).toLocaleString()} lbs</p>
+                        </div>
+                        <div className="rounded-lg bg-accent/30 border border-border p-2">
+                          <p className="text-sm font-semibold text-muted-foreground">{(quoteResult.quote.total_weight_tons ?? 0).toLocaleString(undefined, {maximumFractionDigits: 2})} tons</p>
+                        </div>
+                      </div>
+                    )}
+                    <SizeBreakdownTable sizeBreakdown={quoteResult.quote.size_breakdown} sizeBreakdownKg={quoteResult.quote.size_breakdown_kg} />
+                    {quoteResult.excluded && quoteResult.excluded.length > 0 && (
+                      <div className="mt-3 text-xs text-muted-foreground">
+                        <p className="font-semibold">Excluded ({quoteResult.excluded_count}):</p>
+                        {quoteResult.excluded.map((ex: any, i: number) => <p key={i}>• {ex.element_id}: {ex.reason}</p>)}
+                      </div>
+                    )}
+                    <ExportButtons quoteResult={quoteResult} elements={validationData?.elements || []} scopeData={scopeData} />
+                  </div>
+                )}
 
                 {/* Approval Workflow - shown when quote result exists */}
                 {quoteResult && (
