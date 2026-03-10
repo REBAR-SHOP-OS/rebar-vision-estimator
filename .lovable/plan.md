@@ -1,54 +1,38 @@
 
 
-## Plan: Fix Download PDF & Excel — Real File Downloads
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
 
 ### Problem
-1. **PDF button** sends `sendMessage("Export to PDF")` which triggers an AI chat response with markdown text instead of generating an actual PDF file
-2. **Excel button** crashes when `quoteResult.quote` is undefined (restored projects have a different data shape)
-3. Output format must match the uploaded reference workbook (20_york-3.xlsx): Sheet 1 = Estimate Summary with side-by-side weight tables + notes + mesh; Sheet 2 = Bar List with 13-column grouped table
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
 ### Changes
 
-**1. New file: `src/lib/pdf-export.ts`**
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-Extract the PDF HTML generation from `ExportButtons.tsx` lines 47-278 into a standalone exported function:
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
 
-```typescript
-export function exportPdfFile(params: { quoteResult: any; elements: any[]; scopeData?: any; projectId?: string }): void
-```
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
 
-This function opens a print window with the same HTML report currently in `ExportButtons.handlePdfExport`. No logic changes to the PDF HTML itself — it already matches the reference format (Estimate Summary page + Bar List page).
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
 
-**2. File: `src/components/chat/ChatArea.tsx`** (3 lines changed)
-
-- Import `exportPdfFile` from `@/lib/pdf-export`
-- Line 1604-1608: Replace both export handlers with guarded calls:
-
-```typescript
-} else if (card.action === 'exportExcel') {
-  if (!quoteResult?.quote) {
-    toast.error("Complete estimation first to export");
-    return;
-  }
-  exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData });
-  toast.success("Excel exported");
-} else if (card.action === 'exportPdf') {
-  if (!quoteResult?.quote) {
-    toast.error("Complete estimation first to export");
-    return;
-  }
-  exportPdfFile({ quoteResult, elements: validationData?.elements || [], scopeData, projectId: currentProjectId });
-  toast.success("PDF exported");
-}
-```
-
-**3. File: `src/components/chat/ExportButtons.tsx`**
-
-- Import `exportPdfFile` from `@/lib/pdf-export`
-- Replace the ~230-line inline `handlePdfExport` method body with a one-liner call to `exportPdfFile({ quoteResult, elements, scopeData, projectId })`
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
 ### Scope
-- 1 new file: `src/lib/pdf-export.ts`
-- 2 files modified: `ChatArea.tsx`, `ExportButtons.tsx`
-- No database or backend changes
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
+- No new files, no backend changes
 

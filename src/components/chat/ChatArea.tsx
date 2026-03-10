@@ -6,6 +6,7 @@ import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 import { Button } from "@/components/ui/button";
 import { Paperclip, Send, Loader2, CheckCircle, SlidersHorizontal, Plus, Table, Download, AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle, Upload, FileQuestion, Sparkles, FileText, FileSpreadsheet } from "lucide-react";
 import { exportExcelFile } from "@/lib/excel-export";
+import { exportPdfFile } from "@/lib/pdf-export";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import ChatMessage from "./ChatMessage";
@@ -1602,10 +1603,19 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                         if (card.action === 'upload') {
                           fileInputRef.current?.click();
                         } else if (card.action === 'exportExcel') {
+                          if (!quoteResult?.quote) {
+                            toast.error("Complete estimation first to export");
+                            return;
+                          }
                           exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData });
                           toast.success("Excel exported");
                         } else if (card.action === 'exportPdf') {
-                          sendMessage("Export to PDF");
+                          if (!quoteResult?.quote) {
+                            toast.error("Complete estimation first to export");
+                            return;
+                          }
+                          exportPdfFile({ quoteResult, elements: validationData?.elements || [], scopeData, projectId });
+                          toast.success("PDF exported");
                         } else if (card.sendText) {
                           sendMessage(card.sendText);
                         }
