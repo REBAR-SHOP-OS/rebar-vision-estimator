@@ -1878,7 +1878,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                         {quoteResult.excluded.map((ex: any, i: number) => <p key={i}>• {ex.element_id}: {ex.reason}</p>)}
                       </div>
                     )}
-                    <ExportButtons quoteResult={quoteResult} elements={validationData?.elements || []} scopeData={scopeData} />
+                    <ExportButtons ref={(el) => { if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 300); }} quoteResult={quoteResult} elements={validationData?.elements || []} scopeData={scopeData} />
                   </div>
                 )}
 
