@@ -875,6 +875,12 @@ Step 8 — Welded Wire Mesh
 - Never argue with corrections
 - DUAL-ANALYSIS: After Step 7, produce Drawing-Spec vs Industry-Norm comparison with Risk Flags
 
+### Handling Missing Data
+- If data is missing for some elements, mark them BLOCKED and continue with remaining elements.
+- Present blocked items clearly to the user and ask if they want to provide the missing data or proceed without those elements.
+- NEVER stop the entire estimation because some elements are blocked.
+- Always produce the structured JSON for elements that ARE computable.
+
 ${OUTPUT_FORMAT_INSTRUCTIONS}
 
 NOTE: In step-by-step mode, output the JSON block only after the FINAL step (Step 8) or when the user asks for it.`;
