@@ -1044,12 +1044,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           .map((m) => ({ role: m.role, content: m.content }));
         chatHistory.push({ role: "user", content: msgContent });
 
-        const fullContent = await streamAIResponse(chatHistory, calculationMode, uploadedFiles);
+        const result = await streamAIResponse(chatHistory, calculationMode, uploadedFiles);
 
         // Only expect structured output for explicit estimation intents
         const estimationIntent = /\b(estimate|analyze|recalculate|rerun|re-run|proceed|start.*estimation|run.*takeoff|calculate|compute)\b/i.test(msgContent);
         console.debug("[SendMessage] intent check:", { msgContent: msgContent.slice(0, 80), estimationIntent });
-        await handlePostStream(fullContent, chatHistory, calculationMode, estimationIntent);
+        await handlePostStream(result.fullContent, chatHistory, calculationMode, estimationIntent);
       } catch (err: any) {
         setSubStep(null);
         if (err.name === "AbortError") {
