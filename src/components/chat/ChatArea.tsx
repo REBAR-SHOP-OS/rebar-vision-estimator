@@ -772,6 +772,44 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     return null;
   };
 
+  // Shared post-stream handler for both modes
+  const handlePostStream = async (fullContent: string, chatHistory: { role: string; content: string }[], mode: "smart" | "step-by-step") => {
+    // Fire-and-forget: learning extraction + DB save
+    triggerLearning([...chatHistory, { role: "assistant", content: fullContent }]);
+    supabase.from("messages").insert({
+      project_id: projectId,
+      user_id: user!.id,
+      role: "assistant",
+      content: fullContent,
+      metadata: { calculationMode: mode },
+    }).then(({ error }) => { if (error) console.error("Failed to save assistant message:", error); });
+
+    // Process Atomic Truth pipeline
+    const extracted = await processAtomicTruth(fullContent);
+
+    if (!extracted) {
+      setSubStep(null);
+      const isIntentionalBlock = /BLOCKED|MISSING_DRAWINGS|no.*project.*drawings|cannot.*produce.*quantities|does not contain.*project-specific/i.test(fullContent);
+      if (!isIntentionalBlock) {
+        const fallbackMsg: Message = {
+          id: crypto.randomUUID(),
+          role: "system",
+          content: "⚠️ Estimation completed but structured output was not returned. Please try again or adjust your scope settings.",
+          created_at: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, fallbackMsg]);
+      }
+    }
+
+    // Check for Finder Pass candidates
+    const fpCandidates = extractFinderPassCandidates(fullContent);
+    if (fpCandidates.length > 0) {
+      setFinderPassCandidates(fpCandidates);
+      setFinderReviewMode(true);
+      openBlueprintViewer();
+    }
+  };
+
   const handleModeSelect = async (mode: "smart" | "step-by-step", fileUrlsOverride?: string[]) => {
     if (!user) return;
     setShowModePicker(false);
