@@ -139,12 +139,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         onModeChange?.(mode);
         onStepChange?.(1);
       }
-      // P0: Restore validation state from last assistant message containing ATOMIC_TRUTH markers
+      // P0: Restore validation state + quote result from last assistant message containing ATOMIC_TRUTH markers
       const atomicMsg = [...data].reverse().find((m: any) => m.role === "assistant" && m.content?.includes("%%%ATOMIC_TRUTH_JSON_START%%%"));
       if (atomicMsg) {
         const atomicData = extractAtomicTruthJSON(atomicMsg.content);
         if (atomicData?.elements && atomicData.elements.length > 0) {
           runValidation(atomicData.elements);
+          // Restore quote result so Bar List tab persists across reloads
+          setQuoteResult({ elements: atomicData.elements, summary: atomicData.summary || null });
         }
       }
     }
