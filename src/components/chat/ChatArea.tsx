@@ -484,6 +484,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           try {
             const parsed = JSON.parse(jsonStr);
             const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+            const reasoning = parsed.choices?.[0]?.delta?.reasoning as string | undefined;
             if (content) {
               fullContent += content;
               const flushDisplay = fullContent
