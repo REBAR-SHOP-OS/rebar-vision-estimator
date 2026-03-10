@@ -356,8 +356,8 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
             <div className="rounded-xl bg-card border border-border p-4">
               <p className="text-2xl font-bold text-primary">
                 {quoteResult.quote.total_weight_kg
-                  ? `${quoteResult.quote.total_weight_kg.toLocaleString()} kg`
-                  : `${quoteResult.quote.total_weight_lbs.toLocaleString()} lbs`}
+                  ? `${quoteResult.quote.total_weight_kg.toLocaleString(undefined, {maximumFractionDigits: 1})} kg`
+                  : `${(quoteResult.quote.total_weight_lbs || 0).toLocaleString(undefined, {maximumFractionDigits: 1})} lbs`}
               </p>
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">Total Weight</p>
             </div>
