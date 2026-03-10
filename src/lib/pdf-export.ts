@@ -33,10 +33,18 @@ export async function exportPdfFile({ quoteResult, elements, scopeData, projectI
   sizeEntries.sort((a, b) => parseInt(a[0].replace(/[^0-9]/g, "")) - parseInt(b[0].replace(/[^0-9]/g, "")));
 
   const elemWeights: Record<string, number> = {};
+  const computedSizeKg: Record<string, number> = {};
   for (const b of barList) {
     const t = b.element_type || "OTHER";
-    const wtKg = typeof b.weight_kg === "number" ? b.weight_kg : (b.weight_lbs || 0) * 0.453592;
+    const mult = b.multiplier || 1;
+    const qty = b.qty || 0;
+    const lengthMm = b.length_mm || (b.length_ft ? b.length_ft * 304.8 : 0);
+    const totalLenM = (qty * mult * lengthMm) / 1000;
+    const massKgM = getMassKgPerM(b.size);
+    const wtKg = (typeof b.weight_kg === "number" && b.weight_kg > 0) ? b.weight_kg : totalLenM * massKgM;
     elemWeights[t] = (elemWeights[t] || 0) + wtKg;
+    const sz = b.size || "OTHER";
+    computedSizeKg[sz] = (computedSizeKg[sz] || 0) + wtKg;
   }
   const elemEntries = Object.entries(elemWeights).sort((a, b) => b[1] - a[1]);
 
