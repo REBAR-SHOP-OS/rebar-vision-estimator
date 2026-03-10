@@ -352,6 +352,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
       // P1: Add timeout via AbortController (5 minutes)
       const controller = new AbortController();
+      abortControllerRef.current = controller;
       const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
 
       const resp = await fetch(CHAT_URL, {
