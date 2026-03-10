@@ -1,38 +1,59 @@
 
 
-## Plan: Align PDF Export to Match Excel Two-Sheet Layout
+## Plan: Fix Freezing and Make Both Modes Consistent
 
-### Problem
-The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
+### Root Cause of Freezing
+`subStep` is set to `"parsing"` when estimation starts but **never cleared** when:
+- `processAtomicTruth` returns `false` (no elements found — the exact error in your console log)
+- An error is thrown in the catch block
+- The response is truncated
 
-### Changes
+This leaves the "Parsing / Validating / Ready" progress indicator stuck permanently.
 
-**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
+### Root Cause of Inconsistency
+The two modes (`handleModeSelect` for initial run vs `sendMessage` for follow-ups) have divergent post-streaming logic. `sendMessage` doesn't set/clear `subStep`, doesn't show fallback messages on failure, and doesn't properly handle the pipeline the same way.
 
-Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
+### Changes (1 file: `src/components/chat/ChatArea.tsx`)
 
-**Section 1: "Estimate Summary"** (page 1)
-- Project header: Project Name, Address, Engineer, Customer, Product Line
-- "Estimate Summary" title
-- Side-by-side tables using CSS grid/flexbox:
-  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
-  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
-- NOTES section: Grade, Lap Length Info, Deviations, Coating
-- Scope Items (if any)
-- MESH DETAILS table
+#### Fix 1: Clear `subStep` on all failure paths (~4 locations)
 
-**Section 2: "Bar List"** (page 2+, page-break-before)
-- Project header
-- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
-- Rows grouped by element type headers (bold row spanning columns)
-- Sub-element sub-headers
-- Bar rows with identification string (`{size} @ {spacing} {description}`)
-- TOTAL WEIGHT + TOTAL (Tons) footer rows
-- MESH DETAILS at bottom
+In `handleModeSelect`:
+- After `processAtomicTruth` returns false (line 830): add `setSubStep(null)`
+- In catch block (line 850): add `setSubStep(null)`
 
-The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
+In `sendMessage`:
+- After `processAtomicTruth` (line 939): if it returns false, add `setSubStep(null)`
+- In catch block (line 948): add `setSubStep(null)`
+
+#### Fix 2: Unify post-streaming logic into a shared helper
+
+Extract the duplicated code from `handleModeSelect` (lines 815-849) and `sendMessage` (lines 928-947) into a single `handlePostStream` function:
+
+```text
+async function handlePostStream(fullContent, chatHistory, mode) {
+  triggerLearning(...)
+  save assistant message to DB
+  const extracted = await processAtomicTruth(fullContent)
+  if (!extracted) {
+    setSubStep(null)          // <-- KEY FIX
+    show fallback if not intentional block
+  }
+  check finder pass candidates
+}
+```
+
+Both `handleModeSelect` and `sendMessage` call this same function after `streamAIResponse`.
+
+#### Fix 3: Clean content in flush section (line 475-476)
+
+Apply the same `cleanForDisplay` filter in the buffer flush section so raw JSON doesn't flash at the end of streaming.
+
+#### Fix 4: Always reset `subStep` alongside `setLoading(false)`
+
+Add `setSubStep(null)` next to every `setLoading(false)` call to guarantee cleanup.
 
 ### Scope
-- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
-- No new files, no backend changes
+- 1 file: `ChatArea.tsx`
+- ~30 lines changed (extract shared helper, add cleanup calls)
+- No backend changes
 
