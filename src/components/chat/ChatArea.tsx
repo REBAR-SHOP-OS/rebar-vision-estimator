@@ -390,6 +390,17 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
       const assistantId = crypto.randomUUID();
 
+      // Show thinking indicator immediately — gateway buffers reasoning tokens
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: assistantId,
+          role: "assistant" as const,
+          content: "🧠 *Analyzing blueprints...*",
+          created_at: new Date().toISOString(),
+        },
+      ]);
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
