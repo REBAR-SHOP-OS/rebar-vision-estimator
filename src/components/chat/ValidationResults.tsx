@@ -147,12 +147,14 @@ const ElementCard: React.FC<ElementCardProps> = ({ el, weightInfo, onShowOnDrawi
         </Badge>
       </div>
     </div>
+    {el.validation && (
     <div className="flex gap-1.5 flex-wrap mb-2">
-      <GateBadge name="Identity" passed={el.validation.identity.passed} />
-      <GateBadge name="Complete" passed={el.validation.completeness.passed} />
-      <GateBadge name="Consistent" passed={el.validation.consistency.passed} />
-      <GateBadge name="Scope" passed={el.validation.scope.passed} />
+      <GateBadge name="Identity" passed={el.validation.identity?.passed ?? false} />
+      <GateBadge name="Complete" passed={el.validation.completeness?.passed ?? false} />
+      <GateBadge name="Consistent" passed={el.validation.consistency?.passed ?? false} />
+      <GateBadge name="Scope" passed={el.validation.scope?.passed ?? false} />
     </div>
+    )}
     {el.extraction?.confidence !== undefined && (
       <div className="flex items-center gap-2 mb-2">
         <span className="text-[10px] text-muted-foreground w-16">Confidence</span>
