@@ -266,7 +266,7 @@ describe("Hardened Accuracy Targets", () => {
     ];
     const hasMetric = barLines.some(bl => bl.length_mm && bl.length_mm > 0);
     const hasImperial = barLines.some(bl => bl.length_ft && bl.length_ft > 0);
-    const unitsContext = "METRIC";
+    const unitsContext: string = "METRIC";
     const passed = !(hasMetric && hasImperial && unitsContext !== "MIXED_CONFIRMED");
     expect(passed).toBe(false);
   });
