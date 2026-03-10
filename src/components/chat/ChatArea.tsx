@@ -716,19 +716,17 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
       const fullContent = await streamAIResponse(chatHistory, mode, fileUrlsOverride ?? uploadedFiles);
 
-      // Trigger learning extraction
+      // Fire-and-forget: learning extraction + DB save (non-blocking)
       triggerLearning([...chatHistory, { role: "assistant", content: fullContent }]);
-
-      // Save assistant response to DB
-      await supabase.from("messages").insert({
+      supabase.from("messages").insert({
         project_id: projectId,
         user_id: user.id,
         role: "assistant",
         content: fullContent,
         metadata: { calculationMode: mode, step: 1 },
-      });
+      }).then(() => {}).catch(() => {});
 
-      // Process Atomic Truth pipeline
+      // Process Atomic Truth pipeline (now fast-return with background validation)
       const extracted = await processAtomicTruth(fullContent);
 
       // P0: If no structured data was extracted, show a fallback message
