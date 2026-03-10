@@ -31,6 +31,7 @@ export interface BarItem {
   weight_lbs: number;
   assumptions: string[];
   status?: string;
+  coating?: string;
 }
 
 interface BarListTableProps {
