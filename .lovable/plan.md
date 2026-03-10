@@ -1,45 +1,38 @@
 
 
-## Plan: Fix File Upload + Message Not Triggering AI Analysis
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
 
 ### Problem
-When a user stages files and types a message, `uploadStagedFiles` uploads files and shows them in chat, but **never triggers AI analysis**. The text input is displayed in the bubble but never sent to `sendMessage()` or `streamAIResponse()`. The AI simply never sees the user's question.
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
-### Root Cause
-`uploadStagedFiles` calls `handleFileUpload` (which stores files and populates `uploadedFiles`), but then returns without calling `sendMessage()`. The `sendMessage` function is only called in the else-branch of the send button click.
+### Changes
 
-### Fix (single file: `src/components/chat/ChatArea.tsx`)
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-#### Modify `uploadStagedFiles` (~line 1161-1188)
-After `handleFileUpload` completes and files are stored:
-1. If the user typed text AND a `calculationMode` is already set, call `sendMessage(textInput)` to trigger AI analysis with the uploaded file URLs
-2. If no calculationMode yet, the existing flow (mode picker shown on next interaction) still works, but the text is preserved as context
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
 
-The key change:
-```typescript
-const uploadStagedFiles = async (textInput?: string) => {
-  // ... existing file metadata capture & user message creation ...
-  
-  // Upload files to storage (this populates uploadedFiles)
-  await handleFileUpload(...);
-  
-  // NEW: If user typed a message, trigger AI analysis
-  if (textInput && calculationMode) {
-    await sendMessage(textInput);
-  } else if (textInput && !calculationMode) {
-    // No mode yet — show mode picker so user can proceed
-    setShowModePicker(true);
-  }
-};
-```
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
 
-Also need to prevent `sendMessage` from re-adding the user message (since `uploadStagedFiles` already added it). Add a flag or modify `sendMessage` to accept a `skipAddMessage` option, or simply call `streamAIResponse` directly with the text.
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
 
-#### Prevent duplicate "Uploaded:" messages
-`handleFileUpload` currently adds its own "📎 Uploaded: file.png" message (line 1009-1015). When called from `uploadStagedFiles`, this creates a duplicate since we already added the user message with thumbnails. Add a parameter to skip this when called from staging.
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
 ### Scope
-- 1 file modified: `ChatArea.tsx`
-- ~20 lines changed
-- No backend changes
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
+- No new files, no backend changes
 

@@ -852,18 +852,19 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     setLoading(false);
   };
 
-  const sendMessage = async (overrideText?: string) => {
+  const sendMessage = async (overrideText?: string, opts?: { skipAddMessage?: boolean }) => {
     const text = (overrideText ?? input).trim();
     if (!text || !user || loading) return;
 
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: text,
-      created_at: new Date().toISOString(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
+    if (!opts?.skipAddMessage) {
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: text,
+        created_at: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, userMessage]);
+    }
     const msgContent = text;
     setInput("");
     setLoading(true);
@@ -950,7 +951,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     setLoading(false);
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, skipStatusMessages = false) => {
     const files = e.target.files;
     if (!files || !user) return;
 
@@ -1006,20 +1007,22 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
       if (signedData?.signedUrl) newUrls.push(signedData.signedUrl);
 
-      const msg: Message = {
-        id: crypto.randomUUID(),
-        role: "user",
-        content: `📎 Uploaded: **${file.name}** (${(file.size / 1024 / 1024).toFixed(2)} MB)`,
-        created_at: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, msg]);
+      if (!skipStatusMessages) {
+        const msg: Message = {
+          id: crypto.randomUUID(),
+          role: "user",
+          content: `📎 Uploaded: **${file.name}** (${(file.size / 1024 / 1024).toFixed(2)} MB)`,
+          created_at: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, msg]);
 
-      await supabase.from("messages").insert({
-        project_id: projectId,
-        user_id: user.id,
-        role: "user",
-        content: msg.content,
-      });
+        await supabase.from("messages").insert({
+          project_id: projectId,
+          user_id: user.id,
+          role: "user",
+          content: msg.content,
+        });
+      }
     }
 
     setUploadedFiles((prev) => [...prev, ...newUrls]);
@@ -1184,7 +1187,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     const dt = new DataTransfer();
     stagedFiles.forEach(f => dt.items.add(f));
     setStagedFiles([]);
-    await handleFileUpload({ target: { files: dt.files } } as React.ChangeEvent<HTMLInputElement>);
+    await handleFileUpload({ target: { files: dt.files } } as React.ChangeEvent<HTMLInputElement>, true);
+
+    // Trigger AI analysis if user typed a message
+    if (textInput) {
+      if (calculationMode) {
+        await sendMessage(textInput, { skipAddMessage: true });
+      } else if (uploadedFiles.length > 0 || dt.files.length > 0) {
+        setShowModePicker(true);
+      }
+    }
   };
 
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
