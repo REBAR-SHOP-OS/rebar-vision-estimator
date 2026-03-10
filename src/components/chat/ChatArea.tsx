@@ -1601,6 +1601,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                       onClick={() => {
                         if (card.action === 'upload') {
                           fileInputRef.current?.click();
+                        } else if (card.action === 'exportExcel') {
+                          exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData });
+                          toast.success("Excel exported");
+                        } else if (card.action === 'exportPdf') {
+                          sendMessage("Export to PDF");
                         } else if (card.sendText) {
                           sendMessage(card.sendText);
                         }
