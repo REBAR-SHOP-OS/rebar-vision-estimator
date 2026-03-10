@@ -244,13 +244,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const scopeDataRef = useRef(scopeData);
   useEffect(() => { scopeDataRef.current = scopeData; }, [scopeData]);
 
-  // Pre-computed PDF data type for scope-by-scope reuse
-  interface PreComputedPdfData {
-    effectiveImageUrls: string[];
-    effectivePreExtracted: any[];
-    trimmedOcrResults: any[];
-    knowledgeContext: any;
-  }
 
   const streamAIResponse = useCallback(
     async (
