@@ -317,6 +317,9 @@ serve(async (req) => {
       } else if (!scope.passed) {
         status = "BLOCKED";
         errors.push(`Scope gate failed: ${scope.details.error}`);
+      } else if (!unit.passed) {
+        status = "BLOCKED";
+        errors.push(`Unit gate failed: ${unit.details.issues?.join("; ")}`);
       } else if (!consistency.passed) {
         status = "FLAGGED";
         warnings.push(...(consistency.details.conflicts || []));
