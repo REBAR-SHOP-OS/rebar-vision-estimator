@@ -472,8 +472,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             const content = parsed.choices?.[0]?.delta?.content as string | undefined;
             if (content) {
               fullContent += content;
+              const flushDisplay = fullContent
+                .replace(/%%%ATOMIC_TRUTH_JSON_START%%%[\s\S]*/g, "")
+                .replace(/```json[\s\S]*?```/g, "")
+                .replace(/\{[^}]*"(?:Estimation Group|Element Type|element_type|element_id|Rebar Size|bar_lines)"[\s\S]*$/gs, "")
+                .trim();
               setMessages((prev) =>
-                prev.map((m) => (m.id === assistantId ? { ...m, content: fullContent } : m))
+                prev.map((m) => (m.id === assistantId ? { ...m, content: flushDisplay } : m))
               );
             }
           } catch {}
@@ -767,6 +772,44 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     return null;
   };
 
+  // Shared post-stream handler for both modes
+  const handlePostStream = async (fullContent: string, chatHistory: { role: string; content: string }[], mode: "smart" | "step-by-step") => {
+    // Fire-and-forget: learning extraction + DB save
+    triggerLearning([...chatHistory, { role: "assistant", content: fullContent }]);
+    supabase.from("messages").insert({
+      project_id: projectId,
+      user_id: user!.id,
+      role: "assistant",
+      content: fullContent,
+      metadata: { calculationMode: mode },
+    }).then(({ error }) => { if (error) console.error("Failed to save assistant message:", error); });
+
+    // Process Atomic Truth pipeline
+    const extracted = await processAtomicTruth(fullContent);
+
+    if (!extracted) {
+      setSubStep(null);
+      const isIntentionalBlock = /BLOCKED|MISSING_DRAWINGS|no.*project.*drawings|cannot.*produce.*quantities|does not contain.*project-specific/i.test(fullContent);
+      if (!isIntentionalBlock) {
+        const fallbackMsg: Message = {
+          id: crypto.randomUUID(),
+          role: "system",
+          content: "⚠️ Estimation completed but structured output was not returned. Please try again or adjust your scope settings.",
+          created_at: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, fallbackMsg]);
+      }
+    }
+
+    // Check for Finder Pass candidates
+    const fpCandidates = extractFinderPassCandidates(fullContent);
+    if (fpCandidates.length > 0) {
+      setFinderPassCandidates(fpCandidates);
+      setFinderReviewMode(true);
+      openBlueprintViewer();
+    }
+  };
+
   const handleModeSelect = async (mode: "smart" | "step-by-step", fileUrlsOverride?: string[]) => {
     if (!user) return;
     setShowModePicker(false);
@@ -812,42 +855,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
       const fullContent = await streamAIResponse(chatHistory, mode, fileUrlsOverride ?? uploadedFiles);
 
-      // Fire-and-forget: learning extraction + DB save (non-blocking)
-      triggerLearning([...chatHistory, { role: "assistant", content: fullContent }]);
-      supabase.from("messages").insert({
-        project_id: projectId,
-        user_id: user.id,
-        role: "assistant",
-        content: fullContent,
-        metadata: { calculationMode: mode, step: 1 },
-      }).then(({ error }) => { if (error) console.error("Failed to save assistant message:", error); });
-
-      // Process Atomic Truth pipeline (now fast-return with background validation)
-      const extracted = await processAtomicTruth(fullContent);
-
-      // P0: If no structured data was extracted, show a fallback message
-      // But suppress it if the AI intentionally blocked (e.g., non-blueprint file uploaded)
-      if (!extracted) {
-        const isIntentionalBlock = /BLOCKED|MISSING_DRAWINGS|no.*project.*drawings|cannot.*produce.*quantities|does not contain.*project-specific/i.test(fullContent);
-        if (!isIntentionalBlock) {
-          const fallbackMsg: Message = {
-            id: crypto.randomUUID(),
-            role: "system",
-            content: "⚠️ Estimation completed but structured output was not returned. Please try again or adjust your scope settings.",
-            created_at: new Date().toISOString(),
-          };
-          setMessages((prev) => [...prev, fallbackMsg]);
-        }
-      }
-
-      // Check for Finder Pass candidates
-      const fpCandidates = extractFinderPassCandidates(fullContent);
-      if (fpCandidates.length > 0) {
-        setFinderPassCandidates(fpCandidates);
-        setFinderReviewMode(true);
-        openBlueprintViewer();
-      }
+      await handlePostStream(fullContent, chatHistory, mode);
     } catch (err: any) {
+      setSubStep(null);
       if (err.name === "AbortError") {
         toast.error("AI analysis timed out after 5 minutes. Please retry.");
       } else {
@@ -855,6 +865,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       }
     }
 
+    setSubStep(null);
     setLoading(false);
   };
 
@@ -925,27 +936,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
         const fullContent = await streamAIResponse(chatHistory, calculationMode, uploadedFiles);
 
-        // Trigger learning extraction
-        triggerLearning([...chatHistory, { role: "assistant", content: fullContent }]);
-
-        supabase.from("messages").insert({
-          project_id: projectId,
-          user_id: user.id,
-          role: "assistant",
-          content: fullContent,
-        }).then(({ error }) => { if (error) console.error("Failed to save assistant message:", error); });
-
-        // Process Atomic Truth pipeline
-        await processAtomicTruth(fullContent);
-
-        // Check for Finder Pass candidates
-        const fpCandidates = extractFinderPassCandidates(fullContent);
-        if (fpCandidates.length > 0) {
-          setFinderPassCandidates(fpCandidates);
-          setFinderReviewMode(true);
-          openBlueprintViewer();
-        }
+        await handlePostStream(fullContent, chatHistory, calculationMode);
       } catch (err: any) {
+        setSubStep(null);
         if (err.name === "AbortError") {
           toast.error("AI analysis timed out after 5 minutes. Please retry.");
         } else {
@@ -954,6 +947,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       }
     }
 
+    setSubStep(null);
     setLoading(false);
   };
 
