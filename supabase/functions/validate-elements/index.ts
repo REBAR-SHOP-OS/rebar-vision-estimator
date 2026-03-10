@@ -346,6 +346,7 @@ serve(async (req) => {
         completeness,
         consistency,
         scope,
+        unit,
         errors,
         warnings,
       };

@@ -619,6 +619,7 @@ Top-level required keys:
 - industry_norm_estimate
 - reconciliation_report
 - audit_ledger
+- audit_trace
 - coverage_ledger
 
 Key hard constraints:

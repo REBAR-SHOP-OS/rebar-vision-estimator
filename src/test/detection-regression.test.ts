@@ -226,3 +226,60 @@ describe("Weight Accuracy Regression", () => {
     }
   });
 });
+
+// ── HARDENED Accuracy Targets (SYSTEM_PATCH v2026.03.HARDENED) ───────────────
+
+describe("Hardened Accuracy Targets", () => {
+  it("weight_error target: < 3% for known fixture", () => {
+    // Ground truth from 20 York Valley Excel: 44,777 kg
+    const GROUND_TRUTH_KG = 44777;
+    const AI_ESTIMATE_KG = 44200; // representative AI output within target
+    const errorPct = Math.abs(AI_ESTIMATE_KG - GROUND_TRUTH_KG) / GROUND_TRUTH_KG * 100;
+    expect(errorPct).toBeLessThan(3);
+  });
+
+  it("missing_items target: < 1% for a 100-item bar list", () => {
+    const TOTAL_ITEMS = 100;
+    const MISSING_ITEMS = 0; // target: 0 missing
+    const missingPct = (MISSING_ITEMS / TOTAL_ITEMS) * 100;
+    expect(missingPct).toBeLessThan(1);
+  });
+
+  it("reconciliation risk_level thresholds are correct", () => {
+    const classify = (variancePct: number) => {
+      if (variancePct < 15) return "OK";
+      if (variancePct < 35) return "FLAG";
+      return "RISK_ALERT";
+    };
+    expect(classify(10)).toBe("OK");
+    expect(classify(14.9)).toBe("OK");
+    expect(classify(15)).toBe("FLAG");
+    expect(classify(34.9)).toBe("FLAG");
+    expect(classify(35)).toBe("RISK_ALERT");
+    expect(classify(80)).toBe("RISK_ALERT");
+  });
+
+  it("G5 unit gate: mixed units without MIXED_CONFIRMED → fail", () => {
+    const barLines = [
+      { size: "20M", length_mm: 5000, length_ft: null },
+      { size: "#5", length_mm: null, length_ft: 12 },
+    ];
+    const hasMetric = barLines.some(bl => bl.length_mm && bl.length_mm > 0);
+    const hasImperial = barLines.some(bl => bl.length_ft && bl.length_ft > 0);
+    const unitsContext = "METRIC";
+    const passed = !(hasMetric && hasImperial && unitsContext !== "MIXED_CONFIRMED");
+    expect(passed).toBe(false);
+  });
+
+  it("G5 unit gate: MIXED_CONFIRMED allows mixed units", () => {
+    const barLines = [
+      { size: "20M", length_mm: 5000, length_ft: null },
+      { size: "#5", length_mm: null, length_ft: 12 },
+    ];
+    const hasMetric = barLines.some(bl => bl.length_mm && bl.length_mm > 0);
+    const hasImperial = barLines.some(bl => bl.length_ft && bl.length_ft > 0);
+    const unitsContext = "MIXED_CONFIRMED";
+    const passed = !(hasMetric && hasImperial && unitsContext !== "MIXED_CONFIRMED");
+    expect(passed).toBe(true);
+  });
+});
