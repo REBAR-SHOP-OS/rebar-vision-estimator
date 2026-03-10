@@ -1552,7 +1552,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 const lastMsg = messages.filter(m => m.role === 'assistant').slice(-1)[0];
                 const hasConfirmQuestion = lastMsg?.content?.match(/do you agree|confirm|proceed\?|is this correct/i);
 
-                type IdeaCard = { icon: string; title: string; description: string; sendText: string; autoSend?: boolean; action?: 'upload' };
+                type IdeaCard = { icon: string; title: string; description: string; sendText: string; autoSend?: boolean; action?: 'upload' | 'exportPdf' | 'exportExcel' };
 
                 let cards: IdeaCard[] = [];
 
