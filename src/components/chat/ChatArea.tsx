@@ -197,6 +197,17 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     }
   };
 
+  // Refresh signed URLs every 90 minutes to prevent expiry during long sessions
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (uploadedFiles.length > 0) {
+        console.debug("[SignedURL] Refreshing signed URLs...");
+        loadUploadedFiles();
+      }
+    }, 90 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [projectId, uploadedFiles.length > 0]);
+
   const fetchKnowledgeContext = async (): Promise<{ rules: string[]; fileUrls: string[]; trainingExamples: { title: string; answerText: string }[]; learnedRules: string[] }> => {
     if (!user) return { rules: [], fileUrls: [], trainingExamples: [], learnedRules: [] };
     

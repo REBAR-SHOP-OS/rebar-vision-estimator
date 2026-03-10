@@ -279,8 +279,9 @@ const Dashboard: React.FC = () => {
                     <button
                       onClick={(e) => deleteProject(project.id, e)}
                       className="hover:text-destructive"
+                      disabled={deletingProjectId === project.id}
                     >
-                      <Trash2 className="h-3 w-3" />
+                      {deletingProjectId === project.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
                     </button>
                   </div>
                 </>
