@@ -390,6 +390,17 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
       const assistantId = crypto.randomUUID();
 
+      // Show thinking indicator immediately — gateway buffers reasoning tokens
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: assistantId,
+          role: "assistant" as const,
+          content: "🧠 *Analyzing blueprints...*",
+          created_at: new Date().toISOString(),
+        },
+      ]);
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -422,29 +433,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                     )
                     .join("")
                 : undefined;
-
-            const reasoningRaw =
-              (delta as any).reasoning ??
-              (delta as any).reasoning_content ??
-              (delta as any).reasoning_details;
-            const reasoningText =
-              typeof reasoningRaw === "string"
-                ? reasoningRaw
-                : Array.isArray(reasoningRaw)
-                ? reasoningRaw
-                    .map((part: any) =>
-                      typeof part === "string"
-                        ? part
-                        : part?.text ?? part?.content ?? part?.summary ?? ""
-                    )
-                    .join(" ")
-                    .trim()
-                : typeof reasoningRaw === "object" && reasoningRaw !== null
-                ? [reasoningRaw.text, reasoningRaw.content, reasoningRaw.summary]
-                    .filter((v): v is string => typeof v === "string")
-                    .join(" ")
-                    .trim()
-                : "";
 
             if (content) {
               fullContent += content;
@@ -479,19 +467,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                     content: displayContent,
                     created_at: new Date().toISOString(),
                   },
-                ];
-              });
-            } else if (reasoningText && !fullContent) {
-              const headerMatch = reasoningText.match(/\*\*(.+?)\*\*/);
-              const thinkingLabel = headerMatch ? headerMatch[1] : "Analyzing...";
-              setMessages((prev) => {
-                const last = prev[prev.length - 1];
-                if (last?.id === assistantId) {
-                  return prev.map((m) => (m.id === assistantId ? { ...m, content: `🧠 *${thinkingLabel}*` } : m));
-                }
-                return [
-                  ...prev,
-                  { id: assistantId, role: "assistant" as const, content: `🧠 *${thinkingLabel}*`, created_at: new Date().toISOString() },
                 ];
               });
             }
@@ -531,28 +506,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                     )
                     .join("")
                 : undefined;
-            const reasoningRaw =
-              (delta as any).reasoning ??
-              (delta as any).reasoning_content ??
-              (delta as any).reasoning_details;
-            const reasoningText =
-              typeof reasoningRaw === "string"
-                ? reasoningRaw
-                : Array.isArray(reasoningRaw)
-                ? reasoningRaw
-                    .map((part: any) =>
-                      typeof part === "string"
-                        ? part
-                        : part?.text ?? part?.content ?? part?.summary ?? ""
-                    )
-                    .join(" ")
-                    .trim()
-                : typeof reasoningRaw === "object" && reasoningRaw !== null
-                ? [reasoningRaw.text, reasoningRaw.content, reasoningRaw.summary]
-                    .filter((v): v is string => typeof v === "string")
-                    .join(" ")
-                    .trim()
-                : "";
             if (content) {
               fullContent += content;
               const flushDisplay = fullContent
@@ -562,12 +515,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 .trim();
               setMessages((prev) =>
                 prev.map((m) => (m.id === assistantId ? { ...m, content: flushDisplay } : m))
-              );
-            } else if (reasoningText && !fullContent) {
-              const headerMatch = reasoningText.match(/\*\*(.+?)\*\*/);
-              const thinkingLabel = headerMatch ? headerMatch[1] : "Analyzing...";
-              setMessages((prev) =>
-                prev.map((m) => (m.id === assistantId ? { ...m, content: `🧠 *${thinkingLabel}*` } : m))
               );
             }
           } catch {}
