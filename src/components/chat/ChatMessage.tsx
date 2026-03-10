@@ -6,6 +6,7 @@ interface ChatMessageProps {
   message: {
     role: "user" | "assistant" | "system";
     content: string;
+    files?: { name: string; url: string; type: string }[];
   };
 }
 
@@ -35,6 +36,24 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
         {isUser ? <User className="h-3.5 w-3.5" /> : <Bot className="h-3.5 w-3.5" />}
       </div>
       <div className="min-w-0 flex-1 text-sm leading-relaxed text-foreground pt-0.5 break-words">
+        {message.files && message.files.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {message.files.map((file, i) =>
+              file.type.startsWith("image/") ? (
+                <img
+                  key={i}
+                  src={file.url}
+                  alt={file.name}
+                  className="h-16 w-16 rounded-lg object-cover border border-border"
+                />
+              ) : (
+                <div key={i} className="flex items-center gap-1.5 rounded-lg border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
+                  📎 {file.name}
+                </div>
+              )
+            )}
+          </div>
+        )}
         <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-headings:my-2 prose-headings:font-semibold prose-pre:bg-secondary prose-pre:text-secondary-foreground prose-pre:rounded-lg prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-strong:text-foreground">
           <ReactMarkdown
             components={{
