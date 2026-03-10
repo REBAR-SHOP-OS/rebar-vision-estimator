@@ -951,21 +951,84 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     try {
       // Build category-specific initial message
       const primaryCat = scopeData?.primaryCategory;
-      let initialInstruction = `I've uploaded my blueprint files. Please begin the ${mode === "smart" ? "complete automatic" : "step-by-step"} estimation process.`;
-      
-      if (primaryCat === "cage_only") {
-        initialInstruction = "Begin cage assembly estimation — focus on verticals, ties, and spirals. This is a cage-only project.";
-      } else if (primaryCat === "bar_list_only") {
-        initialInstruction = "Parse the bar schedule table and calculate weights. This is a bar list project.";
-      } else if (scopeData?.features?.hasCageAssembly) {
-        initialInstruction = `I've uploaded my blueprint files. Begin full ${mode === "smart" ? "automatic" : "step-by-step"} estimation. Also process cage assemblies found in the set.`;
+      const isFocusedProject = primaryCat === "cage_only" || primaryCat === "bar_list_only";
+
+      if (isFocusedProject) {
+        // Focused projects: single call (already scoped tightly)
+        let initialInstruction = primaryCat === "cage_only"
+          ? "Begin cage assembly estimation — focus on verticals, ties, and spirals. This is a cage-only project."
+          : "Parse the bar schedule table and calculate weights. This is a bar list project.";
+        const chatHistory = [{ role: "user", content: initialInstruction }];
+        const result = await streamAIResponse(chatHistory, mode, fileUrlsOverride ?? uploadedFiles);
+        await handlePostStream(result.fullContent, chatHistory, mode, mode === "smart");
+      } else {
+        // ── Scope-by-scope iterative processing ──
+        // Group selected scope items by category
+        const selectedSet = new Set(scopeData?.scopeItems || []);
+        const categoryGroups: Record<string, string[]> = {};
+        for (const item of SCOPE_ITEMS) {
+          if (selectedSet.has(item.id)) {
+            if (!categoryGroups[item.category]) categoryGroups[item.category] = [];
+            categoryGroups[item.category].push(item.id);
+          }
+        }
+        const categories = Object.entries(categoryGroups).filter(([, items]) => items.length > 0);
+
+        if (categories.length === 0) {
+          // Fallback: no categories, single call
+          const chatHistory = [{ role: "user", content: `I've uploaded my blueprint files. Please begin the ${mode === "smart" ? "complete automatic" : "step-by-step"} estimation process.` }];
+          const result = await streamAIResponse(chatHistory, mode, fileUrlsOverride ?? uploadedFiles);
+          await handlePostStream(result.fullContent, chatHistory, mode, mode === "smart");
+        } else {
+          let accumulatedContent = "";
+          let preComputed: PreComputedPdfData | undefined;
+          const allFiles = fileUrlsOverride ?? uploadedFiles;
+          const hasCageModule = scopeData?.features?.hasCageAssembly && !isFocusedProject;
+
+          for (let i = 0; i < categories.length; i++) {
+            const [catName, catItems] = categories[i];
+            const catLabels = catItems.map(id => SCOPE_ITEMS.find(s => s.id === id)?.label || id);
+
+            // Show progress message
+            const progressMsg: Message = {
+              id: crypto.randomUUID(),
+              role: "system",
+              content: `📋 **Analyzing: ${catName}** (${i + 1}/${categories.length}) — ${catLabels.join(", ")}`,
+              created_at: new Date().toISOString(),
+            };
+            setMessages(prev => [...prev, progressMsg]);
+            setSubStep(`analyzing ${catName.toLowerCase()}`);
+
+            // Build focused instruction
+            const focusInstruction = `Analyze ONLY these element types: ${catLabels.join(", ")}. Ignore all other element types for this pass.${hasCageModule && catName === "Assemblies" ? " Process cage assemblies (verticals, ties, spirals)." : ""}`;
+            const chatHistory = [{ role: "user", content: focusInstruction }];
+
+            // Build scope override with only this category's items
+            const scopeOverride = {
+              ...scopeDataRef.current!,
+              scopeItems: catItems,
+              focusCategory: catName,
+            };
+
+            const result = await streamAIResponse(chatHistory, mode, allFiles, {
+              preComputed,
+              scopeOverride,
+              silent: i < categories.length - 1, // Don't mark step 9 until last pass
+            });
+
+            // Cache preComputed data from first call for reuse
+            if (!preComputed) {
+              preComputed = result.preComputed;
+            }
+
+            accumulatedContent += "\n\n" + result.fullContent;
+          }
+
+          // Final merge of all accumulated content
+          const finalChatHistory = [{ role: "user", content: `I've uploaded my blueprint files. Full scope-by-scope estimation complete.` }];
+          await handlePostStream(accumulatedContent, finalChatHistory, mode, mode === "smart");
+        }
       }
-
-      const chatHistory = [{ role: "user", content: initialInstruction }];
-
-      const fullContent = await streamAIResponse(chatHistory, mode, fileUrlsOverride ?? uploadedFiles);
-
-      await handlePostStream(fullContent, chatHistory, mode, mode === "smart");
     } catch (err: any) {
       setSubStep(null);
       if (err.name === "AbortError") {
