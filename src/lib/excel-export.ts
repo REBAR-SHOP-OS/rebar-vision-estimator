@@ -77,7 +77,8 @@ function buildEstimateSummarySheet(params: ExportParams): XLSX.WorkSheet {
   // Row 0: Project header
   rows.push(["Project Name:", scopeData?.projectName || "—", "", "", "", "Product Line:", scopeData?.productLine || "Rebar"]);
   rows.push(["Address:", scopeData?.address || "—", "", "", "", "Engineer:", scopeData?.engineer || "—"]);
-  rows.push(["Customer:", scopeData?.clientName || "—"]);
+  rows.push(["Customer:", scopeData?.clientName || "—", "", "", "", "Estimator:", scopeData?.estimator || "—"]);
+  rows.push(["Created Date:", new Date().toLocaleDateString()]);
   rows.push([]);
 
   // Warning banner if blocked/flagged
