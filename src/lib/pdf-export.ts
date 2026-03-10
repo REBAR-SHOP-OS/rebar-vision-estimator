@@ -141,30 +141,33 @@ export function exportPdfFile({ quoteResult, elements, scopeData, projectId }: P
 <style>
 @page{margin:0.6in;size:letter landscape}
 *{box-sizing:border-box}
-body{font-family:'Segoe UI',Arial,sans-serif;color:#1a1a2e;margin:0;padding:30px;font-size:11px}
-.header{margin-bottom:16px}
+body{font-family:'Segoe UI',Arial,sans-serif;color:#1a1a2e;margin:0;padding:30px;font-size:11px;background:#fff}
+.header{margin-bottom:16px;background:#8DB4B4;padding:10px 14px;border:1px solid #7a9e9e}
 .header h1{margin:0;font-size:20px;color:#1a1a2e}
-.meta-row{display:flex;gap:4px;font-size:11px;margin:2px 0}
+.meta-row{display:flex;gap:4px;font-size:11px;margin:2px 0;background:#8DB4B4;padding:2px 14px;border:1px solid #7a9e9e}
 .meta-row .label{font-weight:600;min-width:110px}
-.section-title{font-size:16px;font-weight:700;color:#1a1a2e;border-bottom:2px solid #1a1a2e;padding-bottom:4px;margin:18px 0 10px}
+.section-title{font-size:16px;font-weight:700;color:#fff;background:#92D050;padding:6px 14px;margin:18px 0 10px;text-align:center}
 .side-by-side{display:flex;gap:40px;margin-bottom:20px}
 .side-by-side .panel{flex:1}
-.panel h3{font-size:12px;font-weight:700;margin:0 0 6px;text-transform:uppercase;color:#333}
+.panel h3{font-size:12px;font-weight:700;margin:0 0 6px;text-transform:uppercase;text-decoration:underline;color:#333}
 table{width:100%;border-collapse:collapse;font-size:10px}
-th{background:#1a1a2e;color:#fff;padding:5px 6px;text-align:left;font-weight:600;font-size:9px;text-transform:uppercase}
-td{padding:4px 6px;border-bottom:1px solid #eee}
+th{background:#D9E1F2;color:#1a1a2e;padding:5px 6px;text-align:left;font-weight:600;font-size:9px;text-transform:uppercase;border:1px solid #999}
+td{padding:4px 6px;border:1px solid #ccc}
 tr:nth-child(even){background:#f9f9fb}
-.grand-total td{background:#1a1a2e;color:#fff;font-weight:700}
-.group-header td{background:#e8e8f0;font-weight:700;font-size:10px;border-bottom:2px solid #1a1a2e}
-.sub-header td{background:#f0f0f5;font-weight:600;font-style:italic;font-size:10px}
+.grand-total td{background:#FFFF00;color:#1a1a2e;font-weight:700;border:1px solid #999}
+.group-header td{background:#FFFF00;font-weight:700;font-size:10px;border:1px solid #999}
+.sub-header td{background:#DCE6F1;font-weight:600;font-style:italic;font-size:10px;border:1px solid #999}
 .notes-section{margin-top:20px;font-size:11px}
 .notes-section .note-row{display:flex;gap:4px;margin:2px 0}
 .notes-section .note-label{font-weight:600;min-width:130px}
+.notes-header{font-size:14px;font-weight:700;color:#fff;background:#92D050;padding:6px 14px;margin:18px 0 10px}
 .page-break{page-break-before:always}
 .footer{margin-top:30px;padding-top:8px;border-top:1px solid #ccc;font-size:9px;color:#999;text-align:center}
-.bar-list-table td,.bar-list-table th{font-size:9px;padding:3px 4px;white-space:nowrap}
+.bar-list-table th{background:#FFC7CE;color:#1a1a2e;font-weight:600;font-size:9px;padding:4px 5px;border:1px solid #999;text-align:center;white-space:nowrap}
+.bar-list-table td{font-size:9px;padding:3px 4px;white-space:nowrap;border:1px solid #ccc}
 .risk-alert td{background:#c0392b;color:#fff;font-weight:700}
 .risk-flag td{background:#e67e22;color:#fff;font-weight:700}
+.proj-header{background:#8DB4B4;padding:6px 14px;font-size:14px;font-weight:700;border:1px solid #7a9e9e;margin-bottom:10px}
 </style></head><body>
 
 ${warningBanner}
