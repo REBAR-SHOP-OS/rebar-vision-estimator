@@ -46,11 +46,11 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
     await exportExcelFile({ quoteResult, elements, scopeData });
   };
 
-  const handlePdfExport = () => {
+  const handlePdfExport = async () => {
     if (isBlocked) {
       toast.warning("Estimate is BLOCKED — PDF includes warning banner");
     }
-    exportPdfFile({ quoteResult, elements, scopeData, projectId });
+    await exportPdfFile({ quoteResult, elements, scopeData, projectId });
   };
 
   return (
