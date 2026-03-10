@@ -836,8 +836,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       const totalLenM = (qty * mult * lengthMm) / 1000;
       const massKgM = getMassKgPerM(b.size || "");
       const computedWt = totalLenM * massKgM;
-      const wt = (typeof b.weight_kg === "number" && b.weight_kg > 0) ? b.weight_kg : computedWt;
-      // Persist computed weight on bar object so exports use it
+      // Always use deterministic weight; AI weight is cross-check only
+      const wt = computedWt > 0 ? computedWt : ((typeof b.weight_kg === "number" && b.weight_kg > 0) ? b.weight_kg : 0);
+      if (computedWt > 0 && typeof b.weight_kg === "number" && b.weight_kg > 0 && Math.abs(computedWt - b.weight_kg) / computedWt > 0.05) {
+        console.warn(`[weight-audit] ${b.size} ${b.element_id}: deterministic=${computedWt.toFixed(1)}kg vs AI=${b.weight_kg.toFixed(1)}kg (${((Math.abs(computedWt - b.weight_kg) / computedWt) * 100).toFixed(1)}% diff)`);
+      }
+      // Persist deterministic weight on bar object so exports use it
       b.weight_kg = wt;
       totalKg += wt;
       const sz = b.size || "unknown";
