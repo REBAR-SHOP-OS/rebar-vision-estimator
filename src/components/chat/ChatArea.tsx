@@ -266,6 +266,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                   console.log(`[OCR Routing] ${pageImages.length} page images uploaded. Running Vision OCR on each...`);
                   
                   // OCR each page image individually via the lightweight ocr-image edge function
+                  let ocrFailCount = 0;
                   for (const img of pageImages) {
                     scannedPdfPageImageUrls.push(img.signedUrl);
                     try {
@@ -275,6 +276,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                       });
                       if (ocrErr) {
                         console.error(`[OCR Routing] OCR failed for page ${img.pageNumber}:`, ocrErr);
+                        ocrFailCount++;
                       } else if (ocrData?.ocr_results) {
                         clientOcrResults.push({
                           image_name: `page_${img.pageNumber}.png`,
@@ -284,7 +286,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                       }
                     } catch (ocrErr) {
                       console.error(`[OCR Routing] OCR error for page ${img.pageNumber}:`, ocrErr);
+                      ocrFailCount++;
                     }
+                  }
+                  // P1: Warn if >50% OCR pages failed
+                  if (pageImages.length > 0 && ocrFailCount / pageImages.length > 0.5) {
+                    toast.warning(`OCR failed on ${ocrFailCount}/${pageImages.length} pages. Results may be incomplete.`);
                   }
                 } catch (renderErr) {
                   console.error(`[OCR Routing] Client-side PDF rendering failed:`, renderErr);
