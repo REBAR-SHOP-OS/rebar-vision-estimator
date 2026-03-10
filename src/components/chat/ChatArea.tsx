@@ -664,14 +664,26 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         }
       }
     } catch { /* */ }
-    // Aggressive: find any JSON object with "elements" array
+    // Aggressive: find JSON object with "elements" array using bracket counting
     try {
-      const aggMatch = content.match(/\{[\s\S]*?"elements"\s*:\s*\[[\s\S]*?\]\s*[\s\S]*?\}/);
-      if (aggMatch) {
-        const parsed = JSON.parse(aggMatch[0]);
-        if (parsed?.elements?.length > 0) {
-          console.log("[Fallback-aggressive] Extracted elements:", parsed.elements.length);
-          return parsed.elements;
+      const elemIdx = content.indexOf('"elements"');
+      if (elemIdx !== -1) {
+        // Walk backward to find the opening {
+        let startIdx = content.lastIndexOf('{', elemIdx);
+        if (startIdx !== -1) {
+          let depth = 0;
+          let endIdx = startIdx;
+          for (let i = startIdx; i < content.length; i++) {
+            if (content[i] === '{') depth++;
+            else if (content[i] === '}') { depth--; if (depth === 0) { endIdx = i + 1; break; } }
+          }
+          if (depth === 0) {
+            const parsed = JSON.parse(content.slice(startIdx, endIdx));
+            if (parsed?.elements?.length > 0) {
+              console.log("[Fallback-aggressive] Extracted elements:", parsed.elements.length);
+              return parsed.elements;
+            }
+          }
         }
       }
     } catch { /* */ }
