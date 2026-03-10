@@ -6,6 +6,7 @@ interface ChatMessageProps {
   message: {
     role: "user" | "assistant" | "system";
     content: string;
+    files?: { name: string; url: string; type: string }[];
   };
 }
 
