@@ -412,6 +412,7 @@ Stage 2.5 — Rebar / mesh type identification
     Mesh: SHEET_WWM, ROLL_WWM, UNKNOWN!
   - Record grade/type if stated (e.g., 400R / 400W); else UNKNOWN!
   - Never assume material type in Drawing/Spec mode.
+  - CRITICAL: If ANY note, legend, general note, specification page, or callout mentions epoxy, epoxy-coated, stainless, stainless steel, galvanized, galvanised, MMFX, chromium, duplex, or any coating/material type, you MUST populate the "coating" field for EVERY affected element. Default is "none". This is a PRICING-CRITICAL field — never omit it. If a general note says "all rebar shall be epoxy-coated", set coating="EPOXY" on ALL elements.
 
 Stage 3 — Scale + element extraction
   - Extract scales; validate with at least one dimensioned reference if possible.

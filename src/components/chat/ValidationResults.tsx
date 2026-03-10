@@ -255,6 +255,37 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
         </div>
       </div>
 
+      {/* Special Coating Alert */}
+      {(() => {
+        const coatingCounts: Record<string, number> = {};
+        for (const el of elements) {
+          const coating = el.extraction?.truth?.coating;
+          if (coating && coating !== "none" && coating !== "BLACK") {
+            coatingCounts[coating] = (coatingCounts[coating] || 0) + 1;
+          }
+        }
+        const coatingEntries = Object.entries(coatingCounts);
+        if (coatingEntries.length === 0) return null;
+        const labels: Record<string, string> = {
+          EPOXY: "Epoxy-Coated", STAINLESS: "Stainless Steel", GALVANISED: "Galvanized",
+          MMFX: "MMFX/High-Strength", HIGH_STRENGTH: "High-Strength", COATED_OTHER: "Special Coating",
+        };
+        return (
+          <div className="flex items-start gap-2 p-3 rounded-xl border-2 border-amber-500/40 bg-amber-500/10">
+            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <span className="text-xs font-bold text-amber-700 dark:text-amber-300">⚠️ Special Rebar Detected: </span>
+              <span className="text-xs text-amber-700 dark:text-amber-300">
+                {coatingEntries.map(([c, n]) => `${labels[c] || c} (${n} element${n > 1 ? "s" : ""})`).join(", ")}
+              </span>
+              <p className="text-[10px] text-amber-600/80 dark:text-amber-400/80 mt-1">
+                Special coatings affect pricing significantly. Verify coating surcharges are applied.
+              </p>
+            </div>
+          </div>
+        );
+      })()}
+
       {summary.job_status === "HUMAN_REVIEW_REQUIRED" && (
         <div className="flex items-center gap-2 p-3 rounded-xl border-2 border-destructive/30 bg-destructive/5">
           <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0" />

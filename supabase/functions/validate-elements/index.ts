@@ -172,6 +172,26 @@ function unitGate(element: any, globalUnitsContext: string): GateResult {
   return { passed: issues.length === 0, details: { issues, units_context: globalUnitsContext } };
 }
 
+// ── G6: Coating Gate (advisory — never blocks, always warns) ──
+const SPECIAL_COATINGS = ["EPOXY", "STAINLESS", "GALVANISED", "MMFX", "HIGH_STRENGTH", "COATED_OTHER"];
+const COATING_LABELS: Record<string, string> = {
+  EPOXY: "Epoxy-Coated (~20% price premium)",
+  STAINLESS: "Stainless Steel (~5-8× price premium)",
+  GALVANISED: "Galvanized (~35% price premium)",
+  MMFX: "MMFX/High-Strength (verify pricing)",
+  HIGH_STRENGTH: "High-Strength (verify pricing)",
+  COATED_OTHER: "Special Coating (verify pricing)",
+};
+
+function coatingGate(element: any): { coating: string | null; warning: string | null } {
+  const coating = element.extraction?.truth?.coating;
+  if (!coating || coating === "none" || coating === "BLACK") return { coating: null, warning: null };
+  if (SPECIAL_COATINGS.includes(coating)) {
+    return { coating, warning: `Special coating detected: ${coating} — ${COATING_LABELS[coating] || "verify pricing applies"}` };
+  }
+  return { coating, warning: `Non-standard coating detected: ${coating} — verify pricing applies` };
+}
+
 // ── Question Generation ──
 interface Question {
   element_id: string;
@@ -296,12 +316,13 @@ serve(async (req) => {
     const validatedElements: any[] = [];
 
     for (const element of elements) {
-      // Run 5 gates (G1-G5)
+      // Run 6 gates (G1-G6)
       const identity = identityGate(element);
       const completeness = completenessGate(element);
       const scope = scopeGate(element, scopeTypes);
       const consistency = consistencyGate(element);
       const unit = unitGate(element, globalUnitsContext);
+      const coating = coatingGate(element);
 
       // Determine status
       let status: "READY" | "FLAGGED" | "BLOCKED";
@@ -335,6 +356,11 @@ serve(async (req) => {
           }
         }
         status = lowConfidence ? "FLAGGED" : "READY";
+      }
+
+      // G6: Coating advisory warning (never blocks/flags, just warns)
+      if (coating.warning) {
+        warnings.push(coating.warning);
       }
 
       // Generate questions for FLAGGED
