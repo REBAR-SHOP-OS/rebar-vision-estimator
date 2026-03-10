@@ -1,21 +1,38 @@
 
 
-## Plan: Disable Auto-Start Smart Calculation
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
 
 ### Problem
-When a blueprint is uploaded and detection confidence is >= 0.7, the system automatically skips the Mode Picker and starts Smart Calculation. The user wants to always see the Mode Picker so they can choose.
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
-### Change — `src/components/chat/ChatArea.tsx`
+### Changes
 
-**Lines 1123-1161**: Remove the auto-proceed branch. Instead, always show the Scope Definition Panel / Mode Picker regardless of confidence. Keep the auto-scope building and system message for high-confidence detections (so the user sees what was detected), but stop short of calling `handleModeSelect("smart")`.
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-Replace the `if (confidence >= AUTO_THRESHOLD)` block so that:
-1. High confidence still auto-fills scope data (saves the user from manual entry)
-2. A system message still reports what was detected
-3. But the Mode Picker is shown (`setShowModePicker(true)`) instead of auto-triggering smart mode
-4. Remove the early `return` so it falls through to the normal panel display
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
+
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
+
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
+
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
 ### Scope
-- 1 file: `src/components/chat/ChatArea.tsx` (~15 lines changed)
-- No backend changes
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
+- No new files, no backend changes
 
