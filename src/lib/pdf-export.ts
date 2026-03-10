@@ -1,4 +1,5 @@
 import { getMassKgPerM } from "@/lib/rebar-weights";
+import { getLogoDataUri } from "@/lib/logo-base64";
 
 interface PdfExportParams {
   quoteResult: any;
@@ -7,7 +8,8 @@ interface PdfExportParams {
   projectId?: string;
 }
 
-export function exportPdfFile({ quoteResult, elements, scopeData, projectId }: PdfExportParams): void {
+export async function exportPdfFile({ quoteResult, elements, scopeData, projectId }: PdfExportParams): Promise<void> {
+  const logoDataUri = await getLogoDataUri().catch(() => "");
   const barList: any[] = quoteResult.quote.bar_list || [];
   const sizeBreakdownKg: Record<string, number> = quoteResult.quote.size_breakdown_kg || {};
   const sizeBreakdownLbs: Record<string, number> = quoteResult.quote.size_breakdown || {};
