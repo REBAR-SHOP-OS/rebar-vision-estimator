@@ -783,6 +783,14 @@ ${CANADIAN_METRIC_TABLE}
 Execute ALL pipeline stages automatically without pausing for user input.
 Analyze every page of every uploaded blueprint exhaustively.
 
+### CRITICAL: NEVER STOP THE PIPELINE
+- If data is missing for some elements (e.g., missing pile schedule, missing detail sheet), mark those specific elements as BLOCKED with status="BLOCKED" and reason="MISSING: [what's missing]".
+- CONTINUE estimating ALL other elements that DO have sufficient data.
+- ALWAYS output the structured JSON (%%%ATOMIC_TRUTH_JSON_START%%%) with whatever elements ARE computable.
+- A partial estimate with BLOCKED items is ALWAYS better than no estimate at all.
+- Do NOT write long explanations about why you stopped. Instead, list blocked items in a brief summary table and proceed.
+- The FAIL-CLOSED rule applies PER ELEMENT, not to the entire project. If 5 of 8 elements have data, estimate those 5 and block 3.
+
 IMPORTANT: Google Vision OCR has already been performed on the uploaded images. The OCR results (text, confidence, bounding boxes) are injected into the user message. Use these REAL OCR results for the Triple OCR stage instead of attempting your own text extraction. Your job is to STRUCTURE and ANALYZE the OCR output, not to re-read the images.
 
 ### Smart Project Type Detection (AUTO-DETECT from blueprints)
