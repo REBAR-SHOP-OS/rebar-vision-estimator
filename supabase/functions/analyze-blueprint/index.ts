@@ -1325,7 +1325,7 @@ Before outputting your final answer, you MUST:
         stream: true,
         temperature: 0,
         top_p: 1,
-        max_tokens: 16384,
+        max_tokens: 65536,
       }),
     });
 
