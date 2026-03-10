@@ -639,12 +639,22 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         ...b,
         element_type: e.element_type || e.type || "OTHER",
         element_id: e.element_id || e.id || "",
+        sub_element: b.sub_element || e.sub_element || b.description || "",
       }))
     );
     const sizeBreakdownKg: Record<string, number> = {};
     let totalKg = 0;
     for (const b of barList) {
-      const wt = typeof b.weight_kg === "number" ? b.weight_kg : (b.weight_lbs || 0) * 0.453592;
+      // Compute weight deterministically: qty × multiplier × length × unit_weight
+      const lengthMm = b.length_mm || (b.length_ft ? b.length_ft * 304.8 : 0);
+      const mult = b.multiplier || 1;
+      const qty = b.qty || 0;
+      const totalLenM = (qty * mult * lengthMm) / 1000;
+      const massKgM = getMassKgPerM(b.size || "");
+      const computedWt = totalLenM * massKgM;
+      const wt = (typeof b.weight_kg === "number" && b.weight_kg > 0) ? b.weight_kg : computedWt;
+      // Persist computed weight on bar object so exports use it
+      b.weight_kg = wt;
       totalKg += wt;
       const sz = b.size || "unknown";
       sizeBreakdownKg[sz] = (sizeBreakdownKg[sz] || 0) + wt;
@@ -656,6 +666,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       total_weight_kg: summary?.total_rebar_weight_kg || totalKg,
       total_weight_lbs: summary?.total_rebar_weight_lbs || totalKg / 0.453592,
       mesh_details: summary?.mesh_details || [],
+      reconciliation: summary?.reconciliation || {},
+      risk_flags: summary?.risk_flags || [],
     };
   };
 

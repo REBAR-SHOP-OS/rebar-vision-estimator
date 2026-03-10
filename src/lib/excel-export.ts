@@ -121,9 +121,20 @@ function buildEstimateSummarySheet(params: ExportParams): XLSX.WorkSheet {
   rows.push(["NOTES"]);
   const riskFlags: string[] = quoteResult.quote.risk_flags || [];
   rows.push(["Grade:", scopeData?.grade || "As per drawing"]);
-  rows.push(["Lap Length Info:", scopeData?.lapLengthInfo || "Standard laps as per code"]);
   rows.push(["Deviations:", scopeData?.deviations || quoteResult.quote.deviations || "None noted"]);
   rows.push(["Coating:", scopeData?.coating || "Uncoated"]);
+  // Structured lap length table if available
+  const lapTable = scopeData?.lapLengthTable;
+  if (lapTable && Array.isArray(lapTable) && lapTable.length > 0) {
+    rows.push([]);
+    rows.push(["Lap Length Details"]);
+    rows.push(["Bar Dia.", "Bot Lap", "Top Lap"]);
+    for (const lt of lapTable) {
+      rows.push([lt.size || "", lt.bot_lap || "", lt.top_lap || ""]);
+    }
+  } else {
+    rows.push(["Lap Length Info:", scopeData?.lapLengthInfo || "Standard laps as per code"]);
+  }
   if (riskFlags.length > 0) {
     for (const f of riskFlags) rows.push(["⚠ " + f]);
   }

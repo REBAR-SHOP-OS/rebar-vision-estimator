@@ -198,9 +198,18 @@ ${warningBanner}
 <div class="notes-section">
   <div class="section-title" style="font-size:13px">Notes</div>
   <div class="note-row"><span class="note-label">Grade :</span><span>${scopeData?.rebarGrade || "400W"}</span></div>
-  <div class="note-row"><span class="note-label">Lap Length Info :</span><span>${scopeData?.lapLength || "As per Manual of Standard Practice"}</span></div>
   <div class="note-row"><span class="note-label">Deviations :</span><span>${scopeData?.deviations || "None"}</span></div>
   <div class="note-row"><span class="note-label">Coating :</span><span>${scopeData?.coatingType || "Black Steel"}</span></div>
+  ${(() => {
+    const lapTable = scopeData?.lapLengthTable;
+    if (lapTable && Array.isArray(lapTable) && lapTable.length > 0) {
+      return `<div style="margin-top:8px"><strong>Lap Length Details:</strong>
+        <table style="max-width:400px;margin-top:4px"><tr><th>Bar Dia.</th><th>Bot Lap</th><th>Top Lap</th></tr>
+        ${lapTable.map((r: any) => `<tr><td>${r.size || ""}</td><td>${r.bot_lap || ""}</td><td>${r.top_lap || ""}</td></tr>`).join("")}
+        </table></div>`;
+    }
+    return `<div class="note-row"><span class="note-label">Lap Length Info :</span><span>${scopeData?.lapLength || "As per Manual of Standard Practice"}</span></div>`;
+  })()}
 </div>
 
 ${scopeData?.scopeItems?.length ? `<div style="margin-top:12px"><strong>SCOPE ITEMS INCLUDED</strong><ul style="margin:4px 0">${scopeData.scopeItems.map((s: string) => `<li>${s}</li>`).join("")}</ul></div>` : ""}
