@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 import { Button } from "@/components/ui/button";
-import { Paperclip, Send, Loader2, CheckCircle, SlidersHorizontal, Plus, Table, Download, AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle, Upload, FileQuestion, Sparkles, FileText, FileSpreadsheet, X, Eye, FileCheck } from "lucide-react";
+import { Paperclip, Send, Loader2, CheckCircle, SlidersHorizontal, Plus, Table, Download, AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle, Upload, FileQuestion, Sparkles, FileText, FileSpreadsheet, X, Eye, FileCheck, Square } from "lucide-react";
 import SizeBreakdownTable from "./SizeBreakdownTable";
 import ExportButtons from "./ExportButtons";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
