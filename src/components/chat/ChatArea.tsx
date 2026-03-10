@@ -27,6 +27,12 @@ import BarListTable from "./BarListTable";
 import BendingScheduleTable from "./BendingScheduleTable";
 import ApprovalWorkflow from "./ApprovalWorkflow";
 
+interface MessageFile {
+  name: string;
+  url: string;
+  type: string;
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant" | "system";
@@ -34,6 +40,7 @@ interface Message {
   metadata?: Record<string, unknown>;
   step?: number;
   created_at: string;
+  files?: MessageFile[];
 }
 
 interface ChatAreaProps {
