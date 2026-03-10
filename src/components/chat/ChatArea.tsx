@@ -2002,7 +2002,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               })}
             </div>
           )}
-          {!input.trim() && !loading && !quoteResult?.quote && (
+          {!input.trim() && !loading && (
             <div className="flex gap-2 overflow-x-auto pb-2 mb-1 scrollbar-none">
               {(() => {
                 const lastMsg = messages.filter(m => m.role === 'assistant').slice(-1)[0];
