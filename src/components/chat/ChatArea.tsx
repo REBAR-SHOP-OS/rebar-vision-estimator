@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 import { Button } from "@/components/ui/button";
-import { Paperclip, Send, Loader2, CheckCircle, SlidersHorizontal, Plus, Table, Download, AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle, Upload, FileQuestion, Sparkles, FileText, FileSpreadsheet } from "lucide-react";
+import { Paperclip, Send, Loader2, CheckCircle, SlidersHorizontal, Plus, Table, Download, AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle, Upload, FileQuestion, Sparkles, FileText, FileSpreadsheet, X } from "lucide-react";
 import { exportExcelFile } from "@/lib/excel-export";
 import { exportPdfFile } from "@/lib/pdf-export";
 import { getMassKgPerM } from "@/lib/rebar-weights";
