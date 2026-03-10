@@ -826,7 +826,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     if (!extracted) {
       setSubStep(null);
       const isIntentionalBlock = /BLOCKED|MISSING_DRAWINGS|no.*project.*drawings|cannot.*produce.*quantities|does not contain.*project-specific/i.test(fullContent);
-      if (!isIntentionalBlock) {
+      // Suppress warning for conversational follow-ups that aren't full estimations
+      const isConversational = fullContent.length < 3000 && !/%%%ATOMIC_TRUTH_JSON/.test(fullContent) && !/Stage\s+[0-9]/i.test(fullContent) && !/bar_lines|element_type|Element.*Type/i.test(fullContent);
+      if (!isIntentionalBlock && !isConversational) {
         const fallbackMsg: Message = {
           id: crypto.randomUUID(),
           role: "system",
