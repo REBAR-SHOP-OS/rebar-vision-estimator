@@ -753,25 +753,37 @@ const BarListTable: React.FC<BarListTableProps> = ({ barList: initialBarList, on
                               {hasWarnings && <AlertTriangle className="inline h-3 w-3 ml-1 text-amber-500" />}
                             </TableCell>
                             <TableCell className="text-xs px-3 py-2">
-                              {editing?.rowIndex === origIdx && editing.field === "size" ? (
-                                <Input
-                                  value={editValue}
-                                  onChange={(e) => setEditValue(e.target.value)}
-                                  onBlur={commitEdit}
-                                  onKeyDown={(e) => e.key === "Enter" && commitEdit()}
-                                  className="h-6 w-16 text-xs px-1"
-                                  autoFocus
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                              ) : (
-                                <span
-                                  className="inline-flex items-center gap-1 group/edit cursor-text"
-                                  onClick={(e) => { e.stopPropagation(); startEdit(origIdx, "size", bar.size); }}
-                                >
-                                  {bar.size}
-                                  <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover/edit:opacity-100 transition-opacity" />
-                                </span>
-                              )}
+                              <span className="inline-flex items-center gap-1.5">
+                                {editing?.rowIndex === origIdx && editing.field === "size" ? (
+                                  <Input
+                                    value={editValue}
+                                    onChange={(e) => setEditValue(e.target.value)}
+                                    onBlur={commitEdit}
+                                    onKeyDown={(e) => e.key === "Enter" && commitEdit()}
+                                    className="h-6 w-16 text-xs px-1"
+                                    autoFocus
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                ) : (
+                                  <span
+                                    className="inline-flex items-center gap-1 group/edit cursor-text"
+                                    onClick={(e) => { e.stopPropagation(); startEdit(origIdx, "size", bar.size); }}
+                                  >
+                                    {bar.size}
+                                    <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover/edit:opacity-100 transition-opacity" />
+                                  </span>
+                                )}
+                                {bar.coating && bar.coating !== "none" && bar.coating !== "BLACK" && (
+                                  <span className={`inline-flex items-center text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                                    bar.coating === "EPOXY" ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" :
+                                    bar.coating === "STAINLESS" ? "bg-blue-500/15 text-blue-700 dark:text-blue-400" :
+                                    bar.coating === "GALVANISED" ? "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400" :
+                                    "bg-purple-500/15 text-purple-700 dark:text-purple-400"
+                                  }`}>
+                                    {bar.coating === "EPOXY" ? "ECR" : bar.coating === "STAINLESS" ? "SS" : bar.coating === "GALVANISED" ? "GALV" : bar.coating}
+                                  </span>
+                                )}
+                              </span>
                             </TableCell>
                             <TableCell className="text-xs px-3 py-2 text-muted-foreground">{bar.shape_code || "—"}</TableCell>
                             <TableCell className="text-xs px-3 py-2 text-right">

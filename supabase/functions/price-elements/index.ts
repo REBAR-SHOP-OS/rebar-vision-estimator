@@ -99,17 +99,31 @@ function getMassKgPerM(size: string): number {
   return 0;
 }
 
+// Coating price multipliers
+const COATING_MULTIPLIERS: Record<string, number> = {
+  EPOXY: 1.20,
+  GALVANISED: 1.35,
+  STAINLESS: 6.0,
+  MMFX: 1.50,
+  HIGH_STRENGTH: 1.50,
+  COATED_OTHER: 1.25,
+};
+
 function calculateElementWeight(truth: ElementTruth["truth"], elementType: string): {
   weight_lbs: number;
   weight_kg: number;
   breakdown: Record<string, number>;
   breakdown_kg: Record<string, number>;
-  bar_list_entries: { bar_mark: string; size: string; shape_code: string; qty: number; length_ft: number; weight_lbs: number; weight_kg: number }[];
+  bar_list_entries: { bar_mark: string; size: string; shape_code: string; qty: number; length_ft: number; weight_lbs: number; weight_kg: number; coating?: string }[];
   missing_length_count: number;
   missing_length_bars: string[];
+  coating?: string;
+  coating_multiplier?: number;
 } {
   const breakdown: Record<string, number> = {};
   const breakdown_kg: Record<string, number> = {};
+  const coating = truth.coating && truth.coating !== "none" && truth.coating !== "BLACK" ? truth.coating : null;
+  const coatingMult = coating ? (COATING_MULTIPLIERS[coating] || 1.0) : 1.0;
   let totalWeight_kg = 0;
   const bar_list_entries: any[] = [];
   const missing_length_bars: string[] = [];

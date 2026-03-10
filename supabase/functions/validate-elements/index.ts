@@ -316,12 +316,13 @@ serve(async (req) => {
     const validatedElements: any[] = [];
 
     for (const element of elements) {
-      // Run 5 gates (G1-G5)
+      // Run 6 gates (G1-G6)
       const identity = identityGate(element);
       const completeness = completenessGate(element);
       const scope = scopeGate(element, scopeTypes);
       const consistency = consistencyGate(element);
       const unit = unitGate(element, globalUnitsContext);
+      const coating = coatingGate(element);
 
       // Determine status
       let status: "READY" | "FLAGGED" | "BLOCKED";
@@ -355,6 +356,11 @@ serve(async (req) => {
           }
         }
         status = lowConfidence ? "FLAGGED" : "READY";
+      }
+
+      // G6: Coating advisory warning (never blocks/flags, just warns)
+      if (coating.warning) {
+        warnings.push(coating.warning);
       }
 
       // Generate questions for FLAGGED
