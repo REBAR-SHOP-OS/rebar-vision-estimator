@@ -42,6 +42,21 @@ export async function exportPdfFile({ quoteResult, elements, scopeData, projectI
   }
   const elemEntries = Object.entries(elemWeights).sort((a, b) => b[1] - a[1]);
 
+  const effectiveSizeKg: Record<string, number> = (hasSizeKg || hasSizeLbs)
+    ? (() => {
+        const allSizes = new Set([...Object.keys(sizeBreakdownKg), ...Object.keys(sizeBreakdownLbs)]);
+        const m: Record<string, number> = {};
+        for (const size of allSizes) {
+          const kg = hasSizeKg ? (sizeBreakdownKg[size] || (sizeBreakdownLbs[size] || 0) * 0.453592) : (sizeBreakdownLbs[size] || 0) * 0.453592;
+          if (kg > 0) m[size] = kg;
+        }
+        return Object.keys(m).length > 0 ? m : computedSizeKg;
+      })()
+    : computedSizeKg;
+
+  const sizeEntries: [string, number][] = Object.entries(effectiveSizeKg);
+  sizeEntries.sort((a, b) => parseInt(a[0].replace(/[^0-9]/g, "")) - parseInt(b[0].replace(/[^0-9]/g, "")));
+
   const totalSizeKg = sizeEntries.reduce((s, e) => s + e[1], 0);
   const totalElemKg = elemEntries.reduce((s, e) => s + e[1], 0);
 
