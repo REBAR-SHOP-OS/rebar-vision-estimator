@@ -24,12 +24,7 @@ export async function exportPdfFile({ quoteResult, elements, scopeData, projectI
   let html = "";
 
   const hasSizeKg = Object.keys(sizeBreakdownKg).length > 0;
-  const allSizes = new Set([...Object.keys(sizeBreakdownKg), ...Object.keys(sizeBreakdownLbs)]);
-  const sizeEntries: [string, number][] = [];
-  for (const size of allSizes) {
-    const kg = hasSizeKg ? (sizeBreakdownKg[size] || (sizeBreakdownLbs[size] || 0) * 0.453592) : (sizeBreakdownLbs[size] || 0) * 0.453592;
-    if (kg > 0) sizeEntries.push([size, kg]);
-  }
+  const hasSizeLbs = Object.keys(sizeBreakdownLbs).length > 0;
   sizeEntries.sort((a, b) => parseInt(a[0].replace(/[^0-9]/g, "")) - parseInt(b[0].replace(/[^0-9]/g, "")));
 
   const elemWeights: Record<string, number> = {};
