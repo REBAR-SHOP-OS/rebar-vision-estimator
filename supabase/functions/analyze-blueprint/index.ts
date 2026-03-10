@@ -639,7 +639,7 @@ If pages_processed >= 5 AND bar_lines_count < 30:
   - After re-scan, update bar_lines_count
 If still LOW_COVERAGE after retry, flag it in the output so the user is warned.
 
-OUTPUT: You must return STRICT JSON ONLY that meets the schema. No prose outside JSON.
+OUTPUT: You must return the structured JSON wrapped in the %%%ATOMIC_TRUTH_JSON_START%%% / %%%ATOMIC_TRUTH_JSON_END%%% markers, followed by human-readable analysis.
 `;
 
 const OUTPUT_FORMAT_INSTRUCTIONS = `

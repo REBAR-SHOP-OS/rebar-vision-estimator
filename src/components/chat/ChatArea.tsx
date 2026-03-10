@@ -139,12 +139,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         onModeChange?.(mode);
         onStepChange?.(1);
       }
-      // P0: Restore validation state from last assistant message containing ATOMIC_TRUTH markers
+      // P0: Restore validation state + quote result from last assistant message containing ATOMIC_TRUTH markers
       const atomicMsg = [...data].reverse().find((m: any) => m.role === "assistant" && m.content?.includes("%%%ATOMIC_TRUTH_JSON_START%%%"));
       if (atomicMsg) {
         const atomicData = extractAtomicTruthJSON(atomicMsg.content);
         if (atomicData?.elements && atomicData.elements.length > 0) {
           runValidation(atomicData.elements);
+          // Restore quote result so Bar List tab persists across reloads
+          setQuoteResult({ elements: atomicData.elements, summary: atomicData.summary || null });
         }
       }
     }
@@ -266,30 +268,35 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                   });
                   console.log(`[OCR Routing] ${pageImages.length} page images uploaded. Running Vision OCR on each...`);
                   
-                  // OCR each page image individually via the lightweight ocr-image edge function
-                  let ocrFailCount = 0;
-                  for (const img of pageImages) {
-                    scannedPdfPageImageUrls.push(img.signedUrl);
-                    try {
-                      console.log(`[OCR Routing] OCR page ${img.pageNumber}...`);
-                      const { data: ocrData, error: ocrErr } = await supabase.functions.invoke('ocr-image', {
-                        body: { image_url: img.signedUrl },
-                      });
-                      if (ocrErr) {
-                        console.error(`[OCR Routing] OCR failed for page ${img.pageNumber}:`, ocrErr);
-                        ocrFailCount++;
-                      } else if (ocrData?.ocr_results) {
-                        clientOcrResults.push({
-                          image_name: `page_${img.pageNumber}.png`,
-                          ocr_results: ocrData.ocr_results,
-                        });
-                        console.log(`[OCR Routing] OCR page ${img.pageNumber} done — ${ocrData.ocr_results.reduce((s: number, r: any) => s + (r.blocks?.length || 0), 0)} blocks`);
-                      }
-                    } catch (ocrErr) {
-                      console.error(`[OCR Routing] OCR error for page ${img.pageNumber}:`, ocrErr);
-                      ocrFailCount++;
-                    }
-                  }
+                   // OCR each page image in parallel batches of 4
+                   let ocrFailCount = 0;
+                   const OCR_BATCH_SIZE = 4;
+                   for (let i = 0; i < pageImages.length; i += OCR_BATCH_SIZE) {
+                     const batch = pageImages.slice(i, i + OCR_BATCH_SIZE);
+                     const batchResults = await Promise.allSettled(
+                       batch.map(async (img) => {
+                         scannedPdfPageImageUrls.push(img.signedUrl);
+                         console.log(`[OCR Routing] OCR page ${img.pageNumber}...`);
+                         const { data: ocrData, error: ocrErr } = await supabase.functions.invoke('ocr-image', {
+                           body: { image_url: img.signedUrl },
+                         });
+                         if (ocrErr) throw ocrErr;
+                         return { pageNumber: img.pageNumber, ocrData };
+                       })
+                     );
+                     for (const result of batchResults) {
+                       if (result.status === 'fulfilled' && result.value.ocrData?.ocr_results) {
+                         clientOcrResults.push({
+                           image_name: `page_${result.value.pageNumber}.png`,
+                           ocr_results: result.value.ocrData.ocr_results,
+                         });
+                         console.log(`[OCR Routing] OCR page ${result.value.pageNumber} done — ${result.value.ocrData.ocr_results.reduce((s: number, r: any) => s + (r.blocks?.length || 0), 0)} blocks`);
+                       } else {
+                         console.error(`[OCR Routing] OCR failed for batch page:`, result.status === 'rejected' ? result.reason : 'no results');
+                         ocrFailCount++;
+                       }
+                     }
+                   }
                   // P1: Warn if >50% OCR pages failed
                   if (pageImages.length > 0 && ocrFailCount / pageImages.length > 0.5) {
                     toast.warning(`OCR failed on ${ocrFailCount}/${pageImages.length} pages. Results may be incomplete.`);
@@ -419,9 +426,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             // Complete lines that fail JSON parse should be skipped, not block the queue
             if (line.startsWith("data: ") && jsonStr.length > 0) {
               console.warn("[SSE] Skipping malformed SSE line:", jsonStr.substring(0, 100));
-            } else {
-              textBuffer = line + "\n" + textBuffer;
-              break;
+          } else {
+              // Discard non-data lines that fail parse — don't block the stream
+              console.warn("[SSE] Discarding non-data line:", line.substring(0, 80));
             }
           }
         }
@@ -664,14 +671,26 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         }
       }
     } catch { /* */ }
-    // Aggressive: find any JSON object with "elements" array
+    // Aggressive: find JSON object with "elements" array using bracket counting
     try {
-      const aggMatch = content.match(/\{[\s\S]*?"elements"\s*:\s*\[[\s\S]*?\]\s*[\s\S]*?\}/);
-      if (aggMatch) {
-        const parsed = JSON.parse(aggMatch[0]);
-        if (parsed?.elements?.length > 0) {
-          console.log("[Fallback-aggressive] Extracted elements:", parsed.elements.length);
-          return parsed.elements;
+      const elemIdx = content.indexOf('"elements"');
+      if (elemIdx !== -1) {
+        // Walk backward to find the opening {
+        let startIdx = content.lastIndexOf('{', elemIdx);
+        if (startIdx !== -1) {
+          let depth = 0;
+          let endIdx = startIdx;
+          for (let i = startIdx; i < content.length; i++) {
+            if (content[i] === '{') depth++;
+            else if (content[i] === '}') { depth--; if (depth === 0) { endIdx = i + 1; break; } }
+          }
+          if (depth === 0) {
+            const parsed = JSON.parse(content.slice(startIdx, endIdx));
+            if (parsed?.elements?.length > 0) {
+              console.log("[Fallback-aggressive] Extracted elements:", parsed.elements.length);
+              return parsed.elements;
+            }
+          }
         }
       }
     } catch { /* */ }
@@ -685,6 +704,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     onModeChange?.(mode);
     onStepChange?.(1);
     setLoading(true);
+    setSubStep("parsing");
 
     const modeLabel = mode === "smart" ? "⚡ Smart Calculation" : "📋 Step-by-Step Calculation";
     const modeMsg: Message = {
@@ -730,7 +750,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         role: "assistant",
         content: fullContent,
         metadata: { calculationMode: mode, step: 1 },
-      });
+      }).then(({ error }) => { if (error) console.error("Failed to save assistant message:", error); });
 
       // Process Atomic Truth pipeline (now fast-return with background validation)
       const extracted = await processAtomicTruth(fullContent);
@@ -837,12 +857,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         // Trigger learning extraction
         triggerLearning([...chatHistory, { role: "assistant", content: fullContent }]);
 
-        await supabase.from("messages").insert({
+        supabase.from("messages").insert({
           project_id: projectId,
           user_id: user.id,
           role: "assistant",
           content: fullContent,
-        });
+        }).then(({ error }) => { if (error) console.error("Failed to save assistant message:", error); });
 
         // Process Atomic Truth pipeline
         await processAtomicTruth(fullContent);
@@ -918,7 +938,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       // Get signed URL
       const { data: signedData } = await supabase.storage
         .from("blueprints")
-        .createSignedUrl(filePath, 3600);
+        .createSignedUrl(filePath, 7200);
 
       if (signedData?.signedUrl) newUrls.push(signedData.signedUrl);
 
@@ -980,7 +1000,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
           },
           body: JSON.stringify({ fileUrls: allUrls }),
         });
