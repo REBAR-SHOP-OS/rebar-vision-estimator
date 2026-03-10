@@ -152,6 +152,26 @@ function scopeGate(element: any, allowedTypes: string[]): GateResult {
   return { passed, details: { element_type: type, allowed: allowedTypes, error: passed ? null : "OUT_OF_SCOPE" } };
 }
 
+function unitGate(element: any, globalUnitsContext: string): GateResult {
+  const truth = element.extraction?.truth || {};
+  const barLines = truth.bar_lines || [];
+  const issues: string[] = [];
+
+  if (globalUnitsContext === "UNKNOWN!") {
+    issues.push("units_context is UNKNOWN!");
+  }
+
+  if (globalUnitsContext !== "MIXED_CONFIRMED") {
+    const hasMetric = barLines.some((bl: any) => bl.length_mm && bl.length_mm > 0);
+    const hasImperial = barLines.some((bl: any) => bl.length_ft && bl.length_ft > 0);
+    if (hasMetric && hasImperial) {
+      issues.push("Mixed metric/imperial lengths without MIXED_CONFIRMED");
+    }
+  }
+
+  return { passed: issues.length === 0, details: { issues, units_context: globalUnitsContext } };
+}
+
 // ── Question Generation ──
 interface Question {
   element_id: string;
