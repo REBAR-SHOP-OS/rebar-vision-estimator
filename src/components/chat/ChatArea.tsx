@@ -918,7 +918,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       // Get signed URL
       const { data: signedData } = await supabase.storage
         .from("blueprints")
-        .createSignedUrl(filePath, 3600);
+        .createSignedUrl(filePath, 7200);
 
       if (signedData?.signedUrl) newUrls.push(signedData.signedUrl);
 
