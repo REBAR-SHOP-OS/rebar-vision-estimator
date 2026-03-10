@@ -360,11 +360,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       abortControllerRef.current = controller;
       const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
 
+      // When OCR results exist, pre_extracted_text is redundant — drop it to save payload
+      const effectivePreExtracted = trimmedOcrResults.length > 0 ? [] : preExtractedText;
+
       const payloadObj = {
           messages: chatMessages,
           mode,
           fileUrls: effectiveImageUrls,
-          pre_extracted_text: preExtractedText,
+          pre_extracted_text: effectivePreExtracted,
           pre_ocr_results: trimmedOcrResults,
           knowledgeContext,
           scope: scopeDataRef.current,
@@ -373,22 +376,36 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           projectId,
       };
       let payloadStr = JSON.stringify(payloadObj);
-      const payloadKB = Math.round(payloadStr.length / 1024);
-      console.log(`[Payload] Total size: ${payloadKB} KB`);
+      console.log(`[Payload] Total size: ${Math.round(payloadStr.length / 1024)} KB`);
 
-      // If still over 450KB, aggressively trim OCR text
-      if (payloadStr.length > 450 * 1024 && payloadObj.pre_ocr_results.length > 0) {
-        const excess = payloadStr.length - 400 * 1024;
+      // If still over 400KB, aggressively trim OCR fullText
+      if (payloadStr.length > 400 * 1024 && payloadObj.pre_ocr_results.length > 0) {
+        const excess = payloadStr.length - 350 * 1024;
         const charsToTrim = Math.ceil(excess / payloadObj.pre_ocr_results.length);
         for (const item of payloadObj.pre_ocr_results) {
           for (const pass of item.ocr_results) {
             if (pass.fullText.length > 500) {
               pass.fullText = pass.fullText.substring(0, Math.max(500, pass.fullText.length - charsToTrim));
             }
+            // Drop blocks array to save space
+            delete (pass as any).blocks;
           }
         }
         payloadStr = JSON.stringify(payloadObj);
-        console.log(`[Payload] Trimmed to: ${Math.round(payloadStr.length / 1024)} KB`);
+        console.log(`[Payload] After trim: ${Math.round(payloadStr.length / 1024)} KB`);
+      }
+
+      // Final safety valve — hard cap at 480KB
+      if (payloadStr.length > 480 * 1024 && payloadObj.pre_ocr_results.length > 0) {
+        for (const item of payloadObj.pre_ocr_results) {
+          for (const pass of item.ocr_results) {
+            if (pass.fullText.length > 300) {
+              pass.fullText = pass.fullText.substring(0, 300);
+            }
+          }
+        }
+        payloadStr = JSON.stringify(payloadObj);
+        console.log(`[Payload] Hard-capped to: ${Math.round(payloadStr.length / 1024)} KB`);
       }
 
       const resp = await fetch(CHAT_URL, {
@@ -919,7 +936,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
       const fullContent = await streamAIResponse(chatHistory, mode, fileUrlsOverride ?? uploadedFiles);
 
-      await handlePostStream(fullContent, chatHistory, mode);
+      await handlePostStream(fullContent, chatHistory, mode, mode === "smart");
     } catch (err: any) {
       setSubStep(null);
       if (err.name === "AbortError") {

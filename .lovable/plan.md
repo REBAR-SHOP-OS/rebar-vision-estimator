@@ -1,27 +1,38 @@
 
 
-## Plan: Fix Step-by-Step "Structured Output Not Returned" Warning + Payload Overflow
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
 
-### Problem 1: False warning in Step-by-Step mode
-Line 922 calls `handlePostStream(fullContent, chatHistory, mode)` with `expectStructuredOutput` defaulting to `true`. In step-by-step mode, the first AI response is an interactive Step 1 analysis — it never contains the `%%%ATOMIC_TRUTH_JSON%%%` block. This triggers the false "structured output was not returned" warning every time.
+### Problem
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
-**Fix**: Pass `expectStructuredOutput = false` for step-by-step mode on the initial call (line 922). Only smart mode should expect structured output on the first pass.
+### Changes
 
-```
-// Line 922
-await handlePostStream(fullContent, chatHistory, mode, mode === "smart");
-```
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-### Problem 2: Payload still exceeding 500KB (413 error)
-The client-side trim targets 450KB but only trims `pre_ocr_results`. The `pre_extracted_text` array (from `extract-pdf-text`) can also be large and is never trimmed. For scanned PDFs, both `pre_extracted_text` (with `skipped_reason`) AND `pre_ocr_results` are sent — the former is redundant when OCR results exist.
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
 
-**Fix** in `streamAIResponse` (around line 363-392):
-- When `trimmedOcrResults.length > 0`, clear `pre_extracted_text` to empty array (OCR supersedes it)
-- Lower the aggressive-trim threshold from 450KB to 400KB, target 350KB
-- As a final safety valve, if still over 480KB after trimming, truncate all `fullText` fields to 300 chars
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
+
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
+
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
 ### Scope
-- 1 file: `src/components/chat/ChatArea.tsx`
-- ~10 lines changed
-- No backend changes
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
+- No new files, no backend changes
 
