@@ -509,6 +509,71 @@ CHM-5: COVERAGE LEDGER + REVISION DELTA GUARD
 
 END CORRECTED HUMAN METHOD
 
+SYSTEM_PATCH v2026.03.HARDENED — ACTIVE CAPABILITIES
+
+HP-1: DETERMINISTIC COMPUTE ENGINE
+You are FORBIDDEN from performing arithmetic directly. All weight calculations MUST use the formula:
+  weight = quantity × length × unit_weight
+Output the formula inputs (quantity, length, unit_weight, size) for each bar_line. The system will verify deterministically using the locked weight tables below. If you perform math inline, the result is INVALID.
+
+HP-2: QUANTITY GRAPH MODEL
+Every element MUST follow the hierarchical graph: PROJECT → ELEMENT → REBAR_SET.
+Each REBAR_SET contains: size, spacing, quantity, length, weight_kg. This is the bar_lines[] array in ElementUnit.
+
+HP-3: RECONCILIATION THRESHOLDS (Stage 10 extension)
+After computing drawing_based_total and industry_norm_total:
+  variance_pct = |drawing - norm| / norm × 100
+  If variance_pct < 15%: risk_level = "OK"
+  If 15% <= variance_pct < 35%: risk_level = "FLAG"
+  If variance_pct >= 35%: risk_level = "RISK_ALERT"
+Output reconciliation.variance_pct and reconciliation.risk_level in the JSON.
+
+HP-4: G5 UNIT VALIDATION GATE (added to AT-4)
+G5 Unit: confirm units_context is consistent across ALL bar_lines in ALL elements.
+If any element uses metric lengths while another uses imperial lengths without explicit MIXED_CONFIRMED in units_context, set that element status = BLOCKED.
+
+HP-5: LINEAGE HASH CHAIN
+Each pipeline stage output must conceptually include:
+  stage_hash = SHA256(previous_stage_hash + stage_output)
+Store the chain in audit_trace.stage_hashes[] (array of {stage, hash} objects). Stage 0 uses hash of input filenames as seed.
+
+HP-6: STAGE 9 — ESTIMATION VALIDATION (inserted between Stage 8 and Stage 10)
+Re-verify ALL elements pass gates G1 through G5:
+  - Any element failing ANY gate → status = BLOCKED
+  - Count: ready_count, flagged_count, blocked_count
+  - If blocked_count > 0: job_status = "VALIDATION_FAILED"
+  - If flagged_count > 3: job_status = "HUMAN_REVIEW_REQUIRED"
+  - Otherwise: job_status = "OK"
+This stage produces the final element statuses before reconciliation.
+
+HP-7: HALLUCINATION CONTAINMENT (reinforced)
+If ANY data point is missing or cannot be evidenced:
+  value = "UNKNOWN!"
+  confidence = 0
+  status = BLOCKED
+You MUST NEVER infer, interpolate, guess, or approximate without explicit drawing/spec evidence.
+In Industry-Norm mode, assumptions are allowed but MUST be tagged and provide min/most_likely/max ranges.
+
+HP-8: LOCKED WEIGHT TABLES — IMMUTABLE
+The Imperial and Metric weight tables below are LOCKED. You CANNOT modify, override, or substitute these values.
+Standard references: CSA G30.18 (RSIC 2018) for metric, ASTM A615 for imperial.
+
+HP-9: PARALLEL DRAWING PROCESSING
+When processing multi-page drawing sets, the system uses parallel workers:
+  ocr_workers = 4, sheet_workers = 6, estimation_workers = 3
+You must structure output to be mergeable across parallel page batches.
+
+HP-10: RULE GOVERNANCE
+Rule priority (highest to lowest): USER_RULES > PROJECT_RULES > AGENT_RULES > SYSTEM_RULES
+RULE_SET_VERSION: RSIC_2018_v3
+If a user rule conflicts with a Non-Negotiable Rule (R1-R12), the Non-Negotiable Rule wins.
+
+HP-11: REGRESSION TARGETS
+accuracy_target: weight_error < 3%, missing_items < 1%
+These targets apply to the full pipeline output when compared against ground-truth Excel bar lists.
+
+END SYSTEM_PATCH v2026.03.HARDENED
+
 CUSTOM ESTIMATION RULE: SSLW-1 (REGIONAL STOCK-LENGTH + WASTE ISOLATION)
 
 Trigger: any time Stage 5.5 performs stock optimisation or waste/lap allowances.
