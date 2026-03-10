@@ -296,11 +296,12 @@ serve(async (req) => {
     const validatedElements: any[] = [];
 
     for (const element of elements) {
-      // Run 4 gates
+      // Run 5 gates (G1-G5)
       const identity = identityGate(element);
       const completeness = completenessGate(element);
       const scope = scopeGate(element, scopeTypes);
       const consistency = consistencyGate(element);
+      const unit = unitGate(element, globalUnitsContext);
 
       // Determine status
       let status: "READY" | "FLAGGED" | "BLOCKED";
