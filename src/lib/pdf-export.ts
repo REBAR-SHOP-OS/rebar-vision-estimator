@@ -18,8 +18,8 @@ export function exportPdfFile({ quoteResult, elements, scopeData, projectId }: P
   const isBlocked = quoteResult.quote.job_status === "VALIDATION_FAILED" || quoteResult.quote.job_status === "BLOCKED";
   const isFlagged = quoteResult.quote.reconciliation?.risk_level === "FLAG" || quoteResult.quote.job_status === "FLAGGED";
 
-  const printWindow = window.open("", "_blank");
-  if (!printWindow) return;
+  // Variables used later for blob download
+  let html = "";
 
   const hasSizeKg = Object.keys(sizeBreakdownKg).length > 0;
   const allSizes = new Set([...Object.keys(sizeBreakdownKg), ...Object.keys(sizeBreakdownLbs)]);
