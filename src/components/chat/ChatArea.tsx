@@ -730,14 +730,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       const extracted = await processAtomicTruth(fullContent);
 
       // P0: If no structured data was extracted, show a fallback message
+      // But suppress it if the AI intentionally blocked (e.g., non-blueprint file uploaded)
       if (!extracted) {
-        const fallbackMsg: Message = {
-          id: crypto.randomUUID(),
-          role: "system",
-          content: "⚠️ Estimation completed but structured output was not returned. Please try again or adjust your scope settings.",
-          created_at: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, fallbackMsg]);
+        const isIntentionalBlock = /BLOCKED|MISSING_DRAWINGS|no.*project.*drawings|cannot.*produce.*quantities|does not contain.*project-specific/i.test(fullContent);
+        if (!isIntentionalBlock) {
+          const fallbackMsg: Message = {
+            id: crypto.randomUUID(),
+            role: "system",
+            content: "⚠️ Estimation completed but structured output was not returned. Please try again or adjust your scope settings.",
+            created_at: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, fallbackMsg]);
+        }
       }
 
       // Check for Finder Pass candidates
