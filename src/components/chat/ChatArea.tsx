@@ -1871,7 +1871,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             />
             <Button
               onClick={() => {
-                if (stagedFiles.length > 0) uploadStagedFiles();
+                if (stagedFiles.length > 0) uploadStagedFiles(input.trim());
                 else sendMessage();
               }}
               disabled={(!input.trim() && !showModePicker && stagedFiles.length === 0) || loading}
