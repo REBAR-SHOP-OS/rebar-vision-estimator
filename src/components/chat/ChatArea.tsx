@@ -477,9 +477,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const extractAtomicTruthJSON = (content: string): any | null => {
     const startMarker = "%%%ATOMIC_TRUTH_JSON_START%%%";
     const endMarker = "%%%ATOMIC_TRUTH_JSON_END%%%";
-    const startIdx = content.indexOf(startMarker);
-    const endIdx = content.indexOf(endMarker);
-    if (startIdx === -1 || endIdx === -1) return null;
+    let startIdx = content.indexOf(startMarker);
+    let endIdx = content.indexOf(endMarker);
+    // Fallback: strip markdown code fences and retry
+    if (startIdx === -1 || endIdx === -1) {
+      const stripped = content.replace(/```(?:json)?\s*/g, "").replace(/```/g, "");
+      startIdx = stripped.indexOf(startMarker);
+      endIdx = stripped.indexOf(endMarker);
+      if (startIdx !== -1 && endIdx !== -1) {
+        const jsonStr = stripped.substring(startIdx + startMarker.length, endIdx).trim();
+        try { return JSON.parse(jsonStr); } catch { /* fall through */ }
+      }
+      console.warn("[extractAtomicTruthJSON] Markers not found. First 500 chars:", content.substring(0, 500));
+      return null;
+    }
     const jsonStr = content.substring(startIdx + startMarker.length, endIdx).trim();
     try {
       return JSON.parse(jsonStr);
