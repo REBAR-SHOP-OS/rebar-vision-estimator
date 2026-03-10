@@ -516,12 +516,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               setMessages((prev) =>
                 prev.map((m) => (m.id === assistantId ? { ...m, content: flushDisplay } : m))
               );
-            } else if (reasoningText && !fullContent) {
-              const headerMatch = reasoningText.match(/\*\*(.+?)\*\*/);
-              const thinkingLabel = headerMatch ? headerMatch[1] : "Analyzing...";
-              setMessages((prev) =>
-                prev.map((m) => (m.id === assistantId ? { ...m, content: `🧠 *${thinkingLabel}*` } : m))
-              );
             }
           } catch {}
         }
