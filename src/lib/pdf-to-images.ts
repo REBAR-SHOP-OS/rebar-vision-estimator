@@ -34,10 +34,10 @@ export async function renderPdfPagesToImages(
   const totalPages = Math.min(doc.numPages, maxPages);
   console.log(`[pdf-to-images] PDF has ${doc.numPages} pages, rendering ${totalPages}`);
 
-  // Get current user ID for RLS-compliant storage path
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not authenticated – cannot upload page images");
-  const userId = user.id;
+  // Refresh session to prevent JWT expiry during long rendering+upload loops
+  const { data: { session }, error: refreshErr } = await supabase.auth.refreshSession();
+  if (refreshErr || !session?.user) throw new Error("Not authenticated – cannot upload page images");
+  const userId = session.user.id;
 
   const results: PdfPageImage[] = [];
   const timestamp = Date.now();

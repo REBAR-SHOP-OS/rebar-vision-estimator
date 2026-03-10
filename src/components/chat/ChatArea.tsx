@@ -259,6 +259,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               if (isScanned) {
                 console.log(`[OCR Routing] PDF is scanned/skipped. Rendering pages to images client-side...`);
                 try {
+                  // Refresh session before long-running client-side rendering to prevent JWT expiry
+                  await supabase.auth.refreshSession();
                   const pageImages = await renderPdfPagesToImages(pdfUrl, projectId, {
                     maxPages: 10,
                     scale: 1.5,
