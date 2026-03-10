@@ -424,17 +424,23 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 }
               }
               
+              const displayContent = fullContent
+                .replace(/%%%ATOMIC_TRUTH_JSON_START%%%[\s\S]*/g, "")
+                .replace(/```json[\s\S]*?```/g, "")
+                .replace(/\{[^}]*"(?:Estimation Group|Element Type|element_type|element_id|Rebar Size|bar_lines)"[\s\S]*$/gs, "")
+                .trim();
+
               setMessages((prev) => {
                 const last = prev[prev.length - 1];
                 if (last?.id === assistantId) {
-                  return prev.map((m) => (m.id === assistantId ? { ...m, content: fullContent } : m));
+                  return prev.map((m) => (m.id === assistantId ? { ...m, content: displayContent } : m));
                 }
                 return [
                   ...prev,
                   {
                     id: assistantId,
                     role: "assistant" as const,
-                    content: fullContent,
+                    content: displayContent,
                     created_at: new Date().toISOString(),
                   },
                 ];
