@@ -644,11 +644,11 @@ OUTPUT: You must return STRICT JSON ONLY that meets the schema. No prose outside
 const OUTPUT_FORMAT_INSTRUCTIONS = `
 ## OUTPUT FORMAT (MANDATORY)
 
-Your response MUST have TWO sections:
+Your response MUST have TWO sections. OUTPUT SECTION 2 (JSON) FIRST, then Section 1 (human-readable).
 
-### Section 1: Human-Readable Analysis
-Provide your full step-by-step analysis with tables, explanations, calculations as you currently do.
-Use markdown formatting with headers, tables, ⚠️ flags, etc.
+### Section 2: Structured JSON Block (OUTPUT THIS FIRST!)
+At the VERY BEGINNING of your response, output a JSON block wrapped in these exact markers.
+This MUST come BEFORE any human-readable analysis.
 
 ### Section 2: Structured JSON Block
 At the VERY END of your response, output a JSON block wrapped in these exact markers:
@@ -695,12 +695,17 @@ At the VERY END of your response, output a JSON block wrapped in these exact mar
 %%%ATOMIC_TRUTH_JSON_END%%%
 \`\`\`
 
+### Section 1: Human-Readable Analysis (AFTER the JSON block)
+After the JSON block above, provide your step-by-step analysis with tables, explanations, calculations.
+Use markdown formatting with headers, tables, ⚠️ flags, etc.
+
 IMPORTANT:
 - The JSON must be valid JSON (no trailing commas, no comments)
 - Every element MUST have all required fields per the schema
 - bbox values can be approximate [0,0,0,0] if exact coordinates are unknown
 - timestamps should be ISO8601 format
 - confidence should be a number between 0 and 1
+- ALWAYS output the JSON block FIRST before any analysis text
 `;
 
 const REBAR_WEIGHT_TABLE = `
@@ -1325,7 +1330,7 @@ Before outputting your final answer, you MUST:
         stream: true,
         temperature: 0,
         top_p: 1,
-        max_tokens: 16384,
+        max_tokens: 65536,
       }),
     });
 

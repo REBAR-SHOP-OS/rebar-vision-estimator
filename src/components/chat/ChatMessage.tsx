@@ -14,6 +14,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
 
   const displayContent = message.content
     .replace(/#{1,4}\s*Section\s*2[:\s]*Structured\s*JSON\s*Block[^\n]*/gi, "")
+    .replace(/#{1,4}\s*Section\s*1[:\s]*Human[- ]Readable\s*Analysis[^\n]*/gi, "")
     .replace(/%%%ATOMIC_TRUTH_JSON_START%%%.+?%%%ATOMIC_TRUTH_JSON_END%%%/gs, "")
     .replace(/```\s*```/g, "")
     .trim();
