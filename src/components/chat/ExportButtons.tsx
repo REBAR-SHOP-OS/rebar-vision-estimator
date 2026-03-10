@@ -1,10 +1,12 @@
 import React, { forwardRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { FileSpreadsheet, FileText, Ruler, Share2 } from "lucide-react";
+import { FileSpreadsheet, FileText, Ruler, Share2, Code, Copy, Check, ChevronDown, AlertTriangle } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import ShopDrawingModal from "./ShopDrawingModal";
 import ShareReviewDialog from "./ShareReviewDialog";
 import { getMassKgPerM, kgToLbs } from "@/lib/rebar-weights";
 import { exportExcelFile } from "@/lib/excel-export";
+import { toast } from "sonner";
 
 interface ExportButtonsProps {
   quoteResult: any;
@@ -16,6 +18,8 @@ interface ExportButtonsProps {
 const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteResult, elements, scopeData, projectId }, ref) => {
   const [shopDrawingOpen, setShopDrawingOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [jsonOpen, setJsonOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const barList: any[] = quoteResult.quote.bar_list || [];
   const sizeBreakdown: Record<string, number> = quoteResult.quote.size_breakdown || {};
   const sizeBreakdownKg: Record<string, number> = quoteResult.quote.size_breakdown_kg || {};
@@ -23,15 +27,31 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
   const totalKg = quoteResult.quote.total_weight_kg || (totalLbs ? totalLbs * 0.453592 : 0);
   const dateStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
+  const isBlocked = quoteResult.quote.job_status === "VALIDATION_FAILED" || quoteResult.quote.job_status === "BLOCKED";
+  const isFlagged = quoteResult.quote.reconciliation?.risk_level === "FLAG" || quoteResult.quote.job_status === "FLAGGED";
+
+  const handleCopyJson = () => {
+    navigator.clipboard.writeText(JSON.stringify(quoteResult, null, 2));
+    setCopied(true);
+    toast.success("JSON copied to clipboard");
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   const handleExcelExport = () => {
+    if (isBlocked) {
+      toast.warning("Estimate is BLOCKED — exporting with warning banner");
+    }
     exportExcelFile({ quoteResult, elements, scopeData });
   };
 
   const handlePdfExport = () => {
+    if (isBlocked) {
+      toast.warning("Estimate is BLOCKED — PDF includes warning banner");
+    }
     const printWindow = window.open("", "_blank");
     if (!printWindow) return;
 
-    // ── Data prep (mirrors excel-export.ts logic) ──
+    // ── Data prep ──
     const sizeBreakdownKg: Record<string, number> = quoteResult.quote.size_breakdown_kg || {};
     const sizeBreakdownLbs: Record<string, number> = quoteResult.quote.size_breakdown || {};
     const hasSizeKg = Object.keys(sizeBreakdownKg).length > 0;
@@ -62,12 +82,10 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
       return ft > 0 ? `${ft}'-${inches}"` : `${inches}"`;
     };
 
-    // ── Size table HTML ──
     const sizeRowsHtml = sizeEntries.map(([size, kg]) =>
       `<tr><td>${size}</td><td>${(Math.round(kg * 10) / 10).toLocaleString()}</td></tr>`
     ).join("");
 
-    // ── Element table HTML ──
     const elemRowsHtml = elemEntries.map(([elem, kg], i) =>
       `<tr><td>${i + 1}</td><td>${elem}</td><td>${(Math.round(kg * 10) / 10).toLocaleString()}</td></tr>`
     ).join("");
@@ -83,7 +101,6 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
 
     for (const [elemType, bars] of Object.entries(grouped)) {
       barRowsHtml += `<tr class="group-header"><td colspan="13">${elemType.toUpperCase()}</td></tr>`;
-      // Sub-group
       const subGrouped: Record<string, any[]> = {};
       for (const b of bars) { const k = b.sub_element || b.element_id || ""; if (!subGrouped[k]) subGrouped[k] = []; subGrouped[k].push(b); }
 
@@ -118,7 +135,48 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
       ? meshDetails.map((m: any) => `<tr><td>${m.location || ""}</td><td>${m.mesh_size || ""}</td><td>${m.area_sqft || ""}</td></tr>`).join("")
       : `<tr><td>N/A</td><td></td><td></td></tr>`;
 
-    const html = `<!DOCTYPE html><html><head><title>Rebar Estimation Report</title>
+    // ── Reconciliation section ──
+    const recon = quoteResult.quote.reconciliation || {};
+    const reconHtml = recon.variance_pct !== undefined ? `
+    <div class="page-break">
+      <div class="section-title">Reconciliation Summary</div>
+      <table style="max-width:600px">
+        <tr><th>Metric</th><th>Value</th></tr>
+        <tr><td>Drawing-Based Total (kg)</td><td>${(Math.round((recon.drawing_based_total || grandTotalKg) * 10) / 10).toLocaleString()}</td></tr>
+        <tr><td>Industry Norm Total (kg)</td><td>${(Math.round((recon.industry_norm_total || 0) * 10) / 10).toLocaleString()}</td></tr>
+        <tr><td>Variance</td><td>${recon.variance_pct?.toFixed(1)}%</td></tr>
+        <tr class="${recon.risk_level === 'RISK_ALERT' ? 'risk-alert' : recon.risk_level === 'FLAG' ? 'risk-flag' : ''}"><td>Risk Level</td><td><strong>${recon.risk_level || "OK"}</strong></td></tr>
+      </table>
+      ${recon.notes ? `<p style="margin-top:8px;font-size:10px;color:#666">${recon.notes}</p>` : ""}
+    </div>` : "";
+
+    // ── Risk flags ──
+    const riskFlags: string[] = quoteResult.quote.risk_flags || [];
+    const riskHtml = riskFlags.length > 0 ? `
+    <div style="margin-top:16px">
+      <div class="section-title" style="font-size:13px">Risk Flags</div>
+      <ul style="font-size:10px;color:#c0392b">${riskFlags.map(f => `<li>⚠ ${f}</li>`).join("")}</ul>
+    </div>` : "";
+
+    // ── Audit summary ──
+    const auditTrace = quoteResult.quote.audit_trace || {};
+    const auditHtml = auditTrace.stage_hashes?.length ? `
+    <div style="margin-top:16px">
+      <div class="section-title" style="font-size:13px">Audit Summary</div>
+      <table style="max-width:700px;font-size:9px">
+        <tr><th>Stage</th><th>Hash (first 16)</th></tr>
+        ${auditTrace.stage_hashes.map((h: any, i: number) => `<tr><td>Stage ${i}</td><td style="font-family:monospace">${typeof h === 'string' ? h.substring(0, 16) + '…' : JSON.stringify(h).substring(0, 16) + '…'}</td></tr>`).join("")}
+      </table>
+    </div>` : "";
+
+    // ── Warning banner ──
+    const warningBanner = isBlocked ? `<div style="background:#c0392b;color:#fff;padding:10px 16px;margin-bottom:16px;border-radius:4px;font-weight:700">⚠ WARNING: This estimate has status BLOCKED. Results may be incomplete or invalid.</div>` :
+      isFlagged ? `<div style="background:#e67e22;color:#fff;padding:10px 16px;margin-bottom:16px;border-radius:4px;font-weight:700">⚠ NOTICE: This estimate has been flagged for review. Verify results before use.</div>` : "";
+
+    const projectSlug = (scopeData?.projectName || "rebar-takeoff").replace(/\s+/g, "_");
+    const timestamp = new Date().toISOString();
+
+    const html = `<!DOCTYPE html><html><head><title>${projectSlug} — Estimate Report</title>
 <style>
 @page{margin:0.6in;size:letter landscape}
 *{box-sizing:border-box}
@@ -144,7 +202,11 @@ tr:nth-child(even){background:#f9f9fb}
 .page-break{page-break-before:always}
 .footer{margin-top:30px;padding-top:8px;border-top:1px solid #ccc;font-size:9px;color:#999;text-align:center}
 .bar-list-table td,.bar-list-table th{font-size:9px;padding:3px 4px;white-space:nowrap}
+.risk-alert td{background:#c0392b;color:#fff;font-weight:700}
+.risk-flag td{background:#e67e22;color:#fff;font-weight:700}
 </style></head><body>
+
+${warningBanner}
 
 <!-- SECTION 1: ESTIMATE SUMMARY -->
 <div class="header"><h1>Rebar Estimation Report</h1></div>
@@ -153,6 +215,8 @@ tr:nth-child(even){background:#f9f9fb}
 <div class="meta-row"><span class="label">Engineer :</span><span>${scopeData?.engineer || ""}</span></div>
 <div class="meta-row"><span class="label">Customer :</span><span>${scopeData?.clientName || "—"}</span></div>
 <div class="meta-row"><span class="label">Product Line :</span><span>${scopeData?.coatingType || "Black Steel"}</span></div>
+<div class="meta-row"><span class="label">Estimate Date :</span><span>${dateStr}</span></div>
+<div class="meta-row"><span class="label">Estimator Version :</span><span>v2026-03-10 (Rev B — HARDENED)</span></div>
 
 <div class="section-title">Estimate Summary</div>
 <div class="side-by-side">
@@ -185,6 +249,8 @@ ${scopeData?.scopeItems?.length ? `<div style="margin-top:12px"><strong>SCOPE IT
   <table style="max-width:500px"><tr><th>Location</th><th>Mesh Size</th><th>Total Area (SQFT)</th></tr>${meshHtml}</table>
 </div>
 
+${riskHtml}
+
 <!-- SECTION 2: BAR LIST -->
 <div class="page-break">
   <div class="section-title">Bar List — ${scopeData?.projectName || "Project"}</div>
@@ -200,7 +266,10 @@ ${scopeData?.scopeItems?.length ? `<div style="margin-top:12px"><strong>SCOPE IT
   </div>
 </div>
 
-<div class="footer">Generated by Rebar Estimator Pro &bull; ${dateStr}</div>
+${reconHtml}
+${auditHtml}
+
+<div class="footer">Project ID: ${projectId || "—"} &bull; Generated by Rebar Estimator Pro v2026-03-10 (Rev B) &bull; ${timestamp}</div>
 </body></html>`;
 
     printWindow.document.write(html);
@@ -210,14 +279,64 @@ ${scopeData?.scopeItems?.length ? `<div style="margin-top:12px"><strong>SCOPE IT
 
   return (
     <div ref={ref} className="flex flex-col gap-2 mt-4 pt-3 border-t border-border">
+      {/* JSON Dropdown Accordion — collapsed by default */}
+      <Collapsible open={jsonOpen} onOpenChange={setJsonOpen}>
+        <CollapsibleTrigger asChild>
+          <Button
+            variant="outline"
+            className="w-full gap-2 h-10 rounded-xl font-semibold justify-between"
+          >
+            <span className="flex items-center gap-2">
+              <Code className="h-4 w-4" />
+              Structured JSON Output
+            </span>
+            <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${jsonOpen ? "rotate-180" : ""}`} />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="relative mt-2 rounded-lg border border-border bg-muted/50">
+            <div className="absolute top-2 right-2 z-10">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={handleCopyJson}
+              >
+                {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+              </Button>
+            </div>
+            <div className="max-h-[300px] overflow-auto p-3">
+              <pre className="text-[10px] font-mono whitespace-pre-wrap break-all text-foreground/80 select-all">
+                {JSON.stringify(quoteResult, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+
+      {/* Warning for blocked/flagged estimates */}
+      {isBlocked && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs font-medium">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          Estimate is BLOCKED — exports will include warning banner
+        </div>
+      )}
+      {!isBlocked && isFlagged && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-700 dark:text-yellow-400 text-xs font-medium">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          Estimate flagged for review — verify before final use
+        </div>
+      )}
+
+      {/* Export buttons: PDF then Excel */}
       <div className="flex gap-2">
+        <Button variant="outline" onClick={handlePdfExport} className="flex-1 gap-2 h-10 rounded-xl font-semibold">
+          <FileText className="h-4 w-4" />
+          Export PDF
+        </Button>
         <Button onClick={handleExcelExport} className="flex-1 gap-2 h-10 rounded-xl font-semibold bg-primary hover:bg-primary/90">
           <FileSpreadsheet className="h-4 w-4" />
           Export Excel
-        </Button>
-        <Button variant="outline" onClick={handlePdfExport} className="flex-1 gap-2 h-10 rounded-xl font-semibold">
-          <FileText className="h-4 w-4" />
-          Download PDF
         </Button>
       </div>
       <Button
