@@ -152,6 +152,26 @@ function scopeGate(element: any, allowedTypes: string[]): GateResult {
   return { passed, details: { element_type: type, allowed: allowedTypes, error: passed ? null : "OUT_OF_SCOPE" } };
 }
 
+function unitGate(element: any, globalUnitsContext: string): GateResult {
+  const truth = element.extraction?.truth || {};
+  const barLines = truth.bar_lines || [];
+  const issues: string[] = [];
+
+  if (globalUnitsContext === "UNKNOWN!") {
+    issues.push("units_context is UNKNOWN!");
+  }
+
+  if (globalUnitsContext !== "MIXED_CONFIRMED") {
+    const hasMetric = barLines.some((bl: any) => bl.length_mm && bl.length_mm > 0);
+    const hasImperial = barLines.some((bl: any) => bl.length_ft && bl.length_ft > 0);
+    if (hasMetric && hasImperial) {
+      issues.push("Mixed metric/imperial lengths without MIXED_CONFIRMED");
+    }
+  }
+
+  return { passed: issues.length === 0, details: { issues, units_context: globalUnitsContext } };
+}
+
 // ── Question Generation ──
 interface Question {
   element_id: string;
@@ -243,7 +263,8 @@ serve(async (req) => {
   }
 
   try {
-    const { elements, allowedTypes, userAnswers } = await req.json();
+    const { elements, allowedTypes, userAnswers, units_context } = await req.json();
+    const globalUnitsContext = units_context || "UNKNOWN!";
 
     if (!elements || !Array.isArray(elements)) {
       return new Response(JSON.stringify({ error: "elements array is required" }), {
@@ -275,11 +296,12 @@ serve(async (req) => {
     const validatedElements: any[] = [];
 
     for (const element of elements) {
-      // Run 4 gates
+      // Run 5 gates (G1-G5)
       const identity = identityGate(element);
       const completeness = completenessGate(element);
       const scope = scopeGate(element, scopeTypes);
       const consistency = consistencyGate(element);
+      const unit = unitGate(element, globalUnitsContext);
 
       // Determine status
       let status: "READY" | "FLAGGED" | "BLOCKED";
@@ -295,6 +317,9 @@ serve(async (req) => {
       } else if (!scope.passed) {
         status = "BLOCKED";
         errors.push(`Scope gate failed: ${scope.details.error}`);
+      } else if (!unit.passed) {
+        status = "BLOCKED";
+        errors.push(`Unit gate failed: ${unit.details.issues?.join("; ")}`);
       } else if (!consistency.passed) {
         status = "FLAGGED";
         warnings.push(...(consistency.details.conflicts || []));
@@ -321,6 +346,7 @@ serve(async (req) => {
         completeness,
         consistency,
         scope,
+        unit,
         errors,
         warnings,
       };
