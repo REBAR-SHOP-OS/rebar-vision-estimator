@@ -1642,34 +1642,46 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                       {quoteResult.mode === "ai_express" ? <Zap className="h-5 w-5 text-primary" /> : <FileCheck className="h-5 w-5 text-primary" />}
                       <span className="text-sm font-bold text-foreground">{quoteResult.mode === "ai_express" ? "AI Express" : "Verified"} Quote</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-4 text-center">
-                      <div className="rounded-xl bg-card border border-border p-4">
-                        <p className="text-2xl font-bold text-primary">
-                          {quoteResult.quote.total_weight_kg
-                            ? `${quoteResult.quote.total_weight_kg.toLocaleString(undefined, {maximumFractionDigits: 1})} kg`
-                            : `${(quoteResult.quote.total_weight_lbs || 0).toLocaleString(undefined, {maximumFractionDigits: 1})} lbs`}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">Total Weight</p>
-                      </div>
-                      <div className="rounded-xl bg-card border border-border p-4">
-                        <p className="text-2xl font-bold text-primary">
-                          {(quoteResult.quote.total_weight_tonnes ?? (quoteResult.quote.total_weight_kg ? quoteResult.quote.total_weight_kg / 1000 : null))
-                            ? `${(quoteResult.quote.total_weight_tonnes ?? (quoteResult.quote.total_weight_kg! / 1000)).toLocaleString(undefined, {maximumFractionDigits: 2})} tonnes`
-                            : `${(quoteResult.quote.total_weight_tons ?? ((quoteResult.quote.total_weight_lbs || 0) / 2000)).toLocaleString(undefined, {maximumFractionDigits: 2})} tons`}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">Total Tonnes</p>
-                      </div>
-                    </div>
-                    {quoteResult.quote.total_weight_kg && (
-                      <div className="grid grid-cols-2 gap-4 text-center mt-2">
-                        <div className="rounded-lg bg-accent/30 border border-border p-2">
-                          <p className="text-sm font-semibold text-muted-foreground">{(quoteResult.quote.total_weight_lbs || 0).toLocaleString()} lbs</p>
-                        </div>
-                        <div className="rounded-lg bg-accent/30 border border-border p-2">
-                          <p className="text-sm font-semibold text-muted-foreground">{(quoteResult.quote.total_weight_tons ?? 0).toLocaleString(undefined, {maximumFractionDigits: 2})} tons</p>
-                        </div>
-                      </div>
-                    )}
+                    {(() => {
+                      const q = quoteResult.quote;
+                      const totalLbs = q.total_weight_lbs || 0;
+                      const totalKg = q.total_weight_kg || (totalLbs * 0.453592);
+                      const totalTonnes = q.total_weight_tonnes ?? q.total_tonnes ?? (totalKg > 0 ? totalKg / 1000 : 0);
+                      const totalTons = q.total_weight_tons ?? (totalLbs > 0 ? totalLbs / 2000 : 0);
+                      const showKg = totalKg > 0;
+                      return (
+                        <>
+                          <div className="grid grid-cols-2 gap-4 text-center">
+                            <div className="rounded-xl bg-card border border-border p-4">
+                              <p className="text-2xl font-bold text-primary">
+                                {showKg
+                                  ? `${totalKg.toLocaleString(undefined, {maximumFractionDigits: 1})} kg`
+                                  : `${totalLbs.toLocaleString(undefined, {maximumFractionDigits: 1})} lbs`}
+                              </p>
+                              <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">Total Weight</p>
+                            </div>
+                            <div className="rounded-xl bg-card border border-border p-4">
+                              <p className="text-2xl font-bold text-primary">
+                                {showKg
+                                  ? `${totalTonnes.toLocaleString(undefined, {maximumFractionDigits: 2})} tonnes`
+                                  : `${totalTons.toLocaleString(undefined, {maximumFractionDigits: 2})} tons`}
+                              </p>
+                              <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">Total Tonnes</p>
+                            </div>
+                          </div>
+                          {showKg && totalLbs > 0 && (
+                            <div className="grid grid-cols-2 gap-4 text-center mt-2">
+                              <div className="rounded-lg bg-accent/30 border border-border p-2">
+                                <p className="text-sm font-semibold text-muted-foreground">{totalLbs.toLocaleString()} lbs</p>
+                              </div>
+                              <div className="rounded-lg bg-accent/30 border border-border p-2">
+                                <p className="text-sm font-semibold text-muted-foreground">{totalTons.toLocaleString(undefined, {maximumFractionDigits: 2})} tons</p>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                     <SizeBreakdownTable sizeBreakdown={quoteResult.quote.size_breakdown} sizeBreakdownKg={quoteResult.quote.size_breakdown_kg} />
                     {quoteResult.excluded && quoteResult.excluded.length > 0 && (
                       <div className="mt-3 text-xs text-muted-foreground">

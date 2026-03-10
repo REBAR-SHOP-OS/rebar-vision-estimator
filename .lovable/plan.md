@@ -1,33 +1,38 @@
 
 
-## Plan: VERIFIED_QUOTE_TOTALS_BINDING_FIX (v2026.03.UI_TOTALS_FIX)
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
 
-### Root Causes
+### Problem
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
-1. **"undefined tons"**: The tonnes display at line 1656-1658 chains through `total_weight_tonnes` → `total_weight_kg / 1000` → `total_weight_tons`. When a Verified Quote has only `total_weight_lbs` (no `_kg`, no `_tonnes`), the first branch returns `null`, the fallback computes `total_weight_tons` which may also be `undefined`, producing "undefined tons".
+### Changes
 
-2. **Stray "0"**: Line 1663 uses `{quoteResult.quote.total_weight_kg && (...)}`. When `total_weight_kg` is exactly `0` (falsy number), React renders the literal `0` instead of `null`. Classic React gotcha.
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-### Changes — Single File: `src/components/chat/ChatArea.tsx`
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
 
-**Lines ~1645-1672** — Replace the totals rendering block:
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
 
-- Create normalized totals before the JSX:
-  ```
-  const q = quoteResult.quote;
-  const totalLbs = q.total_weight_lbs || 0;
-  const totalKg = q.total_weight_kg || (totalLbs * 0.453592);
-  const totalTonnes = q.total_weight_tonnes ?? q.total_tonnes ?? (totalKg / 1000);
-  const totalTons = q.total_weight_tons ?? (totalLbs / 2000);
-  ```
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
 
-- Primary cards: show kg if `totalKg > 0`, else lbs. Tonnes card always derives from the resolved value — never "undefined".
-
-- Fix stray "0": Change `{quoteResult.quote.total_weight_kg && (...)}` to `{totalKg > 0 && (...)}` (boolean check, never renders falsy number).
-
-- Secondary row (lbs/tons alternates) uses the same resolved values.
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
 ### Scope
-- 1 file patched: `src/components/chat/ChatArea.tsx` (~25 lines changed)
-- No new files, no backend changes, no styling changes
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
+- No new files, no backend changes
 
