@@ -1779,8 +1779,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none min-h-[36px] max-h-[200px] py-2"
             />
             <Button
-              onClick={() => sendMessage()}
-              disabled={(!input.trim() && !showModePicker) || loading}
+              onClick={() => {
+                if (stagedFiles.length > 0) uploadStagedFiles();
+                else sendMessage();
+              }}
+              disabled={(!input.trim() && !showModePicker && stagedFiles.length === 0) || loading}
               size="icon"
               className="h-9 w-9 flex-shrink-0 rounded-xl"
             >
