@@ -472,8 +472,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             const content = parsed.choices?.[0]?.delta?.content as string | undefined;
             if (content) {
               fullContent += content;
+              const flushDisplay = fullContent
+                .replace(/%%%ATOMIC_TRUTH_JSON_START%%%[\s\S]*/g, "")
+                .replace(/```json[\s\S]*?```/g, "")
+                .replace(/\{[^}]*"(?:Estimation Group|Element Type|element_type|element_id|Rebar Size|bar_lines)"[\s\S]*$/gs, "")
+                .trim();
               setMessages((prev) =>
-                prev.map((m) => (m.id === assistantId ? { ...m, content: fullContent } : m))
+                prev.map((m) => (m.id === assistantId ? { ...m, content: flushDisplay } : m))
               );
             }
           } catch {}
