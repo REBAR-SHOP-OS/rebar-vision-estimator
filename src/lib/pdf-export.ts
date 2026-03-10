@@ -85,7 +85,7 @@ export async function exportPdfFile({ quoteResult, elements, scopeData, projectI
         const totalPieces = qty * mult;
         const totalLenM = (totalPieces * lengthMm) / 1000;
         const massKgM = getMassKgPerM(b.size);
-        const wtKg = typeof b.weight_kg === "number" ? b.weight_kg : totalLenM * massKgM;
+        const wtKg = (typeof b.weight_kg === "number" && b.weight_kg > 0) ? b.weight_kg : totalLenM * massKgM;
         const isBent = b.shape_code && b.shape_code !== "straight" && b.shape_code !== "STRAIGHT";
         const spacing = b.spacing ? ` @ ${b.spacing}` : "";
         const desc = b.description || b.bar_mark || "";
