@@ -1023,6 +1023,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           content: msg.content,
         });
       }
+    }
 
     setUploadedFiles((prev) => [...prev, ...newUrls]);
 
