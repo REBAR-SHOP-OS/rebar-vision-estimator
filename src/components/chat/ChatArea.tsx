@@ -64,6 +64,45 @@ const LEARN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-lea
 const VALIDATE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/validate-elements`;
 const PRICE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/price-elements`;
 const DETECT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/detect-project-type`;
+// Helper: staged file thumbnail with stable blob URL
+const StagedFileThumb: React.FC<{ file: File; index: number; onClick: () => void; onRemove: (i: number) => void }> = ({ file, index, onClick, onRemove }) => {
+  const blobUrl = useMemo(() => file.type.startsWith("image/") ? URL.createObjectURL(file) : null, [file]);
+  useEffect(() => () => { if (blobUrl) URL.revokeObjectURL(blobUrl); }, [blobUrl]);
+  return (
+    <div className="relative group flex items-center gap-1.5 rounded-lg bg-background border border-border px-2 py-1.5 text-xs cursor-pointer hover:ring-1 hover:ring-primary/40 transition-all" onClick={onClick}>
+      {blobUrl ? (
+        <img src={blobUrl} alt={file.name} className="h-10 w-10 rounded object-cover flex-shrink-0" />
+      ) : (
+        <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+      )}
+      <span className="truncate max-w-[120px] text-foreground">{file.name}</span>
+      <button onClick={(e) => { e.stopPropagation(); onRemove(index); }} className="ml-1 text-muted-foreground hover:text-destructive">
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+};
+
+// Helper: preview file dialog with stable blob URL
+const PreviewFileDialog: React.FC<{ previewFile: File | null; onClose: () => void }> = ({ previewFile, onClose }) => {
+  const blobUrl = useMemo(() => previewFile?.type.startsWith("image/") ? URL.createObjectURL(previewFile) : null, [previewFile]);
+  useEffect(() => () => { if (blobUrl) URL.revokeObjectURL(blobUrl); }, [blobUrl]);
+  return (
+    <Dialog open={!!previewFile} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-[90vw] max-h-[90vh] p-2 sm:p-4">
+        {previewFile && blobUrl ? (
+          <img src={blobUrl} alt={previewFile.name} className="max-h-[80vh] w-auto mx-auto rounded object-contain" />
+        ) : previewFile ? (
+          <div className="flex flex-col items-center gap-3 py-10">
+            <FileText className="h-12 w-12 text-muted-foreground" />
+            <p className="text-sm font-medium text-foreground">{previewFile.name}</p>
+            <p className="text-xs text-muted-foreground">{(previewFile.size / 1024).toFixed(1)} KB</p>
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+};
 
 const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialFilesConsumed, onProjectNameChange, onStepChange, onModeChange }) => {
   const navigate = useNavigate();
@@ -196,6 +235,17 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       setUploadedFiles(urls.filter(Boolean));
     }
   };
+
+  // Refresh signed URLs every 90 minutes to prevent expiry during long sessions
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (uploadedFiles.length > 0) {
+        console.debug("[SignedURL] Refreshing signed URLs...");
+        loadUploadedFiles();
+      }
+    }, 90 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [projectId, uploadedFiles.length > 0]);
 
   const fetchKnowledgeContext = async (): Promise<{ rules: string[]; fileUrls: string[]; trainingExamples: { title: string; answerText: string }[]; learnedRules: string[] }> => {
     if (!user) return { rules: [], fileUrls: [], trainingExamples: [], learnedRules: [] };
@@ -898,6 +948,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
     if (!extracted) {
       setSubStep(null);
+      // If we already have validationData but no quoteResult, build synthetic quote so exports appear
+      if (validationData?.elements?.length > 0 && !quoteResult) {
+        const syntheticQuote = buildSyntheticQuote(validationData.elements, validationData.summary);
+        setQuoteResult({ elements: validationData.elements, summary: validationData.summary || null, quote: syntheticQuote });
+      }
       const isIntentionalBlock = /BLOCKED|MISSING_DRAWINGS|no.*project.*drawings|cannot.*produce.*quantities|does not contain.*project-specific/i.test(fullContent);
       console.debug("[PostStream] expectStructured:", expectStructuredOutput, "intentionalBlock:", isIntentionalBlock);
       if (expectStructuredOutput && !isIntentionalBlock) {
@@ -2006,33 +2061,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           {stagedFiles.length > 0 && (
             <div className="flex flex-wrap gap-2 rounded-xl border border-border bg-muted/30 p-2">
               {stagedFiles.map((file, i) => (
-                <div key={i} className="relative group flex items-center gap-1.5 rounded-lg bg-background border border-border px-2 py-1.5 text-xs cursor-pointer hover:ring-1 hover:ring-primary/40 transition-all" onClick={() => setPreviewFile(file)}>
-                  {file.type.startsWith("image/") ? (
-                    <img src={URL.createObjectURL(file)} alt={file.name} className="h-10 w-10 rounded object-cover flex-shrink-0" />
-                  ) : (
-                    <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                  )}
-                  <span className="truncate max-w-[120px] text-foreground">{file.name}</span>
-                  <button onClick={(e) => { e.stopPropagation(); removeStagedFile(i); }} className="ml-1 text-muted-foreground hover:text-destructive">
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
+                <StagedFileThumb key={i} file={file} index={i} onClick={() => setPreviewFile(file)} onRemove={(idx) => removeStagedFile(idx)} />
               ))}
             </div>
           )}
-          <Dialog open={!!previewFile} onOpenChange={(open) => !open && setPreviewFile(null)}>
-            <DialogContent className="max-w-[90vw] max-h-[90vh] p-2 sm:p-4">
-              {previewFile && previewFile.type.startsWith("image/") ? (
-                <img src={URL.createObjectURL(previewFile)} alt={previewFile.name} className="max-h-[80vh] w-auto mx-auto rounded object-contain" />
-              ) : previewFile ? (
-                <div className="flex flex-col items-center gap-3 py-10">
-                  <FileText className="h-12 w-12 text-muted-foreground" />
-                  <p className="text-sm font-medium text-foreground">{previewFile.name}</p>
-                  <p className="text-xs text-muted-foreground">{(previewFile.size / 1024).toFixed(1)} KB</p>
-                </div>
-              ) : null}
-            </DialogContent>
-          </Dialog>
+          <PreviewFileDialog previewFile={previewFile} onClose={() => setPreviewFile(null)} />
           <div
             className={`relative flex items-end gap-2 rounded-2xl border bg-chat-input p-2 shadow-sm transition-colors ${isDragging ? "border-primary ring-2 ring-primary/30" : "border-border"}`}
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}

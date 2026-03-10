@@ -5,13 +5,14 @@ import { useLanguage, LANGUAGES, type Language } from "@/contexts/LanguageContex
 import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2, BarChart3, Search } from "lucide-react";
+import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2, BarChart3, Search, Loader2 } from "lucide-react";
 import CrmSyncPanel, { type LeadAttachment } from "@/components/crm/CrmSyncPanel";
 import BrainKnowledgeDialog from "@/components/chat/BrainKnowledgeDialog";
 import { toast } from "sonner";
 import OutcomeCapture from "@/components/audit/OutcomeCapture";
 import DrawingSearchPanel from "@/components/search/DrawingSearchPanel";
 import ChatArea from "@/components/chat/ChatArea";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import StepProgress from "@/components/chat/StepProgress";
 import logoBg from "@/assets/logo.png";
 import {
@@ -38,6 +39,7 @@ const Dashboard: React.FC = () => {
   const [creatingProject, setCreatingProject] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState<number | null>(null);
   const isMobile = useIsMobile();
   const [calculationMode, setCalculationMode] = useState<"smart" | "step-by-step" | null>(null);
@@ -119,7 +121,10 @@ const Dashboard: React.FC = () => {
 
   const deleteProject = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (deletingProjectId === id) return;
+    setDeletingProjectId(id);
     const { error } = await supabase.from("projects").delete().eq("id", id);
+    setDeletingProjectId(null);
     if (error) {
       toast.error("Failed to delete project");
       return;
@@ -275,8 +280,9 @@ const Dashboard: React.FC = () => {
                     <button
                       onClick={(e) => deleteProject(project.id, e)}
                       className="hover:text-destructive"
+                      disabled={deletingProjectId === project.id}
                     >
-                      <Trash2 className="h-3 w-3" />
+                      {deletingProjectId === project.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
                     </button>
                   </div>
                 </>
@@ -430,18 +436,20 @@ const Dashboard: React.FC = () => {
             }}
           />
         ) : activeProjectId ? (
-          <ChatArea
-            projectId={activeProjectId}
-            initialFiles={initialFiles}
-            onInitialFilesConsumed={() => setInitialFiles(null)}
-            onProjectNameChange={(name) => {
-              setProjects((prev) =>
-                prev.map((p) => (p.id === activeProjectId ? { ...p, name } : p))
-              );
-            }}
-            onStepChange={(step) => setCurrentStep(step)}
-            onModeChange={(mode) => setCalculationMode(mode)}
-          />
+          <ErrorBoundary fallbackMessage="Estimation session crashed">
+            <ChatArea
+              projectId={activeProjectId}
+              initialFiles={initialFiles}
+              onInitialFilesConsumed={() => setInitialFiles(null)}
+              onProjectNameChange={(name) => {
+                setProjects((prev) =>
+                  prev.map((p) => (p.id === activeProjectId ? { ...p, name } : p))
+                );
+              }}
+              onStepChange={(step) => setCurrentStep(step)}
+              onModeChange={(mode) => setCalculationMode(mode)}
+            />
+          </ErrorBoundary>
         ) : (
           <div className="flex flex-1 items-center justify-center blueprint-bg-major">
             <div className="max-w-xl mx-auto text-center space-y-8 px-4">
