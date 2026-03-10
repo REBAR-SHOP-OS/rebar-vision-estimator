@@ -530,11 +530,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
   const runValidation = async (elements: any[], answers?: any[]) => {
     try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
       const resp = await fetch(VALIDATE_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ elements, userAnswers: answers }),
       });
