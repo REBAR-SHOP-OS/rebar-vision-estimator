@@ -1109,10 +1109,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
         const result = await streamAIResponse(chatHistory, calculationMode, uploadedFiles);
 
-        // Only expect structured output for explicit estimation intents
+        // Only expect structured output for explicit estimation intents AND when AI isn't asking a question
         const estimationIntent = /\b(estimate|analyze|recalculate|rerun|re-run|proceed|start.*estimation|run.*takeoff|calculate|compute)\b/i.test(msgContent);
-        console.debug("[SendMessage] intent check:", { msgContent: msgContent.slice(0, 80), estimationIntent });
-        await handlePostStream(result.fullContent, chatHistory, calculationMode, estimationIntent);
+        const aiIsAskingQuestion = /\b(question for user|which.*should be|please (confirm|select|choose|specify)|stage \d+(\.\d+)?:/i.test(result.fullContent);
+        const expectStructured = estimationIntent && !aiIsAskingQuestion;
+        console.debug("[SendMessage] intent check:", { msgContent: msgContent.slice(0, 80), estimationIntent, aiIsAskingQuestion, expectStructured });
+        await handlePostStream(result.fullContent, chatHistory, calculationMode, expectStructured);
       } catch (err: any) {
         setSubStep(null);
         if (err.name === "AbortError") {
