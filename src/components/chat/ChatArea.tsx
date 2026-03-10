@@ -4,7 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 import { Button } from "@/components/ui/button";
-import { Paperclip, Send, Loader2, CheckCircle, SlidersHorizontal, Plus, Table, Download, AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle, Upload, FileQuestion, Sparkles, FileText, FileSpreadsheet, X } from "lucide-react";
+import { Paperclip, Send, Loader2, CheckCircle, SlidersHorizontal, Plus, Table, Download, AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle, Upload, FileQuestion, Sparkles, FileText, FileSpreadsheet, X, Eye } from "lucide-react";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { exportExcelFile } from "@/lib/excel-export";
 import { exportPdfFile } from "@/lib/pdf-export";
 import { getMassKgPerM } from "@/lib/rebar-weights";
@@ -60,6 +61,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const [calculationMode, setCalculationMode] = useState<"smart" | "step-by-step" | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1722,20 +1724,33 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           {stagedFiles.length > 0 && (
             <div className="flex flex-wrap gap-2 rounded-xl border border-border bg-muted/30 p-2">
               {stagedFiles.map((file, i) => (
-                <div key={i} className="relative group flex items-center gap-1.5 rounded-lg bg-background border border-border px-2 py-1.5 text-xs">
+                <div key={i} className="relative group flex items-center gap-1.5 rounded-lg bg-background border border-border px-2 py-1.5 text-xs cursor-pointer hover:ring-1 hover:ring-primary/40 transition-all" onClick={() => setPreviewFile(file)}>
                   {file.type.startsWith("image/") ? (
                     <img src={URL.createObjectURL(file)} alt={file.name} className="h-10 w-10 rounded object-cover flex-shrink-0" />
                   ) : (
                     <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   )}
                   <span className="truncate max-w-[120px] text-foreground">{file.name}</span>
-                  <button onClick={() => removeStagedFile(i)} className="ml-1 text-muted-foreground hover:text-destructive">
+                  <button onClick={(e) => { e.stopPropagation(); removeStagedFile(i); }} className="ml-1 text-muted-foreground hover:text-destructive">
                     <X className="h-3.5 w-3.5" />
                   </button>
                 </div>
               ))}
             </div>
           )}
+          <Dialog open={!!previewFile} onOpenChange={(open) => !open && setPreviewFile(null)}>
+            <DialogContent className="max-w-[90vw] max-h-[90vh] p-2 sm:p-4">
+              {previewFile && previewFile.type.startsWith("image/") ? (
+                <img src={URL.createObjectURL(previewFile)} alt={previewFile.name} className="max-h-[80vh] w-auto mx-auto rounded object-contain" />
+              ) : previewFile ? (
+                <div className="flex flex-col items-center gap-3 py-10">
+                  <FileText className="h-12 w-12 text-muted-foreground" />
+                  <p className="text-sm font-medium text-foreground">{previewFile.name}</p>
+                  <p className="text-xs text-muted-foreground">{(previewFile.size / 1024).toFixed(1)} KB</p>
+                </div>
+              ) : null}
+            </DialogContent>
+          </Dialog>
           <div
             className={`relative flex items-end gap-2 rounded-2xl border bg-chat-input p-2 shadow-sm transition-colors ${isDragging ? "border-primary ring-2 ring-primary/30" : "border-border"}`}
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}

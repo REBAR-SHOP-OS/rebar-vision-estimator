@@ -1,27 +1,38 @@
 
 
-## Plan: Click-to-Preview for Staged Files
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
 
 ### Problem
-The staged file thumbnails are too small. Users want to click on a staged file to see a larger preview before sending.
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
-### Changes (single file: `src/components/chat/ChatArea.tsx`)
+### Changes
 
-#### 1. Add preview state
-```typescript
-const [previewFile, setPreviewFile] = useState<File | null>(null);
-```
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-#### 2. Add a fullscreen preview modal
-When `previewFile` is set, render a dialog/overlay showing the image at full size (or file info for non-images) with a close button. Use the existing `Dialog` component from `@/components/ui/dialog`.
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
 
-#### 3. Make thumbnails clickable
-On the staged file thumbnail/row, add `onClick={() => setPreviewFile(file)}` with `cursor-pointer` styling so clicking opens the large preview.
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
 
-#### 4. No "mark/annotate" — keep it simple
-The preview will be view-only (a lightbox). Annotation tools would add significant complexity; a clear full-size preview addresses the core need of "click to view."
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
+
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
 ### Scope
-- 1 file modified, ~25 lines added
-- No backend changes
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
+- No new files, no backend changes
 
