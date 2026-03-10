@@ -1007,13 +1007,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
       if (signedData?.signedUrl) newUrls.push(signedData.signedUrl);
 
-      const msg: Message = {
-        id: crypto.randomUUID(),
-        role: "user",
-        content: `📎 Uploaded: **${file.name}** (${(file.size / 1024 / 1024).toFixed(2)} MB)`,
-        created_at: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, msg]);
+      if (!skipStatusMessages) {
+        const msg: Message = {
+          id: crypto.randomUUID(),
+          role: "user",
+          content: `📎 Uploaded: **${file.name}** (${(file.size / 1024 / 1024).toFixed(2)} MB)`,
+          created_at: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, msg]);
+      }
 
       await supabase.from("messages").insert({
         project_id: projectId,
