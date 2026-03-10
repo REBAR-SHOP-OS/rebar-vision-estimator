@@ -1,38 +1,47 @@
 
 
-## Plan: Align PDF Export to Match Excel Two-Sheet Layout
+## Plan: Fix Empty Bubble — Show Thinking Indicator Immediately
 
-### Problem
-The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
+### Root Cause (Updated)
+
+The Lovable AI gateway does **not** forward Gemini's reasoning tokens. There is no `delta.reasoning` field in the SSE stream — the gateway buffers reasoning internally and only starts emitting `delta.content` once actual output begins. This means our reasoning-detection code will never trigger.
+
+The fix is simple: show a "Thinking..." indicator in the chat bubble **immediately** when the SSE connection opens, before any tokens arrive. Replace it with real content as soon as the first `delta.content` token streams in.
 
 ### Changes
 
-**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
+**File: `src/components/chat/ChatArea.tsx`** — 2 small changes
 
-Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
+#### 1. Show thinking indicator right after stream opens (~line 391, after `assistantId` is created)
 
-**Section 1: "Estimate Summary"** (page 1)
-- Project header: Project Name, Address, Engineer, Customer, Product Line
-- "Estimate Summary" title
-- Side-by-side tables using CSS grid/flexbox:
-  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
-  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
-- NOTES section: Grade, Lap Length Info, Deviations, Coating
-- Scope Items (if any)
-- MESH DETAILS table
+Insert an immediate message with `🧠 *Analyzing blueprints...*` content before the streaming loop begins:
 
-**Section 2: "Bar List"** (page 2+, page-break-before)
-- Project header
-- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
-- Rows grouped by element type headers (bold row spanning columns)
-- Sub-element sub-headers
-- Bar rows with identification string (`{size} @ {spacing} {description}`)
-- TOTAL WEIGHT + TOTAL (Tons) footer rows
-- MESH DETAILS at bottom
+```typescript
+const assistantId = crypto.randomUUID();
 
-The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
+// Show thinking indicator immediately — gateway buffers reasoning tokens
+setMessages((prev) => [
+  ...prev,
+  {
+    id: assistantId,
+    role: "assistant" as const,
+    content: "🧠 *Analyzing blueprints...*",
+    created_at: new Date().toISOString(),
+  },
+]);
+```
+
+#### 2. Remove the dead reasoning-detection code (~lines 426-497, 534-596)
+
+The `reasoningRaw` / `reasoningText` extraction code in both the main parse loop and the flush section is dead code — the gateway never sends these fields. Remove it to keep the codebase clean. The existing `if (content)` block already correctly overwrites the thinking indicator with real content via the `last?.id === assistantId` check.
+
+### Why This Works
+- User sees "🧠 Analyzing blueprints..." the instant the connection opens (no more empty bubble)
+- Once the first `delta.content` token arrives, the existing `setMessages` logic replaces it with the real streamed text
+- No dependency on gateway-specific fields that don't exist
+- Removes ~60 lines of dead code
 
 ### Scope
-- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
-- No new files, no backend changes
+- 1 file changed
+- ~5 lines added, ~60 lines of dead code removed
 
