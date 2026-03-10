@@ -1187,7 +1187,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     const dt = new DataTransfer();
     stagedFiles.forEach(f => dt.items.add(f));
     setStagedFiles([]);
-    await handleFileUpload({ target: { files: dt.files } } as React.ChangeEvent<HTMLInputElement>);
+    await handleFileUpload({ target: { files: dt.files } } as React.ChangeEvent<HTMLInputElement>, true);
+
+    // Trigger AI analysis if user typed a message
+    if (textInput) {
+      if (calculationMode) {
+        await sendMessage(textInput, { skipAddMessage: true });
+      } else if (uploadedFiles.length > 0 || dt.files.length > 0) {
+        setShowModePicker(true);
+      }
+    }
   };
 
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
