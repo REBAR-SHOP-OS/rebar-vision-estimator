@@ -148,7 +148,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         if (atomicData?.elements && atomicData.elements.length > 0) {
           runValidation(atomicData.elements);
           // Restore quote result so Bar List tab persists across reloads
-          setQuoteResult({ elements: atomicData.elements, summary: atomicData.summary || null });
+          const syntheticQuote = buildSyntheticQuote(atomicData.elements, atomicData.summary);
+          setQuoteResult({ elements: atomicData.elements, summary: atomicData.summary || null, quote: syntheticQuote });
         }
       }
     }

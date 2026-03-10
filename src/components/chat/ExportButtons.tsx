@@ -21,15 +21,16 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
   const [shareOpen, setShareOpen] = useState(false);
   const [jsonOpen, setJsonOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const barList: any[] = quoteResult.quote.bar_list || [];
-  const sizeBreakdown: Record<string, number> = quoteResult.quote.size_breakdown || {};
-  const sizeBreakdownKg: Record<string, number> = quoteResult.quote.size_breakdown_kg || {};
-  const totalLbs = quoteResult.quote.total_weight_lbs;
-  const totalKg = quoteResult.quote.total_weight_kg || (totalLbs ? totalLbs * 0.453592 : 0);
+  const quote = quoteResult?.quote || {};
+  const barList: any[] = quote.bar_list || [];
+  const sizeBreakdown: Record<string, number> = quote.size_breakdown || {};
+  const sizeBreakdownKg: Record<string, number> = quote.size_breakdown_kg || {};
+  const totalLbs = quote.total_weight_lbs;
+  const totalKg = quote.total_weight_kg || (totalLbs ? totalLbs * 0.453592 : 0);
   const dateStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
-  const isBlocked = quoteResult.quote.job_status === "VALIDATION_FAILED" || quoteResult.quote.job_status === "BLOCKED";
-  const isFlagged = quoteResult.quote.reconciliation?.risk_level === "FLAG" || quoteResult.quote.job_status === "FLAGGED";
+  const isBlocked = quote.job_status === "VALIDATION_FAILED" || quote.job_status === "BLOCKED";
+  const isFlagged = quote.reconciliation?.risk_level === "FLAG" || quote.job_status === "FLAGGED";
 
   const handleCopyJson = () => {
     navigator.clipboard.writeText(JSON.stringify(quoteResult, null, 2));
