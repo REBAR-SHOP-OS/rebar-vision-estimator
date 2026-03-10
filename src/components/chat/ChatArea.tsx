@@ -2021,10 +2021,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 } else if (validationData || quoteResult) {
                   cards = [
                     { icon: 'Table', title: 'Bar List', description: 'View full rebar table', sendText: 'Show me the bar list' },
-                    ...(quoteResult?.quote ? [
-                      { icon: 'FileText', title: 'Download PDF', description: 'Export PDF report', sendText: '', action: 'exportPdf' as const },
-                      { icon: 'FileSpreadsheet', title: 'Download Excel', description: 'Export spreadsheet', sendText: '', action: 'exportExcel' as const },
-                    ] : []),
                     { icon: 'AlertTriangle', title: 'Review Flags', description: 'Check flagged items', sendText: 'Review flagged elements' },
                     { icon: 'RefreshCw', title: 'Recalculate', description: 'Update with your edits', sendText: 'Recalculate with edits' },
                   ];
