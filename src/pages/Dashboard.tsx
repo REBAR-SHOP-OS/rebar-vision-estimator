@@ -38,6 +38,7 @@ const Dashboard: React.FC = () => {
   const [creatingProject, setCreatingProject] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState<number | null>(null);
   const isMobile = useIsMobile();
   const [calculationMode, setCalculationMode] = useState<"smart" | "step-by-step" | null>(null);
