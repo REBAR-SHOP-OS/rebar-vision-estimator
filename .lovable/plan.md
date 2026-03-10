@@ -1,38 +1,26 @@
 
 
-## Plan: Align PDF Export to Match Excel Two-Sheet Layout
+## Fix: "undefined tons" Display + Missing Tonnes Fields
 
 ### Problem
-The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
+The screenshot shows "undefined tons" in the Verified Quote card. `buildSyntheticQuote` returns `total_weight_kg` and `total_weight_lbs` but never sets `total_weight_tonnes` or `total_weight_tons`, which the UI (`ValidationResults.tsx` line 366-368) tries to display.
 
 ### Changes
 
-**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
+**File: `src/components/chat/ChatArea.tsx`** (line 663-672)
+Add the missing tonnage fields to the synthetic quote return object:
+```typescript
+total_weight_tonnes: (summary?.total_rebar_weight_kg || totalKg) / 1000,
+total_weight_tons: (summary?.total_rebar_weight_lbs || totalKg / 0.453592) / 2000,
+```
 
-Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
-
-**Section 1: "Estimate Summary"** (page 1)
-- Project header: Project Name, Address, Engineer, Customer, Product Line
-- "Estimate Summary" title
-- Side-by-side tables using CSS grid/flexbox:
-  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
-  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
-- NOTES section: Grade, Lap Length Info, Deviations, Coating
-- Scope Items (if any)
-- MESH DETAILS table
-
-**Section 2: "Bar List"** (page 2+, page-break-before)
-- Project header
-- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
-- Rows grouped by element type headers (bold row spanning columns)
-- Sub-element sub-headers
-- Bar rows with identification string (`{size} @ {spacing} {description}`)
-- TOTAL WEIGHT + TOTAL (Tons) footer rows
-- MESH DETAILS at bottom
-
-The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
+**File: `src/components/chat/ValidationResults.tsx`** (lines 356-380)
+Add null safety so even if fields are missing, it computes from available data instead of showing "undefined":
+- Compute tonnes from kg: `(quote.total_weight_kg / 1000).toFixed(2)` as fallback
+- Compute tons from lbs: `(quote.total_weight_lbs / 2000).toFixed(2)` as fallback
+- Apply optional chaining + `.toLocaleString()` on all weight displays
 
 ### Scope
-- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
-- No new files, no backend changes
+- 2 files: `ChatArea.tsx` (add fields), `ValidationResults.tsx` (null-safe display)
+- No backend changes
 
