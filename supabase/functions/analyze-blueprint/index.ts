@@ -1098,6 +1098,13 @@ Before outputting your final answer, you MUST:
       systemPrompt = stage0 + systemPrompt;
     }
 
+    // 6. Inject Brain File Presence Indicator — force AI to consult brain files for all assumptions
+    const brainFileNames = (knowledgeContext?.fileUrls || []).map((f: any) => typeof f === 'string' ? f.split('/').pop() : (f.name || f)).join(', ');
+    if (brainFileNames) {
+      const brainDirective = `\n## 📚 BRAIN KNOWLEDGE FILES AVAILABLE: [${brainFileNames}]\nCRITICAL: You MUST consult these files for ALL assumptions — especially Industry-Norm assumptions.\nIf a file named "Manual" or "Standard Practice" is listed above, you MUST cite specific sections/pages from it for every assumption.\nNever make an assumption without first checking the brain knowledge base files listed above.\nIf the Manual of Standard Practice is NOT listed above, mark ALL Industry-Norm assumptions as UNVERIFIED_ASSUMPTION!\n\n---\n\n`;
+      systemPrompt = brainDirective + systemPrompt;
+    }
+
     // Build messages array with file context
     const aiMessages: any[] = [
       { role: "system", content: systemPrompt },
