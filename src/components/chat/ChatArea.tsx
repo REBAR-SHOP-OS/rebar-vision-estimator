@@ -360,13 +360,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       abortControllerRef.current = controller;
       const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
 
-      const resp = await fetch(CHAT_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({
+      const payloadObj = {
           messages: chatMessages,
           mode,
           fileUrls: effectiveImageUrls,
@@ -377,7 +371,33 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           primaryCategory: scopeDataRef.current?.primaryCategory,
           features: scopeDataRef.current?.features,
           projectId,
-        }),
+      };
+      let payloadStr = JSON.stringify(payloadObj);
+      const payloadKB = Math.round(payloadStr.length / 1024);
+      console.log(`[Payload] Total size: ${payloadKB} KB`);
+
+      // If still over 450KB, aggressively trim OCR text
+      if (payloadStr.length > 450 * 1024 && payloadObj.pre_ocr_results.length > 0) {
+        const excess = payloadStr.length - 400 * 1024;
+        const charsToTrim = Math.ceil(excess / payloadObj.pre_ocr_results.length);
+        for (const item of payloadObj.pre_ocr_results) {
+          for (const pass of item.ocr_results) {
+            if (pass.fullText.length > 500) {
+              pass.fullText = pass.fullText.substring(0, Math.max(500, pass.fullText.length - charsToTrim));
+            }
+          }
+        }
+        payloadStr = JSON.stringify(payloadObj);
+        console.log(`[Payload] Trimmed to: ${Math.round(payloadStr.length / 1024)} KB`);
+      }
+
+      const resp = await fetch(CHAT_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: payloadStr,
         signal: controller.signal,
       });
 
