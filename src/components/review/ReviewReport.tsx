@@ -5,12 +5,7 @@ interface ReviewReportProps {
   reviewData: any;
 }
 
-const REBAR_UNIT_WEIGHT: Record<string, number> = {
-  "#3": 0.376, "#4": 0.668, "#5": 1.043, "#6": 1.502, "#7": 2.044,
-  "#8": 2.670, "#9": 3.400, "#10": 4.303, "#11": 5.313, "#14": 7.650, "#18": 13.60,
-  "10M": 0.527, "15M": 1.055, "20M": 1.582, "25M": 2.637,
-  "30M": 3.692, "35M": 5.274, "45M": 7.914, "55M": 13.186,
-};
+// Weight tables removed — use canonical source in @/lib/rebar-weights.ts if needed
 
 const ReviewReport: React.FC<ReviewReportProps> = ({ reviewData }) => {
   if (!reviewData || Object.keys(reviewData).length === 0) return null;

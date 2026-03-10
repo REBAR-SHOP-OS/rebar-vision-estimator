@@ -145,6 +145,7 @@ function calculateElementWeight(truth: ElementTruth["truth"], elementType: strin
         const weight_lbs = mult * qty * line.length_ft * wPerFt;
         weight_kg = weight_lbs * 0.453592;
       } else if (line.weight_kg && line.weight_kg > 0) {
+        console.warn(`[weight-fallback] Using AI-provided weight_kg=${line.weight_kg} for ${line.mark || "unknown"} (${size}) — no length data available`);
         weight_kg = line.weight_kg;
       } else {
         // No length and no pre-computed weight — track as missing
