@@ -1777,7 +1777,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                   return (
                     <button
                       key={card.title}
-                      onClick={() => {
+                      onClick={async () => {
                         if (card.action === 'upload') {
                           fileInputRef.current?.click();
                         } else if (card.action === 'exportExcel') {
