@@ -898,6 +898,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
     if (!extracted) {
       setSubStep(null);
+      // If we already have validationData but no quoteResult, build synthetic quote so exports appear
+      if (validationData?.elements?.length > 0 && !quoteResult) {
+        const syntheticQuote = buildSyntheticQuote(validationData.elements, validationData.summary);
+        setQuoteResult({ elements: validationData.elements, summary: validationData.summary || null, quote: syntheticQuote });
+      }
       const isIntentionalBlock = /BLOCKED|MISSING_DRAWINGS|no.*project.*drawings|cannot.*produce.*quantities|does not contain.*project-specific/i.test(fullContent);
       console.debug("[PostStream] expectStructured:", expectStructuredOutput, "intentionalBlock:", isIntentionalBlock);
       if (expectStructuredOutput && !isIntentionalBlock) {
