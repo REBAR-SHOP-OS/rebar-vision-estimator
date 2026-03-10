@@ -138,6 +138,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         onModeChange?.(mode);
         onStepChange?.(1);
       }
+      // P0: Restore validation state from last assistant message containing ATOMIC_TRUTH markers
+      const atomicMsg = [...data].reverse().find((m: any) => m.role === "assistant" && m.content?.includes("%%%ATOMIC_TRUTH_JSON_START%%%"));
+      if (atomicMsg) {
+        const atomicData = extractAtomicTruthJSON(atomicMsg.content);
+        if (atomicData?.elements && atomicData.elements.length > 0) {
+          runValidation(atomicData.elements);
+        }
+      }
     }
     setLoadingMessages(false);
   };
@@ -153,7 +161,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         data.map(async (f) => {
           const { data: signedData } = await supabase.storage
             .from("blueprints")
-            .createSignedUrl(f.file_path, 3600);
+            .createSignedUrl(f.file_path, 7200);
           return signedData?.signedUrl || "";
         })
       );
@@ -258,6 +266,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                   console.log(`[OCR Routing] ${pageImages.length} page images uploaded. Running Vision OCR on each...`);
                   
                   // OCR each page image individually via the lightweight ocr-image edge function
+                  let ocrFailCount = 0;
                   for (const img of pageImages) {
                     scannedPdfPageImageUrls.push(img.signedUrl);
                     try {
@@ -267,6 +276,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                       });
                       if (ocrErr) {
                         console.error(`[OCR Routing] OCR failed for page ${img.pageNumber}:`, ocrErr);
+                        ocrFailCount++;
                       } else if (ocrData?.ocr_results) {
                         clientOcrResults.push({
                           image_name: `page_${img.pageNumber}.png`,
@@ -276,7 +286,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                       }
                     } catch (ocrErr) {
                       console.error(`[OCR Routing] OCR error for page ${img.pageNumber}:`, ocrErr);
+                      ocrFailCount++;
                     }
+                  }
+                  // P1: Warn if >50% OCR pages failed
+                  if (pageImages.length > 0 && ocrFailCount / pageImages.length > 0.5) {
+                    toast.warning(`OCR failed on ${ocrFailCount}/${pageImages.length} pages. Results may be incomplete.`);
                   }
                 } catch (renderErr) {
                   console.error(`[OCR Routing] Client-side PDF rendering failed:`, renderErr);
@@ -303,11 +318,19 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       // Don't send scanned page image URLs if we already have OCR text for them
       const effectiveImageUrls = trimmedOcrResults.length > 0 ? nonPdfUrls : [...nonPdfUrls, ...scannedPdfPageImageUrls];
 
+      // P1: Get user JWT for auth
+      const { data: sessionData } = await supabase.auth.getSession();
+      const authToken = sessionData?.session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+      // P1: Add timeout via AbortController (5 minutes)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+
       const resp = await fetch(CHAT_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          Authorization: `Bearer ${authToken}`,
         },
         body: JSON.stringify({
           messages: chatMessages,
@@ -321,7 +344,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           features: scopeDataRef.current?.features,
           projectId,
         }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!resp.ok) {
         const errData = await resp.json().catch(() => ({ error: "AI request failed" }));
@@ -420,7 +446,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       
       return fullContent;
     },
-    [onStepChange]
+    [onStepChange, projectId]
   );
 
   // Fire-and-forget: extract learnings from chat
@@ -431,17 +457,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     if (allMessages.length < 3) return;
     messageCountSinceLastLearn.current = 0;
     
-    fetch(LEARN_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-      },
-      body: JSON.stringify({
-        messages: allMessages.slice(-10), // last 10 messages for context
-        userId: user.id,
-      }),
-    }).catch(() => {}); // fire-and-forget
+    supabase.auth.getSession().then(({ data: sess }) => {
+      const token = sess?.session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      fetch(LEARN_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          messages: allMessages.slice(-10),
+          userId: user.id,
+        }),
+      }).catch(() => {});
+    });
   }, [user]);
 
   // ── Atomic Truth Pipeline helpers ──
@@ -504,11 +533,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
   const runValidation = async (elements: any[], answers?: any[]) => {
     try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
       const resp = await fetch(VALIDATE_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ elements, userAnswers: answers }),
       });
@@ -535,11 +566,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           status: e.status,
         }));
 
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
       const resp = await fetch(PRICE_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ elements: truthElements, mode }),
       });
@@ -574,7 +607,22 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     const atomicData = extractAtomicTruthJSON(fullContent);
     if (atomicData?.elements && atomicData.elements.length > 0) {
       await runValidation(atomicData.elements);
+      return true;
     }
+    // P0: Fallback — try to extract any JSON array of elements from the response
+    try {
+      const jsonBlockMatch = fullContent.match(/```json\s*([\s\S]*?)```/);
+      if (jsonBlockMatch) {
+        const parsed = JSON.parse(jsonBlockMatch[1]);
+        const elements = parsed?.elements || (Array.isArray(parsed) ? parsed : null);
+        if (elements && elements.length > 0) {
+          console.log("[Fallback] Extracted elements from JSON code block:", elements.length);
+          await runValidation(elements);
+          return true;
+        }
+      }
+    } catch { /* fallback parse failed */ }
+    return false;
   };
 
   const handleModeSelect = async (mode: "smart" | "step-by-step", fileUrlsOverride?: string[]) => {
@@ -634,7 +682,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       });
 
       // Process Atomic Truth pipeline
-      await processAtomicTruth(fullContent);
+      const extracted = await processAtomicTruth(fullContent);
+
+      // P0: If no structured data was extracted, show a fallback message
+      if (!extracted) {
+        const fallbackMsg: Message = {
+          id: crypto.randomUUID(),
+          role: "system",
+          content: "⚠️ Estimation completed but structured output was not returned. Please try again or adjust your scope settings.",
+          created_at: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, fallbackMsg]);
+      }
 
       // Check for Finder Pass candidates
       const fpCandidates = extractFinderPassCandidates(fullContent);
@@ -644,7 +703,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         openBlueprintViewer();
       }
     } catch (err: any) {
-      toast.error(err.message || "AI analysis failed");
+      if (err.name === "AbortError") {
+        toast.error("AI analysis timed out after 5 minutes. Please retry.");
+      } else {
+        toast.error(err.message || "AI analysis failed");
+      }
     }
 
     setLoading(false);
@@ -737,7 +800,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           openBlueprintViewer();
         }
       } catch (err: any) {
-        toast.error(err.message || "AI analysis failed");
+        if (err.name === "AbortError") {
+          toast.error("AI analysis timed out after 5 minutes. Please retry.");
+        } else {
+          toast.error(err.message || "AI analysis failed");
+        }
       }
     }
 
