@@ -96,6 +96,11 @@ const Dashboard: React.FC = () => {
       .single();
 
     if (error) {
+      if (error.message?.includes("JWT expired") || error.message?.includes("Invalid Refresh Token")) {
+        toast.error("Session expired. Please sign in again.");
+        signOut();
+        return;
+      }
       toast.error("Failed to create project");
       setCreatingProject(false);
       return;
