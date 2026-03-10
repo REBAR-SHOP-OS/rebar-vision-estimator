@@ -1603,10 +1603,19 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                         if (card.action === 'upload') {
                           fileInputRef.current?.click();
                         } else if (card.action === 'exportExcel') {
+                          if (!quoteResult?.quote) {
+                            toast.error("Complete estimation first to export");
+                            return;
+                          }
                           exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData });
                           toast.success("Excel exported");
                         } else if (card.action === 'exportPdf') {
-                          sendMessage("Export to PDF");
+                          if (!quoteResult?.quote) {
+                            toast.error("Complete estimation first to export");
+                            return;
+                          }
+                          exportPdfFile({ quoteResult, elements: validationData?.elements || [], scopeData, projectId: currentProjectId });
+                          toast.success("PDF exported");
                         } else if (card.sendText) {
                           sendMessage(card.sendText);
                         }
