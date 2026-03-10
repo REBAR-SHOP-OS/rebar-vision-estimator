@@ -332,16 +332,21 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         }
       }
       // Trim OCR results to reduce payload size — keep only fullText (skip verbose blocks)
+      // Budget: ~300KB for OCR text total, spread across pages
+      const MAX_OCR_PAYLOAD_CHARS = 300_000;
+      const perPageLimit = clientOcrResults.length > 0
+        ? Math.min(4000, Math.floor(MAX_OCR_PAYLOAD_CHARS / clientOcrResults.length))
+        : 4000;
       const trimmedOcrResults = clientOcrResults.map(item => ({
         image_name: item.image_name,
         ocr_results: item.ocr_results.map((pass: any) => ({
           pass: pass.pass,
           engine: pass.engine,
           preprocess: pass.preprocess,
-          fullText: (pass.fullText || "").substring(0, 4000),
-          blocks: [], // skip blocks to save payload space — fullText is sufficient
+          fullText: (pass.fullText || "").substring(0, perPageLimit),
         })),
       }));
+      console.log(`[Payload] OCR pages: ${clientOcrResults.length}, per-page limit: ${perPageLimit} chars`);
 
       // Don't send scanned page image URLs if we already have OCR text for them
       const effectiveImageUrls = trimmedOcrResults.length > 0 ? nonPdfUrls : [...nonPdfUrls, ...scannedPdfPageImageUrls];
