@@ -43,6 +43,13 @@ interface Message {
   files?: MessageFile[];
 }
 
+interface PreComputedPdfData {
+  effectiveImageUrls: string[];
+  effectivePreExtracted: any[];
+  trimmedOcrResults: any[];
+  knowledgeContext: any;
+}
+
 interface ChatAreaProps {
   projectId: string;
   initialFiles?: File[] | null;
