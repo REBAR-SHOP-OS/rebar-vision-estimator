@@ -62,11 +62,18 @@ const BrainKnowledgeDialog: React.FC = () => {
   const answerInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (user) {
+      loadItems();
+      loadTrainingExamples();
+    }
+  }, [user]);
+
+  useEffect(() => {
     if (open && user) {
       loadItems();
       loadTrainingExamples();
     }
-  }, [open, user]);
+  }, [open]);
 
   const loadItems = async () => {
     setLoading(true);
