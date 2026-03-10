@@ -153,7 +153,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         data.map(async (f) => {
           const { data: signedData } = await supabase.storage
             .from("blueprints")
-            .createSignedUrl(f.file_path, 3600);
+            .createSignedUrl(f.file_path, 7200);
           return signedData?.signedUrl || "";
         })
       );
