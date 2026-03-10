@@ -510,7 +510,23 @@ export async function exportExcelFile(params: ExportParams) {
   const { scopeData } = params;
   const wb = new ExcelJS.Workbook();
 
-  buildEstimateSummarySheet(wb, params);
+  // Add logo to workbook
+  try {
+    const logoBuffer = await getLogoBuffer();
+    const logoId = wb.addImage({ buffer: logoBuffer, extension: "png" });
+    // Will be placed on Estimate Summary sheet after it's built
+    buildEstimateSummarySheet(wb, params);
+    const ws = wb.getWorksheet("Estimate Summary");
+    if (ws) {
+      ws.addImage(logoId, {
+        tl: { col: 7, row: 0 },
+        ext: { width: 60, height: 60 },
+      });
+    }
+  } catch {
+    buildEstimateSummarySheet(wb, params);
+  }
+
   buildBarListSheet(wb, params);
   buildReconciliationSheet(wb, params);
   buildAuditTraceSheet(wb, params);

@@ -170,12 +170,15 @@ tr:nth-child(even){background:#f9f9fb}
 .risk-alert td{background:#c0392b;color:#fff;font-weight:700}
 .risk-flag td{background:#e67e22;color:#fff;font-weight:700}
 .proj-header{background:#8DB4B4;padding:6px 14px;font-size:14px;font-weight:700;border:1px solid #7a9e9e;margin-bottom:10px}
+.logo-header{display:flex;align-items:center;gap:14px;margin-bottom:16px;background:#8DB4B4;padding:10px 14px;border:1px solid #7a9e9e}
+.logo-header img{height:50px;width:50px;border-radius:50%;object-fit:cover}
+.logo-header h1{margin:0;font-size:20px;color:#1a1a2e}
 </style></head><body>
 
 ${warningBanner}
 
 <!-- SECTION 1: ESTIMATE SUMMARY -->
-<div class="header"><h1>Rebar Estimation Report</h1></div>
+<div class="logo-header">${logoDataUri ? `<img src="${logoDataUri}" alt="Logo"/>` : ""}<h1>Rebar Estimation Report</h1></div>
 <div class="meta-row"><span class="label">Project Name :</span><span>${scopeData?.projectName || "—"}</span></div>
 <div class="meta-row"><span class="label">Address :</span><span>${scopeData?.address || ""}</span></div>
 <div class="meta-row"><span class="label">Engineer :</span><span>${scopeData?.engineer || ""}</span></div>
