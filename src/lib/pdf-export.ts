@@ -218,7 +218,7 @@ ${warningBanner}
 ${scopeData?.scopeItems?.length ? `<div style="margin-top:12px"><strong>SCOPE ITEMS INCLUDED</strong><ul style="margin:4px 0">${scopeData.scopeItems.map((s: string) => `<li>${s}</li>`).join("")}</ul></div>` : ""}
 
 <div style="margin-top:16px">
-  <div class="section-title" style="font-size:13px">Mesh Details</div>
+  <div class="notes-header">Mesh Details</div>
   <table style="max-width:500px"><tr><th>Location</th><th>Mesh Size</th><th>Total Area (SQFT)</th></tr>${meshHtml}</table>
 </div>
 
