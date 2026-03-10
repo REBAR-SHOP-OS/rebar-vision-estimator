@@ -1738,6 +1738,19 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               ))}
             </div>
           )}
+          <Dialog open={!!previewFile} onOpenChange={(open) => !open && setPreviewFile(null)}>
+            <DialogContent className="max-w-[90vw] max-h-[90vh] p-2 sm:p-4">
+              {previewFile && previewFile.type.startsWith("image/") ? (
+                <img src={URL.createObjectURL(previewFile)} alt={previewFile.name} className="max-h-[80vh] w-auto mx-auto rounded object-contain" />
+              ) : previewFile ? (
+                <div className="flex flex-col items-center gap-3 py-10">
+                  <FileText className="h-12 w-12 text-muted-foreground" />
+                  <p className="text-sm font-medium text-foreground">{previewFile.name}</p>
+                  <p className="text-xs text-muted-foreground">{(previewFile.size / 1024).toFixed(1)} KB</p>
+                </div>
+              ) : null}
+            </DialogContent>
+          </Dialog>
           <div
             className={`relative flex items-end gap-2 rounded-2xl border bg-chat-input p-2 shadow-sm transition-colors ${isDragging ? "border-primary ring-2 ring-primary/30" : "border-border"}`}
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
