@@ -19,7 +19,7 @@ import ValidationResults from "./ValidationResults";
 import ElementReviewPanel, { type ReviewAnswer } from "./ElementReviewPanel";
 import FinderPassReview, { type FinderCandidate, type ReviewedCandidate } from "./FinderPassReview";
 import { type ReviewStatus } from "./DrawingOverlay";
-import ScopeDefinitionPanel, { type ScopeData, type DetectionResult, buildScopeFromDetection } from "./ScopeDefinitionPanel";
+import ScopeDefinitionPanel, { type ScopeData, type DetectionResult, buildScopeFromDetection, SCOPE_ITEMS } from "./ScopeDefinitionPanel";
 import { type OverlayElement } from "./DrawingOverlay";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
