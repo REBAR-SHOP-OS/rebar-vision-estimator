@@ -666,6 +666,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       size_breakdown: {},
       total_weight_kg: summary?.total_rebar_weight_kg || totalKg,
       total_weight_lbs: summary?.total_rebar_weight_lbs || totalKg / 0.453592,
+      total_weight_tonnes: ((summary?.total_rebar_weight_kg || totalKg) / 1000),
+      total_weight_tons: ((summary?.total_rebar_weight_lbs || totalKg / 0.453592) / 2000),
       mesh_details: summary?.mesh_details || [],
       reconciliation: summary?.reconciliation || {},
       risk_flags: summary?.risk_flags || [],
