@@ -644,11 +644,11 @@ OUTPUT: You must return STRICT JSON ONLY that meets the schema. No prose outside
 const OUTPUT_FORMAT_INSTRUCTIONS = `
 ## OUTPUT FORMAT (MANDATORY)
 
-Your response MUST have TWO sections:
+Your response MUST have TWO sections. OUTPUT SECTION 2 (JSON) FIRST, then Section 1 (human-readable).
 
-### Section 1: Human-Readable Analysis
-Provide your full step-by-step analysis with tables, explanations, calculations as you currently do.
-Use markdown formatting with headers, tables, ⚠️ flags, etc.
+### Section 2: Structured JSON Block (OUTPUT THIS FIRST!)
+At the VERY BEGINNING of your response, output a JSON block wrapped in these exact markers.
+This MUST come BEFORE any human-readable analysis.
 
 ### Section 2: Structured JSON Block
 At the VERY END of your response, output a JSON block wrapped in these exact markers:
