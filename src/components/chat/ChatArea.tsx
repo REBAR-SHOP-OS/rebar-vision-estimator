@@ -1487,6 +1487,24 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             </div>
           )}
 
+          {/* Sub-step progress indicator */}
+          {subStep && (
+            <div className="py-2 px-1">
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                {["parsing", "validating", "ready"].map((step, i) => {
+                  const isDone = step === "ready" ? subStep === "ready" : (["parsing", "validating", "ready"].indexOf(subStep) > i);
+                  const isActive = subStep === step;
+                  return (
+                    <span key={step} className={`flex items-center gap-1 ${isActive ? "text-primary font-medium" : isDone ? "text-primary/70" : "text-muted-foreground/50"}`}>
+                      {isDone ? <CheckCircle className="h-3 w-3" /> : isActive ? <Loader2 className="h-3 w-3 animate-spin" /> : <span className="h-3 w-3 rounded-full border border-current inline-block" />}
+                      {step === "parsing" ? "Parsing" : step === "validating" ? "Validating" : "Ready"}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div ref={messagesEndRef} />
         </div>
       </div>
