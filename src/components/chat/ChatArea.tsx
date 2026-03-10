@@ -252,8 +252,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       fileUrls: string[],
       opts?: { preComputed?: PreComputedPdfData; scopeOverride?: ScopeData & { focusCategory?: string }; silent?: boolean }
     ) => {
+      let effectiveImageUrls: string[];
+      let effectivePreExtracted: any[];
+      let trimmedOcrResults: any[];
+      let knowledgeContext: any;
+
+      if (opts?.preComputed) {
+        // Reuse pre-computed PDF extraction data (scope-by-scope loop)
+        effectiveImageUrls = opts.preComputed.effectiveImageUrls;
+        effectivePreExtracted = opts.preComputed.effectivePreExtracted;
+        trimmedOcrResults = opts.preComputed.trimmedOcrResults;
+        knowledgeContext = opts.preComputed.knowledgeContext;
+      } else {
       // Fetch user knowledge context
-      const knowledgeContext = await fetchKnowledgeContext();
+      knowledgeContext = await fetchKnowledgeContext();
 
       // ── Pre-extract PDF text client-side (one at a time to avoid OOM in edge functions) ──
       const pdfUrls: string[] = [];
@@ -350,7 +362,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       const perPageLimit = clientOcrResults.length > 0
         ? Math.min(4000, Math.floor(MAX_OCR_PAYLOAD_CHARS / clientOcrResults.length))
         : 4000;
-      const trimmedOcrResults = clientOcrResults.map(item => ({
+      trimmedOcrResults = clientOcrResults.map(item => ({
         image_name: item.image_name,
         ocr_results: item.ocr_results.map((pass: any) => ({
           pass: pass.pass,
@@ -362,7 +374,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       console.log(`[Payload] OCR pages: ${clientOcrResults.length}, per-page limit: ${perPageLimit} chars`);
 
       // Don't send scanned page image URLs if we already have OCR text for them
-      const effectiveImageUrls = trimmedOcrResults.length > 0 ? nonPdfUrls : [...nonPdfUrls, ...scannedPdfPageImageUrls];
+      effectiveImageUrls = trimmedOcrResults.length > 0 ? nonPdfUrls : [...nonPdfUrls, ...scannedPdfPageImageUrls];
+
+      // When OCR results exist, pre_extracted_text is redundant — drop it to save payload
+      effectivePreExtracted = trimmedOcrResults.length > 0 ? [] : preExtractedText;
+      } // end of !preComputed block
 
       // P1: Get user JWT for auth
       const { data: sessionData } = await supabase.auth.getSession();
