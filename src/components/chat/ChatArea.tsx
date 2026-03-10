@@ -1709,12 +1709,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             </div>
           )}
           <div
-            className={`flex items-end gap-2 rounded-2xl border bg-chat-input p-2 shadow-sm transition-colors ${isDragging ? "border-primary ring-2 ring-primary/30" : "border-border"}`}
+            className={`relative flex items-end gap-2 rounded-2xl border bg-chat-input p-2 shadow-sm transition-colors ${isDragging ? "border-primary ring-2 ring-primary/30" : "border-border"}`}
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
             onDragEnter={(e) => { e.preventDefault(); setIsDragging(true); }}
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleDrop}
           >
+            {isDragging && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-primary/10 backdrop-blur-[2px]">
+                <div className="flex items-center gap-2 text-sm font-medium text-primary">
+                  <Upload className="h-4 w-4" />
+                  Drop files here
+                </div>
+              </div>
+            )}
             <input
               ref={fileInputRef}
               type="file"
