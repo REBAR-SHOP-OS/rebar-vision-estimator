@@ -332,16 +332,21 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         }
       }
       // Trim OCR results to reduce payload size — keep only fullText (skip verbose blocks)
+      // Budget: ~300KB for OCR text total, spread across pages
+      const MAX_OCR_PAYLOAD_CHARS = 300_000;
+      const perPageLimit = clientOcrResults.length > 0
+        ? Math.min(4000, Math.floor(MAX_OCR_PAYLOAD_CHARS / clientOcrResults.length))
+        : 4000;
       const trimmedOcrResults = clientOcrResults.map(item => ({
         image_name: item.image_name,
         ocr_results: item.ocr_results.map((pass: any) => ({
           pass: pass.pass,
           engine: pass.engine,
           preprocess: pass.preprocess,
-          fullText: (pass.fullText || "").substring(0, 4000),
-          blocks: [], // skip blocks to save payload space — fullText is sufficient
+          fullText: (pass.fullText || "").substring(0, perPageLimit),
         })),
       }));
+      console.log(`[Payload] OCR pages: ${clientOcrResults.length}, per-page limit: ${perPageLimit} chars`);
 
       // Don't send scanned page image URLs if we already have OCR text for them
       const effectiveImageUrls = trimmedOcrResults.length > 0 ? nonPdfUrls : [...nonPdfUrls, ...scannedPdfPageImageUrls];
@@ -355,13 +360,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       abortControllerRef.current = controller;
       const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
 
-      const resp = await fetch(CHAT_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({
+      const payloadObj = {
           messages: chatMessages,
           mode,
           fileUrls: effectiveImageUrls,
@@ -372,7 +371,33 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           primaryCategory: scopeDataRef.current?.primaryCategory,
           features: scopeDataRef.current?.features,
           projectId,
-        }),
+      };
+      let payloadStr = JSON.stringify(payloadObj);
+      const payloadKB = Math.round(payloadStr.length / 1024);
+      console.log(`[Payload] Total size: ${payloadKB} KB`);
+
+      // If still over 450KB, aggressively trim OCR text
+      if (payloadStr.length > 450 * 1024 && payloadObj.pre_ocr_results.length > 0) {
+        const excess = payloadStr.length - 400 * 1024;
+        const charsToTrim = Math.ceil(excess / payloadObj.pre_ocr_results.length);
+        for (const item of payloadObj.pre_ocr_results) {
+          for (const pass of item.ocr_results) {
+            if (pass.fullText.length > 500) {
+              pass.fullText = pass.fullText.substring(0, Math.max(500, pass.fullText.length - charsToTrim));
+            }
+          }
+        }
+        payloadStr = JSON.stringify(payloadObj);
+        console.log(`[Payload] Trimmed to: ${Math.round(payloadStr.length / 1024)} KB`);
+      }
+
+      const resp = await fetch(CHAT_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: payloadStr,
         signal: controller.signal,
       });
 
