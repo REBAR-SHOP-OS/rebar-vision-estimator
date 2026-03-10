@@ -137,7 +137,7 @@ export function exportPdfFile({ quoteResult, elements, scopeData, projectId }: P
   const projectSlug = (scopeData?.projectName || "rebar-takeoff").replace(/\s+/g, "_");
   const timestamp = new Date().toISOString();
 
-  const html = `<!DOCTYPE html><html><head><title>${projectSlug} — Estimate Report</title>
+  html = `<!DOCTYPE html><html><head><title>${projectSlug} — Estimate Report</title>
 <style>
 @page{margin:0.6in;size:letter landscape}
 *{box-sizing:border-box}
