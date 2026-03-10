@@ -2017,10 +2017,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                     { icon: 'CheckCircle', title: 'Yes, Proceed', description: 'Continue to next step', sendText: 'Yes, proceed to next stage', autoSend: true },
                     { icon: 'SlidersHorizontal', title: 'Adjust Scope', description: 'Change element types', sendText: 'I need to adjust the scope', autoSend: true },
                     { icon: 'Plus', title: 'Add More', description: 'Include more elements', sendText: 'Add more element types', autoSend: true },
-                    ...(quoteResult?.quote ? [
-                      { icon: 'FileText', title: 'Download PDF', description: 'Export PDF report', sendText: '', action: 'exportPdf' as const },
-                      { icon: 'FileSpreadsheet', title: 'Download Excel', description: 'Export spreadsheet', sendText: '', action: 'exportExcel' as const },
-                    ] : []),
                   ];
                 } else if (validationData || quoteResult) {
                   cards = [
