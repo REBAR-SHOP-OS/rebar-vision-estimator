@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 import { Button } from "@/components/ui/button";
-import { Paperclip, Send, Loader2, CheckCircle, SlidersHorizontal, Plus, Table, Download, AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle, Upload, FileQuestion, Sparkles, FileText, FileSpreadsheet } from "lucide-react";
+import { Paperclip, Send, Loader2, CheckCircle, SlidersHorizontal, Plus, Table, Download, AlertTriangle, RefreshCw, Zap, ListChecks, HelpCircle, Upload, FileQuestion, Sparkles, FileText, FileSpreadsheet, X } from "lucide-react";
 import { exportExcelFile } from "@/lib/excel-export";
 import { exportPdfFile } from "@/lib/pdf-export";
 import { getMassKgPerM } from "@/lib/rebar-weights";
@@ -59,6 +59,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const [showModePicker, setShowModePicker] = useState(false);
   const [calculationMode, setCalculationMode] = useState<"smart" | "step-by-step" | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [stagedFiles, setStagedFiles] = useState<File[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1130,9 +1131,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     }
     if (files.length > 0) {
       e.preventDefault();
-      const dt = new DataTransfer();
-      files.forEach(f => dt.items.add(f));
-      handleFileUpload({ target: { files: dt.files } } as React.ChangeEvent<HTMLInputElement>);
+      setStagedFiles(prev => [...prev, ...files]);
     }
   };
 
@@ -1140,8 +1139,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files?.length) {
-      handleFileUpload({ target: { files: e.dataTransfer.files } } as React.ChangeEvent<HTMLInputElement>);
+      setStagedFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)]);
     }
+  };
+
+  const removeStagedFile = (index: number) => {
+    setStagedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const uploadStagedFiles = async () => {
+    if (stagedFiles.length === 0) return;
+    const dt = new DataTransfer();
+    stagedFiles.forEach(f => dt.items.add(f));
+    setStagedFiles([]);
+    await handleFileUpload({ target: { files: dt.files } } as React.ChangeEvent<HTMLInputElement>);
   };
 
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -1708,6 +1719,23 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               })()}
             </div>
           )}
+          {stagedFiles.length > 0 && (
+            <div className="flex flex-wrap gap-2 rounded-xl border border-border bg-muted/30 p-2">
+              {stagedFiles.map((file, i) => (
+                <div key={i} className="relative group flex items-center gap-1.5 rounded-lg bg-background border border-border px-2 py-1.5 text-xs">
+                  {file.type.startsWith("image/") ? (
+                    <img src={URL.createObjectURL(file)} alt={file.name} className="h-10 w-10 rounded object-cover flex-shrink-0" />
+                  ) : (
+                    <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                  )}
+                  <span className="truncate max-w-[120px] text-foreground">{file.name}</span>
+                  <button onClick={() => removeStagedFile(i)} className="ml-1 text-muted-foreground hover:text-destructive">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <div
             className={`relative flex items-end gap-2 rounded-2xl border bg-chat-input p-2 shadow-sm transition-colors ${isDragging ? "border-primary ring-2 ring-primary/30" : "border-border"}`}
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -1751,8 +1779,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none min-h-[36px] max-h-[200px] py-2"
             />
             <Button
-              onClick={() => sendMessage()}
-              disabled={(!input.trim() && !showModePicker) || loading}
+              onClick={() => {
+                if (stagedFiles.length > 0) uploadStagedFiles();
+                else sendMessage();
+              }}
+              disabled={(!input.trim() && !showModePicker && stagedFiles.length === 0) || loading}
               size="icon"
               className="h-9 w-9 flex-shrink-0 rounded-xl"
             >
