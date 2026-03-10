@@ -1,38 +1,46 @@
 
 
-## Plan: Align PDF Export to Match Excel Two-Sheet Layout
+## Plan: Always Show Brain Knowledge Count Badge
 
 ### Problem
-The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
+The brain icon's count badge only appears after clicking it because knowledge data is fetched only when the dialog opens (`useEffect` fires on `open && user`). Before clicking, `items` is empty so the badge shows nothing.
 
-### Changes
+### Fix (single file: `src/components/chat/BrainKnowledgeDialog.tsx`)
 
-**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
+#### 1. Fetch counts on mount (not just when dialog opens)
+Add a separate `useEffect` that runs on component mount (when `user` is available) to load the item counts, so the badge is visible immediately without opening the dialog.
 
-Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
+Change line 64-69 from:
+```typescript
+useEffect(() => {
+  if (open && user) {
+    loadItems();
+    loadTrainingExamples();
+  }
+}, [open, user]);
+```
 
-**Section 1: "Estimate Summary"** (page 1)
-- Project header: Project Name, Address, Engineer, Customer, Product Line
-- "Estimate Summary" title
-- Side-by-side tables using CSS grid/flexbox:
-  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
-  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
-- NOTES section: Grade, Lap Length Info, Deviations, Coating
-- Scope Items (if any)
-- MESH DETAILS table
+To:
+```typescript
+// Load counts on mount so badge is always visible
+useEffect(() => {
+  if (user) {
+    loadItems();
+    loadTrainingExamples();
+  }
+}, [user]);
 
-**Section 2: "Bar List"** (page 2+, page-break-before)
-- Project header
-- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
-- Rows grouped by element type headers (bold row spanning columns)
-- Sub-element sub-headers
-- Bar rows with identification string (`{size} @ {spacing} {description}`)
-- TOTAL WEIGHT + TOTAL (Tons) footer rows
-- MESH DETAILS at bottom
-
-The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
+// Refresh when dialog opens
+useEffect(() => {
+  if (open && user) {
+    loadItems();
+    loadTrainingExamples();
+  }
+}, [open]);
+```
 
 ### Scope
-- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
-- No new files, no backend changes
+- 1 file, ~3 lines changed
+- No backend changes
+- Badge will show the correct count immediately on page load
 
