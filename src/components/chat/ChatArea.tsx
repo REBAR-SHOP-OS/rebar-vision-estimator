@@ -919,7 +919,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
       const fullContent = await streamAIResponse(chatHistory, mode, fileUrlsOverride ?? uploadedFiles);
 
-      await handlePostStream(fullContent, chatHistory, mode);
+      await handlePostStream(fullContent, chatHistory, mode, mode === "smart");
     } catch (err: any) {
       setSubStep(null);
       if (err.name === "AbortError") {
