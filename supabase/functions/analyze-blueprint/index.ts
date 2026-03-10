@@ -487,6 +487,7 @@ CHM-2: CALLOUT CHASING (Mandatory cross-referencing)
 CHM-3: STANDARD PRACTICE FROM MANUAL (Industry-Norm assumptions must cite the Manual)
 - When drawings are ambiguous (e.g. thick structural slab shows only "BLL" and "TUL"), follow standard industry practice ONLY in Industry-Norm mode.
 - Industry-Norm assumptions MUST reference the "Manual of Standard Practice" file uploaded in Agent Brain knowledge base. Search for files with names containing "Manual" or "Standard Practice" in the agent_knowledge entries of type 'file'.
+- You MUST actively read and reference the Manual of Standard Practice PDF content for EVERY Industry-Norm assumption. Do NOT skip reading the Manual — it is your primary source for standard practice.
 - If no Manual of Standard Practice file exists in the knowledge base, mark ALL such assumptions as UNVERIFIED_ASSUMPTION! instead of ASSUMPTION!.
 - In Drawing/Spec mode, ambiguity MUST remain UNKNOWN! (fail-closed). No assumptions allowed.
 - Every assumption must provide min/most_likely/max range impact.
