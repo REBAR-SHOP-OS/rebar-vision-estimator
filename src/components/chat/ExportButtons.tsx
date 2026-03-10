@@ -6,6 +6,7 @@ import ShopDrawingModal from "./ShopDrawingModal";
 import ShareReviewDialog from "./ShareReviewDialog";
 import { getMassKgPerM, kgToLbs } from "@/lib/rebar-weights";
 import { exportExcelFile } from "@/lib/excel-export";
+import { exportPdfFile } from "@/lib/pdf-export";
 import { toast } from "sonner";
 
 interface ExportButtonsProps {
