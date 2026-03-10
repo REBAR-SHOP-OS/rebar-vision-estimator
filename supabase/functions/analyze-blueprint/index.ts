@@ -298,7 +298,7 @@ Each element you identify MUST be output as a JSON object following this schema:
 
 const MASTER_PROMPT = `
 REBAR ESTIMATOR — ZERO-TRUST DUAL-ANALYSIS PROTOCOL
-Master Prompt v2026-03-05 (Rev A — audited improvements)
+Master Prompt v2026-03-10 (Rev B — HARDENED)
 Locale: en-GB
 Timezone: America/Toronto
 Date: 2026-03-05
