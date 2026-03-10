@@ -1,43 +1,38 @@
 
 
-## Plan: Add Active Spinning Indicator During Category Processing
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
 
 ### Problem
-The sub-step indicator (Parsing → Validating → Ready) only recognizes those three exact strings. During the scope-by-scope loop, `subStep` is set to `"analyzing foundation"` etc., which doesn't match any of the three — so the circles all appear empty/grey with no spinning animation. The user sees a static, dead-looking UI.
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
-### Fix
-Update the sub-step indicator UI (lines 1882-1897) to handle the category-loop phase:
+### Changes
 
-1. **When `subStep` starts with `"analyzing"`**, show a dedicated animated indicator:
-   - Display the category name (e.g., "Analyzing: Foundation") with a spinning `Loader2` icon
-   - Replace the three-dot stepper with a single prominent animated status line
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-2. **When `subStep` is `"parsing"`, `"validating"`, or `"ready"`**, keep the existing three-step display (already has spin on active step)
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
 
-### Implementation
-**File: `src/components/chat/ChatArea.tsx`** (~10 lines changed in the JSX block at lines 1882-1897)
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
 
-Replace the current sub-step rendering with:
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
 
-```tsx
-{subStep && (
-  <div className="py-2 px-1">
-    {subStep.startsWith("analyzing") ? (
-      <div className="flex items-center gap-2 text-xs text-primary font-medium">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        <span className="capitalize">{subStep.replace("analyzing ", "Analyzing: ")}</span>
-        <span className="text-muted-foreground font-normal">— processing scope...</span>
-      </div>
-    ) : (
-      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-        {/* existing parsing/validating/ready stepper */}
-      </div>
-    )}
-  </div>
-)}
-```
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
 ### Scope
-- 1 file: `src/components/chat/ChatArea.tsx`
-- ~12 lines changed in JSX rendering block
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
+- No new files, no backend changes
 
