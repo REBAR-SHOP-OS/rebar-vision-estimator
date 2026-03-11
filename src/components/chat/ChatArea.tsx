@@ -1128,6 +1128,22 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       content: msgContent,
     });
 
+    // Detect "save to brain" intent
+    const saveBrainPattern = /\b(save\s*(?:this|it)?(?:\s*to\s*(?:brain|memory))?|remember\s*this|add\s*to\s*brain|don'?t\s*forget|save\s*to\s*memory)\b/i;
+    if (saveBrainPattern.test(msgContent)) {
+      const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+      if (lastAssistant?.content) {
+        supabase.auth.getSession().then(({ data: sess }) => {
+          const token = sess?.session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+          fetch(LEARN_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ userId: user.id, manualInsight: lastAssistant.content.substring(0, 2000) }),
+          }).then(() => toast.success("💾 Saved to Agent Brain")).catch(() => toast.error("Failed to save to brain"));
+        });
+      }
+    }
+
     // If user clicks "Yes, Proceed" and we already have validation data, skip re-analysis and go to pricing
     if (validationData?.elements && /yes.*proceed|proceed.*next/i.test(msgContent)) {
       try {
