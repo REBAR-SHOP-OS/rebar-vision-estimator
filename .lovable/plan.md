@@ -1,59 +1,38 @@
 
 
-## Plan: Intelligent Learned Rules — Dedup, Merge, and Chat-Triggered Save
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
+
+### Problem
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
 ### Changes
 
-**File: `supabase/functions/extract-learning/index.ts`** — rewrite lines 94-116
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-After extracting `learningText`, add smart dedup/merge:
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
 
-1. **Fetch existing rules** for the user (`type: "learned"`)
-2. **Second AI call** (upgraded to `gemini-2.5-flash`) that compares new learnings against existing ones and returns a JSON array of actions:
-   - `skip` — semantically duplicate, do nothing
-   - `merge` — refines an existing rule, return merged content + target ID → `UPDATE`
-   - `insert` — truly novel → `INSERT`
-3. **Execute** skip/merge/insert loop instead of blind insert
-4. **Remove** the old cap-50-delete-oldest logic (dedup makes it unnecessary; keep a safety cap of 50 but only delete if inserts push past it)
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
 
-**File: `supabase/functions/extract-learning/index.ts`** — accept optional `manualInsight` field
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
 
-Add support for a `manualInsight` string in the request body. When present, skip the extraction AI call entirely and use `manualInsight` as the learning text, then run it through the same dedup/merge pipeline. This enables "Save to Brain" from chat.
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
-**File: `src/components/chat/ChatArea.tsx`** — detect "save/remember" intent in user messages
-
-Add a simple intent detector: if the user's message matches patterns like "save this", "remember this", "add to brain", "don't forget", "save to memory" — extract the assistant's last response and fire a call to `LEARN_URL` with `manualInsight` set to a summary of what the user wants saved. Show a toast confirming "Saved to Agent Brain".
-
-### Dedup Prompt (inside edge function)
-
-```
-You have EXISTING learned rules and NEW learnings. For each new learning, decide:
-
-EXISTING RULES:
-[ID:uuid1] Always check general notes for lap splice info
-[ID:uuid2] ...
-
-NEW LEARNINGS:
-1. Always verify lap splice lengths in general notes
-
-Respond with ONLY a JSON array:
-[{ "action": "skip|merge|insert", "target_id": "uuid (for merge)", "content": "final text (for merge/insert)", "reason": "brief" }]
-
-Rules:
-- "skip" if semantically identical (even different wording)
-- "merge" if it refines/extends existing — combine into ONE stronger statement
-- "insert" only if truly novel
-- For critical corrections, use ALWAYS/NEVER language
-- Strip any project-specific data (sheet numbers, dimensions, names)
-```
-
-### Files to Change
-- `supabase/functions/extract-learning/index.ts` — dedup/merge logic + manual insight support (~50 lines net)
-- `src/components/chat/ChatArea.tsx` — "save to brain" intent detection (~15 lines)
-
-### Impact
-- No more duplicate learned rules
-- Related insights consolidated into stronger statements
-- Users can explicitly say "remember this" or "save to brain" in chat
-- Critical corrections reinforced with absolute language
+### Scope
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
+- No new files, no backend changes
 

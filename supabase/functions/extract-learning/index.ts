@@ -12,10 +12,13 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, userId } = await req.json();
+    const { messages, userId, manualInsight } = await req.json();
 
-    if (!userId || !messages || messages.length < 3) {
-      return new Response(JSON.stringify({ skipped: true, reason: "Not enough messages" }), {
+    // manualInsight bypasses extraction — goes straight to dedup
+    const hasManual = typeof manualInsight === "string" && manualInsight.trim().length > 0;
+
+    if (!userId || (!hasManual && (!messages || messages.length < 3))) {
+      return new Response(JSON.stringify({ skipped: true, reason: "Not enough data" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -27,8 +30,13 @@ serve(async (req) => {
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Ask AI to extract key learnings
-    const extractPrompt = `You are an expert at extracting useful knowledge from construction estimation conversations.
+    let learningText: string;
+
+    if (hasManual) {
+      learningText = manualInsight!.trim();
+    } else {
+      // Step 1: Extract learnings from conversation
+      const extractPrompt = `You are an expert at extracting useful knowledge from construction estimation conversations.
 
 Analyze the following conversation between a user and an AI rebar estimator. Extract 1-3 concise, actionable learnings that would help the AI perform better in future projects.
 
@@ -47,83 +55,183 @@ CRITICAL SANITIZATION RULES:
 - Good example: "Always check for lap splice notes in general notes section"
 - Bad example: "The retaining wall on S-2 is 74m long with 300mm stem"
 
+When the user explicitly corrects the AI, use strong absolute language:
+- Use "ALWAYS" or "NEVER" for critical corrections
+- Example: "NEVER assume default lap lengths without checking general notes first"
+
 Format each learning as a single clear sentence. If no useful learning can be extracted, respond with "NONE".
 
 Conversation:
 ${messages.map((m: any) => `${m.role}: ${m.content?.substring(0, 500)}`).join("\n\n")}`;
 
-    const aiStart = performance.now();
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const aiStart = performance.now();
+      const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash-lite",
+          messages: [
+            { role: "system", content: "Extract concise learnings from conversations. Be brief and actionable." },
+            { role: "user", content: extractPrompt },
+          ],
+          temperature: 0,
+          top_p: 1,
+          max_tokens: 1024,
+        }),
+      });
+
+      const aiLatency = Math.round(performance.now() - aiStart);
+      console.log(JSON.stringify({ route: "extract-learning", step: "extract", latency_ms: aiLatency, success: aiResponse.ok }));
+
+      if (!aiResponse.ok) {
+        console.error("AI extraction failed:", aiResponse.status);
+        return new Response(JSON.stringify({ error: "AI extraction failed" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const aiData = await aiResponse.json();
+      learningText = aiData.choices?.[0]?.message?.content?.trim() || "";
+
+      if (!learningText || learningText === "NONE") {
+        return new Response(JSON.stringify({ skipped: true, reason: "No useful learning" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    // Step 2: Fetch existing learned rules for dedup
+    const { data: existingRules } = await supabaseAdmin
+      .from("agent_knowledge")
+      .select("id, content")
+      .eq("user_id", userId)
+      .eq("type", "learned");
+
+    // Step 3: Smart dedup/merge via AI
+    const dedupPrompt = `You have EXISTING learned rules and NEW learnings. For each new learning, decide what to do.
+
+EXISTING RULES:
+${existingRules?.map((r) => `[ID:${r.id}] ${r.content}`).join("\n") || "None"}
+
+NEW LEARNINGS:
+${learningText}
+
+For each new learning, respond with ONLY a JSON array:
+[{ "action": "skip|merge|insert", "target_id": "uuid (only for merge)", "content": "final text (for merge/insert)", "reason": "brief explanation" }]
+
+Rules:
+- "skip" if semantically identical to an existing rule (even with different wording/naming)
+- "merge" if it refines, extends, or strengthens an existing rule — combine BOTH into ONE stronger statement. Use the existing rule's ID as target_id.
+- "insert" only if truly novel and not covered by any existing rule
+- When merging, preserve ALL insights from both old and new
+- For critical user corrections, use ALWAYS/NEVER language
+- Strip any project-specific data (sheet numbers, dimensions, project names)
+- Respond with ONLY the JSON array, nothing else`;
+
+    const dedupStart = performance.now();
+    const dedupResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${LOVABLE_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash-lite",
+        model: "google/gemini-2.5-flash",
         messages: [
-          { role: "system", content: "Extract concise learnings from conversations. Be brief and actionable." },
-          { role: "user", content: extractPrompt },
+          { role: "system", content: "You are a deduplication engine. Respond ONLY with a valid JSON array." },
+          { role: "user", content: dedupPrompt },
         ],
         temperature: 0,
         top_p: 1,
-        max_tokens: 1024,
+        max_tokens: 2048,
       }),
     });
 
-    const aiLatency = Math.round(performance.now() - aiStart);
-    console.log(JSON.stringify({ route: "extract-learning", provider: "google/gemini", gateway: "lovable-ai", pinned_model: "google/gemini-2.5-flash-lite", latency_ms: aiLatency, success: aiResponse.ok, fallback_used: false }));
+    const dedupLatency = Math.round(performance.now() - dedupStart);
+    console.log(JSON.stringify({ route: "extract-learning", step: "dedup", latency_ms: dedupLatency, success: dedupResponse.ok }));
 
-    if (!aiResponse.ok) {
-      console.error("AI extraction failed:", aiResponse.status);
-      return new Response(JSON.stringify({ error: "AI extraction failed" }), {
-        status: 500,
+    if (!dedupResponse.ok) {
+      // Fallback: insert as before if dedup fails
+      console.error("Dedup AI failed, falling back to direct insert");
+      await supabaseAdmin.from("agent_knowledge").insert({
+        user_id: userId,
+        title: "Auto-learned (methodology only)",
+        content: `[Methodology only]: ${learningText}`,
+        type: "learned",
+      });
+      return new Response(JSON.stringify({ success: true, fallback: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const aiData = await aiResponse.json();
-    const learningText = aiData.choices?.[0]?.message?.content?.trim();
+    const dedupData = await dedupResponse.json();
+    let rawContent = dedupData.choices?.[0]?.message?.content?.trim() || "[]";
+    // Strip markdown code fences if present
+    rawContent = rawContent.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
 
-    if (!learningText || learningText === "NONE") {
-      return new Response(JSON.stringify({ skipped: true, reason: "No useful learning" }), {
+    let actions: any[];
+    try {
+      actions = JSON.parse(rawContent);
+    } catch {
+      console.error("Failed to parse dedup response:", rawContent);
+      // Fallback: insert directly
+      await supabaseAdmin.from("agent_knowledge").insert({
+        user_id: userId,
+        title: "Auto-learned (methodology only)",
+        content: `[Methodology only]: ${learningText}`,
+        type: "learned",
+      });
+      return new Response(JSON.stringify({ success: true, fallback: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Check existing learned items count
-    const { data: existing } = await supabaseAdmin
-      .from("agent_knowledge")
-      .select("id, created_at")
-      .eq("user_id", userId)
-      .eq("type", "learned")
-      .order("created_at", { ascending: true });
+    // Step 4: Execute actions
+    let inserted = 0, merged = 0, skipped = 0;
 
-    // If at limit, delete oldest
-    if (existing && existing.length >= 50) {
-      const toDelete = existing.slice(0, existing.length - 49);
-      for (const item of toDelete) {
-        await supabaseAdmin.from("agent_knowledge").delete().eq("id", item.id);
+    for (const action of actions) {
+      if (action.action === "skip") {
+        skipped++;
+      } else if (action.action === "merge" && action.target_id && action.content) {
+        await supabaseAdmin
+          .from("agent_knowledge")
+          .update({ content: `[Methodology only]: ${action.content}` })
+          .eq("id", action.target_id)
+          .eq("user_id", userId);
+        merged++;
+      } else if (action.action === "insert" && action.content) {
+        // Safety cap: check count before inserting
+        const currentCount = existingRules?.length || 0;
+        if (currentCount + inserted >= 50) {
+          // Delete oldest to make room
+          const { data: oldest } = await supabaseAdmin
+            .from("agent_knowledge")
+            .select("id")
+            .eq("user_id", userId)
+            .eq("type", "learned")
+            .order("created_at", { ascending: true })
+            .limit(1);
+          if (oldest?.[0]) {
+            await supabaseAdmin.from("agent_knowledge").delete().eq("id", oldest[0].id);
+          }
+        }
+        await supabaseAdmin.from("agent_knowledge").insert({
+          user_id: userId,
+          title: "Auto-learned (methodology only)",
+          content: `[Methodology only]: ${action.content}`,
+          type: "learned",
+        });
+        inserted++;
       }
     }
 
-    // Save new learning with methodology-only prefix
-    const { error } = await supabaseAdmin.from("agent_knowledge").insert({
-      user_id: userId,
-      title: "Auto-learned (methodology only)",
-      content: learningText,
-      type: "learned",
-    });
+    console.log(JSON.stringify({ route: "extract-learning", inserted, merged, skipped }));
 
-    if (error) {
-      console.error("Failed to save learning:", error);
-      return new Response(JSON.stringify({ error: "Failed to save" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    return new Response(JSON.stringify({ success: true }), {
+    return new Response(JSON.stringify({ success: true, inserted, merged, skipped }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
