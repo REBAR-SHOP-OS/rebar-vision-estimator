@@ -33,10 +33,19 @@ serve(async (req) => {
 Analyze the following conversation between a user and an AI rebar estimator. Extract 1-3 concise, actionable learnings that would help the AI perform better in future projects.
 
 Focus on:
-- User corrections to AI estimates (dimensions, counts, methods)
-- Project-specific patterns or preferences
+- User corrections to AI estimates (methodology, calculation approach)
+- General patterns or preferences (NOT project-specific values)
 - Calculation methodology improvements
 - Common mistakes to avoid
+
+CRITICAL SANITIZATION RULES:
+- Do NOT include any project-specific sheet numbers (e.g. "S-2", "S-5", "page 3")
+- Do NOT include any project-specific dimensions, lengths, or quantities (e.g. "74m", "2500mm", "8 columns")
+- Do NOT include any project names, addresses, or client names
+- Do NOT include any element IDs specific to a project (e.g. "F1", "W3", "C2")
+- ONLY extract generalizable METHODOLOGY insights that apply across ALL projects
+- Good example: "Always check for lap splice notes in general notes section"
+- Bad example: "The retaining wall on S-2 is 74m long with 300mm stem"
 
 Format each learning as a single clear sentence. If no useful learning can be extracted, respond with "NONE".
 
@@ -98,10 +107,10 @@ ${messages.map((m: any) => `${m.role}: ${m.content?.substring(0, 500)}`).join("\
       }
     }
 
-    // Save new learning
+    // Save new learning with methodology-only prefix
     const { error } = await supabaseAdmin.from("agent_knowledge").insert({
       user_id: userId,
-      title: "Auto-learned",
+      title: "Auto-learned (methodology only)",
       content: learningText,
       type: "learned",
     });
