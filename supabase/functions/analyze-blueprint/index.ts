@@ -1104,10 +1104,16 @@ Before outputting your final answer, you MUST:
       systemPrompt = trainingBlock + systemPrompt;
     }
 
-    // 3. Prepend Learned Rules (BEFORE training examples)
+    // 3. Prepend Learned Rules (BEFORE training examples) — methodology only, no project-specific data
     if (knowledgeContext?.learnedRules?.length > 0) {
-      const learnedBlock = knowledgeContext.learnedRules.join("\n\n");
-      systemPrompt = `## LEARNED FROM PREVIOUS CONVERSATIONS (Apply these insights — they reflect past corrections)\n${learnedBlock}\n\n---\n\n${systemPrompt}`;
+      const learnedBlock = knowledgeContext.learnedRules.map((r: string) => `[Methodology only]: ${r}`).join("\n\n");
+      systemPrompt = `## LEARNED FROM PREVIOUS CONVERSATIONS (Apply these METHODOLOGY insights only — they reflect past corrections)
+⚠️ CRITICAL DATA ISOLATION RULE: These learned rules are from DIFFERENT projects.
+ANY sheet numbers, element IDs, dimensions, quantities, or project details mentioned below are from PREVIOUS projects and MUST NOT be used as evidence for THIS project.
+Use these ONLY for general methodology/approach — NEVER for specific data points.
+You are analyzing ONLY the documents provided in THIS conversation.
+
+${learnedBlock}\n\n---\n\n${systemPrompt}`;
     }
 
     // 4. Prepend User-Defined Rules (ABSOLUTE HIGHEST PRIORITY — at the very TOP)

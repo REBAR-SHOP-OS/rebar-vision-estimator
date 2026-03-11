@@ -107,10 +107,10 @@ ${messages.map((m: any) => `${m.role}: ${m.content?.substring(0, 500)}`).join("\
       }
     }
 
-    // Save new learning
+    // Save new learning with methodology-only prefix
     const { error } = await supabaseAdmin.from("agent_knowledge").insert({
       user_id: userId,
-      title: "Auto-learned",
+      title: "Auto-learned (methodology only)",
       content: learningText,
       type: "learned",
     });

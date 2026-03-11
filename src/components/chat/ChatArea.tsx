@@ -250,10 +250,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const fetchKnowledgeContext = async (): Promise<{ rules: string[]; fileUrls: string[]; trainingExamples: { title: string; answerText: string }[]; learnedRules: string[] }> => {
     if (!user) return { rules: [], fileUrls: [], trainingExamples: [], learnedRules: [] };
     
-    // Fetch knowledge items
+    // Fetch knowledge items (filtered by user_id to prevent cross-user contamination)
     const { data } = await supabase
       .from("agent_knowledge" as any)
-      .select("*");
+      .select("*")
+      .eq("user_id", user.id);
 
     const rules: string[] = [];
     const knowledgeFileUrls: string[] = [];
