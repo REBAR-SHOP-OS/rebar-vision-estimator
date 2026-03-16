@@ -134,6 +134,17 @@ serve(async (req) => {
     const industrialKeywords = ["equipment pad", "tank", "crane beam", "industrial", "process area"];
     const commercialKeywords = ["parking", "multi-storey", "elevator", "drop panel", "flat slab", "post-tension"];
     
+    // Coating keywords
+    const coatingKeywords: { key: string; label: string }[] = [
+      { key: "epoxy", label: "EPOXY" }, { key: "epoxy-coated", label: "EPOXY" }, { key: "epoxy coated", label: "EPOXY" },
+      { key: "ecr", label: "EPOXY" },
+      { key: "galvanized", label: "GALVANISED" }, { key: "galvanised", label: "GALVANISED" },
+      { key: "stainless steel", label: "STAINLESS" }, { key: "stainless", label: "STAINLESS" },
+      { key: "mmfx", label: "MMFX" }, { key: "chromium", label: "MMFX" },
+    ];
+    const foundCoatings = coatingKeywords.filter(c => ocrLower.includes(c.key));
+    const detectedCoatingFromOCR = foundCoatings.length > 0 ? foundCoatings[0].label : "none";
+
     // Count building veto signals found
     const foundBuildingSignals = BUILDING_VETO_SIGNALS.filter(s => ocrLower.includes(s));
     const foundCageSignals = cageKeywords.filter(k => ocrLower.includes(k));
@@ -147,6 +158,7 @@ serve(async (req) => {
     if (industrialKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Industrial indicators found");
     if (commercialKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Commercial indicators found");
     if (foundBuildingSignals.length > 0) keywordHints.push(`Building signals (veto cage_only): ${foundBuildingSignals.join(", ")}`);
+    if (foundCoatings.length > 0) keywordHints.push(`Coating indicators: ${foundCoatings.map(c => c.key).join(", ")} → ${detectedCoatingFromOCR}`);
 
     // Build the detection prompt with Dominance + Veto rules
     const detectionPrompt = `Analyze these blueprint files and determine the project type using the TWO-LAYER detection system.
