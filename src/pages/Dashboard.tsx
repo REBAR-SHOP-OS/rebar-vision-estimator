@@ -457,8 +457,14 @@ const Dashboard: React.FC = () => {
               <Button variant="ghost" size="icon" onClick={() => { setShowEstimateCompare(true); setShowQuoteWorkflow(false); }} className="h-8 w-8 text-muted-foreground" title="Compare Estimates">
                 <GitCompare className="h-4 w-4" />
               </Button>
-              <Button variant="ghost" size="icon" onClick={() => { setShowQuoteWorkflow(true); setShowEstimateCompare(false); }} className="h-8 w-8 text-muted-foreground" title="Quotes">
+              <Button variant="ghost" size="icon" onClick={() => { setShowQuoteWorkflow(true); setShowEstimateCompare(false); setShowFollowUps(false); setShowRevisions(false); }} className="h-8 w-8 text-muted-foreground" title="Quotes">
                 <FileText className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => { setShowFollowUps(true); setShowQuoteWorkflow(false); setShowEstimateCompare(false); setShowRevisions(false); }} className="h-8 w-8 text-muted-foreground" title="Follow-Ups">
+                <Clock className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => { setShowRevisions(true); setShowFollowUps(false); setShowQuoteWorkflow(false); setShowEstimateCompare(false); }} className="h-8 w-8 text-muted-foreground" title="Revisions">
+                <GitBranch className="h-4 w-4" />
               </Button>
             </>
           )}
