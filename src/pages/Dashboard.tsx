@@ -447,6 +447,17 @@ const Dashboard: React.FC = () => {
           </h1>
           {/* Brain Knowledge Button */}
           <BrainKnowledgeDialog />
+          {/* Project-level actions when active */}
+          {activeProjectId && (
+            <>
+              <Button variant="ghost" size="icon" onClick={() => { setShowEstimateCompare(true); setShowQuoteWorkflow(false); }} className="h-8 w-8 text-muted-foreground" title="Compare Estimates">
+                <GitCompare className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => { setShowQuoteWorkflow(true); setShowEstimateCompare(false); }} className="h-8 w-8 text-muted-foreground" title="Quotes">
+                <FileText className="h-4 w-4" />
+              </Button>
+            </>
+          )}
           {/* Refresh Button */}
           <Button
             variant="ghost"
