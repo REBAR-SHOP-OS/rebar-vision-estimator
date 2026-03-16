@@ -432,6 +432,33 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
         {/* Rebar Coating */}
         <div>
           <Label className="text-xs font-semibold text-foreground uppercase tracking-wider mb-2 block">Rebar Coating</Label>
+          {/* Coating auto-detection banner */}
+          {normalized?.detectedCoating && normalized.detectedCoating !== "none" && (
+            <div className="flex items-center gap-3 rounded-lg bg-amber-500/10 border border-amber-500/30 p-3 mb-2">
+              <AlertTriangle className="h-4 w-4 text-amber-500 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                  Coating detected from drawings: <strong>
+                    {normalized.detectedCoating === "EPOXY" ? "Epoxy-Coated" :
+                     normalized.detectedCoating === "GALVANISED" ? "Galvanized" :
+                     normalized.detectedCoating === "STAINLESS" ? "Stainless Steel" :
+                     normalized.detectedCoating === "MMFX" ? "MMFX / High-Strength" :
+                     normalized.detectedCoating}
+                  </strong> — pricing multiplier (
+                    {normalized.detectedCoating === "EPOXY" ? "1.20" :
+                     normalized.detectedCoating === "GALVANISED" ? "1.35" :
+                     normalized.detectedCoating === "STAINLESS" ? "6.0" :
+                     normalized.detectedCoating === "MMFX" ? "1.50" : "1.0"}x) will apply
+                </p>
+              </div>
+              <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-600 dark:text-amber-400">
+                {normalized.detectedCoating === "EPOXY" ? "ECR" :
+                 normalized.detectedCoating === "GALVANISED" ? "GALV" :
+                 normalized.detectedCoating === "STAINLESS" ? "SS" :
+                 normalized.detectedCoating}
+              </Badge>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-1.5">
             {REBAR_COATING_TYPES.map((coating) => (
               <label
