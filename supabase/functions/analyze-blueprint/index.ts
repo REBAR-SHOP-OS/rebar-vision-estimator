@@ -489,8 +489,13 @@ CHM-1: GRANULARITY (No "Total Perimeter" shortcuts)
 - You MUST break the project into the exact plan-defined segments and IDs (e.g. F1, F1a, F2.1, W1, GB1, S1).
 - Compute takeoff per segment and then sum. Every segment must have evidence_refs.
 
-CHM-2: CALLOUT CHASING (Mandatory cross-referencing)
+CHM-2: CALLOUT CHASING + DOCUMENT HIERARCHY (Mandatory cross-referencing — implements Layer 4)
 - You MUST cross-reference ALL plan callouts to details/schedules/notes (e.g. "F1/S10", "GB2/S12").
+- Apply the Layer 4 Hierarchy of Documents at every cross-reference:
+  Specific Detail > Section Cut > Plan View > General Notes > Specifications
+  • If the referenced detail specifies values, those values govern (even if different from general notes).
+  • If the referenced detail is SILENT on a parameter (e.g., bar size not shown), AUTOMATICALLY apply the General Notes default for that parameter. Do NOT leave it UNKNOWN if a general note default exists.
+  • If the referenced detail CONTRADICTS a general note, the detail governs. Record both values.
 - No scope can be considered "missing" until you have:
   1) Searched the referenced detail sheets
   2) Searched typical details
