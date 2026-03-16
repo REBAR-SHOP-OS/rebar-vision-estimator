@@ -394,7 +394,7 @@ function buildFallbackResult() {
     primaryCategory: "commercial",
     features: { hasCageAssembly: false, hasBarListTable: false },
     evidence: { buildingSignals: [], cageSignals: [], barListSignals: [] },
-    recommendedScope: ["FOOTING", "GRADE_BEAM", "RAFT_SLAB", "PIER", "BEAM", "COLUMN", "SLAB", "STAIR", "WALL", "RETAINING_WALL", "ICF_WALL", "CMU_WALL", "WIRE_MESH"],
+    recommendedScope: ["PILE", "CAISSON", "GRADE_BEAM", "FOOTING", "RAFT_SLAB", "PIER", "ELEVATOR_PIT", "SUMP_PIT", "SLAB_ON_GRADE", "THICKENED_EDGE", "TRENCH_DRAIN", "EQUIPMENT_PAD", "WIRE_MESH", "COLUMN", "BEAM", "ELEVATED_SLAB", "STAIR", "SHEAR_WALL", "CAGE", "CMU_WALL", "BOND_BEAM", "MASONRY_DOWEL", "RETAINING_WALL", "ICF_WALL", "LIGHT_POLE_BASE", "TRANSFORMER_PAD", "SITE_PAVING"],
     detectedStandard: "unknown",
     confidencePrimary: 0,
     confidence: 0,
