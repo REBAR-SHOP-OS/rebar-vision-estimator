@@ -20,7 +20,8 @@ Deno.serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
 
-    const { data: claims, error: claimsErr } = await supabase.auth.getClaims(authHeader.replace("Bearer ", ""));
+    const token = authHeader.replace("Bearer ", "");
+    const { data: claims, error: claimsErr } = await supabase.auth.getClaims(token);
     if (claimsErr || !claims?.claims) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     }
@@ -48,7 +49,6 @@ Deno.serve(async (req) => {
     const hasDrawings = (drawingCount || 0) > 0;
 
     if (hasRealScope && hasDrawings) {
-      // Real project scope
       await supabase.from("audit_log").insert({
         user_id: userId,
         project_id,
@@ -64,38 +64,24 @@ Deno.serve(async (req) => {
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Fallback to 20 York template
-    const { data: template } = await supabase
-      .from("scope_templates")
-      .select("scope_items, project_type, name, slug")
-      .eq("slug", "20_york")
-      .single();
-
-    const fallbackScope = template?.scope_items || [
-      "FOOTING", "GRADE_BEAM", "RAFT_SLAB", "PIER", "BEAM", "COLUMN",
-      "SLAB", "STAIR", "WALL", "RETAINING_WALL", "ICF_WALL", "CMU_WALL",
-      "WIRE_MESH", "CAGE",
-    ];
-
+    // No real scope detected — no fallback
     await supabase.from("audit_log").insert({
       user_id: userId,
       project_id,
-      action: "scope_fallback_used",
+      action: "scope_none",
       details: {
-        source_type: "fallback_20_york",
-        confidence: 0.3,
+        source_type: "none",
+        confidence: 0,
         reason: hasRealScope ? "no_drawings" : "no_scope_items",
-        template_slug: "20_york",
       },
     });
 
     return new Response(JSON.stringify({
-      source_type: "fallback_20_york",
-      scope_items: fallbackScope,
-      project_type: template?.project_type || "commercial",
-      confidence: 0.3,
-      warning: "Using fallback scope (20 York). Upload drawings for accurate scope detection.",
-      template_name: template?.name || "20 York - Standard Commercial",
+      source_type: "none",
+      scope_items: [],
+      project_type: null,
+      confidence: 0,
+      warning: "No scope detected. Upload drawings for scope extraction.",
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders });

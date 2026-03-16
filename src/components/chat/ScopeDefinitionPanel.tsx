@@ -243,15 +243,15 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
       </div>
 
       <div className="p-4 space-y-5">
-        {/* Fallback Scope Warning */}
-        {scopeSourceType === "fallback_20_york" && (
+        {/* No Scope Warning */}
+        {scopeSourceType === "none" && (
           <div className="flex items-center gap-3 rounded-lg bg-amber-500/10 border border-amber-500/30 p-3">
             <AlertTriangle className="h-4 w-4 text-amber-500 flex-shrink-0" />
             <div className="flex-1">
-              <p className="text-xs font-medium text-amber-600 dark:text-amber-400">Using fallback scope (20 York)</p>
-              <p className="text-[10px] text-muted-foreground">No real scope detected from drawings. Upload blueprints for accurate scope detection.</p>
+              <p className="text-xs font-medium text-amber-600 dark:text-amber-400">No scope detected</p>
+              <p className="text-[10px] text-muted-foreground">Upload drawings for automatic scope extraction. Estimation blocked until scope is available.</p>
             </div>
-            <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-600 dark:text-amber-400">Fallback</Badge>
+            <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-600 dark:text-amber-400">No Scope</Badge>
           </div>
         )}
         {/* Detection Banner */}

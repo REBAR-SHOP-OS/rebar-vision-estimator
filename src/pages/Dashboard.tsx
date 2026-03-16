@@ -27,6 +27,9 @@ interface Project {
   name: string;
   status: string;
   created_at: string;
+  workflow_status?: string;
+  linkage_score?: string;
+  intake_complete?: boolean;
 }
 
 const Dashboard: React.FC = () => {
@@ -292,10 +295,39 @@ const Dashboard: React.FC = () => {
               ) : (
                 <>
                   <span className="truncate flex-1">{project.name}</span>
-                  {(project as any).intake_complete === false && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-medium flex-shrink-0">intake</span>
+                  {project.linkage_score && (
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${
+                      project.linkage_score === "L3" ? "bg-primary/15 text-primary" :
+                      project.linkage_score === "L2" ? "bg-blue-500/15 text-blue-600 dark:text-blue-400" :
+                      project.linkage_score === "L1" ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" :
+                      "bg-muted text-muted-foreground"
+                    }`}>{project.linkage_score}</span>
+                  )}
+                  {project.workflow_status && project.workflow_status !== "estimated" && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-medium flex-shrink-0">
+                      {project.workflow_status === "intake" ? "intake" :
+                       project.workflow_status === "files_uploaded" ? "files" :
+                       project.workflow_status === "drawings_indexed" ? "indexed" :
+                       project.workflow_status === "scope_detected" ? "scope" : project.workflow_status}
+                    </span>
                   )}
                   <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        toast.info("Reprocessing pipeline...");
+                        const { data, error } = await supabase.functions.invoke("process-pipeline", {
+                          body: { project_id: project.id, reprocess: true },
+                        });
+                        if (error) { toast.error("Pipeline failed"); return; }
+                        toast.success(`Pipeline: ${data?.linkage_score || "done"}`);
+                        loadProjects();
+                      }}
+                      className="hover:text-primary"
+                      title="Reprocess pipeline"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                    </button>
                     <button
                       onClick={(e) => startEditing(project.id, project.name, e)}
                       className="hover:text-primary"

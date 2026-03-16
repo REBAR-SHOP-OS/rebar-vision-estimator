@@ -877,8 +877,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         line_items: elements,
         total_estimated_cost: quote?.total_weight_kg || null,
         confidence_score: resolved.confidence || 0,
-        scope_source_type: resolved.source_type || "real_project",
-        scope_source_reference: resolved.source_type === "fallback_20_york" ? "20_york" : projectId,
+        scope_source_type: resolved.source_type || "none",
+        scope_source_reference: projectId,
         scope_confidence: resolved.confidence || 0,
         status: "draft",
       });
