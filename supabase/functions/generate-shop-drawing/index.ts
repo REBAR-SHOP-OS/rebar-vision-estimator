@@ -167,6 +167,15 @@ Return ONLY the complete HTML document, nothing else. No markdown, no explanatio
     // Strip markdown code fences if present
     html = html.replace(/^```html\s*/i, "").replace(/```\s*$/, "").trim();
 
+    console.log("AI response content length:", html.length);
+    if (!html) {
+      console.error("AI returned empty content. Response:", JSON.stringify(data).substring(0, 500));
+      throw new Error("AI returned empty HTML content");
+    }
+
+    // Inject logo data URI post-generation
+    html = html.replace(/<!-- LOGO_PLACEHOLDER -->/g, logoDataUri || "");
+
     return new Response(JSON.stringify({ html }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
