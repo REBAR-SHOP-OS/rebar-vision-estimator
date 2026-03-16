@@ -88,6 +88,7 @@ interface ScopeDefinitionPanelProps {
   disabled?: boolean;
   detectionResult?: DetectionResult | null;
   isDetecting?: boolean;
+  scopeSourceType?: string | null;
 }
 
 // Helper to normalize detection result to V2 format
