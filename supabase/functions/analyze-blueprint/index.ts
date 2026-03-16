@@ -211,7 +211,7 @@ Each element you identify MUST be output as a JSON object following this schema:
 \`\`\`json
 {
   "element_id": "string — e.g. C1, W3, F2. Pattern: ^[A-Z]+[-]?[0-9A-Z]+$",
-  "element_type": "COLUMN | WALL | FOOTING | BEAM | SLAB_STRIP | GRADE_BEAM | RAFT_SLAB | RETAINING_WALL | ICF_WALL | CMU_WALL | PIER | SLAB | STAIR | WIRE_MESH | OTHER",
+  "element_type": "PILE | CAISSON | GRADE_BEAM | FOOTING | RAFT_SLAB | PIER | ELEVATOR_PIT | SUMP_PIT | SLAB_ON_GRADE | THICKENED_EDGE | TRENCH_DRAIN | EQUIPMENT_PAD | WIRE_MESH | COLUMN | BEAM | ELEVATED_SLAB | STAIR | SHEAR_WALL | CMU_WALL | BOND_BEAM | MASONRY_DOWEL | RETAINING_WALL | ICF_WALL | LIGHT_POLE_BASE | TRANSFORMER_PAD | SITE_PAVING | CAGE | OTHER",
   "estimation_group": "LOOSE_REBAR | CAGE_ASSEMBLY — default LOOSE_REBAR for all standard elements; use CAGE_ASSEMBLY for elements from cage schedules/details",
   "sheet_refs": ["S-101", "S-301"],
   "regions": {
