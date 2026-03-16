@@ -75,6 +75,7 @@ export interface DetectionResult {
   features?: { hasCageAssembly: boolean; hasBarListTable: boolean };
   evidence?: { buildingSignals: string[]; cageSignals: string[]; barListSignals: string[] };
   confidencePrimary?: number;
+  detectedCoating?: string;
   // Legacy fields (backward compat)
   category: string;
   recommendedScope: string[];
