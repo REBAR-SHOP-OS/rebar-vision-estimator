@@ -91,9 +91,31 @@ const Dashboard: React.FC = () => {
     setCreatingProject(true);
     const projectName = files[0].name.replace(/\.[^/.]+$/, "");
 
+    // Check for duplicate projects
+    try {
+      const { data: dupCheck } = await supabase.functions.invoke("check-duplicate", {
+        body: { project_name: projectName },
+      });
+      if (dupCheck?.is_duplicate && dupCheck.matches?.length > 0) {
+        const match = dupCheck.matches[0];
+        const proceed = window.confirm(
+          `A similar project exists: "${match.name}" (${Math.round(match.similarity * 100)}% match). Create anyway?`
+        );
+        if (!proceed) {
+          setCreatingProject(false);
+          if (newProjectFileInputRef.current) newProjectFileInputRef.current.value = "";
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("Duplicate check failed, proceeding:", err);
+    }
+
+    const normalizedName = projectName.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+
     const { data, error } = await supabase
       .from("projects")
-      .insert({ user_id: user.id, name: projectName })
+      .insert({ user_id: user.id, name: projectName, normalized_name: normalizedName, workflow_status: "intake" })
       .select()
       .single();
 
