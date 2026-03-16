@@ -60,6 +60,29 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     loadProjects();
+
+    // Realtime subscription for pipeline progress
+    const channel = supabase
+      .channel('pipeline-progress')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'processing_jobs' },
+        (payload: any) => {
+          const job = payload.new;
+          if (!job) return;
+          if (job.status === 'completed') {
+            toast.success(`Pipeline complete: ${job.result?.linkage_score || 'done'}`, { description: `Workflow: ${job.result?.workflow_status || ''}` });
+            loadProjects(); // Refresh to get updated badges
+          } else if (job.status === 'failed') {
+            toast.error('Pipeline failed', { description: job.error_message?.slice(0, 100) });
+          } else if (job.status === 'processing') {
+            setProcessingPhase(`Processing... ${job.progress || 0}%`);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   useEffect(() => {
