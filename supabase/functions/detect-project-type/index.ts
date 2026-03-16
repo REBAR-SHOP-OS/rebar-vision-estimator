@@ -159,6 +159,8 @@ serve(async (req) => {
     if (residentialKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Residential indicators found");
     if (industrialKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Industrial indicators found");
     if (commercialKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Commercial indicators found");
+    if (siteKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Site/Civil/Landscape indicators found");
+    if (masonryKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Masonry/CMU indicators found");
     if (foundBuildingSignals.length > 0) keywordHints.push(`Building signals (veto cage_only): ${foundBuildingSignals.join(", ")}`);
     if (foundCoatings.length > 0) keywordHints.push(`Coating indicators: ${foundCoatings.map(c => c.key).join(", ")} → ${detectedCoatingFromOCR}`);
 
