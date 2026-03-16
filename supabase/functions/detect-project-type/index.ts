@@ -93,7 +93,7 @@ serve(async (req) => {
     let accessToken: string | null = null;
     try { accessToken = await getGoogleAccessToken(); } catch (e) { console.error("Vision token failed:", e); }
 
-    const filesToScan = fileUrls.slice(0, 2);
+    const filesToScan = fileUrls.slice(0, 6);
     const contentParts: any[] = [];
 
     for (const url of filesToScan) {
