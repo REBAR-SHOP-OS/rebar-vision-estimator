@@ -1,28 +1,38 @@
 
 
-# Improve Scope Detection for Multi-Discipline Drawings
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
 
-## Problem
+### Problem
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
-Three issues prevent accurate scope detection when both structural and architectural drawings are uploaded:
+### Changes
 
-1. **Only 2 images scanned** — `detect-project-type` slices `fileUrls` to first 2 (`fileUrls.slice(0, 2)`). If a user uploads a structural PDF (3 pages rendered) and an architectural PDF (3 pages rendered), detection only sees pages 1-2 of the structural set. The architectural drawings are never analyzed.
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-2. **No discipline identification in the prompt** — The detection prompt asks the AI to classify into categories but never instructs it to identify which discipline each page belongs to (S, A, C, L, M, E, P). Without this, the AI can't report "I found architectural elements on sheet A3.1" vs "structural elements on S2.1."
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
 
-3. **No multi-discipline conflict resolution** — When architectural drawings show CMU walls and structural drawings show footings, the prompt has no instruction to merge findings across disciplines or flag conflicts (e.g., architectural wall location vs structural detail for that wall).
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
 
-## Plan
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
 
-### 1. Increase scan coverage (`detect-project-type/index.ts`)
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
-- Change `fileUrls.slice(0, 2)` → `fileUrls.slice(0, 6)` to scan up to 6 page images (covers ~2 PDFs × 3 pages each)
-- OCR all 6 images instead of just 2
-- This ensures both structural and architectural PDFs get analyzed
+### Scope
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
+- No new files, no backend changes
 
-### 2. Add discipline detection to the prompt (`detect-project-type/index.ts`)
-
-Add a new `disciplinesFound` output field to the tool schema and update the prompt to instruct the AI to:
-- Identify each page's discipline from title block (S = Structural, A = Architectural, C = Civil, etc.)
-- Report which disciplines were found and which scope items came from each
-- Flag when scope elements are found on non-structural drawings (e.g., depressed s

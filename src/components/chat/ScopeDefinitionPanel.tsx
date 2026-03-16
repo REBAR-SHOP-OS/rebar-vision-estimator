@@ -100,6 +100,8 @@ export interface DetectionResult {
   evidence?: { buildingSignals: string[]; cageSignals: string[]; barListSignals: string[] };
   confidencePrimary?: number;
   detectedCoating?: string;
+  disciplinesFound?: { discipline: string; sheetsIdentified?: string[]; scopeContributions: string[] }[];
+  hiddenScope?: string[];
   // Legacy fields (backward compat)
   category: string;
   recommendedScope: string[];
@@ -324,6 +326,26 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
                   <p className="text-[11px] text-muted-foreground mt-0.5">{STANDARD_LABELS[normalized.detectedStandard]}</p>
                 )}
                 <p className="text-[11px] text-muted-foreground mt-0.5">{normalized.reasoning}</p>
+                {/* Discipline coverage */}
+                {normalized.disciplinesFound && normalized.disciplinesFound.length > 0 && (
+                  <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                    <span className="text-[10px] text-muted-foreground font-medium">Disciplines:</span>
+                    {normalized.disciplinesFound.map((d) => (
+                      <Badge key={d.discipline} variant="outline" className="text-[10px] px-1.5 py-0 border-primary/30 text-primary">
+                        {d.discipline}{d.sheetsIdentified?.length ? ` (${d.sheetsIdentified.length} sheets)` : ""}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                {/* Hidden scope warning */}
+                {normalized.hiddenScope && normalized.hiddenScope.length > 0 && (
+                  <div className="flex items-start gap-1.5 mt-1.5 rounded-md bg-amber-500/10 p-1.5">
+                    <AlertTriangle className="h-3 w-3 text-amber-500 flex-shrink-0 mt-0.5" />
+                    <p className="text-[10px] text-amber-600 dark:text-amber-400">
+                      Hidden scope (found only on non-structural drawings): {normalized.hiddenScope.map(s => SCOPE_ITEMS.find(si => si.id === s)?.label || s).join(", ")}
+                    </p>
+                  </div>
+                )}
                 <div className="flex items-center gap-2 mt-1.5">
                   <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
                     <div

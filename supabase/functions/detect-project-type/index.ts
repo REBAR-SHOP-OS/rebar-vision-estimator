@@ -93,7 +93,7 @@ serve(async (req) => {
     let accessToken: string | null = null;
     try { accessToken = await getGoogleAccessToken(); } catch (e) { console.error("Vision token failed:", e); }
 
-    const filesToScan = fileUrls.slice(0, 2);
+    const filesToScan = fileUrls.slice(0, 6);
     const contentParts: any[] = [];
 
     for (const url of filesToScan) {
@@ -171,8 +171,27 @@ ${ocrText ? `## OCR Text Extracted:\n${ocrText}` : "No OCR text available - anal
 
 ${keywordHints.length > 0 ? `## Keyword Analysis Hints:\n${keywordHints.map(h => `- ${h}`).join("\n")}\n` : ""}
 
-## CORE RULE: "Follow the Concrete"
+## STEP 1: DISCIPLINE IDENTIFICATION (Critical First Step)
+Before analyzing scope, identify the DISCIPLINE of each page/image from the title block or sheet number:
+- **S** = Structural (S1.1, S2.1, etc.)
+- **A** = Architectural (A1.1, A2.1, A3.1, etc.)
+- **C** = Civil / Site
+- **L** = Landscape
+- **M** = Mechanical
+- **E** = Electrical
+- **P** = Plumbing
+
+Report each discipline found and which scope elements were identified on each.
+
+## STEP 2: "Follow the Concrete" — Cross-Discipline Scope Extraction
 Rebar only exists inside concrete or masonry. Find EVERY piece of concrete across ALL drawing disciplines (S, A, C, L, MEP) and classify it.
+
+### CRITICAL: Multi-Discipline Rules
+1. **Architectural drawings (A)** often show: CMU/block walls, depressed slabs, monumental stairs, parapets, wall locations — these ALL contain rebar even though detail is on S drawings.
+2. **Civil/Landscape (C/L)** often show: Retaining walls, site paving, light pole bases, transformer pads, catch basins, driveways.
+3. **Mechanical/Electrical (M/E)** often show: Equipment pads, housekeeping pads, duct banks.
+4. **"Hidden Scope"**: Elements visible ONLY on non-S drawings but missing from structural set. Flag these — they are easily missed in estimation.
+5. **"Orphan Scope"**: Concrete elements on A/C/L drawings with no corresponding S-drawing rebar detail. Flag these for review.
 
 ## 5 Construction Buckets (classify every concrete element into one):
 
@@ -191,11 +210,12 @@ Rebar only exists inside concrete or masonry. Find EVERY piece of concrete acros
 **Bucket 5 — Site, Civil & Landscape**: Retaining walls, light pole bases, transformer pads, concrete paving/driveways, catch basins, ICF walls, sound walls.
   Found on: Civil (C), Landscape (L), Electrical (E) for duct banks.
 
-## CRITICAL: Dominance + Veto Classification Rule
+## STEP 3: Dominance + Veto Classification
 
-Output TWO things:
-1. **primaryCategory** — overall project type (residential, commercial, industrial, infrastructure, cage_only, bar_list_only)
+Output:
+1. **primaryCategory** — overall project type
 2. **features** — sub-modules present (hasCageAssembly, hasBarListTable)
+3. **disciplinesFound** — which disciplines were analyzed and what each contributed
 
 ### cage_only classification:
 Set primaryCategory = "cage_only" ONLY IF cage/caisson pages dominate (>70%) AND zero building signals exist.
@@ -267,6 +287,24 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
               enum: ["canadian_metric", "us_imperial", "unknown"],
               description: "Detected measurement standard"
             },
+            disciplinesFound: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  discipline: { type: "string", description: "Discipline code: S, A, C, L, M, E, P" },
+                  sheetsIdentified: { type: "array", items: { type: "string" }, description: "Sheet numbers found for this discipline (e.g. S1.1, A2.3)" },
+                  scopeContributions: { type: "array", items: { type: "string" }, description: "Scope element types found on this discipline's drawings" },
+                },
+                required: ["discipline", "scopeContributions"],
+              },
+              description: "Disciplines identified across all pages analyzed"
+            },
+            hiddenScope: {
+              type: "array",
+              items: { type: "string" },
+              description: "Scope elements found ONLY on non-structural drawings (A/C/L/M/E) — easily missed in estimation"
+            },
             confidencePrimary: {
               type: "number",
               description: "Confidence in primaryCategory classification from 0 to 1"
@@ -276,7 +314,7 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
               description: "Brief explanation of classification (1-2 sentences)"
             }
           },
-          required: ["primaryCategory", "features", "evidence", "recommendedScope", "detectedCoating", "detectedStandard", "confidencePrimary", "reasoning"],
+          required: ["primaryCategory", "features", "evidence", "recommendedScope", "detectedCoating", "detectedStandard", "disciplinesFound", "confidencePrimary", "reasoning"],
           additionalProperties: false,
         }
       }
@@ -291,7 +329,7 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         messages: [
-          { role: "system", content: "You are a structural engineering blueprint classifier implementing the Dominance + Veto detection system. Use the classify_project tool. NEVER set cage_only if building signals are present." },
+          { role: "system", content: "You are a structural engineering blueprint classifier implementing the Dominance + Veto detection system with multi-discipline awareness. FIRST identify each page's discipline (S/A/C/L/M/E/P) from title blocks, THEN extract scope elements from ALL disciplines — not just structural. Report disciplinesFound and hiddenScope. Use the classify_project tool. NEVER set cage_only if building signals are present." },
           { role: "user", content: userContent },
         ],
         tools,
