@@ -56,3 +56,6 @@ verify_jwt = false
 
 [functions.check-duplicate]
 verify_jwt = false
+
+[functions.process-pipeline]
+verify_jwt = false
