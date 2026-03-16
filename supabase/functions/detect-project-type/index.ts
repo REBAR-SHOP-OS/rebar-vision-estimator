@@ -326,6 +326,11 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
         result.evidence = { buildingSignals: foundBuildingSignals, cageSignals: foundCageSignals, barListSignals: foundBarListSignals };
       }
 
+      // ── Coating: use OCR-based detection as override if AI missed it ──
+      if (!result.detectedCoating || result.detectedCoating === "none") {
+        result.detectedCoating = detectedCoatingFromOCR;
+      }
+
       // ── Backward-compatible fields ──
       // Map primaryCategory to old `category` field for transition
       const categoryMap: Record<string, string> = {
