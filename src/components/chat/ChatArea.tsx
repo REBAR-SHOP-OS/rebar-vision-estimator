@@ -1382,13 +1382,36 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       setIsDetecting(true);
       setShowScopePanel(true); // show as fallback while detecting
       try {
+        // Pre-render PDF pages to images so detect-project-type can process them
+        const detectUrls: string[] = [];
+        for (const url of allUrls) {
+          const isPdf = /\.pdf/i.test(url) || url.includes("/blueprints/");
+          if (isPdf) {
+            try {
+              console.log("[detect] Pre-rendering PDF pages for detection:", url.substring(0, 60));
+              const pageImages = await renderPdfPagesToImages(url, projectId, { maxPages: 3, scale: 1.0 });
+              if (pageImages.length > 0) {
+                detectUrls.push(...pageImages.map(p => p.signedUrl));
+                console.log(`[detect] Rendered ${pageImages.length} page images from PDF`);
+              } else {
+                detectUrls.push(url); // fallback to original
+              }
+            } catch (renderErr) {
+              console.warn("[detect] PDF pre-render failed, using original URL:", renderErr);
+              detectUrls.push(url);
+            }
+          } else {
+            detectUrls.push(url);
+          }
+        }
+
         const detectResp = await fetch(DETECT_URL, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
           },
-          body: JSON.stringify({ fileUrls: allUrls }),
+          body: JSON.stringify({ fileUrls: detectUrls }),
         });
         if (detectResp.ok) {
           const result: DetectionResult = await detectResp.json();
