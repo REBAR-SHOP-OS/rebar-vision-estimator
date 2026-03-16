@@ -281,7 +281,7 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
 
       <div className="p-4 space-y-5">
         {/* No Scope Warning */}
-        {scopeSourceType === "none" && (
+        {scopeSourceType === "none" && !isDetecting && (
           <div className="flex items-center gap-3 rounded-lg bg-amber-500/10 border border-amber-500/30 p-3">
             <AlertTriangle className="h-4 w-4 text-amber-500 flex-shrink-0" />
             <div className="flex-1">
