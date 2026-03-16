@@ -5,7 +5,7 @@ import { useLanguage, LANGUAGES, type Language } from "@/contexts/LanguageContex
 import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2, BarChart3, Search, Loader2 } from "lucide-react";
+import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2, BarChart3, Search, Loader2, Activity, HeartPulse } from "lucide-react";
 import CrmSyncPanel, { type LeadAttachment } from "@/components/crm/CrmSyncPanel";
 import BrainKnowledgeDialog from "@/components/chat/BrainKnowledgeDialog";
 import { toast } from "sonner";
@@ -13,6 +13,8 @@ import OutcomeCapture from "@/components/audit/OutcomeCapture";
 import DrawingSearchPanel from "@/components/search/DrawingSearchPanel";
 import ChatArea from "@/components/chat/ChatArea";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import ProjectHealthDashboard from "@/components/dashboard/ProjectHealthDashboard";
+import AdminDiagnosticsPanel from "@/components/dashboard/AdminDiagnosticsPanel";
 import StepProgress from "@/components/chat/StepProgress";
 import logoBg from "@/assets/logo.png";
 import {
@@ -49,6 +51,8 @@ const Dashboard: React.FC = () => {
   const [showCrm, setShowCrm] = useState(false);
   const [showOutcomes, setShowOutcomes] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [showHealth, setShowHealth] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [processingPhase, setProcessingPhase] = useState<string | null>(null);
   const [initialFiles, setInitialFiles] = useState<File[] | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -429,7 +433,11 @@ const Dashboard: React.FC = () => {
         </header>
 
       {/* Chat or Welcome */}
-      {showSearch ? (
+      {showHealth ? (
+          <ProjectHealthDashboard onClose={() => setShowHealth(false)} />
+        ) : showDiagnostics ? (
+          <AdminDiagnosticsPanel onClose={() => setShowDiagnostics(false)} />
+        ) : showSearch ? (
           <DrawingSearchPanel
             onClose={() => setShowSearch(false)}
             onSelectProject={(projectId) => {
@@ -555,6 +563,14 @@ const Dashboard: React.FC = () => {
                 <Button onClick={() => setShowSearch(true)} variant="outline" size="lg" className="gap-2 h-12 px-6 rounded-xl">
                   <Search className="h-5 w-5" />
                   Search Drawings
+                </Button>
+                <Button onClick={() => setShowHealth(true)} variant="outline" size="lg" className="gap-2 h-12 px-6 rounded-xl">
+                  <HeartPulse className="h-5 w-5" />
+                  Health
+                </Button>
+                <Button onClick={() => setShowDiagnostics(true)} variant="outline" size="lg" className="gap-2 h-12 px-6 rounded-xl">
+                  <Activity className="h-5 w-5" />
+                  Diagnostics
                 </Button>
               </div>
             </div>

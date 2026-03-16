@@ -1023,6 +1023,26 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
   const handleModeSelect = async (mode: "smart" | "step-by-step", fileUrlsOverride?: string[]) => {
     if (!user) return;
+
+    // Block estimation if no real scope detected
+    if (!scopeData?.scopeItems || scopeData.scopeItems.length === 0) {
+      toast.error("No scope detected. Upload and process drawings before estimating.");
+      return;
+    }
+
+    // Check scope source — block if no real scope
+    try {
+      const { data: resolved } = await supabase.functions.invoke("resolve-scope", {
+        body: { project_id: projectId },
+      });
+      if (resolved?.source_type === "none") {
+        toast.error("No scope detected from drawings. Upload blueprints for scope extraction before estimating.");
+        return;
+      }
+    } catch {
+      // Allow estimation if scope check fails (non-blocking)
+    }
+
     setShowModePicker(false);
     setCalculationMode(mode);
     onModeChange?.(mode);
@@ -1332,7 +1352,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       onProjectNameChange?.(firstName);
     }
 
-    // Fire-and-forget: populate search index for uploaded PDFs
+    // Fire-and-forget: populate search index + trigger pipeline
     if (newUrls.length > 0) {
       (async () => {
         try {
@@ -1346,8 +1366,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               body: { project_id: projectId, pages: extractData.pages },
             });
           }
+          // Auto-trigger pipeline to update linkage score + workflow status
+          await supabase.functions.invoke("process-pipeline", {
+            body: { project_id: projectId },
+          });
         } catch (e) {
-          console.error("Search index population failed (non-blocking):", e);
+          console.error("Search index / pipeline failed (non-blocking):", e);
         }
       })();
     }
