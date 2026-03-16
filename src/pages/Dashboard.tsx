@@ -485,6 +485,10 @@ const Dashboard: React.FC = () => {
           <EstimateComparison projectId={activeProjectId} onClose={() => setShowEstimateCompare(false)} />
         ) : showQuoteWorkflow && activeProjectId ? (
           <QuoteWorkflow projectId={activeProjectId} onClose={() => setShowQuoteWorkflow(false)} />
+        ) : showFollowUps && activeProjectId ? (
+          <FollowUpBoard projectId={activeProjectId} onClose={() => setShowFollowUps(false)} />
+        ) : showRevisions && activeProjectId ? (
+          <RevisionTracker projectId={activeProjectId} onClose={() => setShowRevisions(false)} />
         ) : showHealth ? (
           <ProjectHealthDashboard onClose={() => setShowHealth(false)} />
         ) : showDiagnostics ? (
