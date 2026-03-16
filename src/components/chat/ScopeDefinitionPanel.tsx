@@ -100,6 +100,8 @@ export interface DetectionResult {
   evidence?: { buildingSignals: string[]; cageSignals: string[]; barListSignals: string[] };
   confidencePrimary?: number;
   detectedCoating?: string;
+  disciplinesFound?: { discipline: string; sheetsIdentified?: string[]; scopeContributions: string[] }[];
+  hiddenScope?: string[];
   // Legacy fields (backward compat)
   category: string;
   recommendedScope: string[];
