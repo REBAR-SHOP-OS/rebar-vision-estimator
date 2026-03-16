@@ -217,9 +217,8 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
     const coatingMap: Record<string, string> = {
       EPOXY: "epoxy_coated", GALVANISED: "galvanized", STAINLESS: "stainless_steel",
     };
-    if (normalized.detectedCoating && coatingMap[normalized.detectedCoating]) {
-      setRebarCoating(coatingMap[normalized.detectedCoating]);
-    }
+    // Keep all coatings selected by default so detection finds any present
+    setRebarCoatings(REBAR_COATING_TYPES.map(c => c.id));
   }, [detectionResult]);
 
   const toggleItem = (id: string) => {
