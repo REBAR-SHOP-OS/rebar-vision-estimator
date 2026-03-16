@@ -564,6 +564,14 @@ const Dashboard: React.FC = () => {
                   <Search className="h-5 w-5" />
                   Search Drawings
                 </Button>
+                <Button onClick={() => setShowHealth(true)} variant="outline" size="lg" className="gap-2 h-12 px-6 rounded-xl">
+                  <HeartPulse className="h-5 w-5" />
+                  Health
+                </Button>
+                <Button onClick={() => setShowDiagnostics(true)} variant="outline" size="lg" className="gap-2 h-12 px-6 rounded-xl">
+                  <Activity className="h-5 w-5" />
+                  Diagnostics
+                </Button>
               </div>
             </div>
           </div>
