@@ -5,7 +5,7 @@ import { useLanguage, LANGUAGES, type Language } from "@/contexts/LanguageContex
 import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2, BarChart3, Search, Loader2, Activity, HeartPulse, GitCompare, FileText } from "lucide-react";
+import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2, BarChart3, Search, Loader2, Activity, HeartPulse, GitCompare, FileText, Clock, GitBranch } from "lucide-react";
 import CrmSyncPanel, { type LeadAttachment } from "@/components/crm/CrmSyncPanel";
 import BrainKnowledgeDialog from "@/components/chat/BrainKnowledgeDialog";
 import { toast } from "sonner";
@@ -17,6 +17,8 @@ import ProjectHealthDashboard from "@/components/dashboard/ProjectHealthDashboar
 import AdminDiagnosticsPanel from "@/components/dashboard/AdminDiagnosticsPanel";
 import EstimateComparison from "@/components/dashboard/EstimateComparison";
 import QuoteWorkflow from "@/components/dashboard/QuoteWorkflow";
+import FollowUpBoard from "@/components/dashboard/FollowUpBoard";
+import RevisionTracker from "@/components/dashboard/RevisionTracker";
 import StepProgress from "@/components/chat/StepProgress";
 import logoBg from "@/assets/logo.png";
 import {
@@ -57,6 +59,8 @@ const Dashboard: React.FC = () => {
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [showEstimateCompare, setShowEstimateCompare] = useState(false);
   const [showQuoteWorkflow, setShowQuoteWorkflow] = useState(false);
+  const [showFollowUps, setShowFollowUps] = useState(false);
+  const [showRevisions, setShowRevisions] = useState(false);
   const [processingPhase, setProcessingPhase] = useState<string | null>(null);
   const [initialFiles, setInitialFiles] = useState<File[] | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -453,8 +457,14 @@ const Dashboard: React.FC = () => {
               <Button variant="ghost" size="icon" onClick={() => { setShowEstimateCompare(true); setShowQuoteWorkflow(false); }} className="h-8 w-8 text-muted-foreground" title="Compare Estimates">
                 <GitCompare className="h-4 w-4" />
               </Button>
-              <Button variant="ghost" size="icon" onClick={() => { setShowQuoteWorkflow(true); setShowEstimateCompare(false); }} className="h-8 w-8 text-muted-foreground" title="Quotes">
+              <Button variant="ghost" size="icon" onClick={() => { setShowQuoteWorkflow(true); setShowEstimateCompare(false); setShowFollowUps(false); setShowRevisions(false); }} className="h-8 w-8 text-muted-foreground" title="Quotes">
                 <FileText className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => { setShowFollowUps(true); setShowQuoteWorkflow(false); setShowEstimateCompare(false); setShowRevisions(false); }} className="h-8 w-8 text-muted-foreground" title="Follow-Ups">
+                <Clock className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => { setShowRevisions(true); setShowFollowUps(false); setShowQuoteWorkflow(false); setShowEstimateCompare(false); }} className="h-8 w-8 text-muted-foreground" title="Revisions">
+                <GitBranch className="h-4 w-4" />
               </Button>
             </>
           )}
@@ -475,6 +485,10 @@ const Dashboard: React.FC = () => {
           <EstimateComparison projectId={activeProjectId} onClose={() => setShowEstimateCompare(false)} />
         ) : showQuoteWorkflow && activeProjectId ? (
           <QuoteWorkflow projectId={activeProjectId} onClose={() => setShowQuoteWorkflow(false)} />
+        ) : showFollowUps && activeProjectId ? (
+          <FollowUpBoard projectId={activeProjectId} onClose={() => setShowFollowUps(false)} />
+        ) : showRevisions && activeProjectId ? (
+          <RevisionTracker projectId={activeProjectId} onClose={() => setShowRevisions(false)} />
         ) : showHealth ? (
           <ProjectHealthDashboard onClose={() => setShowHealth(false)} />
         ) : showDiagnostics ? (
