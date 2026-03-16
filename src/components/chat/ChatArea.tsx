@@ -1985,22 +1985,23 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           {showScopePanel && !scopeData && !calculationMode && (
             <div className="py-2">
               <ScopeDefinitionPanel
-                onProceed={(scope) => {
+                onProceed={async (scope) => {
                   setScopeData(scope);
                   setShowScopePanel(false);
-                  setShowModePicker(true);
                   if (user) {
-                    supabase.from("projects").update({
+                    await supabase.from("projects").update({
                       client_name: scope.clientName || null,
                       project_type: scope.projectType || null,
                       scope_items: scope.scopeItems,
                       deviations: scope.deviations || null,
                     } as any).eq("id", projectId);
                   }
+                  setShowModePicker(true);
                 }}
                 disabled={loading}
                 detectionResult={detectionResult}
                 isDetecting={isDetecting}
+                scopeSourceType={detectionResult ? "detected" : "none"}
               />
             </div>
           )}
