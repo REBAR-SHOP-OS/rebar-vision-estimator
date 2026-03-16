@@ -91,9 +91,31 @@ const Dashboard: React.FC = () => {
     setCreatingProject(true);
     const projectName = files[0].name.replace(/\.[^/.]+$/, "");
 
+    // Check for duplicate projects
+    try {
+      const { data: dupCheck } = await supabase.functions.invoke("check-duplicate", {
+        body: { project_name: projectName },
+      });
+      if (dupCheck?.is_duplicate && dupCheck.matches?.length > 0) {
+        const match = dupCheck.matches[0];
+        const proceed = window.confirm(
+          `A similar project exists: "${match.name}" (${Math.round(match.similarity * 100)}% match). Create anyway?`
+        );
+        if (!proceed) {
+          setCreatingProject(false);
+          if (newProjectFileInputRef.current) newProjectFileInputRef.current.value = "";
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("Duplicate check failed, proceeding:", err);
+    }
+
+    const normalizedName = projectName.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+
     const { data, error } = await supabase
       .from("projects")
-      .insert({ user_id: user.id, name: projectName })
+      .insert({ user_id: user.id, name: projectName, normalized_name: normalizedName, workflow_status: "intake" })
       .select()
       .single();
 
@@ -270,6 +292,9 @@ const Dashboard: React.FC = () => {
               ) : (
                 <>
                   <span className="truncate flex-1">{project.name}</span>
+                  {(project as any).intake_complete === false && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-medium flex-shrink-0">intake</span>
+                  )}
                   <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={(e) => startEditing(project.id, project.name, e)}

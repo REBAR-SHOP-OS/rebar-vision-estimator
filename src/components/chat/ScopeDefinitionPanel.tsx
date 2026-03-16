@@ -88,6 +88,7 @@ interface ScopeDefinitionPanelProps {
   disabled?: boolean;
   detectionResult?: DetectionResult | null;
   isDetecting?: boolean;
+  scopeSourceType?: string | null;
 }
 
 // Helper to normalize detection result to V2 format
@@ -138,7 +139,7 @@ export function buildScopeFromDetection(d: DetectionResult): ScopeData {
   };
 }
 
-const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, disabled, detectionResult, isDetecting }) => {
+const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, disabled, detectionResult, isDetecting, scopeSourceType }) => {
   const [selectedItems, setSelectedItems] = useState<string[]>(SCOPE_ITEMS.map((s) => s.id));
   const [clientName, setClientName] = useState("");
   const [projectType, setProjectType] = useState("");
@@ -242,6 +243,17 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
       </div>
 
       <div className="p-4 space-y-5">
+        {/* Fallback Scope Warning */}
+        {scopeSourceType === "fallback_20_york" && (
+          <div className="flex items-center gap-3 rounded-lg bg-amber-500/10 border border-amber-500/30 p-3">
+            <AlertTriangle className="h-4 w-4 text-amber-500 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="text-xs font-medium text-amber-600 dark:text-amber-400">Using fallback scope (20 York)</p>
+              <p className="text-[10px] text-muted-foreground">No real scope detected from drawings. Upload blueprints for accurate scope detection.</p>
+            </div>
+            <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-600 dark:text-amber-400">Fallback</Badge>
+          </div>
+        )}
         {/* Detection Banner */}
         {isDetecting && (
           <div className="flex items-center gap-3 rounded-lg bg-primary/10 border border-primary/20 p-3 animate-pulse">

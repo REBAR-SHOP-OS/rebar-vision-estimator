@@ -128,6 +128,33 @@ export type Database = {
         }
         Relationships: []
       }
+      audit_log: {
+        Row: {
+          action: string
+          created_at: string
+          details: Json | null
+          id: string
+          project_id: string | null
+          user_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          details?: Json | null
+          id?: string
+          project_id?: string | null
+          user_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          details?: Json | null
+          id?: string
+          project_id?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       crm_deals: {
         Row: {
           close_date: string | null
@@ -445,6 +472,9 @@ export type Database = {
           issued_at: string | null
           line_items: Json | null
           project_id: string
+          scope_confidence: number | null
+          scope_source_reference: string | null
+          scope_source_type: string | null
           status: string | null
           total_estimated_cost: number | null
           total_quoted_price: number | null
@@ -462,6 +492,9 @@ export type Database = {
           issued_at?: string | null
           line_items?: Json | null
           project_id: string
+          scope_confidence?: number | null
+          scope_source_reference?: string | null
+          scope_source_type?: string | null
           status?: string | null
           total_estimated_cost?: number | null
           total_quoted_price?: number | null
@@ -479,6 +512,9 @@ export type Database = {
           issued_at?: string | null
           line_items?: Json | null
           project_id?: string
+          scope_confidence?: number | null
+          scope_source_reference?: string | null
+          scope_source_type?: string | null
           status?: string | null
           total_estimated_cost?: number | null
           total_quoted_price?: number | null
@@ -730,46 +766,61 @@ export type Database = {
       }
       projects: {
         Row: {
+          address: string | null
           client_name: string | null
           created_at: string
           description: string | null
           deviations: string | null
+          duplicate_of: string | null
           id: string
+          intake_complete: boolean | null
           linkage_score: string | null
           name: string
+          normalized_name: string | null
           project_type: string | null
           scope_items: string[] | null
           status: string
           updated_at: string
           user_id: string
+          workflow_status: string | null
         }
         Insert: {
+          address?: string | null
           client_name?: string | null
           created_at?: string
           description?: string | null
           deviations?: string | null
+          duplicate_of?: string | null
           id?: string
+          intake_complete?: boolean | null
           linkage_score?: string | null
           name: string
+          normalized_name?: string | null
           project_type?: string | null
           scope_items?: string[] | null
           status?: string
           updated_at?: string
           user_id: string
+          workflow_status?: string | null
         }
         Update: {
+          address?: string | null
           client_name?: string | null
           created_at?: string
           description?: string | null
           deviations?: string | null
+          duplicate_of?: string | null
           id?: string
+          intake_complete?: boolean | null
           linkage_score?: string | null
           name?: string
+          normalized_name?: string | null
           project_type?: string | null
           scope_items?: string[] | null
           status?: string
           updated_at?: string
           user_id?: string
+          workflow_status?: string | null
         }
         Relationships: []
       }
@@ -1020,6 +1071,45 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      scope_templates: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          is_system: boolean | null
+          metadata: Json | null
+          name: string
+          project_type: string | null
+          scope_items: string[]
+          slug: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_system?: boolean | null
+          metadata?: Json | null
+          name: string
+          project_type?: string | null
+          scope_items?: string[]
+          slug: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_system?: boolean | null
+          metadata?: Json | null
+          name?: string
+          project_type?: string | null
+          scope_items?: string[]
+          slug?: string
+          user_id?: string | null
+        }
+        Relationships: []
       }
       sheet_revisions: {
         Row: {
