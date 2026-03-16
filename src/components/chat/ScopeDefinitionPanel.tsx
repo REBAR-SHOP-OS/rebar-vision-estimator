@@ -124,12 +124,16 @@ export function buildScopeFromDetection(d: DetectionResult): ScopeData {
     industrial: "industrial", infrastructure: "infrastructure",
   };
 
+  const coatingMap: Record<string, string> = {
+    EPOXY: "epoxy_coated", GALVANISED: "galvanized", STAINLESS: "stainless_steel",
+  };
+
   return {
     scopeItems,
     clientName: "",
     projectType: typeMap[n.primaryCategory] || n.primaryCategory,
     deviations: "",
-    rebarCoating: "black_steel",
+    rebarCoating: (n.detectedCoating && coatingMap[n.detectedCoating]) || "black_steel",
     detectedCategory: n.category,
     detectedStandard: n.detectedStandard,
     primaryCategory: n.primaryCategory,
