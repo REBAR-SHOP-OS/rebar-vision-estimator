@@ -70,7 +70,7 @@ CRITICAL LAYOUT REQUIREMENTS:
 1. **DRAWING FRAME**: A thick black border around the entire page content area. Inside is the drawing area.
 
 2. **TITLE BLOCK** (bottom-right, ~300px wide, full bottom height ~200px):
-   - Company logo: include this exact HTML at the top of the title block: <img src="${logoDataUri || ""}" style="height:40px;margin-bottom:4px;" alt="REBAR.SHOP" />
+   - Company logo: include this exact HTML at the top of the title block: <img src="<!-- LOGO_PLACEHOLDER -->" style="height:40px;margin-bottom:4px;" alt="REBAR.SHOP" />
    - Company name "REBAR.SHOP" with tagline "AN INNOVATIVE METHOD OF FABRICATION" in bold
    - Project address line
    - "PART OF DRAWING:" label with value (e.g. "CONCRETE SHEAR WALL" or element description)
@@ -166,6 +166,15 @@ Return ONLY the complete HTML document, nothing else. No markdown, no explanatio
 
     // Strip markdown code fences if present
     html = html.replace(/^```html\s*/i, "").replace(/```\s*$/, "").trim();
+
+    console.log("AI response content length:", html.length);
+    if (!html) {
+      console.error("AI returned empty content. Response:", JSON.stringify(data).substring(0, 500));
+      throw new Error("AI returned empty HTML content");
+    }
+
+    // Inject logo data URI post-generation
+    html = html.replace(/<!-- LOGO_PLACEHOLDER -->/g, logoDataUri || "");
 
     return new Response(JSON.stringify({ html }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
