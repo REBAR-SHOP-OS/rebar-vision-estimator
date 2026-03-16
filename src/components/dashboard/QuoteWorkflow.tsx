@@ -252,7 +252,13 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
                           </Button>
                         )}
                         <Button size="sm" variant="outline" className="text-[10px] h-6 gap-1" onClick={() => sendForReview(q.id)}>
-                          <ExternalLink className="h-3 w-3" /> Share Review
+                          <ExternalLink className="h-3 w-3" /> Share
+                        </Button>
+                        <Button size="sm" variant="outline" className="text-[10px] h-6 gap-1" onClick={() => handlePdfExport(q)}>
+                          <Download className="h-3 w-3" /> PDF
+                        </Button>
+                        <Button size="sm" variant="outline" className="text-[10px] h-6 gap-1" onClick={() => pushToCrm(q.id)}>
+                          <Building2 className="h-3 w-3" /> CRM
                         </Button>
                       </div>
                     </div>
