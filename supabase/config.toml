@@ -50,3 +50,9 @@ verify_jwt = false
 
 [functions.learn-from-pipeline]
 verify_jwt = false
+
+[functions.resolve-scope]
+verify_jwt = false
+
+[functions.check-duplicate]
+verify_jwt = false
