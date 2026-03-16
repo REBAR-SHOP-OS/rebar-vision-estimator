@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText, Plus, Send, ExternalLink } from "lucide-react";
+import { FileText, Plus, Send, ExternalLink, Download, Building2 } from "lucide-react";
 import { toast } from "sonner";
+import { exportQuotePdf } from "@/lib/quote-pdf-export";
 
 interface QuoteVersion {
   id: string;
