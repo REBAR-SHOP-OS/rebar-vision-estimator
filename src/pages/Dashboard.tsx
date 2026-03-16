@@ -15,6 +15,8 @@ import ChatArea from "@/components/chat/ChatArea";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import ProjectHealthDashboard from "@/components/dashboard/ProjectHealthDashboard";
 import AdminDiagnosticsPanel from "@/components/dashboard/AdminDiagnosticsPanel";
+import EstimateComparison from "@/components/dashboard/EstimateComparison";
+import QuoteWorkflow from "@/components/dashboard/QuoteWorkflow";
 import StepProgress from "@/components/chat/StepProgress";
 import logoBg from "@/assets/logo.png";
 import {
