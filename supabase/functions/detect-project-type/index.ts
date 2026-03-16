@@ -134,6 +134,17 @@ serve(async (req) => {
     const industrialKeywords = ["equipment pad", "tank", "crane beam", "industrial", "process area"];
     const commercialKeywords = ["parking", "multi-storey", "elevator", "drop panel", "flat slab", "post-tension"];
     
+    // Coating keywords
+    const coatingKeywords: { key: string; label: string }[] = [
+      { key: "epoxy", label: "EPOXY" }, { key: "epoxy-coated", label: "EPOXY" }, { key: "epoxy coated", label: "EPOXY" },
+      { key: "ecr", label: "EPOXY" },
+      { key: "galvanized", label: "GALVANISED" }, { key: "galvanised", label: "GALVANISED" },
+      { key: "stainless steel", label: "STAINLESS" }, { key: "stainless", label: "STAINLESS" },
+      { key: "mmfx", label: "MMFX" }, { key: "chromium", label: "MMFX" },
+    ];
+    const foundCoatings = coatingKeywords.filter(c => ocrLower.includes(c.key));
+    const detectedCoatingFromOCR = foundCoatings.length > 0 ? foundCoatings[0].label : "none";
+
     // Count building veto signals found
     const foundBuildingSignals = BUILDING_VETO_SIGNALS.filter(s => ocrLower.includes(s));
     const foundCageSignals = cageKeywords.filter(k => ocrLower.includes(k));
@@ -147,6 +158,7 @@ serve(async (req) => {
     if (industrialKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Industrial indicators found");
     if (commercialKeywords.some(k => ocrLower.includes(k))) keywordHints.push("Commercial indicators found");
     if (foundBuildingSignals.length > 0) keywordHints.push(`Building signals (veto cage_only): ${foundBuildingSignals.join(", ")}`);
+    if (foundCoatings.length > 0) keywordHints.push(`Coating indicators: ${foundCoatings.map(c => c.key).join(", ")} → ${detectedCoatingFromOCR}`);
 
     // Build the detection prompt with Dominance + Veto rules
     const detectionPrompt = `Analyze these blueprint files and determine the project type using the TWO-LAYER detection system.
@@ -183,7 +195,16 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
 
 ### Feature Detection (independent of primaryCategory):
 - **hasCageAssembly**: true if ANY cage/caisson/drilled pier/spiral/tied assembly content is found ANYWHERE in the set.
-- **hasBarListTable**: true if ANY bar schedule/bending schedule table is found.`;
+- **hasBarListTable**: true if ANY bar schedule/bending schedule table is found.
+
+### Coating Detection:
+Detect rebar coating from general notes, specifications, or legends:
+- **EPOXY**: "epoxy", "epoxy-coated", "ECR" mentioned
+- **GALVANISED**: "galvanized", "galvanised" mentioned
+- **STAINLESS**: "stainless steel", "stainless" mentioned
+- **MMFX**: "MMFX", "chromium" mentioned
+- **none**: no special coating detected
+Set detectedCoating accordingly. This is CRITICAL for pricing accuracy.`;
 
     const tools = [{
       type: "function" as const,
@@ -220,6 +241,11 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
               items: { type: "string", enum: ["FOOTING", "GRADE_BEAM", "RAFT_SLAB", "PIER", "BEAM", "COLUMN", "SLAB", "STAIR", "WALL", "RETAINING_WALL", "ICF_WALL", "CMU_WALL", "WIRE_MESH", "CAGE"] },
               description: "Which element types are relevant for this project"
             },
+            detectedCoating: {
+              type: "string",
+              enum: ["none", "EPOXY", "GALVANISED", "STAINLESS", "MMFX"],
+              description: "Rebar coating type detected from general notes or specs"
+            },
             detectedStandard: {
               type: "string",
               enum: ["canadian_metric", "us_imperial", "unknown"],
@@ -234,7 +260,7 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
               description: "Brief explanation of classification (1-2 sentences)"
             }
           },
-          required: ["primaryCategory", "features", "evidence", "recommendedScope", "detectedStandard", "confidencePrimary", "reasoning"],
+          required: ["primaryCategory", "features", "evidence", "recommendedScope", "detectedCoating", "detectedStandard", "confidencePrimary", "reasoning"],
           additionalProperties: false,
         }
       }
@@ -307,6 +333,11 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
       }
       if (!result.evidence) {
         result.evidence = { buildingSignals: foundBuildingSignals, cageSignals: foundCageSignals, barListSignals: foundBarListSignals };
+      }
+
+      // ── Coating: use OCR-based detection as override if AI missed it ──
+      if (!result.detectedCoating || result.detectedCoating === "none") {
+        result.detectedCoating = detectedCoatingFromOCR;
       }
 
       // ── Backward-compatible fields ──
