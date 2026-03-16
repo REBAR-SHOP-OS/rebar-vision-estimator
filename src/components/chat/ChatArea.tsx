@@ -1398,19 +1398,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           const AUTO_THRESHOLD = 0.7;
 
           if (confidence >= AUTO_THRESHOLD) {
-            // High confidence: auto-fill scope but let user choose mode
-            const autoScope = buildScopeFromDetection(result);
-            setScopeData(autoScope);
-
-            // Save scope to project
-            if (user) {
-              supabase.from("projects").update({
-                client_name: autoScope.clientName || null,
-                project_type: autoScope.projectType || null,
-                scope_items: autoScope.scopeItems,
-                deviations: autoScope.deviations || null,
-              } as any).eq("id", projectId);
-            }
+            // High confidence: pre-fill scope panel but still require user confirmation
+            // Don't set scopeData here — the panel stays visible for review
 
             // Log auto-detection as system message
             const categoryLabel = autoScope.primaryCategory === "cage_only" ? "Cage Only"
