@@ -1,38 +1,30 @@
 
 
-## Plan: Align PDF Export to Match Excel Two-Sheet Layout
+# Multi-Select Rebar Coating
 
-### Problem
-The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
+## Problem
+Currently, rebar coating is single-select (radio behavior using Checkbox). The user wants to select **all** coating types to detect which ones are present in the drawings.
 
-### Changes
+## Changes
 
-**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
+### `src/components/chat/ScopeDefinitionPanel.tsx`
 
-Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
+1. **Change state from `string` to `string[]`**:
+   - `rebarCoating: string` → `rebarCoatings: string[]`
+   - Default: `["black_steel"]`
+   - Auto-detection sets detected coating in the array alongside black_steel
 
-**Section 1: "Estimate Summary"** (page 1)
-- Project header: Project Name, Address, Engineer, Customer, Product Line
-- "Estimate Summary" title
-- Side-by-side tables using CSS grid/flexbox:
-  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
-  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
-- NOTES section: Grade, Lap Length Info, Deviations, Coating
-- Scope Items (if any)
-- MESH DETAILS table
+2. **Update checkbox to multi-select toggle**:
+   - `checked={rebarCoatings.includes(coating.id)}`
+   - `onCheckedChange` toggles the coating in/out of the array (ensure at least one stays selected)
 
-**Section 2: "Bar List"** (page 2+, page-break-before)
-- Project header
-- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
-- Rows grouped by element type headers (bold row spanning columns)
-- Sub-element sub-headers
-- Bar rows with identification string (`{size} @ {spacing} {description}`)
-- TOTAL WEIGHT + TOTAL (Tons) footer rows
-- MESH DETAILS at bottom
+3. **Update `ScopeDefinition` interface**:
+   - `rebarCoating: string` → `rebarCoating: string | string[]` (backward compatible)
 
-The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
+4. **Update `handleLockScope`** to pass the array in `onScopeConfirmed`
 
-### Scope
-- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
-- No new files, no backend changes
+5. **Add "Select All" checkbox** at the top of the coating grid to toggle all 4 coatings on/off
+
+### Downstream
+- `ChatArea.tsx` and `analyze-blueprint` already receive `rebarCoating` as a string in the scope payload — update to handle array (join with comma or pass as array). The analysis prompt should check for all selected coatings.
 
