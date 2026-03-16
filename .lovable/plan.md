@@ -1,38 +1,37 @@
 
 
-## Plan: Align PDF Export to Match Excel Two-Sheet Layout
+# Fix: "No HTML Returned" from Shop Drawing Generation
 
-### Problem
-The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
+## Root Cause
 
-### Changes
+The network response confirms the API returns `{"html":""}` — an empty string. The edge function logs show `success:true` with ~21s latency, meaning the AI gateway responded 200 but the model returned empty content.
 
-**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
+**Why**: The `logoDataUri` (a massive base64 PNG string — thousands of characters of C2PA-signed image data) is embedded directly in the prompt text. This bloats the prompt enormously, likely causing the model to return empty or truncated content. The base64 string visible in the request body is over 10KB of raw image data injected into the system prompt.
 
-Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
+## Fix
 
-**Section 1: "Estimate Summary"** (page 1)
-- Project header: Project Name, Address, Engineer, Customer, Product Line
-- "Estimate Summary" title
-- Side-by-side tables using CSS grid/flexbox:
-  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
-  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
-- NOTES section: Grade, Lap Length Info, Deviations, Coating
-- Scope Items (if any)
-- MESH DETAILS table
+**File: `supabase/functions/generate-shop-drawing/index.ts`**
 
-**Section 2: "Bar List"** (page 2+, page-break-before)
-- Project header
-- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
-- Rows grouped by element type headers (bold row spanning columns)
-- Sub-element sub-headers
-- Bar rows with identification string (`{size} @ {spacing} {description}`)
-- TOTAL WEIGHT + TOTAL (Tons) footer rows
-- MESH DETAILS at bottom
+1. **Remove `logoDataUri` from the AI prompt** — replace the inline base64 with a placeholder tag like `<!-- LOGO_PLACEHOLDER -->` in the prompt instructions
+2. **Post-process the AI response** — after receiving the HTML, replace the placeholder with the actual logo data URI using string replacement
+3. This keeps the prompt small and focused on layout/content generation
 
-The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
+```
+// Before sending to AI:
+// In prompt: <img src="<!-- LOGO_PLACEHOLDER -->" .../>
 
-### Scope
-- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
-- No new files, no backend changes
+// After receiving HTML:
+html = html.replace(/<!-- LOGO_PLACEHOLDER -->/g, logoDataUri || "");
+```
+
+Also add a debug log for the actual AI response content length to catch empty responses:
+```typescript
+console.log("AI response content length:", html.length);
+if (!html) {
+  console.error("AI returned empty content. Response:", JSON.stringify(data).substring(0, 500));
+}
+```
+
+### Files Modified
+- `supabase/functions/generate-shop-drawing/index.ts` — remove logo from prompt, inject post-generation, add debug logging
 
