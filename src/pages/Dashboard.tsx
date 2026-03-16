@@ -5,7 +5,7 @@ import { useLanguage, LANGUAGES, type Language } from "@/contexts/LanguageContex
 import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2, BarChart3, Search, Loader2, Activity, HeartPulse } from "lucide-react";
+import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2, BarChart3, Search, Loader2, Activity, HeartPulse, GitCompare, FileText } from "lucide-react";
 import CrmSyncPanel, { type LeadAttachment } from "@/components/crm/CrmSyncPanel";
 import BrainKnowledgeDialog from "@/components/chat/BrainKnowledgeDialog";
 import { toast } from "sonner";
@@ -15,6 +15,8 @@ import ChatArea from "@/components/chat/ChatArea";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import ProjectHealthDashboard from "@/components/dashboard/ProjectHealthDashboard";
 import AdminDiagnosticsPanel from "@/components/dashboard/AdminDiagnosticsPanel";
+import EstimateComparison from "@/components/dashboard/EstimateComparison";
+import QuoteWorkflow from "@/components/dashboard/QuoteWorkflow";
 import StepProgress from "@/components/chat/StepProgress";
 import logoBg from "@/assets/logo.png";
 import {
@@ -53,6 +55,8 @@ const Dashboard: React.FC = () => {
   const [showSearch, setShowSearch] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [showEstimateCompare, setShowEstimateCompare] = useState(false);
+  const [showQuoteWorkflow, setShowQuoteWorkflow] = useState(false);
   const [processingPhase, setProcessingPhase] = useState<string | null>(null);
   const [initialFiles, setInitialFiles] = useState<File[] | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -60,6 +64,29 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     loadProjects();
+
+    // Realtime subscription for pipeline progress
+    const channel = supabase
+      .channel('pipeline-progress')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'processing_jobs' },
+        (payload: any) => {
+          const job = payload.new;
+          if (!job) return;
+          if (job.status === 'completed') {
+            toast.success(`Pipeline complete: ${job.result?.linkage_score || 'done'}`, { description: `Workflow: ${job.result?.workflow_status || ''}` });
+            loadProjects(); // Refresh to get updated badges
+          } else if (job.status === 'failed') {
+            toast.error('Pipeline failed', { description: job.error_message?.slice(0, 100) });
+          } else if (job.status === 'processing') {
+            setProcessingPhase(`Processing... ${job.progress || 0}%`);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   useEffect(() => {
@@ -420,6 +447,17 @@ const Dashboard: React.FC = () => {
           </h1>
           {/* Brain Knowledge Button */}
           <BrainKnowledgeDialog />
+          {/* Project-level actions when active */}
+          {activeProjectId && (
+            <>
+              <Button variant="ghost" size="icon" onClick={() => { setShowEstimateCompare(true); setShowQuoteWorkflow(false); }} className="h-8 w-8 text-muted-foreground" title="Compare Estimates">
+                <GitCompare className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => { setShowQuoteWorkflow(true); setShowEstimateCompare(false); }} className="h-8 w-8 text-muted-foreground" title="Quotes">
+                <FileText className="h-4 w-4" />
+              </Button>
+            </>
+          )}
           {/* Refresh Button */}
           <Button
             variant="ghost"
@@ -433,7 +471,11 @@ const Dashboard: React.FC = () => {
         </header>
 
       {/* Chat or Welcome */}
-      {showHealth ? (
+      {showEstimateCompare && activeProjectId ? (
+          <EstimateComparison projectId={activeProjectId} onClose={() => setShowEstimateCompare(false)} />
+        ) : showQuoteWorkflow && activeProjectId ? (
+          <QuoteWorkflow projectId={activeProjectId} onClose={() => setShowQuoteWorkflow(false)} />
+        ) : showHealth ? (
           <ProjectHealthDashboard onClose={() => setShowHealth(false)} />
         ) : showDiagnostics ? (
           <AdminDiagnosticsPanel onClose={() => setShowDiagnostics(false)} />
