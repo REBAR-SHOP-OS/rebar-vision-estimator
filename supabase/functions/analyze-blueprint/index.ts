@@ -894,6 +894,8 @@ const STEP_BY_STEP_SYSTEM_PROMPT = `You are Rebar Estimator Pro — an expert st
 
 ${MASTER_PROMPT}
 
+${FIVE_LAYER_OCR_SYSTEM}
+
 ${ELEMENT_UNIT_SCHEMA}
 
 ${REBAR_WEIGHT_TABLE}
