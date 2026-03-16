@@ -17,6 +17,8 @@ import ProjectHealthDashboard from "@/components/dashboard/ProjectHealthDashboar
 import AdminDiagnosticsPanel from "@/components/dashboard/AdminDiagnosticsPanel";
 import EstimateComparison from "@/components/dashboard/EstimateComparison";
 import QuoteWorkflow from "@/components/dashboard/QuoteWorkflow";
+import FollowUpBoard from "@/components/dashboard/FollowUpBoard";
+import RevisionTracker from "@/components/dashboard/RevisionTracker";
 import StepProgress from "@/components/chat/StepProgress";
 import logoBg from "@/assets/logo.png";
 import {
