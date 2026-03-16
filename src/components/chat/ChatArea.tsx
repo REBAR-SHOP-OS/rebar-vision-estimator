@@ -1400,6 +1400,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           if (confidence >= AUTO_THRESHOLD) {
             // High confidence: pre-fill scope panel but still require user confirmation
             // Don't set scopeData here — the panel stays visible for review
+            const autoScope = buildScopeFromDetection(result);
 
             // Log auto-detection as system message
             const categoryLabel = autoScope.primaryCategory === "cage_only" ? "Cage Only"
@@ -1408,7 +1409,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             const autoMsg: Message = {
               id: crypto.randomUUID(),
               role: "system",
-              content: `🤖 Auto-detected: **${categoryLabel}** project (${Math.round(confidence * 100)}% confidence). Please select your calculation mode below.`,
+              content: `🤖 Auto-detected: **${categoryLabel}** project (${Math.round(confidence * 100)}% confidence). Please review the scope below and confirm.`,
               created_at: new Date().toISOString(),
             };
             setMessages((prev) => [...prev, autoMsg]);
