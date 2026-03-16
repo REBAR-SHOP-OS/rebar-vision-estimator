@@ -125,6 +125,28 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
     }
   };
 
+  const handlePdfExport = async (q: QuoteVersion) => {
+    const { data: project } = await supabase.from("projects").select("name, client_name, address").eq("id", projectId).single();
+    const { data: est } = await supabase.from("estimate_versions").select("version_number, total_estimated_cost").eq("id", q.estimate_version_id).single();
+    await exportQuotePdf({
+      quote: q,
+      projectName: project?.name || "Project",
+      clientName: project?.client_name || undefined,
+      address: project?.address || undefined,
+      estimateSummary: est ? { total_estimated_cost: est.total_estimated_cost, version_number: est.version_number } : undefined,
+    });
+  };
+
+  const pushToCrm = async (quoteId: string) => {
+    const { data: deals } = await supabase.from("crm_deals").select("crm_deal_id").limit(1);
+    if (!deals || deals.length === 0) { toast.error("No CRM deal linked"); return; }
+    const { data, error } = await supabase.functions.invoke("push-quote-to-crm", {
+      body: { quote_id: quoteId, crm_deal_id: deals[0].crm_deal_id },
+    });
+    if (error) { toast.error("CRM push failed"); return; }
+    toast.success(`Quote pushed to CRM (${data?.method || "done"})`);
+  };
+
   const fmtDate = (ts: string) => new Date(ts).toLocaleDateString();
   const fmtPrice = (p: number | null, currency: string | null) =>
     p != null ? `${currency || "CAD"} $${p.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—";
