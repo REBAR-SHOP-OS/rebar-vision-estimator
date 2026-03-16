@@ -84,7 +84,7 @@ export interface ScopeData {
   clientName: string;
   projectType: string;
   deviations: string;
-  rebarCoating: string;
+  rebarCoating: string | string[];
   detectedCategory?: string;
   detectedStandard?: string;
   // V2 fields
@@ -159,7 +159,7 @@ export function buildScopeFromDetection(d: DetectionResult): ScopeData {
     clientName: "",
     projectType: typeMap[n.primaryCategory] || n.primaryCategory,
     deviations: "",
-    rebarCoating: (n.detectedCoating && coatingMap[n.detectedCoating]) || "black_steel",
+    rebarCoating: REBAR_COATING_TYPES.map(c => c.id),
     detectedCategory: n.category,
     detectedStandard: n.detectedStandard,
     primaryCategory: n.primaryCategory,
@@ -175,7 +175,7 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
   const [clientName, setClientName] = useState("");
   const [projectType, setProjectType] = useState("");
   const [deviations, setDeviations] = useState("");
-  const [rebarCoating, setRebarCoating] = useState("black_steel");
+  const [rebarCoatings, setRebarCoatings] = useState<string[]>(REBAR_COATING_TYPES.map(c => c.id));
   const [includeCageModule, setIncludeCageModule] = useState(true);
   const [scopeLocked, setScopeLocked] = useState(false);
 
@@ -217,9 +217,8 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
     const coatingMap: Record<string, string> = {
       EPOXY: "epoxy_coated", GALVANISED: "galvanized", STAINLESS: "stainless_steel",
     };
-    if (normalized.detectedCoating && coatingMap[normalized.detectedCoating]) {
-      setRebarCoating(coatingMap[normalized.detectedCoating]);
-    }
+    // Keep all coatings selected by default so detection finds any present
+    setRebarCoatings(REBAR_COATING_TYPES.map(c => c.id));
   }, [detectionResult]);
 
   const toggleItem = (id: string) => {
@@ -250,7 +249,7 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
       clientName,
       projectType,
       deviations,
-      rebarCoating,
+      rebarCoating: rebarCoatings,
       detectedCategory: normalized?.category,
       detectedStandard: normalized?.detectedStandard,
       primaryCategory: normalized?.primaryCategory,
@@ -477,7 +476,22 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
 
         {/* Rebar Coating */}
         <div>
-          <Label className="text-xs font-semibold text-foreground uppercase tracking-wider mb-2 block">Rebar Coating</Label>
+          <div className="flex items-center justify-between mb-2">
+            <Label className="text-xs font-semibold text-foreground uppercase tracking-wider">Rebar Coating</Label>
+            <button
+              type="button"
+              onClick={() => {
+                if (rebarCoatings.length === REBAR_COATING_TYPES.length) {
+                  setRebarCoatings(["black_steel"]);
+                } else {
+                  setRebarCoatings(REBAR_COATING_TYPES.map(c => c.id));
+                }
+              }}
+              className="text-xs text-primary hover:underline font-medium"
+            >
+              {rebarCoatings.length === REBAR_COATING_TYPES.length ? "Deselect All" : "Select All"}
+            </button>
+          </div>
           {/* Coating auto-detection banner */}
           {normalized?.detectedCoating && normalized.detectedCoating !== "none" && (
             <div className="flex items-center gap-3 rounded-lg bg-amber-500/10 border border-amber-500/30 p-3 mb-2">
@@ -510,14 +524,20 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
               <label
                 key={coating.id}
                 className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs cursor-pointer transition-all ${
-                  rebarCoating === coating.id
+                  rebarCoatings.includes(coating.id)
                     ? "border-primary/40 bg-primary/5 text-foreground"
                     : "border-border hover:bg-accent/50 text-muted-foreground"
                 }`}
               >
                 <Checkbox
-                  checked={rebarCoating === coating.id}
-                  onCheckedChange={() => setRebarCoating(coating.id)}
+                  checked={rebarCoatings.includes(coating.id)}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      setRebarCoatings(prev => [...prev, coating.id]);
+                    } else if (rebarCoatings.length > 1) {
+                      setRebarCoatings(prev => prev.filter(c => c !== coating.id));
+                    }
+                  }}
                   className="h-3.5 w-3.5"
                 />
                 <span>{coating.label}</span>
