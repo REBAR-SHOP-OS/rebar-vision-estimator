@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2, Printer, Trash2, Eye, Clock, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { getLogoDataUri } from "@/lib/logo-base64";
 
 const SHOP_DRAWING_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-shop-drawing`;
 
@@ -115,6 +116,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
     timers.push(setTimeout(() => { if (!abortRef.current) { setProgress(90); setProgressLabel(PROGRESS_STEPS[2].label); } }, 6000));
 
     try {
+      const logoDataUri = await getLogoDataUri();
       const resp = await fetch(SHOP_DRAWING_URL, {
         method: "POST",
         headers: {
@@ -130,6 +132,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
           coatingType: scopeData?.coatingType,
           sizeBreakdown,
           options,
+          logoDataUri,
         }),
       });
 
