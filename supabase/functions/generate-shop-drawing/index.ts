@@ -70,7 +70,7 @@ CRITICAL LAYOUT REQUIREMENTS:
 1. **DRAWING FRAME**: A thick black border around the entire page content area. Inside is the drawing area.
 
 2. **TITLE BLOCK** (bottom-right, ~300px wide, full bottom height ~200px):
-   - Company logo: include this exact HTML at the top of the title block: <img src="${logoDataUri || ""}" style="height:40px;margin-bottom:4px;" alt="REBAR.SHOP" />
+   - Company logo: include this exact HTML at the top of the title block: <img src="<!-- LOGO_PLACEHOLDER -->" style="height:40px;margin-bottom:4px;" alt="REBAR.SHOP" />
    - Company name "REBAR.SHOP" with tagline "AN INNOVATIVE METHOD OF FABRICATION" in bold
    - Project address line
    - "PART OF DRAWING:" label with value (e.g. "CONCRETE SHEAR WALL" or element description)
