@@ -287,6 +287,24 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
               enum: ["canadian_metric", "us_imperial", "unknown"],
               description: "Detected measurement standard"
             },
+            disciplinesFound: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  discipline: { type: "string", description: "Discipline code: S, A, C, L, M, E, P" },
+                  sheetsIdentified: { type: "array", items: { type: "string" }, description: "Sheet numbers found for this discipline (e.g. S1.1, A2.3)" },
+                  scopeContributions: { type: "array", items: { type: "string" }, description: "Scope element types found on this discipline's drawings" },
+                },
+                required: ["discipline", "scopeContributions"],
+              },
+              description: "Disciplines identified across all pages analyzed"
+            },
+            hiddenScope: {
+              type: "array",
+              items: { type: "string" },
+              description: "Scope elements found ONLY on non-structural drawings (A/C/L/M/E) — easily missed in estimation"
+            },
             confidencePrimary: {
               type: "number",
               description: "Confidence in primaryCategory classification from 0 to 1"
@@ -296,7 +314,7 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
               description: "Brief explanation of classification (1-2 sentences)"
             }
           },
-          required: ["primaryCategory", "features", "evidence", "recommendedScope", "detectedCoating", "detectedStandard", "confidencePrimary", "reasoning"],
+          required: ["primaryCategory", "features", "evidence", "recommendedScope", "detectedCoating", "detectedStandard", "disciplinesFound", "confidencePrimary", "reasoning"],
           additionalProperties: false,
         }
       }
