@@ -329,7 +329,7 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         messages: [
-          { role: "system", content: "You are a structural engineering blueprint classifier implementing the Dominance + Veto detection system. Use the classify_project tool. NEVER set cage_only if building signals are present." },
+          { role: "system", content: "You are a structural engineering blueprint classifier implementing the Dominance + Veto detection system with multi-discipline awareness. FIRST identify each page's discipline (S/A/C/L/M/E/P) from title blocks, THEN extract scope elements from ALL disciplines — not just structural. Report disciplinesFound and hiddenScope. Use the classify_project tool. NEVER set cage_only if building signals are present." },
           { role: "user", content: userContent },
         ],
         tools,
