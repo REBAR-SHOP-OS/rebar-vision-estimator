@@ -186,6 +186,14 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
     if (normalized.features?.hasCageAssembly && !isCageOnly) {
       setIncludeCageModule(true);
     }
+
+    // Auto-detect coating
+    const coatingMap: Record<string, string> = {
+      EPOXY: "epoxy_coated", GALVANISED: "galvanized", STAINLESS: "stainless_steel",
+    };
+    if (normalized.detectedCoating && coatingMap[normalized.detectedCoating]) {
+      setRebarCoating(coatingMap[normalized.detectedCoating]);
+    }
   }, [detectionResult]);
 
   const toggleItem = (id: string) => {
