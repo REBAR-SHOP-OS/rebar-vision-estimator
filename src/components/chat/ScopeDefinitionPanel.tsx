@@ -139,7 +139,7 @@ export function buildScopeFromDetection(d: DetectionResult): ScopeData {
   };
 }
 
-const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, disabled, detectionResult, isDetecting }) => {
+const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, disabled, detectionResult, isDetecting, scopeSourceType }) => {
   const [selectedItems, setSelectedItems] = useState<string[]>(SCOPE_ITEMS.map((s) => s.id));
   const [clientName, setClientName] = useState("");
   const [projectType, setProjectType] = useState("");
