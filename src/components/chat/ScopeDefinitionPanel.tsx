@@ -175,7 +175,7 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
   const [clientName, setClientName] = useState("");
   const [projectType, setProjectType] = useState("");
   const [deviations, setDeviations] = useState("");
-  const [rebarCoating, setRebarCoating] = useState("black_steel");
+  const [rebarCoatings, setRebarCoatings] = useState<string[]>(REBAR_COATING_TYPES.map(c => c.id));
   const [includeCageModule, setIncludeCageModule] = useState(true);
   const [scopeLocked, setScopeLocked] = useState(false);
 
