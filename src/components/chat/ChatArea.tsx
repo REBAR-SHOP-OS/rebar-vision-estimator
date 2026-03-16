@@ -862,6 +862,45 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     };
   };
 
+  const persistEstimateVersion = async (elements: any[], quote: any) => {
+    if (!user) return;
+    try {
+      const scopeSource = scopeDataRef.current;
+      const resolveResp = await supabase.functions.invoke("resolve-scope", {
+        body: { project_id: projectId },
+      });
+      const resolved = resolveResp.data || {};
+
+      await supabase.from("estimate_versions").insert({
+        project_id: projectId,
+        user_id: user.id,
+        line_items: elements,
+        total_estimated_cost: quote?.total_weight_kg || null,
+        confidence_score: resolved.confidence || 0,
+        scope_source_type: resolved.source_type || "real_project",
+        scope_source_reference: resolved.source_type === "fallback_20_york" ? "20_york" : projectId,
+        scope_confidence: resolved.confidence || 0,
+        status: "draft",
+      });
+
+      await supabase.from("audit_log").insert({
+        user_id: user.id,
+        project_id: projectId,
+        action: "estimate_created",
+        details: {
+          element_count: elements.length,
+          total_weight_kg: quote?.total_weight_kg || 0,
+          scope_source_type: resolved.source_type,
+        },
+      });
+
+      // Update project workflow status
+      await supabase.from("projects").update({ workflow_status: "estimated" }).eq("id", projectId);
+    } catch (err) {
+      console.warn("[persistEstimateVersion] Failed:", err);
+    }
+  };
+
   const processAtomicTruth = async (fullContent: string) => {
     const atomicData = extractAtomicTruthJSON(fullContent);
     if (atomicData?.elements && atomicData.elements.length > 0) {
@@ -871,6 +910,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       // Build synthetic quote so export buttons appear immediately
       const syntheticQuote = buildSyntheticQuote(atomicData.elements, atomicData.summary);
       setQuoteResult({ elements: atomicData.elements, summary: atomicData.summary || null, quote: syntheticQuote });
+      // Persist estimate to DB
+      persistEstimateVersion(atomicData.elements, syntheticQuote);
       // Background: run validation and merge results
       setSubStep("validating");
       runValidation(atomicData.elements).then(() => {
