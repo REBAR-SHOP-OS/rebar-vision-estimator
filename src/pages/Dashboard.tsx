@@ -433,7 +433,11 @@ const Dashboard: React.FC = () => {
         </header>
 
       {/* Chat or Welcome */}
-      {showSearch ? (
+      {showHealth ? (
+          <ProjectHealthDashboard onClose={() => setShowHealth(false)} />
+        ) : showDiagnostics ? (
+          <AdminDiagnosticsPanel onClose={() => setShowDiagnostics(false)} />
+        ) : showSearch ? (
           <DrawingSearchPanel
             onClose={() => setShowSearch(false)}
             onSelectProject={(projectId) => {
