@@ -1,38 +1,42 @@
 
 
-## Plan: Align PDF Export to Match Excel Two-Sheet Layout
+# Auto-Detect Rebar Coating from Drawings
 
-### Problem
-The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
+## Problem
+The rebar coating field in the Scope Definition Panel always defaults to "Black Steel (Standard)" regardless of what the drawings specify. If general notes mention epoxy, galvanized, or stainless steel, the user must manually change it. This is a pricing-critical field that should be auto-detected and flagged.
+
+## Solution
+Add coating detection to the project type detection pipeline and auto-populate the scope panel with alerts.
 
 ### Changes
 
-**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
+**1. `supabase/functions/detect-project-type/index.ts`**
+- Add coating keywords to OCR keyword analysis: `epoxy`, `epoxy-coated`, `ecr`, `galvanized`, `galvanised`, `stainless`, `stainless steel`, `mmfx`, `chromium`
+- Add `detectedCoating` field to the tool call schema (enum: `none`, `EPOXY`, `GALVANISED`, `STAINLESS`, `MMFX`)
+- Include coating keyword hints in the AI prompt
+- Pass `detectedCoating` through in the response
 
-Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
+**2. `src/components/chat/ScopeDefinitionPanel.tsx`**
+- Extend `DetectionResult` interface with `detectedCoating?: string`
+- In the `useEffect` that applies detection results, map `detectedCoating` to the internal coating ID (`EPOXY` → `epoxy_coated`, `GALVANISED` → `galvanized`, `STAINLESS` → `stainless_steel`) and call `setRebarCoating()`
+- Show an amber alert banner when non-standard coating is detected: "⚠ Coating Detected: Epoxy-Coated — pricing multiplier (1.20x) will be applied automatically"
+- Update `buildScopeFromDetection()` to also use `detectedCoating` instead of always defaulting to `black_steel`
 
-**Section 1: "Estimate Summary"** (page 1)
-- Project header: Project Name, Address, Engineer, Customer, Product Line
-- "Estimate Summary" title
-- Side-by-side tables using CSS grid/flexbox:
-  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
-  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
-- NOTES section: Grade, Lap Length Info, Deviations, Coating
-- Scope Items (if any)
-- MESH DETAILS table
+**3. Coating-to-ID mapping**
 
-**Section 2: "Bar List"** (page 2+, page-break-before)
-- Project header
-- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
-- Rows grouped by element type headers (bold row spanning columns)
-- Sub-element sub-headers
-- Bar rows with identification string (`{size} @ {spacing} {description}`)
-- TOTAL WEIGHT + TOTAL (Tons) footer rows
-- MESH DETAILS at bottom
+| AI Output | Scope Panel ID | Multiplier |
+|-----------|---------------|------------|
+| `EPOXY` | `epoxy_coated` | 1.20x |
+| `GALVANISED` | `galvanized` | 1.35x |
+| `STAINLESS` | `stainless_steel` | 6.0x |
+| `MMFX` | `black_steel` + warning | 1.50x |
+| `none` / absent | `black_steel` | 1.0x |
 
-The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
+**4. Alert banner in scope panel** (new section above the coating radio buttons)
+When `detectedCoating` is non-standard, render an amber banner:
+- Icon: AlertTriangle
+- Text: "Coating detected from drawings: **{label}** — pricing multiplier ({mult}x) will apply"
+- The coating radio is pre-selected but user can override
 
-### Scope
-- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
-- No new files, no backend changes
+No database changes needed. The coating field already flows through `scopeData.rebarCoating` → `analyze-blueprint` prompt → element extraction → pricing.
 
