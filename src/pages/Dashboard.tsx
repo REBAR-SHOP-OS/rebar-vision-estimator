@@ -313,6 +313,22 @@ const Dashboard: React.FC = () => {
                   )}
                   <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        toast.info("Reprocessing pipeline...");
+                        const { data, error } = await supabase.functions.invoke("process-pipeline", {
+                          body: { project_id: project.id, reprocess: true },
+                        });
+                        if (error) { toast.error("Pipeline failed"); return; }
+                        toast.success(`Pipeline: ${data?.linkage_score || "done"}`);
+                        loadProjects();
+                      }}
+                      className="hover:text-primary"
+                      title="Reprocess pipeline"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                    </button>
+                    <button
                       onClick={(e) => startEditing(project.id, project.name, e)}
                       className="hover:text-primary"
                     >
