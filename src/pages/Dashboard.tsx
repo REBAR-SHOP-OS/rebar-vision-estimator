@@ -27,6 +27,9 @@ interface Project {
   name: string;
   status: string;
   created_at: string;
+  workflow_status?: string;
+  linkage_score?: string;
+  intake_complete?: boolean;
 }
 
 const Dashboard: React.FC = () => {
