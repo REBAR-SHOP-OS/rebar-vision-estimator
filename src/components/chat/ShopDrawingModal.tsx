@@ -116,6 +116,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
     timers.push(setTimeout(() => { if (!abortRef.current) { setProgress(90); setProgressLabel(PROGRESS_STEPS[2].label); } }, 6000));
 
     try {
+      const logoDataUri = await getLogoDataUri();
       const resp = await fetch(SHOP_DRAWING_URL, {
         method: "POST",
         headers: {
@@ -131,6 +132,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
           coatingType: scopeData?.coatingType,
           sizeBreakdown,
           options,
+          logoDataUri,
         }),
       });
 
