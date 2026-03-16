@@ -471,7 +471,11 @@ const Dashboard: React.FC = () => {
         </header>
 
       {/* Chat or Welcome */}
-      {showHealth ? (
+      {showEstimateCompare && activeProjectId ? (
+          <EstimateComparison projectId={activeProjectId} onClose={() => setShowEstimateCompare(false)} />
+        ) : showQuoteWorkflow && activeProjectId ? (
+          <QuoteWorkflow projectId={activeProjectId} onClose={() => setShowQuoteWorkflow(false)} />
+        ) : showHealth ? (
           <ProjectHealthDashboard onClose={() => setShowHealth(false)} />
         ) : showDiagnostics ? (
           <AdminDiagnosticsPanel onClose={() => setShowDiagnostics(false)} />
