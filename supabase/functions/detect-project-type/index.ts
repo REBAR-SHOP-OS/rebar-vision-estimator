@@ -232,6 +232,11 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
               items: { type: "string", enum: ["FOOTING", "GRADE_BEAM", "RAFT_SLAB", "PIER", "BEAM", "COLUMN", "SLAB", "STAIR", "WALL", "RETAINING_WALL", "ICF_WALL", "CMU_WALL", "WIRE_MESH", "CAGE"] },
               description: "Which element types are relevant for this project"
             },
+            detectedCoating: {
+              type: "string",
+              enum: ["none", "EPOXY", "GALVANISED", "STAINLESS", "MMFX"],
+              description: "Rebar coating type detected from general notes or specs"
+            },
             detectedStandard: {
               type: "string",
               enum: ["canadian_metric", "us_imperial", "unknown"],
@@ -246,7 +251,7 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
               description: "Brief explanation of classification (1-2 sentences)"
             }
           },
-          required: ["primaryCategory", "features", "evidence", "recommendedScope", "detectedStandard", "confidencePrimary", "reasoning"],
+          required: ["primaryCategory", "features", "evidence", "recommendedScope", "detectedCoating", "detectedStandard", "confidencePrimary", "reasoning"],
           additionalProperties: false,
         }
       }
