@@ -195,7 +195,16 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
 
 ### Feature Detection (independent of primaryCategory):
 - **hasCageAssembly**: true if ANY cage/caisson/drilled pier/spiral/tied assembly content is found ANYWHERE in the set.
-- **hasBarListTable**: true if ANY bar schedule/bending schedule table is found.`;
+- **hasBarListTable**: true if ANY bar schedule/bending schedule table is found.
+
+### Coating Detection:
+Detect rebar coating from general notes, specifications, or legends:
+- **EPOXY**: "epoxy", "epoxy-coated", "ECR" mentioned
+- **GALVANISED**: "galvanized", "galvanised" mentioned
+- **STAINLESS**: "stainless steel", "stainless" mentioned
+- **MMFX**: "MMFX", "chromium" mentioned
+- **none**: no special coating detected
+Set detectedCoating accordingly. This is CRITICAL for pricing accuracy.`;
 
     const tools = [{
       type: "function" as const,
