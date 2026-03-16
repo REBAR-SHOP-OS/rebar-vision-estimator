@@ -75,9 +75,9 @@ const STANDARD_LABELS: Record<string, string> = {
 };
 
 // Scope items locked for cage_only projects
-const CAGE_ONLY_SCOPE = ["CAGE", "COLUMN", "PIER"];
+const CAGE_ONLY_SCOPE = ["CAGE", "COLUMN", "PIER", "CAISSON"];
 // Recommended scope for residential
-const RESIDENTIAL_SCOPE = ["FOOTING", "WALL", "ICF_WALL", "SLAB", "WIRE_MESH", "CAGE"];
+const RESIDENTIAL_SCOPE = ["FOOTING", "GRADE_BEAM", "SLAB_ON_GRADE", "THICKENED_EDGE", "WIRE_MESH", "ICF_WALL", "CMU_WALL", "STAIR", "CAGE"];
 
 export interface ScopeData {
   scopeItems: string[];

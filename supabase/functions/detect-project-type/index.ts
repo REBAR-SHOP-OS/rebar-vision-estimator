@@ -161,32 +161,46 @@ serve(async (req) => {
     if (foundCoatings.length > 0) keywordHints.push(`Coating indicators: ${foundCoatings.map(c => c.key).join(", ")} → ${detectedCoatingFromOCR}`);
 
     // Build the detection prompt with Dominance + Veto rules
-    const detectionPrompt = `Analyze these blueprint files and determine the project type using the TWO-LAYER detection system.
+    const detectionPrompt = `Analyze these blueprint files using the "FOLLOW THE CONCRETE" methodology.
 
 ${ocrText ? `## OCR Text Extracted:\n${ocrText}` : "No OCR text available - analyze the images directly."}
 
 ${keywordHints.length > 0 ? `## Keyword Analysis Hints:\n${keywordHints.map(h => `- ${h}`).join("\n")}\n` : ""}
 
+## CORE RULE: "Follow the Concrete"
+Rebar only exists inside concrete or masonry. Find EVERY piece of concrete across ALL drawing disciplines (S, A, C, L, MEP) and classify it.
+
+## 5 Construction Buckets (classify every concrete element into one):
+
+**Bucket 1 — Substructure & Deep Foundations**: Piles, Caissons, Grade Beams, Strip Footings, Pad Footings, Raft Slabs, Elevator Pits, Sump Pits.
+  Found on: Structural (S), Elevator specs, Plumbing (P) drawings.
+
+**Bucket 2 — Slab-on-Grade & Flatwork**: Main interior slabs, thickened edges, trench drains, vapor barrier protection slabs, heavy equipment pads, wire mesh.
+  Found on: Structural (S), Architectural (A) for depressed slabs, Mechanical/Electrical (M/E) for housekeeping pads.
+
+**Bucket 3 — Superstructure**: Columns, Beams, Elevated/Suspended Slabs, Concrete Roofs, Stairs, Shear Walls, Post-Tensioned decks, Cage Assemblies.
+  Found on: Structural (S), Architectural (A) for monumental stairs, parapets, trimmer bars.
+
+**Bucket 4 — Masonry / CMU**: Vertical rebar in block cells, horizontal bond beams, joint reinforcement, dowels from concrete into block.
+  Found on: Architectural (A) for wall locations, Structural (S) for rebar details inside block.
+
+**Bucket 5 — Site, Civil & Landscape**: Retaining walls, light pole bases, transformer pads, concrete paving/driveways, catch basins, ICF walls, sound walls.
+  Found on: Civil (C), Landscape (L), Electrical (E) for duct banks.
+
 ## CRITICAL: Dominance + Veto Classification Rule
 
-You MUST output TWO things:
-1. **primaryCategory** — what the overall project IS (residential, commercial, industrial, infrastructure, cage_only, bar_list_only)
-2. **features** — what sub-modules are present (hasCageAssembly, hasBarListTable)
+Output TWO things:
+1. **primaryCategory** — overall project type (residential, commercial, industrial, infrastructure, cage_only, bar_list_only)
+2. **features** — sub-modules present (hasCageAssembly, hasBarListTable)
 
-### The "Human Rule" for cage_only classification:
-Set primaryCategory = "cage_only" ONLY IF:
-- Cage/caisson pages dominate (>70% of sheets are cage-related)
-- AND zero strong building signals exist (no FOUNDATION PLAN, FOOTING, BASEMENT WALL, SOG, FRAMING PLAN, BEAM, GRIDLINES, FLOOR LEVELS, sheet patterns S0xx/S1xx, GENERAL NOTES, legends, WALL SCHEDULE, etc.)
+### cage_only classification:
+Set primaryCategory = "cage_only" ONLY IF cage/caisson pages dominate (>70%) AND zero building signals exist.
 
-If ANY building signals exist alongside cage content:
-- Set primaryCategory to the appropriate building type (residential/commercial/etc.)
-- Set features.hasCageAssembly = true
-
-### Building Signal Veto List (these PREVENT cage_only):
+### Building Signal Veto List (PREVENT cage_only):
 FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE, SLAB ON GRADE, SOG, WIRE MESH, WWM, FRAMING PLAN, BEAM, JOIST, GRIDLINES, FLOOR LEVELS, GENERAL NOTES, COLUMN SCHEDULE, STAIR, GRADE BEAM, RAFT SLAB, RETAINING WALL, CMU WALL, sheet patterns S0xx/S1xx
 
 ### Category Guide:
-- **cage_only**: ONLY when cage/caisson pages dominate AND no building signals. Pure cage package.
+- **cage_only**: Pure cage package — cage/caisson pages dominate AND no building signals.
 - **bar_list_only**: No blueprint drawings — just tables with bar marks, sizes, quantities, lengths.
 - **residential**: Strip footings, ICF walls, basement walls, SOG, small columns, house plans.
 - **commercial**: Multi-storey columns, flat slabs, parking, beams, drop panels.
@@ -194,17 +208,15 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
 - **infrastructure**: Bridge decks, abutments, retaining walls >3m, culverts, highway barriers.
 
 ### Feature Detection (independent of primaryCategory):
-- **hasCageAssembly**: true if ANY cage/caisson/drilled pier/spiral/tied assembly content is found ANYWHERE in the set.
-- **hasBarListTable**: true if ANY bar schedule/bending schedule table is found.
+- **hasCageAssembly**: true if ANY cage/caisson/drilled pier/spiral/tied assembly content found.
+- **hasBarListTable**: true if ANY bar schedule/bending schedule table found.
 
 ### Coating Detection:
-Detect rebar coating from general notes, specifications, or legends:
-- **EPOXY**: "epoxy", "epoxy-coated", "ECR" mentioned
-- **GALVANISED**: "galvanized", "galvanised" mentioned
-- **STAINLESS**: "stainless steel", "stainless" mentioned
-- **MMFX**: "MMFX", "chromium" mentioned
-- **none**: no special coating detected
-Set detectedCoating accordingly. This is CRITICAL for pricing accuracy.`;
+- **EPOXY**: "epoxy", "epoxy-coated", "ECR"
+- **GALVANISED**: "galvanized", "galvanised"
+- **STAINLESS**: "stainless steel", "stainless"
+- **MMFX**: "MMFX", "chromium"
+- **none**: no special coating detected`;
 
     const tools = [{
       type: "function" as const,
