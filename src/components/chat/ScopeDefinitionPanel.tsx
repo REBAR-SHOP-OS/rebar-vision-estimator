@@ -9,21 +9,45 @@ import { ArrowRight, Info, Sparkles, AlertTriangle, RotateCcw } from "lucide-rea
 import { Badge } from "@/components/ui/badge";
 
 export const SCOPE_ITEMS = [
-  { id: "FOOTING", label: "Footings", category: "Foundation" },
-  { id: "GRADE_BEAM", label: "Grade Beams", category: "Foundation" },
-  { id: "RAFT_SLAB", label: "Raft Slabs", category: "Foundation" },
-  { id: "PIER", label: "Piers / Pedestals", category: "Foundation" },
-  { id: "BEAM", label: "Beams", category: "Structural" },
-  { id: "COLUMN", label: "Columns", category: "Structural" },
-  { id: "SLAB", label: "Slabs", category: "Structural" },
-  { id: "STAIR", label: "Stairs", category: "Structural" },
-  { id: "WALL", label: "Walls", category: "Walls" },
-  { id: "RETAINING_WALL", label: "Retaining Walls", category: "Walls" },
-  { id: "ICF_WALL", label: "ICF Walls", category: "Walls" },
-  { id: "CMU_WALL", label: "CMU Walls", category: "Walls" },
-  { id: "WIRE_MESH", label: "Wire Mesh", category: "Other" },
-  { id: "CAGE", label: "Cage", category: "Assemblies" },
+  // Bucket 1 — Substructure & Deep Foundations
+  { id: "PILE", label: "Piles", category: "Substructure & Deep Foundations" },
+  { id: "CAISSON", label: "Caissons / Drilled Piers", category: "Substructure & Deep Foundations" },
+  { id: "GRADE_BEAM", label: "Grade Beams", category: "Substructure & Deep Foundations" },
+  { id: "FOOTING", label: "Footings", category: "Substructure & Deep Foundations" },
+  { id: "RAFT_SLAB", label: "Raft Slabs", category: "Substructure & Deep Foundations" },
+  { id: "PIER", label: "Piers / Pedestals", category: "Substructure & Deep Foundations" },
+  { id: "ELEVATOR_PIT", label: "Elevator Pits", category: "Substructure & Deep Foundations" },
+  { id: "SUMP_PIT", label: "Sump Pits", category: "Substructure & Deep Foundations" },
+  // Bucket 2 — Slab-on-Grade & Flatwork
+  { id: "SLAB_ON_GRADE", label: "Slab-on-Grade", category: "Slab-on-Grade & Flatwork" },
+  { id: "THICKENED_EDGE", label: "Thickened Edges", category: "Slab-on-Grade & Flatwork" },
+  { id: "TRENCH_DRAIN", label: "Trench Drains", category: "Slab-on-Grade & Flatwork" },
+  { id: "EQUIPMENT_PAD", label: "Equipment Pads", category: "Slab-on-Grade & Flatwork" },
+  { id: "WIRE_MESH", label: "Wire Mesh", category: "Slab-on-Grade & Flatwork" },
+  // Bucket 3 — Superstructure
+  { id: "COLUMN", label: "Columns", category: "Superstructure" },
+  { id: "BEAM", label: "Beams", category: "Superstructure" },
+  { id: "ELEVATED_SLAB", label: "Elevated / Suspended Slabs", category: "Superstructure" },
+  { id: "STAIR", label: "Stairs", category: "Superstructure" },
+  { id: "SHEAR_WALL", label: "Shear Walls", category: "Superstructure" },
+  { id: "CAGE", label: "Cage Assemblies", category: "Superstructure" },
+  // Bucket 4 — Masonry / CMU
+  { id: "CMU_WALL", label: "CMU Walls", category: "Masonry / CMU" },
+  { id: "BOND_BEAM", label: "Bond Beams", category: "Masonry / CMU" },
+  { id: "MASONRY_DOWEL", label: "Masonry Dowels", category: "Masonry / CMU" },
+  // Bucket 5 — Site, Civil & Landscape
+  { id: "RETAINING_WALL", label: "Retaining Walls", category: "Site, Civil & Landscape" },
+  { id: "ICF_WALL", label: "ICF Walls", category: "Site, Civil & Landscape" },
+  { id: "LIGHT_POLE_BASE", label: "Light Pole Bases", category: "Site, Civil & Landscape" },
+  { id: "TRANSFORMER_PAD", label: "Transformer Pads", category: "Site, Civil & Landscape" },
+  { id: "SITE_PAVING", label: "Site Paving / Driveways", category: "Site, Civil & Landscape" },
 ] as const;
+
+// Legacy ID mapping for backward compatibility with saved projects
+const LEGACY_ID_MAP: Record<string, string> = {
+  SLAB: "SLAB_ON_GRADE",
+  WALL: "SHEAR_WALL",
+};
 
 const REBAR_COATING_TYPES = [
   { id: "black_steel", label: "Black Steel (Standard)" },
@@ -51,9 +75,9 @@ const STANDARD_LABELS: Record<string, string> = {
 };
 
 // Scope items locked for cage_only projects
-const CAGE_ONLY_SCOPE = ["CAGE", "COLUMN", "PIER"];
+const CAGE_ONLY_SCOPE = ["CAGE", "COLUMN", "PIER", "CAISSON"];
 // Recommended scope for residential
-const RESIDENTIAL_SCOPE = ["FOOTING", "WALL", "ICF_WALL", "SLAB", "WIRE_MESH", "CAGE"];
+const RESIDENTIAL_SCOPE = ["FOOTING", "GRADE_BEAM", "SLAB_ON_GRADE", "THICKENED_EDGE", "WIRE_MESH", "ICF_WALL", "CMU_WALL", "STAIR", "CAGE"];
 
 export interface ScopeData {
   scopeItems: string[];

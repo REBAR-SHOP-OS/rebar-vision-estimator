@@ -1,68 +1,38 @@
 
 
-# Restructure Scope to "Follow the Concrete" — 5 Construction Buckets
+## Plan: Align PDF Export to Match Excel Two-Sheet Layout
 
-## What Changes
+### Problem
+The PDF export (lines 30-78 in `ExportButtons.tsx`) uses an old format with summary boxes, a flat bar list, a separate size summary page, and a bending schedule. It needs to match the same two-section structure as the Excel export.
 
-### 1. Reorganize `SCOPE_ITEMS` into 5 Construction Buckets (`ScopeDefinitionPanel.tsx`)
+### Changes
 
-Replace the current 4 abstract categories (Foundation, Structural, Walls, Other, Assemblies) with 5 construction-sequence buckets and add missing element types:
+**File: `src/components/chat/ExportButtons.tsx`** — rewrite `handlePdfExport()` (lines 30-78)
 
-```text
-Current (4 categories, 14 items):
-  Foundation: FOOTING, GRADE_BEAM, RAFT_SLAB, PIER
-  Structural: BEAM, COLUMN, SLAB, STAIR
-  Walls: WALL, RETAINING_WALL, ICF_WALL, CMU_WALL
-  Other: WIRE_MESH
-  Assemblies: CAGE
+Replace the entire PDF HTML generation with two sections mirroring the Excel sheets:
 
-New (5 buckets, 22 items):
-  Bucket 1 — Substructure & Deep Foundations:
-    PILE, CAISSON, GRADE_BEAM, FOOTING, RAFT_SLAB, PIER, ELEVATOR_PIT, SUMP_PIT
+**Section 1: "Estimate Summary"** (page 1)
+- Project header: Project Name, Address, Engineer, Customer, Product Line
+- "Estimate Summary" title
+- Side-by-side tables using CSS grid/flexbox:
+  - Left: **Weight Summary Report in Kgs** — bar sizes with weight, grand total kg + tons
+  - Right: **Element wise Summary Report in Kgs** — numbered element types with weight, grand total kg + tons
+- NOTES section: Grade, Lap Length Info, Deviations, Coating
+- Scope Items (if any)
+- MESH DETAILS table
 
-  Bucket 2 — Slab-on-Grade & Flatwork:
-    SLAB_ON_GRADE, THICKENED_EDGE, TRENCH_DRAIN, EQUIPMENT_PAD, WIRE_MESH
+**Section 2: "Bar List"** (page 2+, page-break-before)
+- Project header
+- 13-column table matching Excel: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info 1, Info 2, Total Length (Mtr.), Total Wgt kg, Notes
+- Rows grouped by element type headers (bold row spanning columns)
+- Sub-element sub-headers
+- Bar rows with identification string (`{size} @ {spacing} {description}`)
+- TOTAL WEIGHT + TOTAL (Tons) footer rows
+- MESH DETAILS at bottom
 
-  Bucket 3 — Superstructure:
-    COLUMN, BEAM, ELEVATED_SLAB, STAIR, SHEAR_WALL, CAGE
+The data computation logic will reuse the same grouping/calculation patterns from `excel-export.ts` (groupBy, mmToFtIn, weight calculations).
 
-  Bucket 4 — Masonry / CMU:
-    CMU_WALL, BOND_BEAM, MASONRY_DOWEL
-
-  Bucket 5 — Site, Civil & Landscape:
-    RETAINING_WALL, ICF_WALL, LIGHT_POLE_BASE, TRANSFORMER_PAD, SITE_PAVING
-```
-
-### 2. Update the detection prompt (`detect-project-type/index.ts`)
-
-- Add the new element IDs to the `recommendedScope` enum in the tool schema
-- Update the detection prompt to use the "Follow the Concrete" methodology — instruct the AI to find every concrete element across S, A, C, L, MEP drawings and classify into the 5 buckets
-- Add new keyword signals for the added element types (elevator pit, trench drain, equipment pad, etc.)
-
-### 3. Update the analysis prompt (`analyze-blueprint/index.ts`)
-
-- Add new `element_type` values to the ElementUnit schema enum
-- Add the "3-Way Match" instruction to the master prompt: for every concrete element found, check (1) Plan View for location/quantity, (2) Section/Detail for shape, (3) General Notes for defaults
-- Add the 5-bucket construction sequence to the scope discovery stage (Stage 1)
-- Update `estimation_group` to support bucket-level grouping
-
-### 4. Update scope-by-scope processing (`ChatArea.tsx`)
-
-- The scope-by-scope iterative processing groups by `item.category` — these will now be the 5 bucket names, so each bucket gets its own focused AI pass
-- Update `SCOPE_ITEMS` import references to work with new IDs
-
-### 5. Fix the "No scope detected" bottom message
-
-- The bottom status message appears because `scopeSourceType` defaults to `"none"` in certain render paths. Pass detection state properly so the message disappears once drawings are uploaded and detection completes.
-
-### 6. Backward compatibility
-
-- Keep old IDs (FOOTING, SLAB, WALL, etc.) as aliases mapped to new bucket items so existing saved projects don't break
-- The `buildScopeFromDetection` function will map to new bucket structure
-
-### Files Modified
-- `src/components/chat/ScopeDefinitionPanel.tsx` — new SCOPE_ITEMS with 5 buckets, 22 elements
-- `supabase/functions/detect-project-type/index.ts` — updated prompt + tool schema with new element IDs
-- `supabase/functions/analyze-blueprint/index.ts` — 3-Way Match methodology + new element types in schema
-- `src/components/chat/ChatArea.tsx` — fix scopeSourceType propagation
+### Scope
+- 1 file modified: `src/components/chat/ExportButtons.tsx` (rewrite `handlePdfExport`)
+- No new files, no backend changes
 
