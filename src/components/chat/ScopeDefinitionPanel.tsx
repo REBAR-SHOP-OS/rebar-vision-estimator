@@ -476,7 +476,22 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
 
         {/* Rebar Coating */}
         <div>
-          <Label className="text-xs font-semibold text-foreground uppercase tracking-wider mb-2 block">Rebar Coating</Label>
+          <div className="flex items-center justify-between mb-2">
+            <Label className="text-xs font-semibold text-foreground uppercase tracking-wider">Rebar Coating</Label>
+            <button
+              type="button"
+              onClick={() => {
+                if (rebarCoatings.length === REBAR_COATING_TYPES.length) {
+                  setRebarCoatings(["black_steel"]);
+                } else {
+                  setRebarCoatings(REBAR_COATING_TYPES.map(c => c.id));
+                }
+              }}
+              className="text-xs text-primary hover:underline font-medium"
+            >
+              {rebarCoatings.length === REBAR_COATING_TYPES.length ? "Deselect All" : "Select All"}
+            </button>
+          </div>
           {/* Coating auto-detection banner */}
           {normalized?.detectedCoating && normalized.detectedCoating !== "none" && (
             <div className="flex items-center gap-3 rounded-lg bg-amber-500/10 border border-amber-500/30 p-3 mb-2">
@@ -509,14 +524,20 @@ const ScopeDefinitionPanel: React.FC<ScopeDefinitionPanelProps> = ({ onProceed, 
               <label
                 key={coating.id}
                 className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs cursor-pointer transition-all ${
-                  rebarCoating === coating.id
+                  rebarCoatings.includes(coating.id)
                     ? "border-primary/40 bg-primary/5 text-foreground"
                     : "border-border hover:bg-accent/50 text-muted-foreground"
                 }`}
               >
                 <Checkbox
-                  checked={rebarCoating === coating.id}
-                  onCheckedChange={() => setRebarCoating(coating.id)}
+                  checked={rebarCoatings.includes(coating.id)}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      setRebarCoatings(prev => [...prev, coating.id]);
+                    } else if (rebarCoatings.length > 1) {
+                      setRebarCoatings(prev => prev.filter(c => c !== coating.id));
+                    }
+                  }}
                   className="h-3.5 w-3.5"
                 />
                 <span>{coating.label}</span>
