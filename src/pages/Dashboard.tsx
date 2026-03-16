@@ -51,6 +51,8 @@ const Dashboard: React.FC = () => {
   const [showCrm, setShowCrm] = useState(false);
   const [showOutcomes, setShowOutcomes] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [showHealth, setShowHealth] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [processingPhase, setProcessingPhase] = useState<string | null>(null);
   const [initialFiles, setInitialFiles] = useState<File[] | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
