@@ -133,6 +133,8 @@ serve(async (req) => {
     const residentialKeywords = ["icf", "basement", "garage", "sog", "slab on grade", "strip footing"];
     const industrialKeywords = ["equipment pad", "tank", "crane beam", "industrial", "process area"];
     const commercialKeywords = ["parking", "multi-storey", "elevator", "drop panel", "flat slab", "post-tension"];
+    const siteKeywords = ["light pole", "transformer pad", "catch basin", "site paving", "driveway", "sound wall"];
+    const masonryKeywords = ["cmu", "block wall", "bond beam", "masonry", "grout fill"];
     
     // Coating keywords
     const coatingKeywords: { key: string; label: string }[] = [
