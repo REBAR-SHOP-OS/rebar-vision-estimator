@@ -238,8 +238,8 @@ Set detectedCoating accordingly. This is CRITICAL for pricing accuracy.`;
             },
             recommendedScope: {
               type: "array",
-              items: { type: "string", enum: ["FOOTING", "GRADE_BEAM", "RAFT_SLAB", "PIER", "BEAM", "COLUMN", "SLAB", "STAIR", "WALL", "RETAINING_WALL", "ICF_WALL", "CMU_WALL", "WIRE_MESH", "CAGE"] },
-              description: "Which element types are relevant for this project"
+              items: { type: "string", enum: ["PILE", "CAISSON", "GRADE_BEAM", "FOOTING", "RAFT_SLAB", "PIER", "ELEVATOR_PIT", "SUMP_PIT", "SLAB_ON_GRADE", "THICKENED_EDGE", "TRENCH_DRAIN", "EQUIPMENT_PAD", "WIRE_MESH", "COLUMN", "BEAM", "ELEVATED_SLAB", "STAIR", "SHEAR_WALL", "CAGE", "CMU_WALL", "BOND_BEAM", "MASONRY_DOWEL", "RETAINING_WALL", "ICF_WALL", "LIGHT_POLE_BASE", "TRANSFORMER_PAD", "SITE_PAVING"] },
+              description: "Which element types are relevant, organized by 5 construction buckets: Substructure, Slab-on-Grade, Superstructure, Masonry, Site/Civil"
             },
             detectedCoating: {
               type: "string",
