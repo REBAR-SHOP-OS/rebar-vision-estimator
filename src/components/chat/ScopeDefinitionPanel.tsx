@@ -159,7 +159,7 @@ export function buildScopeFromDetection(d: DetectionResult): ScopeData {
     clientName: "",
     projectType: typeMap[n.primaryCategory] || n.primaryCategory,
     deviations: "",
-    rebarCoating: (n.detectedCoating && coatingMap[n.detectedCoating]) || "black_steel",
+    rebarCoating: REBAR_COATING_TYPES.map(c => c.id),
     detectedCategory: n.category,
     detectedStandard: n.detectedStandard,
     primaryCategory: n.primaryCategory,
