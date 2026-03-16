@@ -84,7 +84,7 @@ export interface ScopeData {
   clientName: string;
   projectType: string;
   deviations: string;
-  rebarCoating: string;
+  rebarCoating: string | string[];
   detectedCategory?: string;
   detectedStandard?: string;
   // V2 fields
