@@ -39,7 +39,7 @@ serve(async (req) => {
 
     const uniqueShapes = [...new Set((barList || []).map((b: any) => b.shape_code).filter(Boolean))];
 
-    const prompt = `You are a professional rebar detailer. Generate a complete HTML shop drawing document.
+    const prompt = `You are a professional rebar detailer at REBAR.SHOP. Generate a complete HTML shop drawing document that matches the exact professional standard of real construction shop drawings.
 
 PROJECT INFO:
 - Name: ${projectName || "Project"}
@@ -63,25 +63,64 @@ SIZE BREAKDOWN: ${sizeSummary || "N/A"}
 
 UNIQUE SHAPE CODES: ${uniqueShapes.join(", ") || "straight only"}
 
-Generate a COMPLETE standalone HTML document for a professional shop drawing with:
-1. Project header (name, client, date, standard, drawing number with prefix "${opts.drawingPrefix}")
-2. Scale indicator showing "${opts.scale}"
-${opts.includeDims ? "3. Bar Bending Schedule table with columns: Bar Mark, Size, Shape Code, Qty, Cut Length, Total Weight, with dimension annotations" : "3. Bar Bending Schedule table with columns: Bar Mark, Size, Shape Code, Qty, Cut Length, Total Weight (NO dimension annotations)"}
-${opts.layerGrouping ? "4. Group bars by element type with section headers for each group" : "4. List all bars in a single flat table without grouping"}
-${opts.barMarks ? "5. Label each bar with its bar mark ID" : "5. Do NOT show bar mark labels"}
-6. For each unique shape code, a section describing the bend geometry (dimensions A, B, C, D, E as applicable)
-7. Size summary table
-8. Notes section with applicable standards${opts.notes ? ` and user notes: "${opts.notes}"` : ""}
-9. Footer with disclaimer and date
+Generate a COMPLETE standalone HTML document for a professional shop drawing. The output MUST have a DRAWING FRAME (border around entire page) with a TITLE BLOCK in the bottom-right corner, exactly like real engineering shop drawings. 
 
-Use professional styling:
-- Dark navy header (#1a1a2e)
-- Clean table borders
-- Print-optimized @page rules
-- Professional engineering document look
-- Page breaks between major sections
+CRITICAL LAYOUT REQUIREMENTS:
+
+1. **DRAWING FRAME**: A thick black border around the entire page content area. Inside is the drawing area.
+
+2. **TITLE BLOCK** (bottom-right, ~300px wide, full bottom height ~200px):
+   - Company name "REBAR.SHOP" with tagline "AN INNOVATIVE METHOD OF FABRICATION" in bold
+   - Project address line
+   - "PART OF DRAWING:" label with value (e.g. "CONCRETE SHEAR WALL" or element description)
+   - "CUSTOMER:" field
+   - "Project no." field
+   - "SCALE:" field showing "${opts.scale}"
+   - "DETAILED BY:" and "CHECKED BY:" fields
+   - "DRAWING No." and "BAR LIST No." showing "${opts.drawingPrefix}XX"
+   - "FOR FIELD USE" box with grade indicator "400/R"
+   - Small bar size legend row: "B.M. 4M 5M 6M 10M 15M 20M 25M 30M 35M"
+
+3. **REVISION TABLE** (above title block, right side):
+   - Columns: ISSUE | REMARKS | DATE | BY
+   - Triangle revision markers (△)
+   - At least one row: "FOR APPROVAL | ${dateStr} | ${(clientName || "").substring(0,2).toUpperCase() || "MR"}"
+
+4. **REFERENCE TABLES** (left of title block, bottom strip):
+   - LAP SCHEDULE table: Size | TOP 25 MPA | OTHERS columns
+   - LD SCHEDULE table: Size | values
+   - COVER DETAILS table: Face type | clearance values
+
+5. **MAIN DRAWING AREA** (above title block strip):
+   - Bar Bending Schedule (BBS) tables organized by section (e.g. "Bars Below SD5", "Bars Below SD6")
+   - BBS table columns: Bar Mark | Size | No | Qty | Total Length | Tail | Y | Y | Y | Y | Y | Y | Y | Y (dimension columns for bend dimensions A,B,C,D,E,F,G,H)
+   - Header row "BM d7" style with column dimension labels
+   - Each bar row: mark ID, size (e.g. 10M, 15M, 25M), quantity, total length, then bend dimensions in mm
+   
+6. **SHAPE KEY DIAGRAMS** (below BBS tables):
+   - SVG shape diagrams for each unique bend type:
+     - Shape 0: Straight bar with "Length" label
+     - Shape T12: Hook one end
+     - Shape T1: Hooks A & B optional, dimension markings
+     - Shape 17: 90° bend
+     - Shape 2: Hook B optional
+     - Shape 31: Z-bend
+   - Each shape shows dimension labels (A, B, C, D, E, Length)
+   - Include text "Hook B optional" where applicable
+   - Draw with thin black lines, dimension arrows, and labels
+
+STYLING:
+- White background, black lines and text
+- Table borders: 1px solid black
+- Font: Arial or sans-serif, 8-9px for table data, 10-11px for headers
+- @page rules: landscape, letter size, margins 0.3in
+- Title block has slightly thicker borders (2px)
+- Print-optimized: no background colors except white
+- Grid lines visible on all tables
+- Professional engineering document look — clean, precise, no colors except black/white
 
 Return ONLY the complete HTML document, nothing else. No markdown, no explanation.`;
+
 
     const aiStart = performance.now();
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
