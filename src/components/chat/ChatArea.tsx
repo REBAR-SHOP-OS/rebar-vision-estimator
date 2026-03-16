@@ -1332,7 +1332,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       onProjectNameChange?.(firstName);
     }
 
-    // Fire-and-forget: populate search index for uploaded PDFs
+    // Fire-and-forget: populate search index + trigger pipeline
     if (newUrls.length > 0) {
       (async () => {
         try {
@@ -1346,8 +1346,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               body: { project_id: projectId, pages: extractData.pages },
             });
           }
+          // Auto-trigger pipeline to update linkage score + workflow status
+          await supabase.functions.invoke("process-pipeline", {
+            body: { project_id: projectId },
+          });
         } catch (e) {
-          console.error("Search index population failed (non-blocking):", e);
+          console.error("Search index / pipeline failed (non-blocking):", e);
         }
       })();
     }
