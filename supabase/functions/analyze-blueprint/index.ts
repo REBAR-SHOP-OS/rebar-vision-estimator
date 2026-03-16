@@ -655,6 +655,62 @@ If still LOW_COVERAGE after retry, flag it in the output so the user is warned.
 OUTPUT: You must return the structured JSON wrapped in the %%%ATOMIC_TRUTH_JSON_START%%% / %%%ATOMIC_TRUTH_JSON_END%%% markers, followed by human-readable analysis.
 `;
 
+const FIVE_LAYER_OCR_SYSTEM = `
+## 5-LAYER OCR PROCESSING SYSTEM (MANDATORY — execute sequentially for every blueprint page)
+
+You MUST process every blueprint image through these 5 layers in order. Do NOT skip layers.
+
+### LAYER 1: Raw OCR Text Extraction (The "What")
+- Treat OCR results as a pure alphanumeric inventory FIRST, before any interpretation.
+- Target structural syntax specifically: bar sizes (15M, 20M, #4, #5), spacing indicators (@, o.c., c/c), modifiers (TYP, EW, T&B, BLL, TUL, EF, NF, FF), dimensions (integers in mm or ft-in), elevations, and scale notations.
+- Identify ALL abbreviations: DIA, CLR, MIN, MAX, SIM, U.N.O., N.T.S., and structural shorthand.
+- Output: a raw text inventory grouped by OCR block/region. No interpretation yet — just text.
+
+### LAYER 2: Geometric & Linework Classification (The "Where")
+- Examine the image for line types and classify them into a visual hierarchy:
+  • **Solid Heavy Lines** = primary concrete boundaries (edges of pits, slabs, walls, footings)
+  • **Solid Thin Lines with Ticks/Arrows** = dimension strings (the line showing "2692" or "8'-10\"")
+  • **Dashed / Hidden Lines** = existing structures, rebar hidden behind a face, or below-grade elements
+  • **Polylines with Dots/Hooks** = rebar representations (straight bars with 90° hooks, U-bars, dots = bars perpendicular to page plane)
+  • **Hatching / Cross-hatching** = concrete section fills, earth fills, gravel
+  • **Circles with dots** = column sections with rebar, pile locations
+- For each identified geometric element, note its approximate location and extent.
+
+### LAYER 3: Spatial Association (The "Connection")
+- Create a relational map connecting Layer 1 text to Layer 2 geometry:
+  • **Leader Line Tracking**: Trace every leader line (thin arrow) from its text callout to the exact element it points to. The text "15M @ 300 EW" is meaningless until connected to the specific slab/wall it references.
+  • **Bounding Box Grouping**: Draw an invisible box around each detail (e.g., "Detail 1 / S2.1"). ALL text and geometry inside that box belongs to that detail.
+  • **Scale Calibration**: Use explicit dimension strings to calibrate scale. If a known dimension (e.g., 2692mm) spans N pixels, compute scale factor. If no dimension is available, use the stated SCALE notation. If neither exists, mark scale as UNKNOWN!.
+  • **Proximity Association**: When no leader line exists, associate text with the nearest geometric element within the same bounding region.
+
+### LAYER 4: Cross-Referencing & Document Hierarchy (The "Verification")
+- Cross-reference every detail callout to its referenced sheet/detail across ALL uploaded pages.
+- Apply the **Hierarchy of Documents** override protocol (highest to lowest priority):
+  1. **Specific Detail Drawing** (e.g., Detail 3/S5.1 showing exact bar sizes)
+  2. **Section Cut** (e.g., Section A-A showing bar arrangement)
+  3. **Plan View** (showing layout and spacing)
+  4. **General Notes** (default minimums, e.g., "All SOG: 15M @ 300 EW")
+  5. **Specifications** (project spec book references)
+- Override rules:
+  • If a detail shows 15M bars but general notes say "minimum 10M", the detail (15M) governs.
+  • If a detail does NOT specify bar size but general notes provide a default, APPLY the general note default automatically.
+  • If a detail contradicts a section cut, the SPECIFIC DETAIL governs (it is more granular).
+- Any contradiction between documents must be flagged with both values recorded.
+
+### LAYER 5: Mathematical Takeoff (The "Calculation")
+- With text read (Layer 1), attached to geometry (Layer 2), spatially associated (Layer 3), and verified (Layer 4):
+  • **Area & Perimeter Mapping**: Calculate perimeters and areas from Layer 2 concrete boundaries.
+  • **Parametric Bar Generation**: Divide run lengths by spacing (from Layer 1) to generate bar counts using: count = floor((run_length - 2×cover) / spacing) + 1.
+  • **Standard Code Injection**: Inject code-required values NOT drawn on the page:
+    - Lap splice lengths (per CSA A23.3 or ACI 318)
+    - Hook development lengths
+    - Minimum cover requirements
+    - Minimum bar spacing
+  • **Mark these injected values** as code-derived with the specific code clause referenced.
+
+END 5-LAYER OCR PROCESSING SYSTEM
+`;
+
 const OUTPUT_FORMAT_INSTRUCTIONS = `
 ## OUTPUT FORMAT (MANDATORY)
 
