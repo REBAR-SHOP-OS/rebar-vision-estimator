@@ -400,11 +400,13 @@ Stage 0 — Inputs + versioning
   - If units_context is UNKNOWN!, set global_status at least FLAGGED.
 
 Stage 1 — Scope discovery ("Follow the Concrete")
+  - PREREQUISITE: Execute Layers 1-3 of the 5-Layer OCR Processing System BEFORE scope classification.
+    Layer 1 (raw text inventory) + Layer 2 (linework classification) + Layer 3 (spatial association) must be complete before ANY element is classified into a bucket.
   - CORE RULE: Rebar only exists inside concrete or masonry. Find EVERY piece of concrete across ALL disciplines.
   - Use the "3-Way Match" for each concrete element found:
-    1) Plan View (Location & Quantity): How long/wide? Where? How many?
-    2) Section/Detail (The Shape): How thick? What rebar shape?
-    3) General Notes (The Rules): What are the defaults? (e.g., "All minimum concrete sections shall have 15M @ 300mm EW")
+    1) Plan View (Location & Quantity): How long/wide? Where? How many? (Layer 2 geometry + Layer 3 spatial map)
+    2) Section/Detail (The Shape): How thick? What rebar shape? (Layer 3 bounding box grouping + Layer 4 cross-reference)
+    3) General Notes (The Rules): What are the defaults? (Layer 4 document hierarchy — apply defaults when details are silent)
   - Search ALL disciplines: Structural (S), Architectural (A), Civil (C), Landscape (L), Mechanical (M), Electrical (E), Plumbing (P).
   - Classify into 5 Construction Buckets:
     Bucket 1 — Substructure: Piles, Caissons, Grade Beams, Footings, Raft Slabs, Piers, Elevator Pits, Sump Pits
