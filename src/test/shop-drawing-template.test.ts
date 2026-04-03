@@ -34,10 +34,10 @@ describe("buildShopDrawingHtml", () => {
     const sheetCount = (html.match(/class="sheet"/g) || []).length;
 
     expect(sheetCount).toBeGreaterThan(2);
-    expect(html).toContain("SHOP DRAWING DRAFT SET");
-    expect(html).toContain("Bar bending schedule 1");
+    expect(html).toContain("PLAN LAYOUT / REINFORCEMENT DETAILS");
+    expect(html).toContain("Foundation plan and reinforcement details");
     expect(html).toContain("Shape key 1");
-    expect(html).toContain("Large projects are split across multiple sheets");
+    expect(html).toContain("Lap schedule - structural slab");
   });
 
   it("keeps one row per bar mark instead of compressing them into one sheet summary", () => {
@@ -49,7 +49,8 @@ describe("buildShopDrawingHtml", () => {
     expect(html).toContain("BM-1");
     expect(html).toContain("BM-2");
     expect(html).toContain("BM-3");
-    expect(html).toContain("Readable paginated schedule for fabrication and review");
+    expect(html).toContain("Bar bending schedule 1");
     expect(html).toContain("class=\"bbs-table\"");
+    expect(html).toContain("Cover details");
   });
 });

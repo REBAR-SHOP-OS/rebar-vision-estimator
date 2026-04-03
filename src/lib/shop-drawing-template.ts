@@ -89,6 +89,16 @@ interface NormalizedBar {
   legD?: number;
 }
 
+interface NormalizedElementRegion {
+  elementId: string;
+  elementType: string;
+  pageNumber: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
 const SHEET_ROW_LIMIT = 24;
 const SHAPES_PER_SHEET = 6;
 const SIZE_TABLE_LIMIT = 12;
@@ -208,6 +218,310 @@ function chunkArray<T>(items: T[], size: number): T[][] {
     chunks.push(items.slice(i, i + size));
   }
   return chunks;
+}
+
+function getElementBBox(element: ShopDrawingElement): number[] | null {
+  const bbox = element.bbox || element.regions?.tag_region?.bbox;
+  if (!Array.isArray(bbox) || bbox.length !== 4) return null;
+  const [x1, y1, x2, y2] = bbox.map((value) => toNumber(value));
+  if (x2 <= x1 || y2 <= y1) return null;
+  return [x1, y1, x2, y2];
+}
+
+function normalizeElementRegions(
+  elements: ShopDrawingElement[],
+  bars: NormalizedBar[],
+): NormalizedElementRegion[] {
+  const directRegions = elements
+    .map((element) => {
+      const bbox = getElementBBox(element);
+      if (!bbox) return null;
+
+      return {
+        elementId: String(element.element_id || "ELEMENT").trim() || "ELEMENT",
+        elementType: String(element.element_type || "OTHER").trim() || "OTHER",
+        pageNumber: Math.max(1, Math.round(toNumber(element.page_number || element.regions?.tag_region?.page_number) || 1)),
+        x1: bbox[0],
+        y1: bbox[1],
+        x2: bbox[2],
+        y2: bbox[3],
+      };
+    })
+    .filter((region): region is NormalizedElementRegion => Boolean(region));
+
+  if (directRegions.length > 0) {
+    return directRegions.sort((a, b) => {
+      if (a.pageNumber !== b.pageNumber) return a.pageNumber - b.pageNumber;
+      if (a.y1 !== b.y1) return a.y1 - b.y1;
+      return a.x1 - b.x1;
+    });
+  }
+
+  const syntheticElements = Array.from(
+    bars.reduce((acc, bar) => {
+      const key = `${bar.elementId}|||${bar.elementType}`;
+      if (!acc.has(key)) {
+        acc.set(key, { elementId: bar.elementId, elementType: bar.elementType });
+      }
+      return acc;
+    }, new Map<string, { elementId: string; elementType: string }>())
+      .values()
+  );
+
+  return syntheticElements.map((element, index) => {
+    const pageIndex = Math.floor(index / 8);
+    const position = index % 8;
+    const col = position % 4;
+    const row = Math.floor(position / 4);
+    const x1 = 50 + col * 180;
+    const y1 = 48 + row * 128;
+    return {
+      elementId: element.elementId,
+      elementType: element.elementType,
+      pageNumber: pageIndex + 1,
+      x1,
+      y1,
+      x2: x1 + 130,
+      y2: y1 + 82,
+    };
+  });
+}
+
+function getBarsForRegion(region: NormalizedElementRegion, bars: NormalizedBar[]): NormalizedBar[] {
+  const directMatches = bars.filter((bar) => bar.elementId === region.elementId);
+  if (directMatches.length > 0) return directMatches;
+  return bars.filter((bar) => bar.elementType === region.elementType);
+}
+
+function buildStandardReferencePanels(standard: string, coatingType: string): string {
+  const slabLapRows = [
+    ["10M", '17"'],
+    ["15M", '25"'],
+    ["20M", '33"'],
+    ["25M", '51"'],
+    ["30M", '61"'],
+    ["35M", '71"'],
+  ];
+  const wallLapRows = [
+    ["10M", '20"'],
+    ["15M", '30"'],
+    ["20M", '39"'],
+    ["25M", '61"'],
+    ["30M", '72"'],
+    ["35M", '84"'],
+  ];
+
+  const slabLapTable = slabLapRows.map(([size, splice]) => `
+    <tr><td>${size}</td><td class="num">${splice}</td></tr>
+  `).join("");
+  const wallLapTable = wallLapRows.map(([size, splice]) => `
+    <tr><td>${size}</td><td class="num">${splice}</td></tr>
+  `).join("");
+
+  return `
+    <div class="standards-grid">
+      <section class="reference-panel compact">
+        <div class="mini-title">Lap schedule - structural slab</div>
+        <table class="mini-table">
+          <tr><th>Size</th><th class="num">35 MPA</th></tr>
+          ${slabLapTable}
+        </table>
+      </section>
+      <section class="reference-panel compact">
+        <div class="mini-title">Lap schedule - concrete walls</div>
+        <table class="mini-table">
+          <tr><th>Size</th><th class="num">25 MPA</th></tr>
+          ${wallLapTable}
+        </table>
+      </section>
+      <section class="reference-panel compact">
+        <div class="mini-title">Cover details</div>
+        <table class="mini-table">
+          <tr><th>Ground floor slab</th><td>Top 1 1/2" clr, sides 3" clr</td></tr>
+          <tr><th>Footing</th><td>Bottom 3" clr, faces 1 1/2" clr</td></tr>
+          <tr><th>Walls</th><td>Top / bottom / sides 1 1/2" clr</td></tr>
+          <tr><th>Grade beam</th><td>Top 1 1/2" clr, bottom 3" clr</td></tr>
+        </table>
+      </section>
+      <section class="reference-panel compact">
+        <div class="mini-title">General notes</div>
+        <table class="mini-table">
+          <tr><th>Standard</th><td>${escapeHtml(standard)}</td></tr>
+          <tr><th>Coating</th><td>${escapeHtml(coatingType)}</td></tr>
+          <tr><th>Use</th><td>Verify dimensions and bar arrangement against latest engineer-issued drawing.</td></tr>
+          <tr><th>Issue</th><td>Draft shop drawing for review and field coordination.</td></tr>
+        </table>
+      </section>
+    </div>
+  `;
+}
+
+function buildReferenceContent(primaryContent: string, standard: string, coatingType: string): string {
+  return `
+    <div class="reference-shell">
+      <div class="reference-primary">
+        ${primaryContent}
+      </div>
+      ${buildStandardReferencePanels(standard, coatingType)}
+    </div>
+  `;
+}
+
+function buildLayoutViewport(regions: NormalizedElementRegion[]): string {
+  if (regions.length === 0) {
+    return `<div class="layout-empty">No element geometry was available, so the layout sheet shows schedule-based details only.</div>`;
+  }
+
+  const minX = Math.min(...regions.map((region) => region.x1));
+  const minY = Math.min(...regions.map((region) => region.y1));
+  const maxX = Math.max(...regions.map((region) => region.x2));
+  const maxY = Math.max(...regions.map((region) => region.y2));
+  const sourceWidth = Math.max(maxX - minX, 1);
+  const sourceHeight = Math.max(maxY - minY, 1);
+  const width = 760;
+  const height = 320;
+  const pad = 30;
+  const scale = Math.min((width - pad * 2) / sourceWidth, (height - pad * 2) / sourceHeight);
+
+  const items = regions.map((region, index) => {
+    const x = pad + (region.x1 - minX) * scale;
+    const y = pad + (region.y1 - minY) * scale;
+    const w = Math.max(46, (region.x2 - region.x1) * scale);
+    const h = Math.max(32, (region.y2 - region.y1) * scale);
+    const bubbleX = x + 14;
+    const bubbleY = y + 14;
+    const labelY = y + Math.min(h / 2 + 4, h - 8);
+    return `
+      <g>
+        <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="3" ry="3" />
+        <circle cx="${bubbleX.toFixed(1)}" cy="${bubbleY.toFixed(1)}" r="10" />
+        <text x="${bubbleX.toFixed(1)}" y="${(bubbleY + 3.5).toFixed(1)}" text-anchor="middle">${index + 1}</text>
+        <text x="${(x + w / 2).toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle" class="layout-label">${escapeHtml(region.elementId)}</text>
+      </g>
+    `;
+  }).join("");
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" class="layout-svg" aria-hidden="true">
+      <rect x="1" y="1" width="${width - 2}" height="${height - 2}" class="layout-outline" />
+      ${items}
+    </svg>
+  `;
+}
+
+function buildElementDetailCard(
+  region: NormalizedElementRegion,
+  bars: NormalizedBar[],
+  index: number,
+): string {
+  const detailRows = bars.slice(0, 5).map((bar) => `
+    <tr>
+      <td>${escapeHtml(bar.barMark)}</td>
+      <td>${escapeHtml(bar.size)}</td>
+      <td class="num">${formatNumber(bar.pieces)}</td>
+      <td>${bar.note ? escapeHtml(bar.note) : escapeHtml(bar.shapeCode)}</td>
+    </tr>
+  `).join("");
+
+  const detailKind = /WALL|COLUMN|PIER/.test(region.elementType)
+    ? "Elevation detail"
+    : /FOOTING|SLAB|RAFT|BEAM/.test(region.elementType)
+    ? "Plan detail"
+    : "Reinforcement detail";
+
+  return `
+    <article class="detail-card">
+      <div class="detail-card-head">
+        <div class="detail-index">${index + 1}</div>
+        <div>
+          <div class="detail-card-title">${escapeHtml(region.elementId)} - ${escapeHtml(region.elementType)}</div>
+          <div class="detail-card-subtitle">${detailKind}</div>
+        </div>
+      </div>
+      <table class="mini-table detail-table">
+        <tr><th>Bar Mark</th><th>Size</th><th class="num">Pcs</th><th>Description</th></tr>
+        ${detailRows || `<tr><td colspan="4">No related bars found.</td></tr>`}
+      </table>
+    </article>
+  `;
+}
+
+function buildLayoutSheets(params: {
+  bars: NormalizedBar[];
+  elements: ShopDrawingElement[];
+  projectName: string;
+  clientName: string;
+  standard: string;
+  coatingType: string;
+}): SheetDefinition[] {
+  const regions = normalizeElementRegions(params.elements, params.bars);
+  const byPage = regions.reduce((acc, region) => {
+    if (!acc.has(region.pageNumber)) acc.set(region.pageNumber, []);
+    acc.get(region.pageNumber)?.push(region);
+    return acc;
+  }, new Map<number, NormalizedElementRegion[]>());
+
+  const pageEntries = Array.from(byPage.entries()).sort((a, b) => a[0] - b[0]);
+  if (pageEntries.length === 0) return [];
+
+  return pageEntries.flatMap(([pageNumber, pageRegions], pageIndex) =>
+    chunkArray(pageRegions, 8).map((regionChunk, chunkIndex) => {
+      const dominantTypes = Array.from(
+        regionChunk.reduce((acc, region) => {
+          acc.set(region.elementType, (acc.get(region.elementType) || 0) + 1);
+          return acc;
+        }, new Map<string, number>())
+      ).sort((a, b) => b[1] - a[1]);
+      const dominantType = dominantTypes[0]?.[0] || "FOUNDATION";
+      const title = `${params.projectName} ${dominantType.toLowerCase()} reinforcement layout`;
+      const subtitle = `Plan, elevation, and section callouts - source page ${pageNumber}${chunkIndex > 0 ? ` / part ${chunkIndex + 1}` : ""}`;
+
+      const detailCards = regionChunk.map((region, index) =>
+        buildElementDetailCard(region, getBarsForRegion(region, params.bars), index)
+      ).join("");
+
+      const relatedBars = regionChunk.flatMap((region) => getBarsForRegion(region, params.bars));
+      const primaryReference = `
+        <section class="reference-panel compact">
+          <div class="mini-title">Sheet summary</div>
+          <table class="mini-table">
+            <tr><th>Source page</th><td>${pageNumber}</td></tr>
+            <tr><th>Elements shown</th><td class="num">${formatNumber(regionChunk.length)}</td></tr>
+            <tr><th>Bar items linked</th><td class="num">${formatNumber(relatedBars.length)}</td></tr>
+            <tr><th>Part of structure</th><td>${escapeHtml(dominantType)}</td></tr>
+          </table>
+        </section>
+      `;
+
+      return {
+        title: pageIndex === 0 && chunkIndex === 0 ? "Foundation plan and reinforcement details" : `Reinforcement details ${pageIndex + 1}.${chunkIndex + 1}`,
+        subtitle,
+        mainContent: `
+          <div class="drawing-header compact">
+            <div>
+              <div class="drawing-kicker">PLAN LAYOUT / REINFORCEMENT DETAILS</div>
+              <h1>${escapeHtml(title)}</h1>
+              <p>This sheet is arranged like the reference cabana drawing: a large drawing field with numbered callouts and compact reinforcement details tied to each area.</p>
+            </div>
+            <div class="summary-badge small">
+              <strong>${formatNumber(regionChunk.length)}</strong>
+              <span>Callouts on sheet</span>
+            </div>
+          </div>
+          <div class="layout-main">
+            <section class="layout-panel">
+              <div class="panel-title">Plan layout</div>
+              ${buildLayoutViewport(regionChunk)}
+            </section>
+            <div class="detail-grid">
+              ${detailCards || `<div class="layout-empty">No detail cards available.</div>`}
+            </div>
+          </div>
+        `,
+        referenceContent: buildReferenceContent(primaryReference, params.standard, params.coatingType),
+      };
+    })
+  );
 }
 
 function buildShapeSvg(shapeCode: string): string {
@@ -820,6 +1134,14 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
   const bars = normalizeBars(params.barList || []);
   const elements = params.elements || [];
 
+  const layoutSheets = buildLayoutSheets({
+    bars,
+    elements,
+    projectName,
+    clientName,
+    standard,
+    coatingType,
+  });
   const scheduleSheets = buildScheduleSheets(bars, options);
   const shapeSheets = buildShapeSheets(bars.length > 0 ? bars : [{
     elementId: "N/A",
@@ -847,11 +1169,11 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
     sizeBreakdown: params.sizeBreakdown || {},
     bars,
     elements,
-    scheduleSheetCount: scheduleSheets.length,
+    scheduleSheetCount: layoutSheets.length + scheduleSheets.length,
     shapeSheetCount: shapeSheets.length,
   });
 
-  const sheets = [summarySheet, ...scheduleSheets, ...shapeSheets];
+  const sheets = [summarySheet, ...layoutSheets, ...scheduleSheets, ...shapeSheets];
 
   const sheetHtml = sheets.map((sheet, index) => buildSheetHtml(sheet, index, sheets.length, {
     projectName,
