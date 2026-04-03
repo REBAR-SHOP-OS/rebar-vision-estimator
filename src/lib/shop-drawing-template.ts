@@ -56,19 +56,6 @@ export interface BuildShopDrawingParams {
   logoDataUri?: string;
 }
 
-interface SheetDefinition {
-  title: string;
-  subtitle: string;
-  mainContent: string;
-  referenceContent: string;
-}
-
-interface ScheduleEntry {
-  kind: "section" | "bar";
-  title?: string;
-  bar?: NormalizedBar;
-}
-
 interface NormalizedBar {
   elementId: string;
   elementType: string;
@@ -89,10 +76,7 @@ interface NormalizedBar {
   legD?: number;
 }
 
-const SHEET_ROW_LIMIT = 24;
-const SHAPES_PER_SHEET = 6;
-const SIZE_TABLE_LIMIT = 12;
-const SECTION_INDEX_LIMIT = 14;
+// ── Helpers ─────────────────────────────────────────────────
 
 function escapeHtml(value: unknown): string {
   return String(value ?? "")
@@ -136,25 +120,12 @@ function inferLengthMm(bar: ShopDrawingBar): number {
 function inferWeightKg(bar: ShopDrawingBar, totalLengthM: number): number {
   const supplied = toNumber(bar.weight_kg);
   if (supplied > 0) return supplied;
-
   const kgPerM: Record<string, number> = {
-    "10M": 0.785,
-    "15M": 1.57,
-    "20M": 2.355,
-    "25M": 3.925,
-    "30M": 5.495,
-    "35M": 7.85,
-    "4M": 0.25,
-    "5M": 0.395,
-    "6M": 0.56,
-    "#3": 0.56,
-    "#4": 0.994,
-    "#5": 1.552,
-    "#6": 2.235,
-    "#7": 3.042,
-    "#8": 3.973,
+    "10M": 0.785, "15M": 1.57, "20M": 2.355, "25M": 3.925,
+    "30M": 5.495, "35M": 7.85, "4M": 0.25, "5M": 0.395,
+    "6M": 0.56, "#3": 0.56, "#4": 0.994, "#5": 1.552,
+    "#6": 2.235, "#7": 3.042, "#8": 3.973,
   };
-
   const normalizedSize = String(bar.size || "").trim().toUpperCase();
   return totalLengthM * (kgPerM[normalizedSize] || 0);
 }
@@ -168,7 +139,6 @@ function normalizeBars(barList: ShopDrawingBar[]): NormalizedBar[] {
       const pieces = qty * multiplier;
       const totalLengthM = (pieces * lengthMm) / 1000;
       const weightKg = inferWeightKg(bar, totalLengthM);
-
       return {
         elementId: String(bar.element_id || bar.sub_element || `ROW-${index + 1}`).trim(),
         elementType: String(bar.element_type || "OTHER").trim() || "OTHER",
@@ -176,12 +146,7 @@ function normalizeBars(barList: ShopDrawingBar[]): NormalizedBar[] {
         barMark: String(bar.bar_mark || bar.description || `BM-${index + 1}`).trim(),
         size: String(bar.size || "—").trim() || "—",
         shapeCode: normalizeShapeCode(bar.shape_code),
-        qty,
-        multiplier,
-        pieces,
-        lengthMm,
-        totalLengthM,
-        weightKg,
+        qty, multiplier, pieces, lengthMm, totalLengthM, weightKg,
         note: [
           bar.spacing ? `Spacing ${bar.spacing}` : "",
           bar.info1 ? String(bar.info1).trim() : "",
@@ -201,601 +166,352 @@ function normalizeBars(barList: ShopDrawingBar[]): NormalizedBar[] {
     });
 }
 
-function chunkArray<T>(items: T[], size: number): T[][] {
-  if (size <= 0) return [items];
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
-  return chunks;
-}
+// ── Shape SVGs ──────────────────────────────────────────────
 
 function buildShapeSvg(shapeCode: string): string {
   switch (shapeCode) {
     case "17":
-      return `
-        <svg viewBox="0 0 180 100" class="shape-svg" aria-hidden="true">
-          <path d="M30 75 L30 25 L140 25" />
-          <path class="dim" d="M18 75 L18 25 M18 25 L30 25 M18 75 L30 75" />
-          <path class="dim" d="M30 12 L140 12 M30 12 L30 25 M140 12 L140 25" />
-          <text x="10" y="52">A</text>
-          <text x="82" y="8">B</text>
-        </svg>`;
+      return `<svg viewBox="0 0 180 100" class="shape-svg"><path d="M30 75 L30 25 L140 25"/><path class="dim" d="M18 75 L18 25 M18 25 L30 25 M18 75 L30 75"/><path class="dim" d="M30 12 L140 12 M30 12 L30 25 M140 12 L140 25"/><text x="10" y="52">A</text><text x="82" y="8">B</text></svg>`;
     case "31":
-      return `
-        <svg viewBox="0 0 180 100" class="shape-svg" aria-hidden="true">
-          <path d="M28 72 L70 72 L112 28 L152 28" />
-          <path class="dim" d="M28 84 L70 84 M28 84 L28 72 M70 84 L70 72" />
-          <path class="dim" d="M112 16 L152 16 M112 16 L112 28 M152 16 L152 28" />
-          <text x="44" y="96">A</text>
-          <text x="126" y="12">B</text>
-          <text x="78" y="58">C</text>
-        </svg>`;
+      return `<svg viewBox="0 0 180 100" class="shape-svg"><path d="M28 72 L70 72 L112 28 L152 28"/><path class="dim" d="M28 84 L70 84 M28 84 L28 72 M70 84 L70 72"/><path class="dim" d="M112 16 L152 16 M112 16 L112 28 M152 16 L152 28"/><text x="44" y="96">A</text><text x="126" y="12">B</text><text x="78" y="58">C</text></svg>`;
     case "T1":
-      return `
-        <svg viewBox="0 0 180 100" class="shape-svg" aria-hidden="true">
-          <path d="M38 72 L38 28 L142 28 L142 72" />
-          <path class="dim" d="M24 72 L24 28 M24 28 L38 28 M24 72 L38 72" />
-          <path class="dim" d="M38 14 L142 14 M38 14 L38 28 M142 14 L142 28" />
-          <path class="dim" d="M156 28 L156 72 M142 28 L156 28 M142 72 L156 72" />
-          <text x="14" y="53">A</text>
-          <text x="86" y="10">B</text>
-          <text x="160" y="53">C</text>
-        </svg>`;
+      return `<svg viewBox="0 0 180 100" class="shape-svg"><path d="M38 72 L38 28 L142 28 L142 72"/><path class="dim" d="M24 72 L24 28 M24 28 L38 28 M24 72 L38 72"/><path class="dim" d="M38 14 L142 14 M38 14 L38 28 M142 14 L142 28"/><path class="dim" d="M156 28 L156 72 M142 28 L156 28 M142 72 L156 72"/><text x="14" y="53">A</text><text x="86" y="10">B</text><text x="160" y="53">C</text></svg>`;
     case "T12":
-      return `
-        <svg viewBox="0 0 180 100" class="shape-svg" aria-hidden="true">
-          <path d="M26 66 L126 66 Q148 66 148 44 L148 24" />
-          <path class="dim" d="M26 80 L126 80 M26 80 L26 66 M126 80 L126 66" />
-          <path class="dim" d="M162 24 L162 44 M148 24 L162 24 M148 44 L162 44" />
-          <text x="70" y="94">Length</text>
-          <text x="166" y="36">A</text>
-        </svg>`;
+      return `<svg viewBox="0 0 180 100" class="shape-svg"><path d="M26 66 L126 66 Q148 66 148 44 L148 24"/><path class="dim" d="M26 80 L126 80 M26 80 L26 66 M126 80 L126 66"/><path class="dim" d="M162 24 L162 44 M148 24 L162 24 M148 44 L162 44"/><text x="70" y="94">Length</text><text x="166" y="36">A</text></svg>`;
     case "2":
-      return `
-        <svg viewBox="0 0 180 100" class="shape-svg" aria-hidden="true">
-          <path d="M28 68 L124 68 Q146 68 146 46 L146 32" />
-          <path class="dim" d="M28 82 L124 82 M28 82 L28 68 M124 82 L124 68" />
-          <text x="70" y="94">Length</text>
-          <text x="126" y="24">Hook B optional</text>
-        </svg>`;
+      return `<svg viewBox="0 0 180 100" class="shape-svg"><path d="M28 68 L124 68 Q146 68 146 46 L146 32"/><path class="dim" d="M28 82 L124 82 M28 82 L28 68 M124 82 L124 68"/><text x="70" y="94">Length</text><text x="126" y="24">Hook</text></svg>`;
     case "CLOSED":
-      return `
-        <svg viewBox="0 0 180 100" class="shape-svg" aria-hidden="true">
-          <rect x="38" y="24" width="104" height="48" />
-          <path class="dim" d="M24 72 L24 24 M24 24 L38 24 M24 72 L38 72" />
-          <path class="dim" d="M38 12 L142 12 M38 12 L38 24 M142 12 L142 24" />
-          <text x="14" y="52">A</text>
-          <text x="86" y="8">B</text>
-        </svg>`;
+      return `<svg viewBox="0 0 180 100" class="shape-svg"><rect x="38" y="24" width="104" height="48"/><path class="dim" d="M24 72 L24 24 M24 24 L38 24 M24 72 L38 72"/><path class="dim" d="M38 12 L142 12 M38 12 L38 24 M142 12 L142 24"/><text x="14" y="52">A</text><text x="86" y="8">B</text></svg>`;
     case "STRAIGHT":
     default:
-      return `
-        <svg viewBox="0 0 180 100" class="shape-svg" aria-hidden="true">
-          <path d="M26 50 L154 50" />
-          <path class="dim" d="M26 36 L154 36 M26 36 L26 50 M154 36 L154 50" />
-          <text x="78" y="28">Length</text>
-        </svg>`;
+      return `<svg viewBox="0 0 180 100" class="shape-svg"><path d="M26 50 L154 50"/><path class="dim" d="M26 36 L154 36 M26 36 L26 50 M154 36 L154 50"/><text x="78" y="28">Length</text></svg>`;
   }
 }
 
-function createSummarySheet(params: {
-  projectName: string;
-  clientName: string;
-  standard: string;
-  coatingType: string;
-  options: Required<ShopDrawingOptions>;
-  dateStr: string;
-  sizeBreakdown: Record<string, number>;
+// ── Segment-based sheet building ────────────────────────────
+
+const SEGMENT_BBS_LIMIT = 28;
+
+interface SegmentGroup {
+  segmentName: string;
   bars: NormalizedBar[];
-  elements: ShopDrawingElement[];
-  scheduleSheetCount: number;
-  shapeSheetCount: number;
-}): SheetDefinition {
-  const totalWeightKg = params.bars.reduce((sum, bar) => sum + bar.weightKg, 0);
-  const totalLengthM = params.bars.reduce((sum, bar) => sum + bar.totalLengthM, 0);
-  const totalPieces = params.bars.reduce((sum, bar) => sum + bar.pieces, 0);
-  const bentBarCount = params.bars.filter((bar) => bar.shapeCode !== "STRAIGHT").length;
-
-  const sizeEntries = Object.entries(params.sizeBreakdown || {})
-    .map(([size, weight]) => [size, toNumber(weight)] as const)
-    .filter(([, weight]) => weight > 0)
-    .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true, sensitivity: "base" }));
-
-  if (sizeEntries.length === 0) {
-    const computed: Record<string, number> = {};
-    for (const bar of params.bars) {
-      computed[bar.size] = (computed[bar.size] || 0) + bar.weightKg;
-    }
-    sizeEntries.push(
-      ...Object.entries(computed).sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true, sensitivity: "base" }))
-    );
-  }
-
-  const sectionIndex = Array.from(
-    new Set(params.bars.map((bar) => `${bar.elementType}${bar.subgroup ? ` - ${bar.subgroup}` : ` - ${bar.elementId}`}`))
-  ).slice(0, SECTION_INDEX_LIMIT);
-
-  const pageStats = Array.from(
-    params.elements.reduce((acc, element) => {
-      const pageNumber = element.page_number || element.regions?.tag_region?.page_number;
-      if (!pageNumber) return acc;
-      acc.set(pageNumber, (acc.get(pageNumber) || 0) + 1);
-      return acc;
-    }, new Map<number, number>())
-  )
-    .sort((a, b) => a[0] - b[0])
-    .slice(0, 8);
-
-  const sizeRows = sizeEntries.slice(0, SIZE_TABLE_LIMIT).map(([size, weight]) => `
-    <tr>
-      <td>${escapeHtml(size)}</td>
-      <td class="num">${formatNumber(weight, 1)}</td>
-    </tr>
-  `).join("");
-
-  const sectionRows = sectionIndex.map((section, index) => `
-    <tr>
-      <td>${index + 1}</td>
-      <td>${escapeHtml(section)}</td>
-    </tr>
-  `).join("");
-
-  const pageRows = pageStats.length > 0
-    ? pageStats.map(([page, count]) => `
-        <tr>
-          <td>Source page ${page}</td>
-          <td class="num">${count}</td>
-        </tr>
-      `).join("")
-    : `
-      <tr>
-        <td>Element pages</td>
-        <td class="num">N/A</td>
-      </tr>
-    `;
-
-  const mainContent = `
-    <div class="drawing-header">
-      <div>
-        <div class="drawing-kicker">SHOP DRAWING DRAFT SET</div>
-        <h1>${escapeHtml(params.projectName)}</h1>
-        <p>Structured multi-sheet draft generated from the validated bar list. Large projects are broken into readable schedule sheets instead of being compressed onto one page.</p>
-      </div>
-      <div class="summary-badge">
-        <strong>${params.scheduleSheetCount + params.shapeSheetCount + 1}</strong>
-        <span>Total sheets</span>
-      </div>
-    </div>
-
-    <div class="summary-grid">
-      <div class="metric-card">
-        <span>Total bars</span>
-        <strong>${formatNumber(params.bars.length)}</strong>
-      </div>
-      <div class="metric-card">
-        <span>Total pieces</span>
-        <strong>${formatNumber(totalPieces)}</strong>
-      </div>
-      <div class="metric-card">
-        <span>Total cut length</span>
-        <strong>${formatNumber(totalLengthM, 1)} m</strong>
-      </div>
-      <div class="metric-card">
-        <span>Total weight</span>
-        <strong>${formatNumber(totalWeightKg, 1)} kg</strong>
-      </div>
-      <div class="metric-card">
-        <span>Bar sections</span>
-        <strong>${formatNumber(sectionIndex.length)}</strong>
-      </div>
-      <div class="metric-card">
-        <span>Bent bars</span>
-        <strong>${formatNumber(bentBarCount)}</strong>
-      </div>
-    </div>
-
-    <div class="panel-grid">
-      <section class="panel">
-        <div class="panel-title">Project and issue data</div>
-        <table class="meta-table">
-          <tr><th>Customer</th><td>${escapeHtml(params.clientName || "—")}</td></tr>
-          <tr><th>Standard</th><td>${escapeHtml(params.standard)}</td></tr>
-          <tr><th>Product line</th><td>${escapeHtml(params.coatingType)}</td></tr>
-          <tr><th>Scale</th><td>${escapeHtml(params.options.scale)}</td></tr>
-          <tr><th>Date</th><td>${escapeHtml(params.dateStr)}</td></tr>
-          <tr><th>Notes</th><td>${escapeHtml(params.options.notes || "Verify dimensions against IFC and latest plan before fabrication.")}</td></tr>
-        </table>
-      </section>
-
-      <section class="panel">
-        <div class="panel-title">Sheet contents</div>
-        <table class="meta-table">
-          <tr><th>Summary sheet</th><td>1</td></tr>
-          <tr><th>Bar schedule sheets</th><td>${params.scheduleSheetCount}</td></tr>
-          <tr><th>Shape key sheets</th><td>${params.shapeSheetCount}</td></tr>
-          <tr><th>Dimensions shown</th><td>${params.options.includeDims ? "Where source data exists" : "Suppressed by option"}</td></tr>
-          <tr><th>Layer grouping</th><td>${params.options.layerGrouping ? "By element and subgroup" : "Flat bar list ordering"}</td></tr>
-          <tr><th>Bar marks</th><td>${params.options.barMarks ? "Visible" : "Suppressed"}</td></tr>
-        </table>
-      </section>
-
-      <section class="panel">
-        <div class="panel-title">Source drawing coverage</div>
-        <table class="meta-table">
-          <tr><th>Measure</th><th class="num">Value</th></tr>
-          ${pageRows}
-        </table>
-      </section>
-    </div>
-  `;
-
-  const referenceContent = `
-    <div class="reference-grid">
-      <section class="reference-panel">
-        <div class="mini-title">Bar size schedule</div>
-        <table class="mini-table">
-          <tr><th>Size</th><th class="num">Kg</th></tr>
-          ${sizeRows || `<tr><td colspan="2">No size data</td></tr>`}
-        </table>
-      </section>
-      <section class="reference-panel">
-        <div class="mini-title">Section index</div>
-        <table class="mini-table">
-          <tr><th>No.</th><th>Section</th></tr>
-          ${sectionRows || `<tr><td colspan="2">No sections</td></tr>`}
-        </table>
-      </section>
-      <section class="reference-panel">
-        <div class="mini-title">Drafting notes</div>
-        <ul class="note-list">
-          <li>This draft is split across multiple sheets to keep tables readable.</li>
-          <li>Cut lengths are taken from the imported bar list.</li>
-          <li>Shape dimensions A-D are shown only when supplied in source data.</li>
-          <li>Review field conditions and the latest structural drawing before fabrication.</li>
-        </ul>
-      </section>
-    </div>
-  `;
-
-  return {
-    title: "General arrangement and summary",
-    subtitle: "Sheet index, project data, and fabrication summary",
-    mainContent,
-    referenceContent,
-  };
 }
 
-function buildScheduleSheets(
-  bars: NormalizedBar[],
-  options: Required<ShopDrawingOptions>,
-): SheetDefinition[] {
-  const grouped = new Map<string, NormalizedBar[]>();
+function groupBySegment(bars: NormalizedBar[]): SegmentGroup[] {
+  const map = new Map<string, NormalizedBar[]>();
   for (const bar of bars) {
-    const subgroup = options.layerGrouping ? (bar.subgroup || bar.elementId) : bar.elementId;
-    const key = `${bar.elementType}|||${subgroup}`;
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key)?.push(bar);
+    const key = bar.elementType || "GENERAL";
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(bar);
   }
-
-  const entriesPerPage: ScheduleEntry[][] = [];
-  let currentPage: ScheduleEntry[] = [];
-  let usedRows = 0;
-
-  for (const [key, groupBars] of grouped.entries()) {
-    const [elementType, subgroup] = key.split("|||");
-    const titleBase = `${elementType}${subgroup ? ` - ${subgroup}` : ""}`;
-    let index = 0;
-
-    while (index < groupBars.length) {
-      if (usedRows > 0 && SHEET_ROW_LIMIT - usedRows < 2) {
-        entriesPerPage.push(currentPage);
-        currentPage = [];
-        usedRows = 0;
-      }
-
-      currentPage.push({
-        kind: "section",
-        title: index === 0 ? titleBase : `${titleBase} (cont.)`,
-      });
-      usedRows += 1;
-
-      while (index < groupBars.length && usedRows < SHEET_ROW_LIMIT) {
-        currentPage.push({ kind: "bar", bar: groupBars[index] });
-        index += 1;
-        usedRows += 1;
-      }
-
-      if (index < groupBars.length) {
-        entriesPerPage.push(currentPage);
-        currentPage = [];
-        usedRows = 0;
-      }
-    }
-  }
-
-  if (currentPage.length > 0) {
-    entriesPerPage.push(currentPage);
-  }
-
-  if (entriesPerPage.length === 0) {
-    entriesPerPage.push([]);
-  }
-
-  return entriesPerPage.map((entries, pageIndex) => {
-    const rows = entries.map((entry) => {
-      if (entry.kind === "section") {
-        return `<tr class="section-row"><td colspan="14">${escapeHtml(entry.title)}</td></tr>`;
-      }
-
-      const bar = entry.bar!;
-      return `
-        <tr>
-          <td>${escapeHtml(options.barMarks ? bar.barMark : bar.elementId)}</td>
-          <td>${escapeHtml(bar.size)}</td>
-          <td>${escapeHtml(bar.shapeCode)}</td>
-          <td class="num">${formatNumber(bar.qty)}</td>
-          <td class="num">${formatNumber(bar.multiplier)}</td>
-          <td class="num">${formatNumber(bar.pieces)}</td>
-          <td class="num">${bar.lengthMm > 0 ? formatNumber(bar.lengthMm) : "—"}</td>
-          <td class="num">${bar.totalLengthM > 0 ? formatNumber(bar.totalLengthM, 2) : "—"}</td>
-          <td class="num">${bar.weightKg > 0 ? formatNumber(bar.weightKg, 1) : "—"}</td>
-          <td class="num">${options.includeDims && bar.legA ? formatNumber(bar.legA) : "—"}</td>
-          <td class="num">${options.includeDims && bar.legB ? formatNumber(bar.legB) : "—"}</td>
-          <td class="num">${options.includeDims && bar.legC ? formatNumber(bar.legC) : "—"}</td>
-          <td class="num">${options.includeDims && bar.legD ? formatNumber(bar.legD) : "—"}</td>
-          <td>${escapeHtml(bar.note || "—")}</td>
-        </tr>
-      `;
-    }).join("");
-
-    const pageBars = entries
-      .filter((entry): entry is { kind: "bar"; bar: NormalizedBar } => entry.kind === "bar")
-      .map((entry) => entry.bar);
-
-    const pageWeight = pageBars.reduce((sum, bar) => sum + bar.weightKg, 0);
-    const pageLength = pageBars.reduce((sum, bar) => sum + bar.totalLengthM, 0);
-
-    const referenceContent = `
-      <div class="reference-grid">
-        <section class="reference-panel">
-          <div class="mini-title">Page summary</div>
-          <table class="mini-table">
-            <tr><th>Rows</th><td class="num">${formatNumber(pageBars.length)}</td></tr>
-            <tr><th>Total length</th><td class="num">${formatNumber(pageLength, 1)} m</td></tr>
-            <tr><th>Total weight</th><td class="num">${formatNumber(pageWeight, 1)} kg</td></tr>
-            <tr><th>Units</th><td>mm / m / kg</td></tr>
-          </table>
-        </section>
-        <section class="reference-panel">
-          <div class="mini-title">Column legend</div>
-          <table class="mini-table">
-            <tr><th>A-D</th><td>Leg dimensions when supplied</td></tr>
-            <tr><th>Pieces</th><td>Qty x multiplier</td></tr>
-            <tr><th>Cut mm</th><td>Single bar cut length</td></tr>
-            <tr><th>Total m</th><td>Total cut length for listed pieces</td></tr>
-          </table>
-        </section>
-        <section class="reference-panel">
-          <div class="mini-title">Fabrication notes</div>
-          <ul class="note-list">
-            <li>Bars are grouped by element type and subgroup for readability.</li>
-            <li>Continuation headers are added when a section spans multiple sheets.</li>
-            <li>Any missing A-D dimensions must be verified from the source drawing.</li>
-          </ul>
-        </section>
-      </div>
-    `;
-
-    return {
-      title: `Bar bending schedule ${pageIndex + 1}`,
-      subtitle: "Readable paginated schedule for fabrication and review",
-      mainContent: `
-        <div class="drawing-header compact">
-          <div>
-            <div class="drawing-kicker">BAR BENDING SCHEDULE</div>
-            <h1>Grouped by element and bar section</h1>
-            <p>Large projects are split across multiple sheets so table text remains legible when printed to PDF.</p>
-          </div>
-          <div class="summary-badge small">
-            <strong>${formatNumber(pageBars.length)}</strong>
-            <span>Bar rows on sheet</span>
-          </div>
-        </div>
-
-        <table class="bbs-table">
-          <thead>
-            <tr>
-              <th>BM</th>
-              <th>Size</th>
-              <th>Shape</th>
-              <th class="num">Qty</th>
-              <th class="num">Mult</th>
-              <th class="num">Pieces</th>
-              <th class="num">Cut mm</th>
-              <th class="num">Total m</th>
-              <th class="num">Wt kg</th>
-              <th class="num">A</th>
-              <th class="num">B</th>
-              <th class="num">C</th>
-              <th class="num">D</th>
-              <th>Notes</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows || `<tr><td colspan="14">No bar list data available.</td></tr>`}
-          </tbody>
-        </table>
-      `,
-      referenceContent,
-    };
-  });
+  return Array.from(map.entries()).map(([segmentName, segBars]) => ({
+    segmentName: segmentName.toUpperCase(),
+    bars: segBars,
+  }));
 }
 
-function buildShapeSheets(bars: NormalizedBar[]): SheetDefinition[] {
-  const shapes = Array.from(
-    bars.reduce((acc, bar) => {
-      if (!acc.has(bar.shapeCode)) {
-        acc.set(bar.shapeCode, []);
-      }
-      acc.get(bar.shapeCode)?.push(bar);
-      return acc;
-    }, new Map<string, NormalizedBar[]>())
-  )
+function buildBbsTableHtml(bars: NormalizedBar[], options: Required<ShopDrawingOptions>): string {
+  if (bars.length === 0) return `<div class="zone-empty">No bar data</div>`;
+
+  const rows = bars.map((bar) => `
+    <tr>
+      <td>${escapeHtml(options.barMarks ? bar.barMark : bar.elementId)}</td>
+      <td>${escapeHtml(bar.size)}</td>
+      <td>${escapeHtml(bar.shapeCode)}</td>
+      <td class="num">${formatNumber(bar.qty)}</td>
+      <td class="num">${formatNumber(bar.multiplier)}</td>
+      <td class="num">${formatNumber(bar.pieces)}</td>
+      <td class="num">${bar.lengthMm > 0 ? formatNumber(bar.lengthMm) : "—"}</td>
+      <td class="num">${bar.totalLengthM > 0 ? formatNumber(bar.totalLengthM, 2) : "—"}</td>
+      <td class="num">${bar.weightKg > 0 ? formatNumber(bar.weightKg, 1) : "—"}</td>
+      <td class="num">${options.includeDims && bar.legA ? formatNumber(bar.legA) : "—"}</td>
+      <td class="num">${options.includeDims && bar.legB ? formatNumber(bar.legB) : "—"}</td>
+      <td class="num">${options.includeDims && bar.legC ? formatNumber(bar.legC) : "—"}</td>
+      <td class="num">${options.includeDims && bar.legD ? formatNumber(bar.legD) : "—"}</td>
+      <td>${escapeHtml(bar.note || "—")}</td>
+    </tr>`).join("");
+
+  const totalWt = bars.reduce((s, b) => s + b.weightKg, 0);
+  const totalLen = bars.reduce((s, b) => s + b.totalLengthM, 0);
+
+  return `
+    <table class="bbs-table">
+      <thead><tr>
+        <th>BM</th><th>Size</th><th>Shape</th>
+        <th class="num">Qty</th><th class="num">Mult</th><th class="num">Pcs</th>
+        <th class="num">Cut mm</th><th class="num">Total m</th><th class="num">Wt kg</th>
+        <th class="num">A</th><th class="num">B</th><th class="num">C</th><th class="num">D</th>
+        <th>Notes</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr class="total-row">
+        <td colspan="7"><strong>TOTAL</strong></td>
+        <td class="num"><strong>${formatNumber(totalLen, 2)}</strong></td>
+        <td class="num"><strong>${formatNumber(totalWt, 1)}</strong></td>
+        <td colspan="5"></td>
+      </tr></tfoot>
+    </table>`;
+}
+
+function buildShapeKeysHtml(bars: NormalizedBar[]): string {
+  const shapeMap = new Map<string, NormalizedBar[]>();
+  for (const bar of bars) {
+    if (!shapeMap.has(bar.shapeCode)) shapeMap.set(bar.shapeCode, []);
+    shapeMap.get(bar.shapeCode)!.push(bar);
+  }
+
+  const cards = Array.from(shapeMap.entries())
     .sort((a, b) => {
       if (a[0] === "STRAIGHT") return -1;
       if (b[0] === "STRAIGHT") return 1;
-      return a[0].localeCompare(b[0], undefined, { numeric: true, sensitivity: "base" });
-    });
-
-  return chunkArray(shapes, SHAPES_PER_SHEET).map((shapeChunk, pageIndex) => {
-    const shapeCards = shapeChunk.map(([shapeCode, shapeBars]) => {
-      const sampleMarks = shapeBars.slice(0, 4).map((bar) => bar.barMark).join(", ");
-      const typicalCut = shapeBars.reduce((sum, bar) => sum + bar.lengthMm, 0) / Math.max(shapeBars.length, 1);
+      return a[0].localeCompare(b[0], undefined, { numeric: true });
+    })
+    .slice(0, 8)
+    .map(([code, shapeBars]) => {
+      const marks = shapeBars.slice(0, 3).map(b => b.barMark).join(", ");
       return `
-        <article class="shape-card">
-          <div class="shape-card-header">
-            <div>
-              <div class="shape-code">${escapeHtml(shapeCode)}</div>
-              <p>${shapeBars.length} bar item${shapeBars.length === 1 ? "" : "s"}</p>
-            </div>
-            <div class="shape-length">${typicalCut > 0 ? `${formatNumber(typicalCut)} mm typ.` : "Cut length varies"}</div>
-          </div>
-          ${buildShapeSvg(shapeCode)}
-          <div class="shape-note">
-            <strong>Sample marks:</strong> ${escapeHtml(sampleMarks || "N/A")}
-          </div>
-        </article>
-      `;
+        <div class="shape-mini-card">
+          <div class="shape-code-label">${escapeHtml(code)}</div>
+          ${buildShapeSvg(code)}
+          <div class="shape-marks">${escapeHtml(marks)}</div>
+        </div>`;
     }).join("");
 
-    const referenceContent = `
-      <div class="reference-grid">
-        <section class="reference-panel">
-          <div class="mini-title">Shape note</div>
-          <ul class="note-list">
-            <li>Diagrams are schematic and intended to organize the schedule.</li>
-            <li>Use the cut length and source drawing for fabrication control.</li>
-            <li>Unknown shape codes are shown with a generic bar sketch.</li>
-          </ul>
-        </section>
-        <section class="reference-panel">
-          <div class="mini-title">Typical dimensions</div>
-          <table class="mini-table">
-            <tr><th>A-D</th><td>Leg labels only when supplied in source data</td></tr>
-            <tr><th>Length</th><td>Overall cut length from bar list</td></tr>
-            <tr><th>Use</th><td>Shape key and review support</td></tr>
-          </table>
-        </section>
-        <section class="reference-panel">
-          <div class="mini-title">Control</div>
-          <table class="mini-table">
-            <tr><th>Count</th><td class="num">${formatNumber(shapeChunk.length)}</td></tr>
-            <tr><th>Sheet type</th><td>Shape key</td></tr>
-            <tr><th>Print size</th><td>Letter landscape</td></tr>
-          </table>
-        </section>
-      </div>
-    `;
-
-    return {
-      title: `Shape key ${pageIndex + 1}`,
-      subtitle: "Typical bend families referenced by the bar schedule",
-      mainContent: `
-        <div class="drawing-header compact">
-          <div>
-            <div class="drawing-kicker">SHAPE KEY</div>
-            <h1>Typical bend families on this project</h1>
-            <p>The previous one-page layout was replaced with dedicated shape sheets so details remain clean and readable.</p>
-          </div>
-          <div class="summary-badge small">
-            <strong>${formatNumber(shapeChunk.length)}</strong>
-            <span>Shape families</span>
-          </div>
-        </div>
-        <div class="shape-grid">
-          ${shapeCards}
-        </div>
-      `,
-      referenceContent,
-    };
-  });
+  return `<div class="shape-keys-grid">${cards}</div>`;
 }
 
-function buildSheetHtml(
-  sheet: SheetDefinition,
-  index: number,
-  total: number,
-  params: Required<Omit<BuildShopDrawingParams, "barList" | "elements" | "sizeBreakdown" | "options">> & {
-    options: Required<ShopDrawingOptions>;
+function buildPlanLayoutSvg(bars: NormalizedBar[], elements: ShopDrawingElement[]): string {
+  // Schematic plan view — show element callouts in a grid
+  const uniqueElements = Array.from(new Set(bars.map(b => b.elementId))).slice(0, 12);
+  const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(uniqueElements.length))));
+  const cellW = 180;
+  const cellH = 80;
+  const svgW = cols * cellW + 40;
+  const rows = Math.ceil(uniqueElements.length / cols);
+  const svgH = rows * cellH + 40;
+
+  const rects = uniqueElements.map((elId, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = 20 + col * cellW;
+    const y = 20 + row * cellH;
+    const elBars = bars.filter(b => b.elementId === elId);
+    const sizes = Array.from(new Set(elBars.map(b => b.size))).join("/");
+    return `
+      <rect x="${x}" y="${y}" width="${cellW - 10}" height="${cellH - 10}" fill="none" stroke="#111" stroke-width="1.5"/>
+      <text x="${x + 8}" y="${y + 20}" class="el-label">${escapeHtml(elId)}</text>
+      <text x="${x + 8}" y="${y + 36}" class="el-size">${escapeHtml(sizes)}</text>
+      <text x="${x + 8}" y="${y + 50}" class="el-count">${elBars.length} bars</text>`;
+  }).join("");
+
+  return `
+    <svg viewBox="0 0 ${svgW} ${svgH}" class="plan-layout-svg" aria-label="Plan layout">
+      <style>
+        .el-label { font: bold 12px Arial; fill: #111; }
+        .el-size { font: 10px Arial; fill: #333; }
+        .el-count { font: 9px Arial; fill: #555; }
+      </style>
+      ${rects}
+    </svg>`;
+}
+
+function buildSectionDetailSvg(): string {
+  // Typical cross-section showing rebar placement
+  return `
+    <svg viewBox="0 0 280 160" class="section-svg" aria-label="Typical section">
+      <style>
+        .sec-label { font: 8px Arial; fill: #111; }
+        .sec-dim { font: 7px Arial; fill: #333; }
+      </style>
+      <rect x="40" y="20" width="200" height="120" fill="none" stroke="#111" stroke-width="2"/>
+      <circle cx="60" cy="40" r="5" fill="#111"/><text x="70" y="43" class="sec-label">TOP BAR</text>
+      <circle cx="60" cy="120" r="5" fill="#111"/><text x="70" y="123" class="sec-label">BOT. BAR</text>
+      <circle cx="220" cy="40" r="5" fill="#111"/><text x="175" y="43" class="sec-label">TOP BAR</text>
+      <circle cx="220" cy="120" r="5" fill="#111"/><text x="175" y="123" class="sec-label">BOT. BAR</text>
+      <line x1="55" y1="45" x2="55" y2="115" stroke="#111" stroke-width="1" stroke-dasharray="4,2"/>
+      <line x1="225" y1="45" x2="225" y2="115" stroke="#111" stroke-width="1" stroke-dasharray="4,2"/>
+      <text x="110" y="75" class="sec-label">STIRRUP / TIE</text>
+      <rect x="50" y="30" width="180" height="100" fill="none" stroke="#111" stroke-width="1" stroke-dasharray="3,3"/>
+      <text x="100" y="155" class="sec-dim">TYPICAL SECTION</text>
+    </svg>`;
+}
+
+function buildTypicalBarArrangementSvg(): string {
+  return `
+    <svg viewBox="0 0 280 140" class="arrangement-svg" aria-label="Typical bar arrangement">
+      <style>
+        .arr-label { font: 8px Arial; fill: #111; }
+      </style>
+      <rect x="20" y="20" width="240" height="100" fill="none" stroke="#111" stroke-width="2"/>
+      <circle cx="40" cy="40" r="4" fill="#111"/><text x="48" y="43" class="arr-label">BOT. COR.</text>
+      <circle cx="40" cy="100" r="4" fill="#111"/><text x="48" y="103" class="arr-label">BOT. CONT.</text>
+      <circle cx="240" cy="40" r="4" fill="#111"/><text x="190" y="43" class="arr-label">BOT. COR.</text>
+      <circle cx="240" cy="100" r="4" fill="#111"/><text x="190" y="103" class="arr-label">BOT. CONT.</text>
+      <line x1="60" y1="100" x2="220" y2="100" stroke="#111" stroke-width="1.5"/>
+      <text x="100" y="70" class="arr-label">@WALL CORNER DETAIL</text>
+      <path d="M30 30 L30 110 L250 110 L250 30 Z" fill="none" stroke="#111" stroke-width="1" stroke-dasharray="5,3"/>
+      <text x="90" y="135" class="arr-label">TYPICAL BAR ARRANGEMENT</text>
+    </svg>`;
+}
+
+function buildMeshScheduleHtml(): string {
+  return `
+    <table class="mini-table mesh-table">
+      <thead><tr><th>Location</th><th>Mesh Size</th><th>Sheet Size</th><th class="num">Qty</th><th class="num">Area m²</th></tr></thead>
+      <tbody>
+        <tr><td colspan="5" class="zone-empty">Per structural drawing</td></tr>
+      </tbody>
+    </table>`;
+}
+
+function buildLapCoverHtml(bars: NormalizedBar[], standard: string): string {
+  const sizes = Array.from(new Set(bars.map(b => b.size))).filter(s => s !== "—").sort();
+  const lapMultiplier = standard.toLowerCase().includes("aci") ? 40 : 45;
+
+  const lapRows = sizes.map(size => {
+    const dia = parseInt(size.replace(/[^0-9]/g, "")) || 10;
+    const lap = dia * lapMultiplier;
+    return `<tr><td>${escapeHtml(size)}</td><td class="num">${lap} mm</td></tr>`;
+  }).join("") || `<tr><td colspan="2">—</td></tr>`;
+
+  return `
+    <div class="lap-cover-grid">
+      <div>
+        <div class="mini-title">LAP SCHEDULE</div>
+        <table class="mini-table"><thead><tr><th>Size</th><th class="num">Lap Splice</th></tr></thead><tbody>${lapRows}</tbody></table>
+      </div>
+      <div>
+        <div class="mini-title">COVER DETAILS</div>
+        <table class="mini-table">
+          <thead><tr><th>Location</th><th class="num">Clearance</th></tr></thead>
+          <tbody>
+            <tr><td>Top</td><td class="num">40 mm</td></tr>
+            <tr><td>Bottom</td><td class="num">75 mm</td></tr>
+            <tr><td>Sides</td><td class="num">40 mm</td></tr>
+            <tr><td>Earth face</td><td class="num">75 mm</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function buildSegmentSheet(
+  segment: SegmentGroup,
+  segmentBars: NormalizedBar[],
+  sheetIndex: number,
+  totalSheets: number,
+  continuation: boolean,
+  allElements: ShopDrawingElement[],
+  params: {
+    projectName: string;
     clientName: string;
     standard: string;
     coatingType: string;
+    dateStr: string;
     logoDataUri: string;
+    options: Required<ShopDrawingOptions>;
   },
 ): string {
-  const revisionInitials = (params.clientName || "RS").replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase() || "RS";
-  const drawingNumber = `${params.options.drawingPrefix}${String(index + 1).padStart(2, "0")}`;
+  const drawingNumber = `${params.options.drawingPrefix}${String(sheetIndex + 1).padStart(2, "0")}`;
+  const revInitials = (params.clientName || "RS").replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase() || "RS";
+  const segTitle = continuation
+    ? `${segment.segmentName} (CONT.)`
+    : segment.segmentName;
+
+  const totalWt = segmentBars.reduce((s, b) => s + b.weightKg, 0);
 
   return `
     <section class="sheet">
       <div class="sheet-frame">
-        <div class="sheet-grid">
-          <main class="main-area">
-            <div class="sheet-heading">
-              <div>
-                <div class="sheet-title">${escapeHtml(sheet.title)}</div>
-                <div class="sheet-subtitle">${escapeHtml(sheet.subtitle)}</div>
+        <div class="segment-grid">
+
+          <!-- TOP LEFT: Plan Layout -->
+          <div class="zone zone-plan">
+            <div class="zone-title">${escapeHtml(segTitle)} — PLAN LAYOUT</div>
+            ${buildPlanLayoutSvg(segmentBars, allElements)}
+          </div>
+
+          <!-- TOP RIGHT: BBS Table -->
+          <div class="zone zone-bbs">
+            <div class="zone-title">BAR BENDING SCHEDULE${continuation ? " (CONT.)" : ""}</div>
+            ${buildBbsTableHtml(segmentBars, params.options)}
+          </div>
+
+          <!-- RIGHT: Shape Keys -->
+          <div class="zone zone-shapes">
+            <div class="zone-title">SHAPES</div>
+            ${buildShapeKeysHtml(segmentBars)}
+          </div>
+
+          <!-- MIDDLE LEFT: Section Detail -->
+          <div class="zone zone-section">
+            <div class="zone-title">TYPICAL SECTION</div>
+            ${buildSectionDetailSvg()}
+          </div>
+
+          <!-- MIDDLE RIGHT: Mesh + Lap/Cover -->
+          <div class="zone zone-mesh-lap">
+            <div class="zone-title">MESH SCHEDULE</div>
+            ${buildMeshScheduleHtml()}
+            ${buildLapCoverHtml(segmentBars, params.standard)}
+          </div>
+
+          <!-- BOTTOM LEFT: Typical Bar Arrangement -->
+          <div class="zone zone-arrangement">
+            <div class="zone-title">TYPICAL BAR ARRANGEMENT</div>
+            ${buildTypicalBarArrangementSvg()}
+          </div>
+
+          <!-- BOTTOM RIGHT: Revision + Title Block -->
+          <div class="zone zone-titleblock">
+            <div class="revision-table">
+              <div class="mini-title">REVISION RECORD</div>
+              <table class="mini-table">
+                <thead><tr><th>△</th><th>Description</th><th>Date</th><th>By</th></tr></thead>
+                <tbody>
+                  <tr><td>△0</td><td>Initial draft for review</td><td>${escapeHtml(params.dateStr)}</td><td>${escapeHtml(revInitials)}</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="title-block-content">
+              <div class="logo-row">
+                ${params.logoDataUri ? `<img src="${params.logoDataUri}" alt="Logo"/>` : ""}
+                <div>
+                  <div class="company-name">REBAR.SHOP</div>
+                  <div class="company-tagline">AN INNOVATIVE METHOD OF FABRICATION</div>
+                </div>
               </div>
-              <div class="sheet-counter">Sheet ${index + 1} of ${total}</div>
-            </div>
-            ${sheet.mainContent}
-          </main>
-
-          <aside class="revision-area">
-            <div class="mini-title">Revision and issue record</div>
-            <table class="mini-table">
-              <tr><th>Issue</th><th>Remarks</th><th>Date</th><th>By</th></tr>
-              <tr><td>A</td><td>Draft issue for review</td><td>${escapeHtml(params.dateStr)}</td><td>${escapeHtml(revisionInitials)}</td></tr>
-              <tr><td>B</td><td>Paginated schedule output</td><td>${escapeHtml(params.dateStr)}</td><td>RS</td></tr>
-            </table>
-          </aside>
-
-          <section class="reference-area">
-            ${sheet.referenceContent}
-          </section>
-
-          <section class="title-block">
-            <div class="logo-row">
-              ${params.logoDataUri ? `<img src="${params.logoDataUri}" alt="REBAR.SHOP logo" />` : ""}
-              <div>
-                <div class="company-name">REBAR.SHOP</div>
-                <div class="company-tagline">AN INNOVATIVE METHOD OF FABRICATION</div>
+              <table class="title-block-table">
+                <tr><th>Project</th><td>${escapeHtml(params.projectName)}</td></tr>
+                <tr><th>Part of Structure</th><td>${escapeHtml(segTitle)}</td></tr>
+                <tr><th>Customer</th><td>${escapeHtml(params.clientName || "—")}</td></tr>
+                <tr><th>Standard</th><td>${escapeHtml(params.standard)}</td></tr>
+                <tr><th>Coating</th><td>${escapeHtml(params.coatingType)}</td></tr>
+                <tr><th>Drawing No.</th><td>${escapeHtml(drawingNumber)}</td></tr>
+                <tr><th>Bar List No.</th><td>${escapeHtml(drawingNumber)}</td></tr>
+                <tr><th>Total Weight</th><td>${formatNumber(totalWt, 1)} kg (${formatNumber(totalWt / 1000, 3)} T)</td></tr>
+              </table>
+              <div class="title-block-footer">
+                <span>Sheet ${sheetIndex + 1} / ${totalSheets}</span>
+                <span>${escapeHtml(params.dateStr)}</span>
               </div>
             </div>
+          </div>
 
-            <table class="title-block-table">
-              <tr><th>Project</th><td>${escapeHtml(params.projectName)}</td></tr>
-              <tr><th>Customer</th><td>${escapeHtml(params.clientName || "—")}</td></tr>
-              <tr><th>Date</th><td>${escapeHtml(params.dateStr)}</td></tr>
-              <tr><th>Standard</th><td>${escapeHtml(params.standard)}</td></tr>
-              <tr><th>Coating</th><td>${escapeHtml(params.coatingType)}</td></tr>
-              <tr><th>Scale</th><td>${escapeHtml(params.options.scale)}</td></tr>
-              <tr><th>Drawing No.</th><td>${escapeHtml(drawingNumber)}</td></tr>
-              <tr><th>Bar List No.</th><td>${escapeHtml(drawingNumber)}</td></tr>
-              <tr><th>Status</th><td>FOR FIELD USE / REVIEW</td></tr>
-            </table>
-
-            <div class="title-block-footer">
-              <div><strong>Detailed by:</strong> REBAR.SHOP</div>
-              <div><strong>Checked by:</strong> —</div>
-            </div>
-          </section>
         </div>
       </div>
-    </section>
-  `;
+    </section>`;
 }
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  if (size <= 0) return [items];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
+// ── Main entry point ────────────────────────────────────────
 
 export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
   const options: Required<ShopDrawingOptions> = {
@@ -812,465 +528,150 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
   const standard = params.standard || "ACI 318 / RSIC";
   const coatingType = params.coatingType || "Black Steel";
   const dateStr = params.dateStr || new Date().toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
+    year: "numeric", month: "long", day: "numeric",
   });
   const logoDataUri = params.logoDataUri || "";
   const bars = normalizeBars(params.barList || []);
   const elements = params.elements || [];
 
-  const scheduleSheets = buildScheduleSheets(bars, options);
-  const shapeSheets = buildShapeSheets(bars.length > 0 ? bars : [{
-    elementId: "N/A",
-    elementType: "OTHER",
-    subgroup: "",
-    barMark: "BM-1",
-    size: "—",
-    shapeCode: "STRAIGHT",
-    qty: 1,
-    multiplier: 1,
-    pieces: 1,
-    lengthMm: 0,
-    totalLengthM: 0,
-    weightKg: 0,
-    note: "",
-  }]);
-
-  const summarySheet = createSummarySheet({
-    projectName,
-    clientName,
-    standard,
-    coatingType,
-    options,
-    dateStr,
-    sizeBreakdown: params.sizeBreakdown || {},
-    bars,
-    elements,
-    scheduleSheetCount: scheduleSheets.length,
-    shapeSheetCount: shapeSheets.length,
-  });
-
-  const sheets = [summarySheet, ...scheduleSheets, ...shapeSheets];
-
-  const sheetHtml = sheets.map((sheet, index) => buildSheetHtml(sheet, index, sheets.length, {
-    projectName,
-    clientName,
-    standard,
-    coatingType,
-    dateStr,
-    logoDataUri,
-    options,
-  })).join("");
-
-  return `
-    <!DOCTYPE html>
-    <html lang="en">
-      <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>${escapeHtml(projectName)} - Shop Drawing Draft</title>
-        <style>
-          @page {
-            size: letter landscape;
-            margin: 0.3in;
-          }
-
-          * {
-            box-sizing: border-box;
-          }
-
-          html, body {
-            margin: 0;
-            padding: 0;
-            font-family: Arial, Helvetica, sans-serif;
-            color: #111;
-            background: #d1d5db;
-          }
-
-          body {
-            padding: 16px;
-          }
-
-          .sheet {
-            width: 10.4in;
-            min-height: 7.9in;
-            margin: 0 auto 18px;
-            background: #fff;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
-            page-break-after: always;
-            break-after: page;
-          }
-
-          .sheet:last-child {
-            page-break-after: auto;
-            break-after: auto;
-          }
-
-          .sheet-frame {
-            height: 7.9in;
-            border: 2px solid #111;
-            padding: 6px;
-          }
-
-          .sheet-grid {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) 280px;
-            grid-template-rows: minmax(0, 1fr) 194px;
-            gap: 8px;
-            height: 100%;
-          }
-
-          .main-area,
-          .revision-area,
-          .reference-area,
-          .title-block {
-            border: 1px solid #111;
-            overflow: hidden;
-          }
-
-          .main-area {
-            padding: 10px;
-          }
-
-          .revision-area {
-            padding: 8px;
-          }
-
-          .reference-area {
-            padding: 8px;
-          }
-
-          .title-block {
-            padding: 8px;
-            border-width: 2px;
-          }
-
-          .sheet-heading,
-          .drawing-header {
-            display: flex;
-            justify-content: space-between;
-            gap: 12px;
-            align-items: flex-start;
-          }
-
-          .sheet-heading {
-            margin-bottom: 10px;
-            padding-bottom: 8px;
-            border-bottom: 1px solid #111;
-          }
-
-          .sheet-title {
-            font-size: 18px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-          }
-
-          .sheet-subtitle {
-            margin-top: 2px;
-            font-size: 10px;
-          }
-
-          .sheet-counter,
-          .drawing-kicker {
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-          }
-
-          .drawing-header {
-            margin-bottom: 12px;
-          }
-
-          .drawing-header h1 {
-            margin: 3px 0 4px;
-            font-size: 17px;
-            line-height: 1.2;
-          }
-
-          .drawing-header p {
-            margin: 0;
-            font-size: 10px;
-            line-height: 1.45;
-            max-width: 520px;
-          }
-
-          .drawing-header.compact h1 {
-            font-size: 15px;
-          }
-
-          .summary-badge {
-            min-width: 82px;
-            padding: 8px 10px;
-            border: 1px solid #111;
-            text-align: center;
-          }
-
-          .summary-badge strong {
-            display: block;
-            font-size: 24px;
-            line-height: 1;
-          }
-
-          .summary-badge span {
-            display: block;
-            margin-top: 4px;
-            font-size: 9px;
-            text-transform: uppercase;
-          }
-
-          .summary-badge.small strong {
-            font-size: 20px;
-          }
-
-          .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(6, minmax(0, 1fr));
-            gap: 8px;
-            margin-bottom: 12px;
-          }
-
-          .metric-card {
-            border: 1px solid #111;
-            padding: 8px;
-            min-height: 58px;
-          }
-
-          .metric-card span {
-            display: block;
-            font-size: 9px;
-            text-transform: uppercase;
-          }
-
-          .metric-card strong {
-            display: block;
-            margin-top: 5px;
-            font-size: 18px;
-          }
-
-          .panel-grid {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 10px;
-          }
-
-          .panel,
-          .reference-panel {
-            border: 1px solid #111;
-            padding: 8px;
-          }
-
-          .panel-title,
-          .mini-title {
-            font-size: 10px;
-            font-weight: 700;
-            text-transform: uppercase;
-            margin-bottom: 6px;
-            letter-spacing: 0.06em;
-          }
-
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            table-layout: fixed;
-          }
-
-          th,
-          td {
-            border: 1px solid #111;
-            padding: 4px 5px;
-            vertical-align: top;
-            font-size: 9px;
-            line-height: 1.25;
-            text-align: left;
-          }
-
-          th {
-            font-weight: 700;
-            background: #fff;
-          }
-
-          .num {
-            text-align: right;
-          }
-
-          .meta-table th {
-            width: 34%;
-          }
-
-          .reference-grid {
-            display: grid;
-            grid-template-columns: 1.1fr 1.2fr 1fr;
-            gap: 8px;
-            height: 100%;
-          }
-
-          .mini-table th,
-          .mini-table td,
-          .meta-table th,
-          .meta-table td {
-            font-size: 8.5px;
-          }
-
-          .note-list {
-            margin: 0;
-            padding-left: 16px;
-            font-size: 8.5px;
-            line-height: 1.35;
-          }
-
-          .note-list li + li {
-            margin-top: 4px;
-          }
-
-          .bbs-table th,
-          .bbs-table td {
-            font-size: 8px;
-            padding: 3px 4px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-          }
-
-          .bbs-table td:last-child,
-          .bbs-table th:last-child {
-            white-space: normal;
-          }
-
-          .section-row td {
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            background: #f5f5f5;
-          }
-
-          .shape-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 10px;
-          }
-
-          .shape-card {
-            border: 1px solid #111;
-            padding: 8px;
-            min-height: 148px;
-          }
-
-          .shape-card-header {
-            display: flex;
-            justify-content: space-between;
-            gap: 8px;
-            margin-bottom: 8px;
-          }
-
-          .shape-code {
-            font-size: 14px;
-            font-weight: 700;
-          }
-
-          .shape-card p,
-          .shape-length,
-          .shape-note {
-            margin: 0;
-            font-size: 9px;
-            line-height: 1.35;
-          }
-
-          .shape-svg {
-            display: block;
-            width: 100%;
-            height: 78px;
-            margin: 6px 0;
-          }
-
-          .shape-svg path,
-          .shape-svg rect {
-            fill: none;
-            stroke: #111;
-            stroke-width: 2;
-            stroke-linecap: round;
-            stroke-linejoin: round;
-          }
-
-          .shape-svg .dim {
-            stroke-width: 1;
-          }
-
-          .shape-svg text {
-            font-size: 10px;
-            font-family: Arial, Helvetica, sans-serif;
-          }
-
-          .logo-row {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            padding-bottom: 8px;
-            margin-bottom: 8px;
-            border-bottom: 1px solid #111;
-          }
-
-          .logo-row img {
-            width: 44px;
-            height: 44px;
-            object-fit: contain;
-          }
-
-          .company-name {
-            font-size: 16px;
-            font-weight: 700;
-          }
-
-          .company-tagline {
-            font-size: 8px;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
-          }
-
-          .title-block-table th,
-          .title-block-table td {
-            font-size: 8.5px;
-          }
-
-          .title-block-table th {
-            width: 38%;
-          }
-
-          .title-block-footer {
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid #111;
-            font-size: 8.5px;
-            line-height: 1.5;
-          }
-
-          @media print {
-            html, body {
-              background: #fff;
-            }
-
-            body {
-              padding: 0;
-            }
-
-            .sheet {
-              width: auto;
-              min-height: auto;
-              margin: 0;
-              box-shadow: none;
-            }
-
-            .sheet-frame {
-              height: calc(7.9in - 2px);
-            }
-          }
-        </style>
-      </head>
-      <body>
-        ${sheetHtml}
-      </body>
-    </html>
-  `;
+  // Group bars by structural segment
+  const segments = groupBySegment(bars);
+  if (segments.length === 0) {
+    segments.push({ segmentName: "GENERAL", bars: [] });
+  }
+
+  // Build sheets: one per segment, overflow to continuation sheets
+  const sheetDefs: { segment: SegmentGroup; bars: NormalizedBar[]; continuation: boolean }[] = [];
+  for (const seg of segments) {
+    const chunks = chunkArray(seg.bars, SEGMENT_BBS_LIMIT);
+    if (chunks.length === 0) chunks.push([]);
+    chunks.forEach((chunk, ci) => {
+      sheetDefs.push({ segment: seg, bars: chunk, continuation: ci > 0 });
+    });
+  }
+
+  const totalSheets = sheetDefs.length;
+  const sheetParams = { projectName, clientName, standard, coatingType, dateStr, logoDataUri, options };
+
+  const sheetHtml = sheetDefs.map((def, i) =>
+    buildSegmentSheet(def.segment, def.bars, i, totalSheets, def.continuation, elements, sheetParams)
+  ).join("");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>${escapeHtml(projectName)} - Shop Drawing</title>
+  <style>
+    @page { size: letter landscape; margin: 0.3in; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; color: #111; background: #d1d5db; }
+    body { padding: 16px; }
+
+    .sheet {
+      width: 10.4in; min-height: 7.9in; margin: 0 auto 18px;
+      background: #fff; box-shadow: 0 8px 24px rgba(15,23,42,.18);
+      page-break-after: always; break-after: page;
+    }
+    .sheet:last-child { page-break-after: auto; break-after: auto; }
+
+    .sheet-frame {
+      height: 7.9in; border: 2px solid #111; padding: 4px;
+    }
+
+    /* 6-zone consolidated grid matching reference SD22 layout */
+    .segment-grid {
+      display: grid;
+      grid-template-columns: 320px 1fr 160px;
+      grid-template-rows: minmax(0, 1.1fr) minmax(0, 0.9fr) minmax(0, 0.8fr);
+      gap: 3px;
+      height: 100%;
+    }
+
+    .zone { border: 1px solid #111; padding: 4px; overflow: hidden; }
+
+    .zone-plan     { grid-column: 1; grid-row: 1; }
+    .zone-bbs      { grid-column: 2; grid-row: 1 / 3; }
+    .zone-shapes   { grid-column: 3; grid-row: 1 / 3; }
+    .zone-section  { grid-column: 1; grid-row: 2; }
+    .zone-mesh-lap { grid-column: 2; grid-row: 3; }
+    .zone-arrangement { grid-column: 1; grid-row: 3; }
+    .zone-titleblock  { grid-column: 3; grid-row: 3; display: flex; flex-direction: column; }
+
+    .zone-title {
+      font-size: 8px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.06em; margin-bottom: 3px; padding-bottom: 2px;
+      border-bottom: 1px solid #999;
+    }
+
+    .zone-empty { font-size: 8px; color: #666; padding: 4px; }
+
+    /* BBS Table */
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid #111; padding: 2px 3px; font-size: 7.5px; line-height: 1.2; text-align: left; vertical-align: top; }
+    th { font-weight: 700; background: #fff; }
+    .num { text-align: right; }
+
+    .bbs-table th, .bbs-table td { font-size: 7px; padding: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bbs-table td:last-child, .bbs-table th:last-child { white-space: normal; }
+    .total-row td { border-top: 2px solid #111; background: #f5f5f5; }
+
+    .section-row td { font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; background: #f5f5f5; }
+
+    /* Shape keys grid */
+    .shape-keys-grid { display: grid; grid-template-columns: 1fr; gap: 3px; }
+    .shape-mini-card { border: 1px solid #ccc; padding: 3px; }
+    .shape-code-label { font-size: 9px; font-weight: 700; }
+    .shape-marks { font-size: 7px; color: #555; }
+    .shape-svg { display: block; width: 100%; height: 40px; }
+    .shape-svg path, .shape-svg rect { fill: none; stroke: #111; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .shape-svg .dim { stroke-width: 1; }
+    .shape-svg text { font-size: 10px; font-family: Arial; }
+
+    /* Plan layout */
+    .plan-layout-svg { width: 100%; max-height: 200px; }
+
+    /* Section + arrangement SVGs */
+    .section-svg, .arrangement-svg { width: 100%; max-height: 130px; }
+
+    /* Mesh table */
+    .mesh-table { margin-bottom: 4px; }
+
+    /* Lap/cover */
+    .lap-cover-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+    .lap-cover-grid .mini-title { font-size: 7px; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; }
+
+    .mini-title { font-size: 8px; font-weight: 700; text-transform: uppercase; margin-bottom: 3px; letter-spacing: 0.06em; }
+    .mini-table th, .mini-table td { font-size: 7px; }
+
+    /* Revision + title block */
+    .revision-table { margin-bottom: 4px; }
+    .title-block-content { flex: 1; display: flex; flex-direction: column; }
+
+    .logo-row { display: flex; gap: 4px; align-items: center; padding-bottom: 3px; margin-bottom: 3px; border-bottom: 1px solid #111; }
+    .logo-row img { width: 28px; height: 28px; object-fit: contain; }
+    .company-name { font-size: 11px; font-weight: 700; }
+    .company-tagline { font-size: 6px; letter-spacing: 0.06em; text-transform: uppercase; }
+
+    .title-block-table th, .title-block-table td { font-size: 7px; padding: 1px 3px; }
+    .title-block-table th { width: 42%; }
+
+    .title-block-footer {
+      margin-top: auto; padding-top: 3px; border-top: 1px solid #111;
+      font-size: 7px; display: flex; justify-content: space-between;
+    }
+
+    @media print {
+      html, body { background: #fff; }
+      body { padding: 0; }
+      .sheet { width: auto; min-height: auto; margin: 0; box-shadow: none; }
+      .sheet-frame { height: calc(7.9in - 2px); }
+    }
+  </style>
+</head>
+<body>
+  ${sheetHtml}
+</body>
+</html>`;
 }
