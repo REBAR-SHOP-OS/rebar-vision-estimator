@@ -14,7 +14,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import * as XLSX from "xlsx";
+import { readSpreadsheetFile, rowsToCsvText } from "@/lib/spreadsheet-import";
 
 interface KnowledgeItem {
   id: string;
@@ -191,28 +191,14 @@ const BrainKnowledgeDialog: React.FC = () => {
     }
   };
 
-  // Parse Excel file to text
-  const parseExcelToText = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const data = new Uint8Array(e.target!.result as ArrayBuffer);
-          const workbook = XLSX.read(data, { type: "array" });
-          let text = "";
-          for (const sheetName of workbook.SheetNames) {
-            const sheet = workbook.Sheets[sheetName];
-            text += `=== Sheet: ${sheetName} ===\n`;
-            text += XLSX.utils.sheet_to_csv(sheet) + "\n\n";
-          }
-          resolve(text.trim());
-        } catch (err) {
-          reject(err);
-        }
-      };
-      reader.onerror = reject;
-      reader.readAsArrayBuffer(file);
-    });
+  // Parse spreadsheet file to text
+  const parseExcelToText = async (file: File): Promise<string> => {
+    const sheets = await readSpreadsheetFile(file);
+
+    return sheets
+      .map((sheet) => `=== Sheet: ${sheet.name} ===\n${rowsToCsvText(sheet.rows)}`)
+      .join("\n\n")
+      .trim();
   };
 
   // Handle answer file selection - auto-parse Excel
@@ -222,13 +208,13 @@ const BrainKnowledgeDialog: React.FC = () => {
     setTrainingAnswerFile(file);
 
     const ext = file.name.toLowerCase().split(".").pop();
-    if (ext === "xlsx" || ext === "xls") {
+    if (ext === "xlsx" || ext === "xls" || ext === "csv") {
       try {
         const text = await parseExcelToText(file);
         setTrainingAnswerText(text);
-        toast.success("Excel parsed successfully");
-      } catch {
-        toast.error("Failed to parse Excel file");
+        toast.success("Spreadsheet parsed successfully");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to parse spreadsheet file");
       }
     }
   };

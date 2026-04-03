@@ -6,7 +6,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ChevronDown, ChevronRight, Search, Pencil, Upload, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
-import * as XLSX from "xlsx";
+import { readSpreadsheetFile, sheetRowsToObjects } from "@/lib/spreadsheet-import";
 import {
   getMassKgPerM,
   getWeightLbPerFt,
@@ -85,15 +85,16 @@ function parseNumericValue(val: any): number {
 
 // ── Cross-check: find "TOTAL WEIGHT" cell in worksheet ──────────
 
-function findExcelTotalWeight(ws: XLSX.WorkSheet): number | null {
-  const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
-  for (let r = range.s.r; r <= range.e.r; r++) {
-    for (let c = range.s.c; c <= range.e.c; c++) {
-      const cell = ws[XLSX.utils.encode_cell({ r, c })];
-      if (cell && typeof cell.v === "string" && /total\s*(weight|wt|mass)/i.test(cell.v)) {
-        for (const [dr, dc] of [[0, 1], [0, 2], [1, 0]]) {
-          const adj = ws[XLSX.utils.encode_cell({ r: r + dr, c: c + dc })];
-          if (adj && typeof adj.v === "number") return adj.v;
+function findExcelTotalWeight(rows: unknown[][]): number | null {
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r] ?? [];
+    for (let c = 0; c < row.length; c++) {
+      const cell = row[c];
+      if (typeof cell === "string" && /total\s*(weight|wt|mass)/i.test(cell)) {
+        for (const [dr, dc] of [[0, 1], [0, 2], [1, 0]] as const) {
+          const adjacentValue = rows[r + dr]?.[c + dc];
+          const numericValue = parseNumericValue(adjacentValue);
+          if (numericValue > 0) return numericValue;
         }
       }
     }
@@ -143,8 +144,7 @@ function matchHeader(cellVal: string, candidates: string[]): boolean {
   return candidates.some(c => v.includes(c.toLowerCase()));
 }
 
-function tryParseComplexXlsx(ws: XLSX.WorkSheet): ParseResult | null {
-  const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+function tryParseComplexXlsx(rows: any[][]): ParseResult | null {
   if (rows.length < 5) return null;
 
   // Find header row: look for a row containing "Qty" AND ("Bar Dia" OR size-like header)
@@ -403,7 +403,7 @@ function tryParseComplexXlsx(ws: XLSX.WorkSheet): ParseResult | null {
   if (items.length === 0) return null;
 
   const computedTotalKg = items.reduce((sum, b) => sum + b.weight_kg, 0);
-  const excelTotalWeight = findExcelTotalWeight(ws);
+  const excelTotalWeight = findExcelTotalWeight(rows);
   let mismatchPct: number | null = null;
   if (excelTotalWeight !== null && excelTotalWeight > 0) {
     mismatchPct = Math.abs(computedTotalKg - excelTotalWeight) / excelTotalWeight * 100;
@@ -429,7 +429,7 @@ function tryParseComplexXlsx(ws: XLSX.WorkSheet): ParseResult | null {
 
 // ── Legacy flat-header parser (fallback) ────────────────────────
 
-function parseFlatXlsx(data: any[], ws: XLSX.WorkSheet): ParseResult {
+function parseFlatXlsx(data: any[], rows: unknown[][]): ParseResult {
   if (data.length === 0) return { items: [], diagnostics: { detectedUnit: "mm", unitAssumed: true, rowCount: 0, missingSizes: [], formulaFallbacks: 0, excelTotalWeight: null, computedTotalKg: 0, mismatchPct: null, assumptions: [], elementSummary: {}, weightMismatches: 0 } };
 
   const headers = Object.keys(data[0]);
@@ -500,7 +500,7 @@ function parseFlatXlsx(data: any[], ws: XLSX.WorkSheet): ParseResult {
   });
 
   const computedTotalKg = items.reduce((sum, b) => sum + b.weight_kg, 0);
-  const excelTotalWeight = findExcelTotalWeight(ws);
+  const excelTotalWeight = findExcelTotalWeight(rows);
   let mismatchPct: number | null = null;
   if (excelTotalWeight !== null && excelTotalWeight > 0) {
     mismatchPct = Math.abs(computedTotalKg - excelTotalWeight) / excelTotalWeight * 100;
@@ -609,61 +609,61 @@ const BarListTable: React.FC<BarListTableProps> = ({ barList: initialBarList, on
 
   const xlsxInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const wb = XLSX.read(evt.target?.result, { type: "array" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-
-        // Try complex parser first, fall back to flat-header parser
-        let result = tryParseComplexXlsx(ws);
-        if (!result) {
-          const raw = XLSX.utils.sheet_to_json(ws);
-          if (!raw.length) { toast.error("No data found in the file"); return; }
-          result = parseFlatXlsx(raw, ws);
-        }
-
-        const { items, diagnostics } = result;
-        if (items.length === 0) { toast.error("No bar items found in the file"); return; }
-
-        setBarList(items);
-        onImport?.(items);
-
-        // Build warnings
-        const warnings: string[] = [];
-        if (diagnostics.unitAssumed) warnings.push(`⚠ Length unit assumed: ${diagnostics.detectedUnit}`);
-        if (diagnostics.missingSizes.length > 0) warnings.push(`⚠ Unknown sizes: ${diagnostics.missingSizes.join(", ")}`);
-        if (diagnostics.formulaFallbacks > 0) warnings.push(`⚠ ${diagnostics.formulaFallbacks} formula(s) could not be evaluated`);
-        if (diagnostics.weightMismatches > 0) warnings.push(`⚠ ${diagnostics.weightMismatches} row(s) with weight cross-check mismatch > 2%`);
-        if (diagnostics.mismatchPct !== null && diagnostics.mismatchPct > 1) {
-          warnings.push(`⚠ Weight mismatch: computed ${diagnostics.computedTotalKg.toFixed(1)} kg vs Excel total ${diagnostics.excelTotalWeight?.toFixed(1)} kg (${diagnostics.mismatchPct.toFixed(1)}% off)`);
-        }
-        // Element summary
-        if (Object.keys(diagnostics.elementSummary).length > 0) {
-          for (const [el, wt] of Object.entries(diagnostics.elementSummary)) {
-            warnings.push(`📊 ${el}: ${(wt as number).toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`);
-          }
-        }
-
-        setImportWarnings(warnings);
-
-        if (warnings.some(w => w.startsWith("⚠"))) {
-          toast.warning(`Imported ${items.length} items with diagnostics`, {
-            description: warnings.filter(w => w.startsWith("⚠")).join("\n"),
-            duration: 10000,
-          });
-        } else {
-          toast.success(`Imported ${items.length} bar items — ${diagnostics.computedTotalKg.toFixed(1)} kg total`);
-        }
-      } catch {
-        toast.error("Failed to parse the Excel file");
+    try {
+      const [sheet] = await readSpreadsheetFile(file);
+      if (!sheet || !sheet.rows.length) {
+        toast.error("No data found in the file");
+        return;
       }
-    };
-    reader.readAsArrayBuffer(file);
-    e.target.value = "";
+
+      // Try complex parser first, fall back to flat-header parser.
+      let result = tryParseComplexXlsx(sheet.rows as any[][]);
+      if (!result) {
+        const raw = sheetRowsToObjects(sheet.rows);
+        if (!raw.length) { toast.error("No data found in the file"); return; }
+        result = parseFlatXlsx(raw, sheet.rows);
+      }
+
+      const { items, diagnostics } = result;
+      if (items.length === 0) { toast.error("No bar items found in the file"); return; }
+
+      setBarList(items);
+      onImport?.(items);
+
+      // Build warnings
+      const warnings: string[] = [];
+      if (diagnostics.unitAssumed) warnings.push(`⚠ Length unit assumed: ${diagnostics.detectedUnit}`);
+      if (diagnostics.missingSizes.length > 0) warnings.push(`⚠ Unknown sizes: ${diagnostics.missingSizes.join(", ")}`);
+      if (diagnostics.formulaFallbacks > 0) warnings.push(`⚠ ${diagnostics.formulaFallbacks} formula(s) could not be evaluated`);
+      if (diagnostics.weightMismatches > 0) warnings.push(`⚠ ${diagnostics.weightMismatches} row(s) with weight cross-check mismatch > 2%`);
+      if (diagnostics.mismatchPct !== null && diagnostics.mismatchPct > 1) {
+        warnings.push(`⚠ Weight mismatch: computed ${diagnostics.computedTotalKg.toFixed(1)} kg vs Excel total ${diagnostics.excelTotalWeight?.toFixed(1)} kg (${diagnostics.mismatchPct.toFixed(1)}% off)`);
+      }
+      // Element summary
+      if (Object.keys(diagnostics.elementSummary).length > 0) {
+        for (const [el, wt] of Object.entries(diagnostics.elementSummary)) {
+          warnings.push(`📊 ${el}: ${(wt as number).toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`);
+        }
+      }
+
+      setImportWarnings(warnings);
+
+      if (warnings.some(w => w.startsWith("⚠"))) {
+        toast.warning(`Imported ${items.length} items with diagnostics`, {
+          description: warnings.filter(w => w.startsWith("⚠")).join("\n"),
+          duration: 10000,
+        });
+      } else {
+        toast.success(`Imported ${items.length} bar items — ${diagnostics.computedTotalKg.toFixed(1)} kg total`);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to parse the spreadsheet file");
+    } finally {
+      e.target.value = "";
+    }
   };
 
   return (
@@ -692,7 +692,7 @@ const BarListTable: React.FC<BarListTableProps> = ({ barList: initialBarList, on
             className="pl-9 h-9 rounded-xl text-xs"
           />
         </div>
-        <input ref={xlsxInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileImport} />
+        <input ref={xlsxInputRef} type="file" accept=".xlsx,.csv" className="hidden" onChange={handleFileImport} />
         <Button variant="outline" size="sm" className="h-9 rounded-xl text-xs gap-1.5" onClick={() => xlsxInputRef.current?.click()}>
           <Upload className="h-3.5 w-3.5" />
           Import
