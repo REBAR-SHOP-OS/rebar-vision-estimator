@@ -38,6 +38,8 @@ describe("buildShopDrawingHtml", () => {
     expect(html).toContain("Foundation plan and reinforcement details");
     expect(html).toContain("Shape key 1");
     expect(html).toContain("Lap schedule - structural slab");
+    expect(html).toContain("Project no.");
+    expect(html).toContain("FOR FIELD USE / REVIEW");
   });
 
   it("keeps one row per bar mark instead of compressing them into one sheet summary", () => {

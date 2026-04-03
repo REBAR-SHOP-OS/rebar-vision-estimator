@@ -1050,6 +1050,8 @@ function buildSheetHtml(
 ): string {
   const revisionInitials = (params.clientName || "RS").replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase() || "RS";
   const drawingNumber = `${params.options.drawingPrefix}${String(index + 1).padStart(2, "0")}`;
+  const projectNumber = `${params.options.drawingPrefix.replace(/-+$/, "") || "SD"}-${String(total).padStart(2, "0")}`;
+  const partOfStructure = sheet.title.replace(/\s+\d+(?:\.\d+)?$/, "");
 
   return `
     <section class="sheet">
@@ -1061,7 +1063,7 @@ function buildSheetHtml(
                 <div class="sheet-title">${escapeHtml(sheet.title)}</div>
                 <div class="sheet-subtitle">${escapeHtml(sheet.subtitle)}</div>
               </div>
-              <div class="sheet-counter">Sheet ${index + 1} of ${total}</div>
+              <div class="sheet-counter">${escapeHtml(drawingNumber)}<span>${index + 1} of ${total}</span></div>
             </div>
             ${sheet.mainContent}
           </main>
@@ -1089,14 +1091,16 @@ function buildSheetHtml(
             </div>
 
             <table class="title-block-table">
-              <tr><th>Project</th><td>${escapeHtml(params.projectName)}</td></tr>
-              <tr><th>Customer</th><td>${escapeHtml(params.clientName || "—")}</td></tr>
+              <tr><th>PROJECT</th><td>${escapeHtml(params.projectName)}</td></tr>
+              <tr><th>CUSTOMER</th><td>${escapeHtml(params.clientName || "—")}</td></tr>
+              <tr><th>PART OF STRUCTURE</th><td>${escapeHtml(partOfStructure)}</td></tr>
+              <tr><th>Project no.</th><td>${escapeHtml(projectNumber)}</td></tr>
               <tr><th>Date</th><td>${escapeHtml(params.dateStr)}</td></tr>
               <tr><th>Standard</th><td>${escapeHtml(params.standard)}</td></tr>
               <tr><th>Coating</th><td>${escapeHtml(params.coatingType)}</td></tr>
-              <tr><th>Scale</th><td>${escapeHtml(params.options.scale)}</td></tr>
+              <tr><th>SCALE</th><td>${escapeHtml(params.options.scale)}</td></tr>
               <tr><th>Drawing No.</th><td>${escapeHtml(drawingNumber)}</td></tr>
-              <tr><th>Bar List No.</th><td>${escapeHtml(drawingNumber)}</td></tr>
+              <tr><th>BAR LIST No.</th><td>${escapeHtml(drawingNumber)}</td></tr>
               <tr><th>Status</th><td>FOR FIELD USE / REVIEW</td></tr>
             </table>
 
