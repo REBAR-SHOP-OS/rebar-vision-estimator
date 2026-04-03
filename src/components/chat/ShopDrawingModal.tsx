@@ -12,6 +12,7 @@ import { Loader2, Printer, Trash2, Eye, Clock, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { getLogoDataUri } from "@/lib/logo-base64";
+import { cn } from "@/lib/utils";
 
 const SHOP_DRAWING_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-shop-drawing`;
 
@@ -125,7 +126,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
         },
         body: JSON.stringify({
           barList,
-          elements: quoteResult.quote.elements,
+          elements,
           projectName: scopeData?.projectName,
           clientName: scopeData?.clientName,
           standard: scopeData?.standard,
@@ -196,7 +197,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-full sm:max-w-3xl max-h-[90vh] flex flex-col">
+      <DialogContent className="w-[96vw] max-w-[1400px] h-[92vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Settings2 className="h-5 w-5" />
@@ -266,16 +267,22 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
 
             {phase === "preview" && (
               <div className="flex flex-col gap-3 flex-1 min-h-0">
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2 items-center">
                   <Button onClick={handlePrint} className="gap-2">
                     <Printer className="h-4 w-4" /> Print / Save PDF
                   </Button>
                   <Button variant="outline" onClick={() => { setPhase("options"); setHtmlContent(""); }}>New Drawing</Button>
+                  <p className="text-xs text-muted-foreground">
+                    Preview shows a paginated draft set. Print keeps each sheet on its own page.
+                  </p>
                 </div>
                 <iframe
                   ref={iframeRef}
                   srcDoc={iframeSrcDoc}
-                  className="flex-1 w-full min-h-[400px] border rounded-lg bg-white"
+                  className={cn(
+                    "flex-1 w-full min-h-[620px] border rounded-lg bg-white",
+                    "shadow-sm"
+                  )}
                   title="Shop Drawing Preview"
                   sandbox="allow-same-origin allow-scripts allow-modals"
                 />
