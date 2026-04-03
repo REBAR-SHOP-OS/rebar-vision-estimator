@@ -15,7 +15,7 @@ const makeBar = (index: number) => ({
 });
 
 describe("buildShopDrawingHtml", () => {
-  it("splits large bar lists across multiple printable sheets", () => {
+  it("splits large bar lists across multiple segment sheets", () => {
     const html = buildShopDrawingHtml({
       projectName: "Big House",
       clientName: "Client",
@@ -33,14 +33,16 @@ describe("buildShopDrawingHtml", () => {
 
     const sheetCount = (html.match(/class="sheet"/g) || []).length;
 
-    expect(sheetCount).toBeGreaterThan(2);
-    expect(html).toContain("SHOP DRAWING DRAFT SET");
-    expect(html).toContain("Bar bending schedule 1");
-    expect(html).toContain("Shape key 1");
-    expect(html).toContain("Large projects are split across multiple sheets");
+    expect(sheetCount).toBeGreaterThan(1);
+    expect(html).toContain("BAR BENDING SCHEDULE");
+    expect(html).toContain("SHAPES");
+    expect(html).toContain("LAP SCHEDULE");
+    expect(html).toContain("COVER DETAILS");
+    expect(html).toContain("TYPICAL SECTION");
+    expect(html).toContain("REVISION RECORD");
   });
 
-  it("keeps one row per bar mark instead of compressing them into one sheet summary", () => {
+  it("keeps one row per bar mark in the BBS table", () => {
     const html = buildShopDrawingHtml({
       projectName: "Readable Draft",
       barList: [makeBar(0), makeBar(1), makeBar(2)],
@@ -49,7 +51,19 @@ describe("buildShopDrawingHtml", () => {
     expect(html).toContain("BM-1");
     expect(html).toContain("BM-2");
     expect(html).toContain("BM-3");
-    expect(html).toContain("Readable paginated schedule for fabrication and review");
     expect(html).toContain("class=\"bbs-table\"");
+    expect(html).toContain("REBAR.SHOP");
+  });
+
+  it("generates consolidated segment layout with all zones", () => {
+    const html = buildShopDrawingHtml({
+      projectName: "Foundation Test",
+      barList: [makeBar(0), makeBar(1)],
+    });
+
+    expect(html).toContain("PLAN LAYOUT");
+    expect(html).toContain("MESH SCHEDULE");
+    expect(html).toContain("TYPICAL BAR ARRANGEMENT");
+    expect(html).toContain("segment-grid");
   });
 });
