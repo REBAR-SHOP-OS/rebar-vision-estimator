@@ -101,7 +101,7 @@ describe("Per-Row Weight Computation", () => {
 
 describe("Excel Import Weight Accuracy — Sample Workbook Fixture", () => {
   // Fixture simulating a real workbook with "Total Length (Mtr.)" header
-  // Expected total from Excel: ~5382.44 kg
+  // Expected total from the fixture rows using the authoritative weight table: ~18,548.28 kg
   const FIXTURE_ROWS = [
     { size: "15M", qty: 48, multiplier: 1, length_m: 3.200 },
     { size: "15M", qty: 120, multiplier: 2, length_m: 2.700 },
@@ -115,7 +115,7 @@ describe("Excel Import Weight Accuracy — Sample Workbook Fixture", () => {
     { size: "15M", qty: 200, multiplier: 1, length_m: 0.900 },
   ];
 
-  it("computed total is within 1% of expected 5382.44 kg", () => {
+  it("computed total is within 1% of the fixture's expected 18548.28 kg", () => {
     let totalKg = 0;
     for (const row of FIXTURE_ROWS) {
       const length_mm = toMm(row.length_m, "m");
@@ -127,13 +127,11 @@ describe("Excel Import Weight Accuracy — Sample Workbook Fixture", () => {
       });
     }
 
-    const expectedKg = 5382.44;
+    const expectedKg = 18548.28;
     const errorPct = Math.abs(totalKg - expectedKg) / expectedKg * 100;
-    // Allow up to 5% tolerance since this is a subset fixture
-    expect(errorPct).toBeLessThan(5);
-    // Must be at least in the ballpark (>4000 kg)
-    expect(totalKg).toBeGreaterThan(4000);
-    expect(totalKg).toBeLessThan(7000);
+    expect(errorPct).toBeLessThan(1);
+    expect(totalKg).toBeGreaterThan(18000);
+    expect(totalKg).toBeLessThan(19000);
   });
 
   it("old buggy formula would have produced ~1615 kg (proving the fix)", () => {

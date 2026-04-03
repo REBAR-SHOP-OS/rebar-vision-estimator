@@ -14,29 +14,26 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import * as XLSX from "xlsx";
+import { readSpreadsheetFile, sheetToCsv } from "@/lib/spreadsheet-import";
+import type { Database } from "@/integrations/supabase/types";
 
-interface KnowledgeItem {
-  id: string;
-  user_id: string;
-  title: string | null;
-  content: string | null;
-  file_path: string | null;
-  file_name: string | null;
-  type: string;
-  created_at: string;
-}
+type KnowledgeItem = Database["public"]["Tables"]["agent_knowledge"]["Row"];
+type KnowledgeInsert = Database["public"]["Tables"]["agent_knowledge"]["Insert"];
+type KnowledgeUpdate = Database["public"]["Tables"]["agent_knowledge"]["Update"];
+type TrainingExampleRow = Database["public"]["Tables"]["agent_training_examples"]["Row"];
+type TrainingExampleInsert = Database["public"]["Tables"]["agent_training_examples"]["Insert"];
 
-interface TrainingExample {
-  id: string;
-  title: string;
-  description: string | null;
+interface TrainingExample extends Omit<TrainingExampleRow, "blueprint_file_paths" | "blueprint_file_names"> {
   blueprint_file_paths: string[];
   blueprint_file_names: string[];
-  answer_file_path: string | null;
-  answer_file_name: string | null;
-  answer_text: string | null;
-  created_at: string;
+}
+
+function normalizeTrainingExample(row: TrainingExampleRow): TrainingExample {
+  return {
+    ...row,
+    blueprint_file_paths: row.blueprint_file_paths ?? [],
+    blueprint_file_names: row.blueprint_file_names ?? [],
+  };
 }
 
 const BrainKnowledgeDialog: React.FC = () => {
@@ -73,26 +70,26 @@ const BrainKnowledgeDialog: React.FC = () => {
       loadItems();
       loadTrainingExamples();
     }
-  }, [open]);
+  }, [open, user]);
 
   const loadItems = async () => {
     setLoading(true);
     const { data, error } = await supabase
-      .from("agent_knowledge" as any)
+      .from("agent_knowledge")
       .select("*")
       .order("created_at", { ascending: false });
 
-    if (!error && data) setItems(data as any);
+    if (!error && data) setItems(data);
     setLoading(false);
   };
 
   const loadTrainingExamples = async () => {
     const { data, error } = await supabase
-      .from("agent_training_examples" as any)
+      .from("agent_training_examples")
       .select("*")
       .order("created_at", { ascending: false });
 
-    if (!error && data) setTrainingExamples(data as any);
+    if (!error && data) setTrainingExamples(data.map(normalizeTrainingExample));
   };
 
   const addRule = async () => {
@@ -103,12 +100,13 @@ const BrainKnowledgeDialog: React.FC = () => {
       return;
     }
     setSaving(true);
-    const { error } = await supabase.from("agent_knowledge" as any).insert({
+    const payload: KnowledgeInsert = {
       user_id: user.id,
       title: ruleTitle.trim() || null,
       content: ruleContent.trim(),
       type: "rule",
-    } as any);
+    };
+    const { error } = await supabase.from("agent_knowledge").insert(payload);
 
     if (error) {
       toast.error("Failed to save rule");
@@ -144,13 +142,14 @@ const BrainKnowledgeDialog: React.FC = () => {
         continue;
       }
 
-      const { error } = await supabase.from("agent_knowledge" as any).insert({
+      const payload: KnowledgeInsert = {
         user_id: user.id,
         title: file.name,
         file_path: filePath,
         file_name: file.name,
         type: "file",
-      } as any);
+      };
+      const { error } = await supabase.from("agent_knowledge").insert(payload);
 
       if (error) toast.error(`Failed to save ${file.name}`);
     }
@@ -166,7 +165,7 @@ const BrainKnowledgeDialog: React.FC = () => {
       await supabase.storage.from("blueprints").remove([item.file_path]);
     }
     const { error } = await supabase
-      .from("agent_knowledge" as any)
+      .from("agent_knowledge")
       .delete()
       .eq("id", item.id);
 
@@ -178,9 +177,10 @@ const BrainKnowledgeDialog: React.FC = () => {
   };
 
   const updateRule = async (id: string, title: string, content: string) => {
+    const payload: KnowledgeUpdate = { title: title.trim() || null, content: content.trim() };
     const { error } = await supabase
-      .from("agent_knowledge" as any)
-      .update({ title: title.trim() || null, content: content.trim() } as any)
+      .from("agent_knowledge")
+      .update(payload)
       .eq("id", id);
 
     if (error) {
@@ -193,26 +193,12 @@ const BrainKnowledgeDialog: React.FC = () => {
 
   // Parse Excel file to text
   const parseExcelToText = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const data = new Uint8Array(e.target!.result as ArrayBuffer);
-          const workbook = XLSX.read(data, { type: "array" });
-          let text = "";
-          for (const sheetName of workbook.SheetNames) {
-            const sheet = workbook.Sheets[sheetName];
-            text += `=== Sheet: ${sheetName} ===\n`;
-            text += XLSX.utils.sheet_to_csv(sheet) + "\n\n";
-          }
-          resolve(text.trim());
-        } catch (err) {
-          reject(err);
-        }
-      };
-      reader.onerror = reject;
-      reader.readAsArrayBuffer(file);
-    });
+    return readSpreadsheetFile(file).then((workbook) =>
+      workbook.sheets
+        .map((sheet) => `=== Sheet: ${sheet.name} ===\n${sheetToCsv(sheet)}`)
+        .join("\n\n")
+        .trim()
+    );
   };
 
   // Handle answer file selection - auto-parse Excel
@@ -275,7 +261,7 @@ const BrainKnowledgeDialog: React.FC = () => {
         }
       }
 
-      const { error } = await supabase.from("agent_training_examples" as any).insert({
+      const payload: TrainingExampleInsert = {
         user_id: user.id,
         title: trainingTitle.trim(),
         description: trainingDescription.trim() || null,
@@ -284,7 +270,8 @@ const BrainKnowledgeDialog: React.FC = () => {
         answer_file_path: answerFilePath,
         answer_file_name: answerFileName,
         answer_text: trainingAnswerText.trim() || null,
-      } as any);
+      };
+      const { error } = await supabase.from("agent_training_examples").insert(payload);
 
       if (error) {
         toast.error("Failed to save training example");
@@ -313,7 +300,7 @@ const BrainKnowledgeDialog: React.FC = () => {
     }
 
     const { error } = await supabase
-      .from("agent_training_examples" as any)
+      .from("agent_training_examples")
       .delete()
       .eq("id", example.id);
 
