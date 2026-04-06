@@ -10,13 +10,13 @@ const corsHeaders = {
 // ── Google Vision helpers ──
 
 function base64url(data: Uint8Array): string {
-  return encodeBase64(data).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return encodeBase64(data as unknown as string).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 async function importPrivateKey(pem: string): Promise<CryptoKey> {
   const pemContents = pem.replace(/-----BEGIN PRIVATE KEY-----/, '').replace(/-----END PRIVATE KEY-----/, '').replace(/\n/g, '');
   const binaryDer = decodeBase64(pemContents);
-  return await crypto.subtle.importKey('pkcs8', binaryDer, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+  return await crypto.subtle.importKey('pkcs8', (binaryDer as unknown as BufferSource), { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
 }
 
 async function getGoogleAccessToken(): Promise<string> {
