@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { buildShopDrawingHtml } from "../../../src/lib/shop-drawing-template.ts";
+import { buildShopDrawingHtml } from "./shop-drawing-template.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
