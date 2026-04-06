@@ -86,6 +86,7 @@ interface CrmDealSummaryRow {
   crm_deal_id: string;
   deal_name: string | null;
   deal_value: number | null;
+  metadata: Record<string, unknown> | null;
   stage: string | null;
   status: string | null;
   company_name: string | null;
@@ -362,9 +363,9 @@ const WorkflowCommandCenterPage: React.FC = () => {
           .limit(5),
         supabase
           .from("crm_deals")
-          .select("id, crm_deal_id, deal_name, deal_value, stage, status, company_name, synced_at")
+          .select("id, crm_deal_id, deal_name, deal_value, metadata, stage, status, company_name, synced_at")
           .order("synced_at", { ascending: false })
-          .limit(5),
+          .limit(25),
       ]);
 
       const shareIds = (sharesRes.data || []).map((share) => share.id);
@@ -473,7 +474,12 @@ const WorkflowCommandCenterPage: React.FC = () => {
   const latestQuote = snapshot.quotes[0];
   const latestShare = snapshot.shares[0];
   const latestComment = snapshot.comments[0];
-  const latestDeal = snapshot.deals[0];
+  const quoteIds = snapshot.quotes.map((quote) => quote.id);
+  const matchedDeals = snapshot.deals.filter((deal) => {
+    const lastQuoteId = typeof deal.metadata?.last_quote_id === "string" ? deal.metadata.last_quote_id : null;
+    return lastQuoteId ? quoteIds.includes(lastQuoteId) : false;
+  });
+  const latestDeal = matchedDeals[0] || null;
   const latestJobProgress = typeof snapshot.latestJob?.progress === "number"
     ? snapshot.latestJob.progress
     : linkageSignal[project?.linkage_score || "L0"];
@@ -505,7 +511,7 @@ const WorkflowCommandCenterPage: React.FC = () => {
                 : 0,
   );
   const quoteSignal = clampSignal(
-    latestDeal
+        latestDeal
       ? 100
       : latestQuote?.status === "issued"
         ? 78
@@ -668,16 +674,16 @@ const WorkflowCommandCenterPage: React.FC = () => {
       metrics: [
         { label: "Quotes", value: `${snapshot.quotes.length}`, hint: "Recent quote versions available" },
         { label: "Top quote", value: fmtCurrency(latestQuote?.quoted_price, latestQuote?.currency || "CAD"), hint: "Newest commercial offer value" },
-        { label: "CRM bridge", value: latestDeal?.stage || "offline", hint: "Latest CRM deal stage detected" },
+        { label: "CRM bridge", value: latestDeal?.stage || "offline", hint: "Latest CRM deal tied to this project's quotes" },
       ],
       bullets: [
         latestQuote ? `Quote v${latestQuote.version_number} is the latest proposal package` : "Quote workflow has not started yet",
         latestQuote?.issued_at ? `Quote was issued on ${fmtCompactDate(latestQuote.issued_at)}` : "Quote has not been formally issued yet",
-        latestDeal ? `Latest CRM deal is ${latestDeal.deal_name || latestDeal.crm_deal_id}` : "CRM sync will appear once a quote is pushed outward",
+        latestDeal ? `Latest CRM deal is ${latestDeal.deal_name || latestDeal.crm_deal_id}` : "CRM sync will appear once a project quote is pushed outward",
       ],
       timeline: [
         latestQuote ? `Latest quote created ${fmtDate(latestQuote.created_at)}` : "No quote version has been created",
-        latestDeal ? `CRM synced ${fmtDate(latestDeal.synced_at)}` : "No CRM sync event detected",
+        latestDeal ? `CRM synced ${fmtDate(latestDeal.synced_at)}` : "No project-linked CRM sync event detected",
         latestDeal?.company_name ? `Company context: ${latestDeal.company_name}` : "CRM company context not visible yet",
       ],
     },
@@ -869,7 +875,7 @@ const WorkflowCommandCenterPage: React.FC = () => {
               <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-1">
                 <MetricTile label="Latest job" value={snapshot.latestJob?.status || "idle"} hint={snapshot.latestJob ? `Updated ${fmtCompactDate(snapshot.latestJob.created_at)}` : "No active job yet"} accentClass="border-cyan-400/15" />
                 <MetricTile label="Review mesh" value={`${snapshot.shares.length} links`} hint={`${snapshot.comments.length} feedback events captured`} accentClass="border-amber-400/15" />
-                <MetricTile label="CRM sync" value={latestDeal?.stage || "offline"} hint={latestDeal ? fmtCompactDate(latestDeal.synced_at) : "Waiting on commercial sync"} accentClass="border-fuchsia-400/15" />
+                <MetricTile label="CRM sync" value={latestDeal?.stage || "offline"} hint={latestDeal ? fmtCompactDate(latestDeal.synced_at) : "Waiting on project-linked commercial sync"} accentClass="border-fuchsia-400/15" />
               </div>
             </section>
 
@@ -1101,7 +1107,7 @@ const WorkflowCommandCenterPage: React.FC = () => {
                         {
                           icon: Building2,
                           label: "CRM handoff",
-                          value: latestDeal ? `${latestDeal.stage || latestDeal.status || "synced"} · ${latestDeal.deal_name || latestDeal.crm_deal_id}` : "No CRM sync yet",
+                          value: latestDeal ? `${latestDeal.stage || latestDeal.status || "synced"} · ${latestDeal.deal_name || latestDeal.crm_deal_id}` : "No project-linked CRM sync yet",
                           time: fmtCompactDate(latestDeal?.synced_at),
                         },
                       ].map((eventItem) => {
