@@ -1,4 +1,16 @@
-# Welcome to your Lovable project
+# Rebar Estimator
+
+AI-assisted rebar takeoff, estimation, review, quoting, and CRM handoff built with React and Supabase.
+
+## System workflow diagram
+
+The main system workflow is documented in [`docs/system-workflow.md`](docs/system-workflow.md).
+
+It includes:
+
+- an end-to-end application flow diagram
+- the persisted project pipeline state machine
+- the review, quoting, and CRM sync path
 
 ## Project info
 
