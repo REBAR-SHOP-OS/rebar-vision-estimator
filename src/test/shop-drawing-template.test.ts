@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildShopDrawingHtml } from "@/lib/shop-drawing-template";
+import { buildShopDrawingHtml, requiredViewsForElementType } from "@/lib/shop-drawing-template";
 
 const makeBar = (index: number) => ({
   element_id: `F${Math.ceil((index + 1) / 10)}`,
@@ -15,7 +15,7 @@ const makeBar = (index: number) => ({
 });
 
 describe("buildShopDrawingHtml", () => {
-  it("splits large bar lists across multiple segment sheets", () => {
+  it("splits large bar lists across multiple printable sheets", () => {
     const html = buildShopDrawingHtml({
       projectName: "Big House",
       clientName: "Client",
@@ -33,16 +33,21 @@ describe("buildShopDrawingHtml", () => {
 
     const sheetCount = (html.match(/class="sheet"/g) || []).length;
 
-    expect(sheetCount).toBeGreaterThan(1);
-    expect(html).toContain("BAR BENDING SCHEDULE");
-    expect(html).toContain("SHAPES");
-    expect(html).toContain("LAP SCHEDULE");
-    expect(html).toContain("COVER DETAILS");
-    expect(html).toContain("TYPICAL SECTION");
-    expect(html).toContain("REVISION RECORD");
+    expect(sheetCount).toBeGreaterThan(2);
+    expect(html).toContain("PLAN LAYOUT / REINFORCEMENT DETAILS");
+    expect(html).toContain("Foundation plan and reinforcement details");
+    expect(html).toContain("Shape key 1");
+    expect(html).toContain("Lap schedule - structural slab");
+    expect(html).toContain("Project no.");
+    expect(html).toContain("FOR FIELD USE / REVIEW");
+    expect(html).toContain("Top view");
+    expect(html).toContain("Front elevation");
+    expect(html).toContain("Horizontal section");
+    expect(html).toContain("Constructability notes");
+    expect(html).toContain("Placing views checklist");
   });
 
-  it("keeps one row per bar mark in the BBS table", () => {
+  it("keeps one row per bar mark instead of compressing them into one sheet summary", () => {
     const html = buildShopDrawingHtml({
       projectName: "Readable Draft",
       barList: [makeBar(0), makeBar(1), makeBar(2)],
@@ -51,19 +56,31 @@ describe("buildShopDrawingHtml", () => {
     expect(html).toContain("BM-1");
     expect(html).toContain("BM-2");
     expect(html).toContain("BM-3");
+    expect(html).toContain("Bar bending schedule 1");
     expect(html).toContain("class=\"bbs-table\"");
+    expect(html).toContain("Cover details");
+    expect(html).toContain("Every bar mark shown here must also appear in the schedule and at least one graphic view.");
     expect(html).toContain("REBAR.SHOP");
   });
 
-  it("generates consolidated segment layout with all zones", () => {
+  it("embeds optional estimate context on the summary sheet", () => {
     const html = buildShopDrawingHtml({
-      projectName: "Foundation Test",
-      barList: [makeBar(0), makeBar(1)],
+      projectName: "With Est",
+      barList: [makeBar(0)],
+      estimateContext: "mark,size,qty\nA1,20M,10",
+      options: { estimateFileName: "takeoff.csv", notes: "Check lap lengths" },
     });
+    expect(html).toContain("Estimate upload");
+    expect(html).toContain("takeoff.csv");
+    expect(html).toContain("mark,size,qty");
+    expect(html).toContain("Placing views checklist");
+  });
+});
 
-    expect(html).toContain("PLAN LAYOUT");
-    expect(html).toContain("MESH SCHEDULE");
-    expect(html).toContain("TYPICAL BAR ARRANGEMENT");
-    expect(html).toContain("segment-grid");
+describe("requiredViewsForElementType", () => {
+  it("maps footings to plan + section guidance", () => {
+    const v = requiredViewsForElementType("FOOTING");
+    expect(v.some((x) => /plan/i.test(x))).toBe(true);
+    expect(v.some((x) => /section/i.test(x))).toBe(true);
   });
 });
