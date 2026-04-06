@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { buildShopDrawingHtml } from "../../../src/lib/shop-drawing-template.ts";
+import { buildShopDrawingHtml } from "./shop-drawing-template.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,7 +12,18 @@ serve(async (req) => {
   }
 
   try {
-    const { barList, elements, projectName, clientName, standard, coatingType, sizeBreakdown, options, logoDataUri } = await req.json();
+    const {
+      barList,
+      elements,
+      projectName,
+      clientName,
+      standard,
+      coatingType,
+      sizeBreakdown,
+      options,
+      logoDataUri,
+      estimateContext,
+    } = await req.json();
 
     const dateStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
@@ -24,6 +35,7 @@ serve(async (req) => {
       barMarks: true,
       drawingPrefix: "SD-",
       notes: "",
+      estimateFileName: "",
       ...options,
     };
 
@@ -38,6 +50,7 @@ serve(async (req) => {
       options: opts,
       dateStr,
       logoDataUri,
+      estimateContext: typeof estimateContext === "string" ? estimateContext : "",
     });
 
     console.log(JSON.stringify({

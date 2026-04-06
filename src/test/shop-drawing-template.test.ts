@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildShopDrawingHtml } from "@/lib/shop-drawing-template";
+import { buildShopDrawingHtml, requiredViewsForElementType } from "@/lib/shop-drawing-template";
 
 const makeBar = (index: number) => ({
   element_id: `F${Math.ceil((index + 1) / 10)}`,
@@ -44,6 +44,7 @@ describe("buildShopDrawingHtml", () => {
     expect(html).toContain("Front elevation");
     expect(html).toContain("Horizontal section");
     expect(html).toContain("Constructability notes");
+    expect(html).toContain("Placing views checklist");
   });
 
   it("keeps one row per bar mark instead of compressing them into one sheet summary", () => {
@@ -59,5 +60,27 @@ describe("buildShopDrawingHtml", () => {
     expect(html).toContain("class=\"bbs-table\"");
     expect(html).toContain("Cover details");
     expect(html).toContain("Every bar mark shown here must also appear in the schedule and at least one graphic view.");
+    expect(html).toContain("REBAR.SHOP");
+  });
+
+  it("embeds optional estimate context on the summary sheet", () => {
+    const html = buildShopDrawingHtml({
+      projectName: "With Est",
+      barList: [makeBar(0)],
+      estimateContext: "mark,size,qty\nA1,20M,10",
+      options: { estimateFileName: "takeoff.csv", notes: "Check lap lengths" },
+    });
+    expect(html).toContain("Estimate upload");
+    expect(html).toContain("takeoff.csv");
+    expect(html).toContain("mark,size,qty");
+    expect(html).toContain("Placing views checklist");
+  });
+});
+
+describe("requiredViewsForElementType", () => {
+  it("maps footings to plan + section guidance", () => {
+    const v = requiredViewsForElementType("FOOTING");
+    expect(v.some((x) => /plan/i.test(x))).toBe(true);
+    expect(v.some((x) => /section/i.test(x))).toBe(true);
   });
 });
