@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useLanguage, LANGUAGES, type Language } from "@/contexts/LanguageContext";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2, BarChart3, Search, Loader2, Activity, HeartPulse, GitCompare, FileText, Clock, GitBranch } from "lucide-react";
+import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2, BarChart3, Search, Loader2, Activity, HeartPulse, GitCompare, FileText, Clock, GitBranch, Layers3 } from "lucide-react";
 import CrmSyncPanel, { type LeadAttachment } from "@/components/crm/CrmSyncPanel";
 import BrainKnowledgeDialog from "@/components/chat/BrainKnowledgeDialog";
 import { toast } from "sonner";
@@ -454,6 +455,11 @@ const Dashboard: React.FC = () => {
           {/* Project-level actions when active */}
           {activeProjectId && (
             <>
+              <Button variant="ghost" size="icon" asChild className="h-8 w-8 text-muted-foreground" title="Workflow Command Center">
+                <Link to={`/workflow?projectId=${activeProjectId}`}>
+                  <Layers3 className="h-4 w-4" />
+                </Link>
+              </Button>
               <Button variant="ghost" size="icon" onClick={() => { setShowEstimateCompare(true); setShowQuoteWorkflow(false); }} className="h-8 w-8 text-muted-foreground" title="Compare Estimates">
                 <GitCompare className="h-4 w-4" />
               </Button>
@@ -607,6 +613,12 @@ const Dashboard: React.FC = () => {
                 <Button onClick={handleNewEstimationClick} disabled={creatingProject} size="lg" className="gap-2 h-12 px-8 rounded-xl font-bold text-base">
                   <Plus className="h-5 w-5" />
                   {t("startNewEstimation")}
+                </Button>
+                <Button asChild variant="outline" size="lg" className="gap-2 h-12 px-6 rounded-xl">
+                  <Link to="/workflow">
+                    <Layers3 className="h-5 w-5" />
+                    Workflow View
+                  </Link>
                 </Button>
                 <Button onClick={() => setShowCrm(true)} variant="outline" size="lg" className="gap-2 h-12 px-6 rounded-xl">
                   <Building2 className="h-5 w-5" />

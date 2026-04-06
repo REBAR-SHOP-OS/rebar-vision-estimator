@@ -218,3 +218,174 @@
 .overlay-pulse {
   animation: overlay-dot-pulse 1.5s ease-in-out infinite;
 }
+
+/* Workflow command center */
+@keyframes workflow-orbital-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(18px, -14px, 0) scale(1.03);
+  }
+}
+
+@keyframes workflow-grid-shift {
+  0% {
+    background-position: 0 0, 0 0, 0 0;
+  }
+  100% {
+    background-position: 80px 40px, 0 0, 0 0;
+  }
+}
+
+@keyframes workflow-beam {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scaleX(0.92);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scaleX(1);
+  }
+}
+
+.workflow-cosmos {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top, hsla(190, 95%, 60%, 0.14), transparent 22%),
+    radial-gradient(circle at 20% 20%, hsla(281, 91%, 65%, 0.12), transparent 26%),
+    linear-gradient(180deg, hsl(223 52% 7%) 0%, hsl(225 50% 5%) 100%);
+}
+
+.workflow-grid {
+  position: absolute;
+  inset: 0;
+}
+
+.workflow-grid::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, hsla(190, 95%, 60%, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, hsla(190, 95%, 60%, 0.08) 1px, transparent 1px),
+    radial-gradient(circle at 50% 0%, hsla(190, 95%, 60%, 0.08), transparent 45%);
+  background-size: 36px 36px, 36px 36px, 100% 100%;
+  animation: workflow-grid-shift 20s linear infinite;
+}
+
+.workflow-scanline {
+  background:
+    linear-gradient(to bottom, transparent, hsla(190, 95%, 60%, 0.04), transparent),
+    repeating-linear-gradient(
+      to bottom,
+      hsla(0, 0%, 100%, 0.015) 0px,
+      hsla(0, 0%, 100%, 0.015) 1px,
+      transparent 2px,
+      transparent 6px
+    );
+}
+
+.workflow-core-glow {
+  animation: workflow-orbital-drift 14s ease-in-out infinite;
+}
+
+.workflow-layer-shell {
+  perspective: 1800px;
+  perspective-origin: center center;
+}
+
+.workflow-icon-orbit {
+  animation: workflow-orbital-drift 8s ease-in-out infinite;
+}
+
+.workflow-depth-scene {
+  perspective: 1800px;
+  perspective-origin: center top;
+}
+
+.workflow-grid-bg {
+  background-image:
+    linear-gradient(to right, hsla(190, 95%, 60%, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, hsla(190, 95%, 60%, 0.08) 1px, transparent 1px),
+    radial-gradient(circle at top, hsla(190, 95%, 60%, 0.18), transparent 55%);
+  background-size: 32px 32px, 32px 32px, 100% 100%;
+  animation: workflow-grid-shift 18s linear infinite;
+}
+
+.workflow-orbital-glow {
+  animation: workflow-orbital-drift 12s ease-in-out infinite;
+}
+
+.workflow-beam {
+  animation: workflow-beam 3.4s ease-in-out infinite;
+}
+
+.workflow-layer-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid hsla(190, 95%, 60%, 0.18);
+  background:
+    linear-gradient(145deg, hsla(0, 0%, 100%, 0.88), hsla(210, 60%, 98%, 0.7)),
+    hsla(0, 0%, 100%, 0.75);
+  backdrop-filter: blur(22px);
+  box-shadow:
+    0 32px 70px hsla(220, 35%, 20%, 0.12),
+    inset 0 1px 0 hsla(0, 0%, 100%, 0.35);
+  transform-style: preserve-3d;
+  transition:
+    transform 480ms cubic-bezier(0.2, 0.65, 0.2, 1),
+    opacity 480ms ease,
+    border-color 280ms ease,
+    box-shadow 280ms ease;
+}
+
+.workflow-layer-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top left, hsla(190, 95%, 60%, 0.16), transparent 34%),
+    linear-gradient(135deg, hsla(260, 90%, 72%, 0.08), transparent 45%);
+  pointer-events: none;
+}
+
+.workflow-layer-card::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  border: 1px solid hsla(0, 0%, 100%, 0.24);
+  pointer-events: none;
+}
+
+.workflow-layer-card:hover {
+  border-color: hsla(190, 95%, 60%, 0.32);
+  box-shadow:
+    0 36px 80px hsla(220, 35%, 20%, 0.16),
+    0 0 0 1px hsla(190, 95%, 60%, 0.08),
+    inset 0 1px 0 hsla(0, 0%, 100%, 0.42);
+}
+
+.dark .workflow-layer-card {
+  border: 1px solid hsla(190, 95%, 60%, 0.16);
+  background:
+    linear-gradient(155deg, hsla(220, 30%, 10%, 0.92), hsla(225, 30%, 12%, 0.78)),
+    hsla(220, 20%, 8%, 0.84);
+  box-shadow:
+    0 36px 90px hsla(220, 50%, 2%, 0.5),
+    inset 0 1px 0 hsla(190, 95%, 80%, 0.08);
+}
+
+.dark .workflow-layer-card::before {
+  background:
+    radial-gradient(circle at top left, hsla(190, 95%, 60%, 0.18), transparent 32%),
+    linear-gradient(135deg, hsla(260, 90%, 72%, 0.14), transparent 42%);
+}
+
+.dark .workflow-layer-card::after {
+  border-color: hsla(190, 95%, 85%, 0.08);
+}

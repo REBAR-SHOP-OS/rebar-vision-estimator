@@ -10,6 +10,7 @@ import AuthPage from "./pages/AuthPage";
 import Dashboard from "./pages/Dashboard";
 import ReviewPage from "./pages/ReviewPage";
 import BlueprintViewerPage from "./pages/BlueprintViewerPage";
+import WorkflowCommandCenterPage from "./pages/WorkflowCommandCenterPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -51,6 +52,7 @@ const App = () => (
                 <Route path="/auth" element={<AuthRoute><AuthPage /></AuthRoute>} />
                 <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                 <Route path="/blueprint-viewer" element={<ProtectedRoute><BlueprintViewerPage /></ProtectedRoute>} />
+                <Route path="/workflow" element={<ProtectedRoute><WorkflowCommandCenterPage /></ProtectedRoute>} />
                 <Route path="/review/:token" element={<ReviewPage />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
