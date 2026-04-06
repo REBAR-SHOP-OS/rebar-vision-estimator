@@ -5,6 +5,8 @@ export interface ShopDrawingOptions {
   barMarks?: boolean;
   drawingPrefix?: string;
   notes?: string;
+  /** Optional: file name of uploaded estimate spreadsheet for title-block reference */
+  estimateFileName?: string;
 }
 
 export interface ShopDrawingBar {
@@ -54,6 +56,8 @@ export interface BuildShopDrawingParams {
   options?: ShopDrawingOptions;
   dateStr?: string;
   logoDataUri?: string;
+  /** Text extracted from an optional uploaded estimate workbook (CSV/XLSX) */
+  estimateContext?: string;
 }
 
 interface NormalizedBar {
@@ -164,6 +168,99 @@ function normalizeBars(barList: ShopDrawingBar[]): NormalizedBar[] {
       if (a.elementId !== b.elementId) return a.elementId.localeCompare(b.elementId);
       return a.barMark.localeCompare(b.barMark, undefined, { numeric: true, sensitivity: "base" });
     });
+}
+
+/** Minimum placing-drawing views by element family (aligns with analyzer drawing_view_policy). */
+export function requiredViewsForElementType(elementType: string): string[] {
+  const t = elementType.toUpperCase();
+  if (/^(PILE|CAISSON|FOOTING|RAFT_SLAB|RAFT|EQUIPMENT_PAD|TRANSFORMER_PAD|ELEVATOR_PIT|SUMP_PIT|THICKENED_EDGE)$/.test(t) || /PAD|PIT/.test(t)) {
+    return ["Plan (top)", "Section(s)", "Detail(s) if stepped, sloped, thickened, or congested"];
+  }
+  if (/WALL|RETAINING|ICF|CMU|SHEAR/.test(t)) {
+    return ["Elevation", "Horizontal section", "Vertical section", "End/detail if corners, openings, embeds, or laps are complex"];
+  }
+  if (/SLAB|SOG|PAVING|SITE/.test(t)) {
+    return ["Top/plan", "Section(s)", "Enlarged details at openings, drops, edges, joints, penetrations"];
+  }
+  if (/BEAM|BOND|GRADE_BEAM/.test(t)) {
+    return ["Longitudinal elevation", "Cross-section(s)", "Stirrup/hoop details", "End anchorage if needed"];
+  }
+  if (/COLUMN|CAGE|PIER|LIGHT_POLE/.test(t)) {
+    return ["Elevation", "Cross-section", "Tie/spiral detail", "Lap/splice zone if applicable"];
+  }
+  if (/STAIR|RAMP/.test(t)) {
+    return ["Plan", "Long section", "Cross-section(s)", "Enlarged bending details as needed"];
+  }
+  if (/WIRE_MESH/.test(t)) {
+    return ["Plan showing layout", "Support/chair/placement notes as applicable"];
+  }
+  return ["Primary orthographic view", "Section(s) where cover/layers/faces are unclear", "Detail(s) where ambiguity remains"];
+}
+
+function buildViewChecklistTableHtml(segmentBars: NormalizedBar[]): string {
+  const types = Array.from(new Set(segmentBars.map((b) => b.elementType).filter(Boolean)));
+  if (types.length === 0) {
+    return `<div class="view-check-wrap"><div class="meta-title">Placing views (by element)</div><p class="meta-muted">No element types in this segment — add bar list element_type.</p></div>`;
+  }
+  const rows = types
+    .sort((a, b) => a.localeCompare(b))
+    .map((t) => {
+      const v = requiredViewsForElementType(t);
+      return `<tr><td>${escapeHtml(t)}</td><td>${escapeHtml(v.join(" · "))}</td></tr>`;
+    })
+    .join("");
+  return `
+    <div class="view-check-wrap">
+      <div class="meta-title">Placing views (minimum checklist)</div>
+      <table class="view-check-table">
+        <thead><tr><th>Element type</th><th>Required views</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p class="meta-muted">Schedules supplement — they do not replace graphic views. Add sections/details when placement is ambiguous.</p>
+    </div>`;
+}
+
+const ESTIMATE_CONTEXT_MAX = 7000;
+
+function buildMetaStripHtml(
+  segmentBars: NormalizedBar[],
+  sheetIndex: number,
+  totalSheets: number,
+  notes: string,
+  estimateContext: string,
+  estimateFileName: string,
+): string {
+  const notesBlock = notes.trim()
+    ? `<div class="meta-block"><div class="meta-title">Special notes</div><div class="meta-body">${escapeHtml(notes.trim())}</div></div>`
+    : "";
+
+  let estimateBlock = "";
+  const estRaw = estimateContext.trim();
+  if (estRaw || estimateFileName) {
+    const capped = estRaw.length > ESTIMATE_CONTEXT_MAX ? `${estRaw.slice(0, ESTIMATE_CONTEXT_MAX)}\n… [truncated]` : estRaw;
+    const fileLine = estimateFileName ? ` — ${escapeHtml(estimateFileName)}` : "";
+    if (sheetIndex === 0) {
+      estimateBlock = `
+        <div class="meta-block">
+          <div class="meta-title">Estimate upload${fileLine}</div>
+          ${capped ? `<pre class="estimate-pre">${escapeHtml(capped)}</pre>` : `<p class="meta-muted">(File name only — no tabular text parsed.)</p>`}
+        </div>`;
+    } else if (capped) {
+      estimateBlock = `
+        <div class="meta-block">
+          <div class="meta-title">Estimate upload${fileLine}</div>
+          <p class="meta-muted">Full extract on sheet 1 of ${totalSheets}.</p>
+        </div>`;
+    }
+  }
+
+  const hasRightColumn = Boolean(estimateBlock || notesBlock);
+
+  return `
+    <div class="sheet-meta-strip${hasRightColumn ? "" : " sheet-meta-strip--views-only"}">
+      ${buildViewChecklistTableHtml(segmentBars)}
+      <div class="meta-grid">${estimateBlock}${notesBlock}</div>
+    </div>`;
 }
 
 // ── Shape SVGs ──────────────────────────────────────────────
@@ -410,6 +507,7 @@ function buildSegmentSheet(
     dateStr: string;
     logoDataUri: string;
     options: Required<ShopDrawingOptions>;
+    estimateContext: string;
   },
 ): string {
   const drawingNumber = `${params.options.drawingPrefix}${String(sheetIndex + 1).padStart(2, "0")}`;
@@ -423,6 +521,7 @@ function buildSegmentSheet(
   return `
     <section class="sheet">
       <div class="sheet-frame">
+        ${buildMetaStripHtml(segmentBars, sheetIndex, totalSheets, params.options.notes, params.estimateContext, params.options.estimateFileName || "")}
         <div class="segment-grid">
 
           <!-- TOP LEFT: Plan Layout -->
@@ -521,7 +620,10 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
     barMarks: params.options?.barMarks ?? true,
     drawingPrefix: params.options?.drawingPrefix || "SD-",
     notes: params.options?.notes || "",
+    estimateFileName: params.options?.estimateFileName || "",
   };
+
+  const estimateContext = (params.estimateContext || "").trim();
 
   const projectName = params.projectName || "Project";
   const clientName = params.clientName || "—";
@@ -551,7 +653,7 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
   }
 
   const totalSheets = sheetDefs.length;
-  const sheetParams = { projectName, clientName, standard, coatingType, dateStr, logoDataUri, options };
+  const sheetParams = { projectName, clientName, standard, coatingType, dateStr, logoDataUri, options, estimateContext };
 
   const sheetHtml = sheetDefs.map((def, i) =>
     buildSegmentSheet(def.segment, def.bars, i, totalSheets, def.continuation, elements, sheetParams)
@@ -578,7 +680,33 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
 
     .sheet-frame {
       height: 7.9in; border: 2px solid #111; padding: 4px;
+      display: flex; flex-direction: column; gap: 3px; min-height: 0;
     }
+
+    .sheet-meta-strip {
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      max-height: 1.35in;
+      overflow: hidden;
+    }
+    .sheet-meta-strip--views-only { grid-template-columns: 1fr; }
+
+    .view-check-wrap { border: 1px solid #111; padding: 3px; overflow: auto; font-size: 6.5px; line-height: 1.25; }
+    .view-check-wrap .meta-title { font-size: 7px; margin-bottom: 2px; }
+    .meta-grid { display: flex; flex-direction: column; gap: 3px; min-height: 0; overflow: hidden; }
+    .meta-block { border: 1px solid #111; padding: 3px; overflow: auto; flex: 1; font-size: 6.5px; }
+    .meta-title { font-size: 7px; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; letter-spacing: 0.04em; }
+    .meta-body { white-space: pre-wrap; word-break: break-word; }
+    .meta-muted { font-size: 6px; color: #555; margin: 2px 0 0; }
+    .estimate-pre {
+      margin: 0; padding: 2px; font-family: Consolas, monospace; font-size: 6px; white-space: pre-wrap; word-break: break-word;
+      max-height: 0.95in; overflow: auto;
+    }
+    .view-check-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .view-check-table th, .view-check-table td { border: 1px solid #ccc; padding: 1px 2px; font-size: 6px; vertical-align: top; }
+    .view-check-table th { background: #f5f5f5; }
 
     /* 6-zone consolidated grid matching reference SD22 layout */
     .segment-grid {
@@ -586,7 +714,8 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
       grid-template-columns: 320px 1fr 160px;
       grid-template-rows: minmax(0, 1.1fr) minmax(0, 0.9fr) minmax(0, 0.8fr);
       gap: 3px;
-      height: 100%;
+      flex: 1;
+      min-height: 0;
     }
 
     .zone { border: 1px solid #111; padding: 4px; overflow: hidden; }

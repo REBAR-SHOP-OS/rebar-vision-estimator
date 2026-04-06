@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildShopDrawingHtml } from "@/lib/shop-drawing-template";
+import { buildShopDrawingHtml, requiredViewsForElementType } from "@/lib/shop-drawing-template";
 
 const makeBar = (index: number) => ({
   element_id: `F${Math.ceil((index + 1) / 10)}`,
@@ -65,5 +65,27 @@ describe("buildShopDrawingHtml", () => {
     expect(html).toContain("MESH SCHEDULE");
     expect(html).toContain("TYPICAL BAR ARRANGEMENT");
     expect(html).toContain("segment-grid");
+    expect(html).toContain("Placing views (minimum checklist)");
+  });
+
+  it("embeds optional estimate context and shows view checklist", () => {
+    const html = buildShopDrawingHtml({
+      projectName: "With Est",
+      barList: [makeBar(0)],
+      estimateContext: "mark,size,qty\nA1,20M,10",
+      options: { estimateFileName: "takeoff.csv", notes: "Check lap lengths" },
+    });
+    expect(html).toContain("Estimate upload");
+    expect(html).toContain("takeoff.csv");
+    expect(html).toContain("Check lap lengths");
+    expect(html).toContain("mark,size,qty");
+  });
+});
+
+describe("requiredViewsForElementType", () => {
+  it("maps footings to plan + section guidance", () => {
+    const v = requiredViewsForElementType("FOOTING");
+    expect(v.some((x) => /plan/i.test(x))).toBe(true);
+    expect(v.some((x) => /section/i.test(x))).toBe(true);
   });
 });

@@ -290,10 +290,66 @@ Each element you identify MUST be output as a JSON object following this schema:
   },
   "status": "READY | FLAGGED | BLOCKED",
   "questions": [],
+  "drawing_views": {
+    "primary_orthographic": "PLAN | ELEVATION | SECTION | MIXED",
+    "required_graphic_views": ["plan_view", "front_elevation", "section_view"],
+    "detail_views": ["opening_detail", "lap_zone_detail"],
+    "view_selection_notes": "Why each view is included or omitted; link callouts to section marks, detail bubbles, bar marks, grids.",
+    "schedule_supplements_not_replaces_views": true,
+    "incomplete_placing_package": false,
+    "incomplete_reason": null
+  },
   "created_at": "ISO8601",
   "updated_at": "ISO8601"
 }
 \`\`\`
+
+### Placing-drawing views (mandatory reasoning)
+
+Every element that will support fabrication/placing must declare **drawing_views** as above. Do **not** output only a bar list/table as sufficient documentation.
+
+**View selection rule:** Include enough orthographic and detail views to define reinforcement **clearly and unambiguously** (bar location, spacing, cover, lap/splice, hook/orientation, face of placement, relation to openings/embeds). If one view is insufficient, add another section or detail. **Schedules support views; they do not replace graphic views.**
+
+**Required views by element family (minimum — add more when ambiguity remains):**
+- Footings / pile caps / pads: top/plan + at least one section; details if stepped, sloped, thickened, or congested.
+- Walls: elevation + horizontal section + vertical section; end/detail if corners, openings, embeds, or laps are complex.
+- Slabs: top/plan + section(s); enlarged details at openings, drops, thickened edges, joints, penetrations.
+- Beams / grade beams: longitudinal elevation + cross-sections + stirrup/hoop details + end anchorage if needed.
+- Columns / piers: elevation + cross-section + tie/spiral detail + lap/splice zone if applicable.
+- Stairs / ramps / special geometry: plan + long section + cross-sections + enlarged bending details as needed.
+
+**Hard rules:** Primary orthographic: slabs/footings/mats → **plan**; walls/columns/beam cages → **elevation**. Never claim scaled dimensions from raster drawings. If geometry stays ambiguous after views, set **incomplete_placing_package** true and explain — do not guess.
+
+`;
+
+const DRAWING_VIEW_POLICY_YAML = `
+drawing_view_policy:
+  principle: "Use enough orthographic and detail views to define reinforcement clearly and unambiguously."
+  required_views_by_element:
+    footing: [top_view, section_view]
+    pile_cap: [top_view, section_view]
+    slab: [top_view, section_view]
+    wall: [front_elevation, horizontal_section, vertical_section]
+    beam: [front_elevation, cross_section]
+    grade_beam: [front_elevation, cross_section]
+    column: [front_elevation, cross_section]
+    pier: [front_elevation, cross_section]
+    stair: [top_view, longitudinal_section, cross_section]
+  auto_add_detail_when:
+    - opening_exists
+    - penetration_exists
+    - lap_or_splice_zone_is_complex
+    - hooks_or_anchorage_not_clear
+    - congestion_detected
+    - variable_thickness_or_offsets_exist
+    - embeds_or_dowels_exist
+    - geometry_not_clear_in_primary_view
+  hard_rules:
+    - schedule_does_not_replace_views
+    - every_bar_mark_must_appear_in_schedule_and_graphic_view
+    - do_not_scale_drawings
+    - if_geometry_is_ambiguous_add_section_or_detail
+    - if_still_ambiguous_flag_for_review
 `;
 
 const MASTER_PROMPT = `
@@ -854,6 +910,8 @@ ${REBAR_WEIGHT_TABLE}
 
 ${CANADIAN_METRIC_TABLE}
 
+${DRAWING_VIEW_POLICY_YAML}
+
 ## Mode: SMART (Automatic)
 Execute ALL pipeline stages automatically without pausing for user input.
 Analyze every page of every uploaded blueprint exhaustively.
@@ -901,6 +959,8 @@ ${ELEMENT_UNIT_SCHEMA}
 ${REBAR_WEIGHT_TABLE}
 
 ${CANADIAN_METRIC_TABLE}
+
+${DRAWING_VIEW_POLICY_YAML}
 
 ## Mode: STEP-BY-STEP (Interactive)
 Execute ONE step at a time and WAIT for user confirmation before proceeding.

@@ -10,6 +10,7 @@ export interface ShopDrawingGenerationOptions {
   barMarks: boolean;
   drawingPrefix: string;
   notes: string;
+  estimateFileName?: string;
 }
 
 export const DEFAULT_SHOP_DRAWING_OPTIONS: ShopDrawingGenerationOptions = {
@@ -28,6 +29,8 @@ interface GenerateAndStoreShopDrawingParams {
   sizeBreakdown?: Record<string, number>;
   projectId?: string;
   options?: Partial<ShopDrawingGenerationOptions>;
+  /** Tabular text from optional CSV/XLSX upload */
+  estimateContext?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -44,6 +47,7 @@ export async function generateAndStoreShopDrawing({
   sizeBreakdown,
   projectId,
   options,
+  estimateContext,
   metadata,
 }: GenerateAndStoreShopDrawingParams): Promise<GeneratedShopDrawingResult> {
   const mergedOptions: ShopDrawingGenerationOptions = {
@@ -67,6 +71,7 @@ export async function generateAndStoreShopDrawing({
       coatingType: scopeData?.coatingType,
       sizeBreakdown,
       options: mergedOptions,
+      estimateContext: estimateContext ?? "",
       logoDataUri,
     }),
   });
