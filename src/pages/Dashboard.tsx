@@ -6,6 +6,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Plus, MessageSquare, LogOut, Sun, Moon, Menu, Trash2, Pencil, Check, X, RefreshCw, Globe, Building2, BarChart3, Search, Loader2, Activity, HeartPulse, GitCompare, FileText, Clock, GitBranch } from "lucide-react";
+import WorkflowDiagram from "@/components/dashboard/WorkflowDiagram";
 import CrmSyncPanel, { type LeadAttachment } from "@/components/crm/CrmSyncPanel";
 import BrainKnowledgeDialog from "@/components/chat/BrainKnowledgeDialog";
 import { toast } from "sonner";
@@ -276,6 +277,13 @@ const Dashboard: React.FC = () => {
             {t("newEstimation")}
           </Button>
         </div>
+
+        {/* Workflow Diagram */}
+        {activeProjectId && (
+          <div className="border-b border-border">
+            <WorkflowDiagram currentStep={currentStep} processingPhase={processingPhase} />
+          </div>
+        )}
 
         {/* Step Progress - shown when a project is active */}
         {activeProjectId && (
