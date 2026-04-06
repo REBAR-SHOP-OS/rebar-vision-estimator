@@ -23,9 +23,10 @@ import ScopeDefinitionPanel, { type ScopeData, type DetectionResult, buildScopeF
 import { type OverlayElement } from "./DrawingOverlay";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import BarListTable from "./BarListTable";
+import BarListTable, { parseExternalEstimateFile, type BarItem, type ImportedEstimateMeta } from "./BarListTable";
 import BendingScheduleTable from "./BendingScheduleTable";
 import ApprovalWorkflow from "./ApprovalWorkflow";
+import { DEFAULT_SHOP_DRAWING_OPTIONS, generateAndStoreShopDrawing } from "@/lib/shop-drawing-client";
 
 interface MessageFile {
   name: string;
@@ -121,6 +122,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const abortControllerRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const outsideEstimateInputRef = useRef<HTMLInputElement>(null);
   const [uploadProgress, setUploadProgress] = useState<{ fileName: string; progress: number } | null>(null);
   const messageCountSinceLastLearn = useRef(0);
   const [validationData, setValidationData] = useState<any>(null);
@@ -139,6 +141,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const [finderReviewMode, setFinderReviewMode] = useState(false);
   const [confirmedFinderCandidates, setConfirmedFinderCandidates] = useState<ReviewedCandidate[]>([]);
   const [importedBarList, setImportedBarList] = useState<any[] | null>(null);
+  const [outsideEstimateResult, setOutsideEstimateResult] = useState<any>(null);
+  const [outsideEstimateElements, setOutsideEstimateElements] = useState<any[]>([]);
+  const [outsideEstimateMeta, setOutsideEstimateMeta] = useState<ImportedEstimateMeta | null>(null);
+  const [outsideShopDrawingStatus, setOutsideShopDrawingStatus] = useState<"idle" | "generating" | "ready" | "failed">("idle");
+  const [outsideShopDrawingVersion, setOutsideShopDrawingVersion] = useState<number | null>(null);
   const [estimationGroupFilter, setEstimationGroupFilter] = useState<"all" | "loose" | "cage">("all");
   const [subStep, setSubStep] = useState<string | null>(null);
   const isMobile = useIsMobile();
@@ -157,6 +164,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     setDetectionResult(null);
     setIsDetecting(false);
     setImportedBarList(null);
+    setOutsideEstimateResult(null);
+    setOutsideEstimateElements([]);
+    setOutsideEstimateMeta(null);
+    setOutsideShopDrawingStatus("idle");
+    setOutsideShopDrawingVersion(null);
     initialFilesProcessed.current = false;
     onModeChange?.(null);
     onStepChange?.(null);
@@ -860,6 +872,143 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       reconciliation: summary?.reconciliation || {},
       risk_flags: summary?.risk_flags || [],
     };
+  };
+
+  const buildImportedEstimateLayer = (barItems: BarItem[]) => {
+    const groupedElements = new Map<string, { element_id: string; element_type: string; bar_lines: BarItem[] }>();
+    const sizeBreakdownKg: Record<string, number> = {};
+    const sizeBreakdownLbs: Record<string, number> = {};
+    let totalKg = 0;
+    let totalLbs = 0;
+
+    const normalizedBarList = barItems.map((bar, index) => {
+      const elementId = bar.element_id || `EXT-${index + 1}`;
+      const elementType = bar.element_type || "OUTSIDE_ESTIMATION";
+      const normalizedBar = {
+        ...bar,
+        element_id: elementId,
+        element_type: elementType,
+        sub_element: bar.element_id || bar.bar_mark || `ITEM-${index + 1}`,
+      };
+
+      const elementKey = `${elementType}::${elementId}`;
+      const existingElement = groupedElements.get(elementKey) || {
+        element_id: elementId,
+        element_type: elementType,
+        bar_lines: [],
+      };
+      existingElement.bar_lines.push(normalizedBar);
+      groupedElements.set(elementKey, existingElement);
+
+      const sizeKey = normalizedBar.size || "UNKNOWN";
+      const weightKg = Number(normalizedBar.weight_kg) || 0;
+      const weightLbs = Number(normalizedBar.weight_lbs) || (weightKg / 0.453592);
+      totalKg += weightKg;
+      totalLbs += weightLbs;
+      sizeBreakdownKg[sizeKey] = (sizeBreakdownKg[sizeKey] || 0) + weightKg;
+      sizeBreakdownLbs[sizeKey] = (sizeBreakdownLbs[sizeKey] || 0) + weightLbs;
+
+      return normalizedBar;
+    });
+
+    const elements = Array.from(groupedElements.values()).map((element, index) => ({
+      element_id: element.element_id,
+      element_type: element.element_type,
+      estimation_group: "OUTSIDE_ESTIMATION",
+      status: "IMPORTED",
+      page_number: index + 1,
+      extraction: {
+        confidence: 1,
+        truth: {
+          bar_lines: element.bar_lines,
+        },
+      },
+      bar_lines: element.bar_lines,
+    }));
+
+    return {
+      elements,
+      quoteResult: {
+        mode: "external_import",
+        source: "outside_estimation",
+        quote: {
+          bar_list: normalizedBarList,
+          size_breakdown: sizeBreakdownLbs,
+          size_breakdown_kg: sizeBreakdownKg,
+          total_weight_kg: totalKg,
+          total_weight_lbs: totalLbs,
+          total_weight_tonnes: totalKg / 1000,
+          total_weight_tons: totalLbs / 2000,
+          job_status: "IMPORTED_EXTERNAL",
+          reconciliation: {},
+          risk_flags: [],
+        },
+      },
+    };
+  };
+
+  const handleOutsideEstimationImported = async (barItems: BarItem[], meta?: ImportedEstimateMeta) => {
+    setImportedBarList(barItems);
+    setOutsideEstimateMeta(meta || null);
+
+    const importedLayer = buildImportedEstimateLayer(barItems);
+    setOutsideEstimateElements(importedLayer.elements);
+    setOutsideEstimateResult(importedLayer.quoteResult);
+    setOutsideShopDrawingVersion(null);
+
+    if (!projectId) return;
+
+    setOutsideShopDrawingStatus("generating");
+    const loadingToastId = toast.loading("Importing outside estimation and building a shop drawing layer...");
+
+    try {
+      const generatedDrawing = await generateAndStoreShopDrawing({
+        barList: barItems,
+        elements: importedLayer.elements,
+        scopeData,
+        sizeBreakdown: importedLayer.quoteResult.quote.size_breakdown,
+        projectId,
+        options: {
+          ...DEFAULT_SHOP_DRAWING_OPTIONS,
+          drawingPrefix: "EXT-SD-",
+          notes: meta?.fileName
+            ? `Auto-generated from outside estimation import: ${meta.fileName}`
+            : "Auto-generated from outside estimation import",
+        },
+        metadata: {
+          autoGenerated: true,
+          importedFileName: meta?.fileName || null,
+          sourceLabel: "Outside Estimation",
+          sourceLayer: "outside_estimation",
+        },
+      });
+
+      setOutsideShopDrawingStatus("ready");
+      setOutsideShopDrawingVersion(generatedDrawing.version);
+      toast.success("Outside estimation imported and shop drawing layer created", {
+        id: loadingToastId,
+      });
+    } catch (error) {
+      console.error("[outside-estimation] shop drawing generation failed", error);
+      setOutsideShopDrawingStatus("failed");
+      toast.error(error instanceof Error ? error.message : "Failed to build shop drawing from outside estimation", {
+        id: loadingToastId,
+      });
+    }
+  };
+
+  const handleOutsideEstimateFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const { items, meta } = await parseExternalEstimateFile(file);
+      await handleOutsideEstimationImported(items, meta);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to import outside estimation");
+    } finally {
+      e.target.value = "";
+    }
   };
 
   const persistEstimateVersion = async (elements: any[], quote: any) => {
@@ -1893,7 +2042,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                         barList={filteredBarList}
                         onShowOnDrawing={handleShowOnDrawing}
                         selectedElementId={selectedElementId}
-                        onImport={(data) => setImportedBarList(data)}
+                        onImport={handleOutsideEstimationImported}
                       />
                     </TabsContent>
                   )}
@@ -1964,7 +2113,80 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                         {quoteResult.excluded.map((ex: any, i: number) => <p key={i}>• {ex.element_id}: {ex.reason}</p>)}
                       </div>
                     )}
-                    <ExportButtons ref={(el) => { if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 300); }} quoteResult={quoteResult} elements={validationData?.elements || []} scopeData={scopeData} />
+                    <ExportButtons
+                      ref={(el) => { if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 300); }}
+                      quoteResult={quoteResult}
+                      elements={validationData?.elements || []}
+                      scopeData={scopeData}
+                      projectId={projectId}
+                      sourceLayer="ai_estimation"
+                      sourceLabel="AI Estimation"
+                    />
+                  </div>
+                )}
+
+                {outsideEstimateResult?.quote && (
+                  <div className="mt-4 p-5 rounded-xl border-2 border-sky-500/30 bg-sky-500/5">
+                    <div className="flex flex-wrap items-center gap-2 mb-4">
+                      <FileSpreadsheet className="h-5 w-5 text-sky-600 dark:text-sky-400" />
+                      <span className="text-sm font-bold text-foreground">Outside Estimation Layer</span>
+                      {outsideEstimateMeta?.fileName && (
+                        <span className="rounded-full border border-sky-500/20 bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">
+                          {outsideEstimateMeta.fileName}
+                        </span>
+                      )}
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                        outsideShopDrawingStatus === "ready"
+                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                          : outsideShopDrawingStatus === "generating"
+                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                            : outsideShopDrawingStatus === "failed"
+                              ? "bg-destructive/10 text-destructive"
+                              : "bg-muted text-muted-foreground"
+                      }`}>
+                        {outsideShopDrawingStatus === "ready"
+                          ? `Shop drawing layer ready${outsideShopDrawingVersion ? ` · v${outsideShopDrawingVersion}` : ""}`
+                          : outsideShopDrawingStatus === "generating"
+                            ? "Building shop drawing layer..."
+                            : outsideShopDrawingStatus === "failed"
+                              ? "Shop drawing build failed"
+                              : "Imported external bars"}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 text-center">
+                      <div className="rounded-xl bg-card border border-border p-4">
+                        <p className="text-2xl font-bold text-sky-600 dark:text-sky-400">
+                          {(outsideEstimateResult.quote.total_weight_kg || 0).toLocaleString(undefined, { maximumFractionDigits: 1 })} kg
+                        </p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">Imported Weight</p>
+                      </div>
+                      <div className="rounded-xl bg-card border border-border p-4">
+                        <p className="text-2xl font-bold text-sky-600 dark:text-sky-400">
+                          {(outsideEstimateResult.quote.total_weight_tonnes || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} tonnes
+                        </p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">Imported Tonnes</p>
+                      </div>
+                    </div>
+                    <SizeBreakdownTable
+                      sizeBreakdown={outsideEstimateResult.quote.size_breakdown}
+                      sizeBreakdownKg={outsideEstimateResult.quote.size_breakdown_kg}
+                    />
+                    {outsideEstimateMeta?.warnings?.length ? (
+                      <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                        <p className="font-semibold mb-1">Import diagnostics</p>
+                        {outsideEstimateMeta.warnings.slice(0, 4).map((warning) => (
+                          <p key={warning}>• {warning}</p>
+                        ))}
+                      </div>
+                    ) : null}
+                    <ExportButtons
+                      quoteResult={outsideEstimateResult}
+                      elements={outsideEstimateElements}
+                      scopeData={scopeData}
+                      projectId={projectId}
+                      sourceLayer="outside_estimation"
+                      sourceLabel="Outside Estimation"
+                    />
                   </div>
                 )}
 

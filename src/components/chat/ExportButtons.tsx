@@ -14,9 +14,18 @@ interface ExportButtonsProps {
   elements: any[];
   scopeData?: any;
   projectId?: string;
+  sourceLayer?: string;
+  sourceLabel?: string;
 }
 
-const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteResult, elements, scopeData, projectId }, ref) => {
+const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({
+  quoteResult,
+  elements,
+  scopeData,
+  projectId,
+  sourceLayer = "ai_estimation",
+  sourceLabel = "AI Estimation",
+}, ref) => {
   const [shopDrawingOpen, setShopDrawingOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [jsonOpen, setJsonOpen] = useState(false);
@@ -121,7 +130,7 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
         className="w-full gap-2 h-10 rounded-xl font-semibold border-primary/30 text-primary hover:bg-primary/10"
       >
         <Ruler className="h-4 w-4" />
-        Create Shop Drawing
+        {sourceLayer === "outside_estimation" ? "Create Outside Shop Drawing" : "Create Shop Drawing"}
       </Button>
       <Button
         variant="outline"
@@ -131,7 +140,16 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
         <Share2 className="h-4 w-4" />
         Share for Review
       </Button>
-      <ShopDrawingModal open={shopDrawingOpen} onOpenChange={setShopDrawingOpen} quoteResult={quoteResult} elements={elements} scopeData={scopeData} projectId={projectId} />
+      <ShopDrawingModal
+        open={shopDrawingOpen}
+        onOpenChange={setShopDrawingOpen}
+        quoteResult={quoteResult}
+        elements={elements}
+        scopeData={scopeData}
+        projectId={projectId}
+        sourceLayer={sourceLayer}
+        sourceLabel={sourceLabel}
+      />
       <ShareReviewDialog open={shareOpen} onOpenChange={setShareOpen} projectId={projectId} />
     </div>
   );

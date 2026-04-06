@@ -38,7 +38,7 @@ interface BarListTableProps {
   barList: BarItem[];
   onShowOnDrawing?: (elementId: string) => void;
   selectedElementId?: string | null;
-  onImport?: (data: BarItem[]) => void;
+  onImport?: (data: BarItem[], meta?: ImportedEstimateMeta) => void;
 }
 
 interface EditingCell {
@@ -118,6 +118,59 @@ interface ParseResult {
     assumptions: string[];
     elementSummary: Record<string, number>;
     weightMismatches: number;
+  };
+}
+
+type ParseDiagnostics = ParseResult["diagnostics"];
+
+export interface ImportedEstimateMeta {
+  fileName: string;
+  warnings: string[];
+  diagnostics: ParseDiagnostics;
+}
+
+export async function parseExternalEstimateFile(file: File): Promise<{ items: BarItem[]; meta: ImportedEstimateMeta }> {
+  const [sheet] = await readSpreadsheetFile(file);
+  if (!sheet || !sheet.rows.length) {
+    throw new Error("No data found in the file");
+  }
+
+  let result = tryParseComplexXlsx(sheet.rows as any[][]);
+  if (!result) {
+    const raw = sheetRowsToObjects(sheet.rows);
+    if (!raw.length) {
+      throw new Error("No data found in the file");
+    }
+    result = parseFlatXlsx(raw, sheet.rows);
+  }
+
+  const { items, diagnostics } = result;
+  if (items.length === 0) {
+    throw new Error("No bar items found in the file");
+  }
+
+  const warnings: string[] = [];
+  if (diagnostics.unitAssumed) warnings.push(`Length unit assumed: ${diagnostics.detectedUnit}`);
+  if (diagnostics.missingSizes.length > 0) warnings.push(`Unknown sizes: ${diagnostics.missingSizes.join(", ")}`);
+  if (diagnostics.formulaFallbacks > 0) warnings.push(`${diagnostics.formulaFallbacks} formula(s) could not be evaluated`);
+  if (diagnostics.weightMismatches > 0) warnings.push(`${diagnostics.weightMismatches} row(s) with weight cross-check mismatch > 2%`);
+  if (diagnostics.mismatchPct !== null && diagnostics.mismatchPct > 1) {
+    warnings.push(
+      `Weight mismatch: computed ${diagnostics.computedTotalKg.toFixed(1)} kg vs Excel total ${diagnostics.excelTotalWeight?.toFixed(1)} kg (${diagnostics.mismatchPct.toFixed(1)}% off)`,
+    );
+  }
+
+  for (const [elementType, weightKg] of Object.entries(diagnostics.elementSummary)) {
+    warnings.push(`${elementType}: ${(weightKg as number).toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`);
+  }
+
+  return {
+    items,
+    meta: {
+      fileName: file.name,
+      warnings,
+      diagnostics,
+    },
   };
 }
 
@@ -613,51 +666,27 @@ const BarListTable: React.FC<BarListTableProps> = ({ barList: initialBarList, on
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const [sheet] = await readSpreadsheetFile(file);
-      if (!sheet || !sheet.rows.length) {
-        toast.error("No data found in the file");
-        return;
-      }
-
-      // Try complex parser first, fall back to flat-header parser.
-      let result = tryParseComplexXlsx(sheet.rows as any[][]);
-      if (!result) {
-        const raw = sheetRowsToObjects(sheet.rows);
-        if (!raw.length) { toast.error("No data found in the file"); return; }
-        result = parseFlatXlsx(raw, sheet.rows);
-      }
-
-      const { items, diagnostics } = result;
-      if (items.length === 0) { toast.error("No bar items found in the file"); return; }
-
+      const { items, meta } = await parseExternalEstimateFile(file);
       setBarList(items);
-      onImport?.(items);
+      onImport?.(items, meta);
 
-      // Build warnings
-      const warnings: string[] = [];
-      if (diagnostics.unitAssumed) warnings.push(`⚠ Length unit assumed: ${diagnostics.detectedUnit}`);
-      if (diagnostics.missingSizes.length > 0) warnings.push(`⚠ Unknown sizes: ${diagnostics.missingSizes.join(", ")}`);
-      if (diagnostics.formulaFallbacks > 0) warnings.push(`⚠ ${diagnostics.formulaFallbacks} formula(s) could not be evaluated`);
-      if (diagnostics.weightMismatches > 0) warnings.push(`⚠ ${diagnostics.weightMismatches} row(s) with weight cross-check mismatch > 2%`);
-      if (diagnostics.mismatchPct !== null && diagnostics.mismatchPct > 1) {
-        warnings.push(`⚠ Weight mismatch: computed ${diagnostics.computedTotalKg.toFixed(1)} kg vs Excel total ${diagnostics.excelTotalWeight?.toFixed(1)} kg (${diagnostics.mismatchPct.toFixed(1)}% off)`);
-      }
-      // Element summary
-      if (Object.keys(diagnostics.elementSummary).length > 0) {
-        for (const [el, wt] of Object.entries(diagnostics.elementSummary)) {
-          warnings.push(`📊 ${el}: ${(wt as number).toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`);
-        }
-      }
-
+      const warnings = meta.warnings.map((warning) => {
+        const isWarning =
+          warning.includes("assumed") ||
+          warning.includes("Unknown sizes") ||
+          warning.includes("formula") ||
+          warning.includes("mismatch");
+        return `${isWarning ? "⚠" : "📊"} ${warning}`;
+      });
       setImportWarnings(warnings);
 
-      if (warnings.some(w => w.startsWith("⚠"))) {
+      if (warnings.some((warning) => warning.startsWith("⚠"))) {
         toast.warning(`Imported ${items.length} items with diagnostics`, {
-          description: warnings.filter(w => w.startsWith("⚠")).join("\n"),
+          description: warnings.filter((warning) => warning.startsWith("⚠")).join("\n"),
           duration: 10000,
         });
       } else {
-        toast.success(`Imported ${items.length} bar items — ${diagnostics.computedTotalKg.toFixed(1)} kg total`);
+        toast.success(`Imported ${items.length} bar items — ${meta.diagnostics.computedTotalKg.toFixed(1)} kg total`);
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to parse the spreadsheet file");
@@ -695,7 +724,7 @@ const BarListTable: React.FC<BarListTableProps> = ({ barList: initialBarList, on
         <input ref={xlsxInputRef} type="file" accept=".xlsx,.csv" className="hidden" onChange={handleFileImport} />
         <Button variant="outline" size="sm" className="h-9 rounded-xl text-xs gap-1.5" onClick={() => xlsxInputRef.current?.click()}>
           <Upload className="h-3.5 w-3.5" />
-          Import
+          Import Outside Estimation
         </Button>
       </div>
 
