@@ -40,6 +40,10 @@ describe("buildShopDrawingHtml", () => {
     expect(html).toContain("Lap schedule - structural slab");
     expect(html).toContain("Project no.");
     expect(html).toContain("FOR FIELD USE / REVIEW");
+    expect(html).toContain("Top view");
+    expect(html).toContain("Front elevation");
+    expect(html).toContain("Horizontal section");
+    expect(html).toContain("Constructability notes");
   });
 
   it("keeps one row per bar mark instead of compressing them into one sheet summary", () => {
@@ -54,5 +58,6 @@ describe("buildShopDrawingHtml", () => {
     expect(html).toContain("Bar bending schedule 1");
     expect(html).toContain("class=\"bbs-table\"");
     expect(html).toContain("Cover details");
+    expect(html).toContain("Every bar mark shown here must also appear in the schedule and at least one graphic view.");
   });
 });

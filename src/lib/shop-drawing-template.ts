@@ -97,6 +97,33 @@ interface NormalizedElementRegion {
   y1: number;
   x2: number;
   y2: number;
+  synthetic?: boolean;
+}
+
+interface DrawingViewSpec {
+  key:
+    | "top_view"
+    | "front_elevation"
+    | "side_elevation"
+    | "horizontal_section"
+    | "vertical_section"
+    | "section_view"
+    | "cross_section"
+    | "longitudinal_section"
+    | "detail_view"
+    | "stirrup_detail"
+    | "tie_spiral_detail";
+  label: string;
+  purpose: string;
+  callout: string;
+}
+
+interface ViewPolicySelection {
+  primaryLabel: string;
+  views: DrawingViewSpec[];
+  constructabilityNotes: string[];
+  flagForReview: boolean;
+  reviewReason?: string;
 }
 
 const SHEET_ROW_LIMIT = 24;
@@ -245,6 +272,7 @@ function normalizeElementRegions(
         y1: bbox[1],
         x2: bbox[2],
         y2: bbox[3],
+        synthetic: false,
       };
     })
     .filter((region): region is NormalizedElementRegion => Boolean(region));
@@ -283,6 +311,7 @@ function normalizeElementRegions(
       y1,
       x2: x1 + 130,
       y2: y1 + 82,
+      synthetic: true,
     };
   });
 }
@@ -409,6 +438,166 @@ function buildLayoutViewport(regions: NormalizedElementRegion[]): string {
   `;
 }
 
+function normalizeElementClass(elementType: string): string {
+  const normalized = elementType.trim().toUpperCase();
+  if (/PILE_CAP/.test(normalized)) return "pile_cap";
+  if (/FOOTING|PAD|MAT/.test(normalized)) return "footing";
+  if (/WALL/.test(normalized)) return "wall";
+  if (/SLAB|RAFT/.test(normalized)) return "slab";
+  if (/GRADE_BEAM/.test(normalized)) return "grade_beam";
+  if (/BEAM/.test(normalized)) return "beam";
+  if (/COLUMN/.test(normalized)) return "column";
+  if (/PIER/.test(normalized)) return "pier";
+  if (/STAIR|RAMP/.test(normalized)) return "stair";
+  return "other";
+}
+
+function hasComplexReinforcementSignals(bars: NormalizedBar[]): boolean {
+  if (bars.length === 0) return false;
+
+  const notesBlob = bars
+    .flatMap((bar) => [bar.note, bar.shapeCode, bar.barMark, bar.subgroup])
+    .join(" ")
+    .toUpperCase();
+
+  return (
+    /\b(OPENING|PENETRATION|LAP|SPLICE|HOOK|ANCHOR|DOWEL|EMBED|CORNER|CONGEST|OFFSET|STEP|SLOPE|THICKEN|DROP|JOINT|VARIABLE|INTERSECTION|JAMB)\b/.test(notesBlob) ||
+    bars.some((bar) => bar.shapeCode !== "STRAIGHT" && bar.shapeCode !== "CLOSED") ||
+    bars.some((bar) => [bar.legA, bar.legB, bar.legC, bar.legD].some((value) => Boolean(value))) ||
+    bars.length >= 5
+  );
+}
+
+function createViewSpec(
+  key: DrawingViewSpec["key"],
+  label: string,
+  purpose: string,
+  index: number,
+): DrawingViewSpec {
+  const suffix = String.fromCharCode(65 + index);
+  return {
+    key,
+    label,
+    purpose,
+    callout: `${suffix}${index + 1}`,
+  };
+}
+
+function getConstructabilityNotes(elementClass: string, bars: NormalizedBar[]): string[] {
+  const notes = [
+    "Every bar mark shown here must also appear in the schedule and at least one graphic view.",
+  ];
+
+  if (elementClass === "footing" || elementClass === "pile_cap" || elementClass === "slab") {
+    notes.push("Show chairs, standees, or support bars needed to maintain top and bottom cover.");
+  }
+  if (elementClass === "wall") {
+    notes.push("Identify inside/outside faces and maintain spacer support so bars remain on the correct face.");
+  }
+  if (elementClass === "beam" || elementClass === "grade_beam") {
+    notes.push("Keep longitudinal bars, stirrups, and end anchorage details tied to the same beam reference.");
+  }
+  if (elementClass === "column" || elementClass === "pier") {
+    notes.push("Confirm tie or spiral spacing and clearly mark lap/splice zones before placing.");
+  }
+  if (elementClass === "stair") {
+    notes.push("Coordinate bar bends and supports with stair geometry before fabrication.");
+  }
+  if (bars.some((bar) => /\bCHAIR|STANDEE|SUPPORT|TIE\b/i.test(bar.note))) {
+    notes.push("Support and tying notes from the bar list must remain visible on the placing views.");
+  }
+
+  return notes;
+}
+
+function selectViewsForElement(region: NormalizedElementRegion, bars: NormalizedBar[]): ViewPolicySelection {
+  const elementClass = normalizeElementClass(region.elementType);
+  const complex = hasComplexReinforcementSignals(bars);
+  const views: DrawingViewSpec[] = [];
+
+  const pushView = (key: DrawingViewSpec["key"], label: string, purpose: string) => {
+    views.push(createViewSpec(key, label, purpose, views.length));
+  };
+
+  switch (elementClass) {
+    case "footing":
+    case "pile_cap":
+      pushView("top_view", "Top view", "Primary orthographic view for bar layout, spacing, and bar mark locations.");
+      pushView("section_view", "Section A-A", "Clarifies cover, top/bottom layers, and hook orientation through the footing depth.");
+      if (complex) pushView("detail_view", "Detail 1", "Enlarged view for stepped edges, dowels, or congested reinforcement zones.");
+      break;
+    case "wall":
+      pushView("front_elevation", "Front elevation", "Primary view for vertical bar arrangement, openings, and elevation dimensions.");
+      pushView("horizontal_section", "Horizontal section", "Shows face-of-placement, wall thickness, and horizontal bar position.");
+      pushView("vertical_section", "Vertical section", "Shows lap zones, cover, and top/bottom anchorage through the wall height.");
+      if (complex) pushView("detail_view", "Detail 1", "Enlarged corner/opening/embed view to remove ambiguity around laps or dowels.");
+      break;
+    case "slab":
+      pushView("top_view", "Top view", "Primary view for bar layout, spacing, openings, and thickened edges.");
+      pushView("section_view", "Section A-A", "Shows top/bottom mat layering, cover, and drop or thickened slab depth.");
+      if (complex) pushView("detail_view", "Detail 1", "Enlarged opening, penetration, or edge reinforcement detail.");
+      break;
+    case "beam":
+    case "grade_beam":
+      pushView("front_elevation", "Longitudinal elevation", "Primary view for longitudinal bars, bar curtailment, and bar marks along the span.");
+      pushView("cross_section", "Section A-A", "Shows stirrups, cover, and layer arrangement through the beam width and depth.");
+      if (complex) pushView("detail_view", "Detail 1", "End anchorage or congestion detail for hooks, laps, or support conditions.");
+      break;
+    case "column":
+    case "pier":
+      pushView("front_elevation", "Front elevation", "Primary view for vertical reinforcement and lap/splice zoning.");
+      pushView("cross_section", "Cross-section", "Shows bar count, tie spacing, and cover around the perimeter.");
+      pushView("tie_spiral_detail", "Tie / spiral detail", "Clarifies tie, hoop, or spiral arrangement where confinement is critical.");
+      if (complex) pushView("detail_view", "Detail 1", "Enlarged lap or connection detail at splice or embed zones.");
+      break;
+    case "stair":
+      pushView("top_view", "Plan view", "Primary view for stair or ramp bar layout and directional placement.");
+      pushView("longitudinal_section", "Longitudinal section", "Shows rise/run geometry and bar continuity through the slope.");
+      pushView("cross_section", "Cross-section", "Clarifies cover, face of placement, and bar layering across width.");
+      pushView("detail_view", "Detail 1", "Enlarged bend and anchorage detail at landings, nosings, or supports.");
+      break;
+    default:
+      pushView("top_view", "Primary view", "Primary orthographic view showing bar placement for this element.");
+      pushView("section_view", "Section A-A", "Adds cover and layer information where the primary view is insufficient.");
+      if (complex) pushView("detail_view", "Detail 1", "Enlarged local view where geometry or bar orientation remains ambiguous.");
+      break;
+  }
+
+  const flagForReview = region.synthetic && (complex || views.length > 1);
+  const reviewReason = flagForReview
+    ? "Source geometry was incomplete, so these view frames were inferred from bar data. Verify dimensions and orientation before issue."
+    : undefined;
+
+  return {
+    primaryLabel: views[0]?.label || "Primary view",
+    views,
+    constructabilityNotes: getConstructabilityNotes(elementClass, bars),
+    flagForReview,
+    reviewReason,
+  };
+}
+
+function buildViewBlocks(region: NormalizedElementRegion, bars: NormalizedBar[], selection: ViewPolicySelection): string {
+  const markList = bars.slice(0, 4).map((bar) => bar.barMark).join(", ") || "No mapped marks";
+
+  return selection.views.map((view) => `
+    <article class="view-card">
+      <div class="view-card-head">
+        <span class="view-callout">${escapeHtml(view.callout)}</span>
+        <div>
+          <div class="view-card-title">${escapeHtml(view.label)}</div>
+          <div class="view-card-subtitle">${escapeHtml(region.elementId)} / ${escapeHtml(region.elementType)}</div>
+        </div>
+      </div>
+      <div class="view-diagram">
+        <div class="view-diagram-label">${escapeHtml(view.label)}</div>
+      </div>
+      <p class="view-purpose">${escapeHtml(view.purpose)}</p>
+      <p class="view-bar-marks"><strong>Bar marks:</strong> ${escapeHtml(markList)}</p>
+    </article>
+  `).join("");
+}
+
 function buildElementDetailCard(
   region: NormalizedElementRegion,
   bars: NormalizedBar[],
@@ -428,6 +617,9 @@ function buildElementDetailCard(
     : /FOOTING|SLAB|RAFT|BEAM/.test(region.elementType)
     ? "Plan detail"
     : "Reinforcement detail";
+  const selection = selectViewsForElement(region, bars);
+  const viewBlocks = buildViewBlocks(region, bars, selection);
+  const constructabilityNotes = selection.constructabilityNotes.map((note) => `<li>${escapeHtml(note)}</li>`).join("");
 
   return `
     <article class="detail-card">
@@ -435,13 +627,21 @@ function buildElementDetailCard(
         <div class="detail-index">${index + 1}</div>
         <div>
           <div class="detail-card-title">${escapeHtml(region.elementId)} - ${escapeHtml(region.elementType)}</div>
-          <div class="detail-card-subtitle">${detailKind}</div>
+          <div class="detail-card-subtitle">${detailKind} / ${escapeHtml(selection.primaryLabel)}</div>
         </div>
+      </div>
+      ${selection.flagForReview ? `<div class="detail-flag">FLAG FOR REVIEW: ${escapeHtml(selection.reviewReason)}</div>` : ""}
+      <div class="view-grid">
+        ${viewBlocks}
       </div>
       <table class="mini-table detail-table">
         <tr><th>Bar Mark</th><th>Size</th><th class="num">Pcs</th><th>Description</th></tr>
         ${detailRows || `<tr><td colspan="4">No related bars found.</td></tr>`}
       </table>
+      <div class="detail-note-title">Constructability notes</div>
+      <ul class="note-list compact">
+        ${constructabilityNotes}
+      </ul>
     </article>
   `;
 }
@@ -501,7 +701,7 @@ function buildLayoutSheets(params: {
             <div>
               <div class="drawing-kicker">PLAN LAYOUT / REINFORCEMENT DETAILS</div>
               <h1>${escapeHtml(title)}</h1>
-              <p>This sheet is arranged like the reference cabana drawing: a large drawing field with numbered callouts and compact reinforcement details tied to each area.</p>
+              <p>This sheet uses element-type view selection so each callout gets the plan, elevation, section, and detail views needed to define reinforcement without relying on the schedule alone.</p>
             </div>
             <div class="summary-badge small">
               <strong>${formatNumber(regionChunk.length)}</strong>
@@ -1447,8 +1647,189 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
             line-height: 1.35;
           }
 
+          .note-list.compact {
+            font-size: 8px;
+            margin-top: 6px;
+          }
+
           .note-list li + li {
             margin-top: 4px;
+          }
+
+          .reference-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            height: 100%;
+          }
+
+          .reference-primary {
+            flex: 0 0 auto;
+          }
+
+          .standards-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+          }
+
+          .reference-panel.compact .mini-table th,
+          .reference-panel.compact .mini-table td {
+            font-size: 8px;
+          }
+
+          .layout-main {
+            display: grid;
+            grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+            gap: 10px;
+            align-items: start;
+          }
+
+          .layout-panel,
+          .detail-card {
+            border: 1px solid #111;
+            padding: 8px;
+          }
+
+          .layout-svg {
+            width: 100%;
+            height: auto;
+            display: block;
+          }
+
+          .layout-outline,
+          .layout-svg rect,
+          .layout-svg circle {
+            fill: none;
+            stroke: #111;
+            stroke-width: 1.5;
+          }
+
+          .layout-svg text {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 10px;
+            fill: #111;
+          }
+
+          .layout-label {
+            font-size: 8px;
+          }
+
+          .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+          }
+
+          .detail-card {
+            min-height: 100%;
+          }
+
+          .detail-card-head,
+          .view-card-head {
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+          }
+
+          .detail-index,
+          .view-callout {
+            width: 22px;
+            height: 22px;
+            border: 1px solid #111;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            font-weight: 700;
+            flex: 0 0 auto;
+          }
+
+          .detail-card-title,
+          .view-card-title {
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            line-height: 1.25;
+          }
+
+          .detail-card-subtitle,
+          .view-card-subtitle {
+            font-size: 8px;
+            margin-top: 2px;
+            line-height: 1.3;
+          }
+
+          .detail-flag {
+            margin-top: 6px;
+            padding: 6px 7px;
+            border: 1px solid #111;
+            font-size: 8px;
+            font-weight: 700;
+          }
+
+          .view-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 6px;
+            margin: 8px 0;
+          }
+
+          .view-card {
+            border: 1px solid #111;
+            padding: 6px;
+          }
+
+          .view-diagram {
+            margin: 6px 0;
+            height: 42px;
+            border: 1px solid #111;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 4px;
+          }
+
+          .view-diagram-label,
+          .view-purpose,
+          .view-bar-marks,
+          .detail-note-title {
+            font-size: 8px;
+            line-height: 1.35;
+          }
+
+          .view-purpose,
+          .view-bar-marks {
+            margin: 4px 0 0;
+          }
+
+          .detail-note-title {
+            margin-top: 8px;
+            font-weight: 700;
+            text-transform: uppercase;
+          }
+
+          .detail-table {
+            margin-top: 4px;
+          }
+
+          .detail-table th,
+          .detail-table td {
+            font-size: 7.8px;
+          }
+
+          .layout-empty {
+            min-height: 48px;
+            border: 1px dashed #111;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 8px;
+            font-size: 8px;
+            line-height: 1.35;
           }
 
           .bbs-table th,
