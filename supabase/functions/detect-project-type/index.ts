@@ -355,7 +355,7 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
     const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
     
     if (toolCall?.function?.arguments) {
-      let result = JSON.parse(toolCall.function.arguments);
+      const result = JSON.parse(toolCall.function.arguments);
       
       // ── Server-side Veto Logic ──
       // If AI returned cage_only but our keyword analysis found building signals, override

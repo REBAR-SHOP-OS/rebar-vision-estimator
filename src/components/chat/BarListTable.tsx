@@ -165,7 +165,7 @@ function tryParseComplexXlsx(rows: any[][]): ParseResult | null {
 
   // Merge with row above if it has partial labels (multi-row header)
   const headerRow = rows[headerRowIdx].map((c: any) => String(c ?? "").trim());
-  let mergedHeaders = [...headerRow];
+  const mergedHeaders = [...headerRow];
   if (headerRowIdx > 0) {
     const above = rows[headerRowIdx - 1];
     if (above) {
@@ -255,7 +255,7 @@ function tryParseComplexXlsx(rows: any[][]): ParseResult | null {
   let currentElementType = "OTHER";
   let currentElementId = "";
   const missingSizes: string[] = [];
-  let formulaFallbacks = 0;
+  const formulaFallbacks = 0;
   let weightMismatches = 0;
   const elementSummary: Record<string, number> = {};
   const globalAssumptions: string[] = [];
