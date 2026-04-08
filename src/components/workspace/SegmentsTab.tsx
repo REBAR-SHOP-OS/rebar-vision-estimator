@@ -333,6 +333,57 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Auto-detect Suggestions Dialog */}
+      <Dialog open={autoDialogOpen} onOpenChange={setAutoDialogOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-sm flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              Auto-detected Segments ({suggestions.filter(s => s.selected).length}/{suggestions.length} selected)
+            </DialogTitle>
+          </DialogHeader>
+          <div className="overflow-auto flex-1 space-y-1.5 pr-1">
+            {suggestions.map((s, idx) => (
+              <label
+                key={idx}
+                className={`flex items-start gap-3 p-2.5 rounded-lg border transition-colors cursor-pointer ${
+                  s.selected ? "border-primary/40 bg-primary/5" : "border-border bg-muted/20"
+                }`}
+              >
+                <Checkbox
+                  checked={s.selected}
+                  onCheckedChange={() => toggleSuggestion(idx)}
+                  className="mt-0.5"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-foreground">{s.name}</span>
+                    <Badge variant="outline" className="text-[9px] capitalize">{s.segment_type.replace(/_/g, " ")}</Badge>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted-foreground">
+                    {s.level_label && <span>Level: {s.level_label}</span>}
+                    {s.zone_label && <span>Zone: {s.zone_label}</span>}
+                  </div>
+                  {s.notes && <p className="text-[10px] text-muted-foreground mt-0.5">{s.notes}</p>}
+                </div>
+              </label>
+            ))}
+          </div>
+          <div className="flex items-center justify-between pt-3 border-t border-border">
+            <Button variant="ghost" size="sm" className="text-xs" onClick={() => setSuggestions(prev => prev.map(s => ({ ...s, selected: !suggestions.every(x => x.selected) })))}>
+              {suggestions.every(s => s.selected) ? "Deselect All" : "Select All"}
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => setAutoDialogOpen(false)}>Cancel</Button>
+              <Button size="sm" onClick={handleCreateSuggestions} disabled={autoCreating || suggestions.filter(s => s.selected).length === 0} className="gap-1.5">
+                {autoCreating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+                Create {suggestions.filter(s => s.selected).length} Segment{suggestions.filter(s => s.selected).length !== 1 ? "s" : ""}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
