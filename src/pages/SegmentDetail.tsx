@@ -1,4 +1,5 @@
 import { useParams, useNavigate } from "react-router-dom";
+import { getMassKgPerM } from "@/lib/rebar-weights";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
