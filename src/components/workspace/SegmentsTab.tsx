@@ -184,7 +184,7 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
                 <th className="text-left px-3 py-2.5 font-semibold">Status</th>
                 <th className="text-right px-3 py-2.5 font-semibold">Confidence</th>
                 <th className="text-left px-3 py-2.5 font-semibold">Drawing</th>
-              </tr>
+                <th className="text-right px-3 py-2.5 font-semibold">Actions</th>
             </thead>
             <tbody>
               {segments.map((s) => (
@@ -207,7 +207,12 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
                   <td className="px-3 py-2.5">
                     <Badge variant="outline" className="text-[9px]">{s.drawing_readiness.replace(/_/g, " ")}</Badge>
                   </td>
-                </tr>
+                  <td className="px-3 py-2.5 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => handleOpenEdit(s, e)}><Pencil className="h-3 w-3" /></Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteId(s.id); }}><Trash2 className="h-3 w-3" /></Button>
+                    </div>
+                  </td>
               ))}
             </tbody>
           </table>
