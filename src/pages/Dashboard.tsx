@@ -59,8 +59,9 @@ const Dashboard: React.FC = () => {
   };
 
   const handleNewProjectFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0 || !user) return;
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0 || !user) return;
+    const files = Array.from(fileList);
     setCreatingProject(true);
     const projectName = files[0].name.replace(/\.[^/.]+$/, "");
 
@@ -101,9 +102,23 @@ const Dashboard: React.FC = () => {
       return;
     }
 
+    // Upload all selected files to the new project
+    for (const file of files) {
+      const path = `${user.id}/${data.id}/${Date.now()}_${file.name}`;
+      const { error: storageErr } = await supabase.storage.from("blueprints").upload(path, file);
+      if (storageErr) { console.warn("Upload failed:", file.name); continue; }
+      await supabase.from("project_files").insert({
+        project_id: data.id,
+        user_id: user.id,
+        file_name: file.name,
+        file_path: path,
+        file_type: file.type || null,
+        file_size: file.size,
+      });
+    }
+
     setCreatingProject(false);
     if (newProjectFileInputRef.current) newProjectFileInputRef.current.value = "";
-    // Navigate to the new project workspace
     navigate(`/app/project/${data.id}`);
   };
 
