@@ -346,7 +346,9 @@ export default function SegmentDetail() {
                       <td className="px-3 py-2 text-right font-mono">{Number(item.total_length).toLocaleString()}</td>
                       <td className="px-3 py-2 text-right font-mono">{Number(item.total_weight).toLocaleString()}</td>
                       <td className="px-3 py-2 text-right font-mono">{Number(item.confidence) > 0 ? `${Math.round(Number(item.confidence) * 100)}%` : "—"}</td>
-                      <td className="px-3 py-2 text-muted-foreground text-[10px] truncate max-w-[120px]">{item.source_file_id ? fileNameById(item.source_file_id) || "Linked" : "—"}</td>
+                      <td className="px-3 py-2 text-muted-foreground text-[10px] truncate max-w-[160px]">
+                        {segment ? [segment.level_label, segment.zone_label, segment.name].filter(Boolean).join(" · ") : "—"}
+                      </td>
                       <td className="px-3 py-2"><Badge variant="outline" className="text-[9px]">{item.status}</Badge></td>
                     </tr>
                   ))}
