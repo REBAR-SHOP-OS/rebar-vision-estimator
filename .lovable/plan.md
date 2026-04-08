@@ -1,55 +1,47 @@
 
 
-# Auto-Segments: Cross-Reference ALL Uploaded Drawings
+# Add Provenance Notes to Weight Calculation Breakdown
 
 ## Problem
-The `auto-segments` edge function only passes **file names** to the AI. It doesn't read any extracted drawing content. With scope_items, project_type, and description all null, the AI can only guess from file names like "CRU-1 Structral (4).pdf" — producing generic segments that ignore the architectural file entirely.
+The Weight Calculation Breakdown box shows the math (Qty × Length × Mass = Weight) but doesn't explain **where** those numbers came from — which estimate item, which source file, what confidence level, or how the AI determined each value.
 
-The user wants the system to read BOTH structural and architectural drawings and cross-reference them to generate accurate, specific segments.
+## Current Data Flow
+```text
+Drawing PDF → auto-estimate → estimate_items (with source_file_id) → auto-bar-schedule (AI) → bar_items
+```
 
-## Root Cause
-1. `auto-segments/index.ts` fetches `project_files.file_name` only — no extracted text
-2. `drawing_search_index` and `logical_drawings` tables are empty for this project (blueprint analysis hasn't populated them)
-3. No `document_versions` data exists either
-4. The function has no fallback to read raw text from any source
+Key facts from the database:
+- `bar_items` have `confidence` (0.85–0.9) but NO `estimate_item_id` link (all null)
+- `estimate_items` have `source_file_id` linking to the drawing file and `description` explaining the structural element
+- The AI generates bar marks from estimate items but doesn't store which estimate item produced which bar mark
+- The segment has `level_label`, `zone_label`, `segment_type`
 
 ## Changes
 
-### 1. `supabase/functions/auto-segments/index.ts` — Inject extracted drawing text
+### 1. `supabase/functions/auto-bar-schedule/index.ts` — Link bar items to estimate items
+Add `estimate_item_id` to each generated bar item by:
+- Passing estimate item IDs to the AI prompt alongside descriptions
+- Asking the AI to return which `estimate_item_index` each bar came from
+- Mapping the index back to the actual `estimate_item.id` before insert
 
-Fetch extracted text from `drawing_search_index` for the project. If empty (as currently), fall back to fetching `document_versions.pdf_metadata` pages. Group text snippets by discipline (detected from file name patterns: S-/STR = Structural, A-/ARCH = Architectural).
+### 2. `src/pages/SegmentDetail.tsx` — Add provenance notes to breakdown box
+Below each bar line in the breakdown, show:
+- **Source**: the estimate item description (e.g., "Continuous Wall Footing - Longitudinal Reinforcement")
+- **Drawing**: the source file name (from the linked estimate item's `source_file_id`)
+- **Confidence**: the bar item's confidence score as a percentage
+- **Process**: "AI-generated from estimate via auto-bar-schedule" or "Manually entered"
 
-Pass this grouped text context to the AI prompt so it can:
-- Parse actual footing schedules, slab callouts, wall types from structural drawings
-- Identify architectural elements (CMU walls, concrete curbs, equipment pads) from architectural drawings
-- Cross-reference: flag "Hidden Scope" (structural items found only on architectural sheets) and "Orphan Scope" (architectural concrete lacking structural details)
-- Tag each suggested segment's `notes` with which file(s) it was derived from (e.g., "Found on: S-101, A-201")
+Also add a header note: "Data pipeline: Drawing → Auto-Estimate → Auto-Bar-Schedule → Weight Calculation"
 
-Updated prompt additions:
-```
-=== STRUCTURAL DRAWING TEXT ===
-[extracted text from structural files]
-
-=== ARCHITECTURAL DRAWING TEXT ===  
-[extracted text from architectural files]
-
-Cross-reference rules:
-- Check BOTH structural and architectural drawings for concrete elements
-- Architectural drawings may show concrete elements (curbs, pads, CMU walls) not on structural sheets
-- Structural drawings show rebar details; architectural shows dimensions and locations
-- Note which drawing(s) each segment was found on
-```
-
-### 2. Handle empty extraction gracefully
-
-If no extracted text is available from either `drawing_search_index` or `document_versions`, the function should still work (current behavior) but add a note: "No drawing text extracted — segments inferred from file names and project type only."
-
-### 3. Increase `max_tokens` to 3000
-
-With more context (drawing text from multiple files), the AI needs more room to respond.
+### 3. Data joining approach
+Since most bar items currently lack `estimate_item_id`, use a **best-match heuristic** in the UI:
+- Match bar item `size` to estimate item `bar_size`
+- If multiple matches, show all possible sources
+- Going forward, new bar schedules will have the proper link
 
 ## Files Modified
-- `supabase/functions/auto-segments/index.ts` — fetch drawing text from `drawing_search_index` / `document_versions`, group by discipline, inject into prompt
+- `supabase/functions/auto-bar-schedule/index.ts` — add estimate_item_id mapping
+- `src/pages/SegmentDetail.tsx` — add provenance info to breakdown box
 
 ## No new files, no migrations
 
