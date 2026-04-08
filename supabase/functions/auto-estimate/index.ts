@@ -231,7 +231,7 @@ Generate estimate items for this segment. Base quantities on the ACTUAL drawing 
       total_length: Math.max(0, Number(item.total_length) || 0),
       total_weight: Math.max(0, Number(item.total_weight) || 0),
       confidence: Math.min(1, Math.max(0, Number(item.confidence) || 0)),
-      item_type: "rebar",
+      item_type: String(item.item_type || "rebar"),
       status: "draft",
       source_file_id: sourceFileId || null,
     }));
