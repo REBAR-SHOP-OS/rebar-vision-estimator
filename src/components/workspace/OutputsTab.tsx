@@ -32,7 +32,7 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
       supabase.from("approvals").select("status").eq("project_id", projectId).is("segment_id", null).order("created_at", { ascending: false }).limit(1),
       supabase.from("validation_issues").select("id", { count: "exact" }).eq("project_id", projectId).eq("status", "open"),
       supabase.from("estimate_items").select("id", { count: "exact" }).eq("project_id", projectId),
-      supabase.from("bar_items").select("id", { count: "exact" }).eq("project_id", projectId),
+      supabase.from("estimate_items").select("id", { count: "exact" }).eq("project_id", projectId).eq("item_type", "bar"),
     ]).then(([est, shop, issues, quotes, appRes, openRes, estItems, barItems]) => {
       const estCount = (est.count || 0) + (estItems.count || 0);
       const shopCount = (shop.count || 0);
