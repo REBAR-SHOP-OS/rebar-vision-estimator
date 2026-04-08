@@ -1,47 +1,44 @@
 
 
-# Add Provenance Notes to Weight Calculation Breakdown
+# Enhance Provenance with Full Address + Clickable Drawing Navigation
 
-## Problem
-The Weight Calculation Breakdown box shows the math (Qty × Length × Mass = Weight) but doesn't explain **where** those numbers came from — which estimate item, which source file, what confidence level, or how the AI determined each value.
+## What Changes
 
-## Current Data Flow
-```text
-Drawing PDF → auto-estimate → estimate_items (with source_file_id) → auto-bar-schedule (AI) → bar_items
+### 1. `src/pages/SegmentDetail.tsx` — Fetch additional context for provenance
+
+In `loadData()`, add a query to fetch `drawing_search_index` entries for this project to get page numbers per source file. Also fetch `document_versions` for page metadata.
+
+Use this data to enrich the provenance line:
+- **Page number**: from `drawing_search_index.page_number` matched via `source_file_id` → `document_version_id`
+- **Segment address**: show `segment.level_label`, `zone_label`, `segment_type`
+- **Full file name**: already available from `projectFiles`
+
+Display format per bar line:
+```
+A1  [15M]  72 × (6,000 mm ÷ 1000) × 1.570 kg/m = 678.2 kg
+📍 Source: Continuous Wall Footing - Longitudinal Reinforcement
+   Drawing: CRU-1 Structral (4).pdf · Page 3 · Segment: L1 / Zone A / Foundation
+   Confidence: 90% · AI-generated
 ```
 
-Key facts from the database:
-- `bar_items` have `confidence` (0.85–0.9) but NO `estimate_item_id` link (all null)
-- `estimate_items` have `source_file_id` linking to the drawing file and `description` explaining the structural element
-- The AI generates bar marks from estimate items but doesn't store which estimate item produced which bar mark
-- The segment has `level_label`, `zone_label`, `segment_type`
+### 2. `src/pages/SegmentDetail.tsx` — Make drawing reference clickable
 
-## Changes
+Add a click handler on the drawing/page reference that:
+1. Fetches a signed URL for the source file from storage
+2. Sets `sessionStorage` with `blueprint-viewer-data` including the page number and any overlay elements for this segment
+3. Opens `/blueprint-viewer` in a new tab via `window.open`
 
-### 1. `supabase/functions/auto-bar-schedule/index.ts` — Link bar items to estimate items
-Add `estimate_item_id` to each generated bar item by:
-- Passing estimate item IDs to the AI prompt alongside descriptions
-- Asking the AI to return which `estimate_item_index` each bar came from
-- Mapping the index back to the actual `estimate_item.id` before insert
-
-### 2. `src/pages/SegmentDetail.tsx` — Add provenance notes to breakdown box
-Below each bar line in the breakdown, show:
-- **Source**: the estimate item description (e.g., "Continuous Wall Footing - Longitudinal Reinforcement")
-- **Drawing**: the source file name (from the linked estimate item's `source_file_id`)
-- **Confidence**: the bar item's confidence score as a percentage
-- **Process**: "AI-generated from estimate via auto-bar-schedule" or "Manually entered"
-
-Also add a header note: "Data pipeline: Drawing → Auto-Estimate → Auto-Bar-Schedule → Weight Calculation"
+The blueprint viewer already supports PDF page navigation (`currentPage`) and element highlighting via `selectedElementId`, so passing the correct page number and element data will auto-navigate and highlight.
 
 ### 3. Data joining approach
-Since most bar items currently lack `estimate_item_id`, use a **best-match heuristic** in the UI:
-- Match bar item `size` to estimate item `bar_size`
-- If multiple matches, show all possible sources
-- Going forward, new bar schedules will have the proper link
+
+- Match `estimate_item.source_file_id` → `project_files.id` for file name
+- Match `estimate_item.source_file_id` → `document_versions.file_id` → get `page_count` and `pdf_metadata`
+- Match `source_file_id` → `drawing_search_index` entries (via `document_version_id`) to find relevant page numbers
+- Use segment's `level_label`, `zone_label`, `segment_type` for the address
 
 ## Files Modified
-- `supabase/functions/auto-bar-schedule/index.ts` — add estimate_item_id mapping
-- `src/pages/SegmentDetail.tsx` — add provenance info to breakdown box
+- `src/pages/SegmentDetail.tsx` — add drawing_search_index + document_versions queries, enrich provenance display, add click-to-open handler
 
-## No new files, no migrations
+## No new files, no migrations, no edge function changes
 
