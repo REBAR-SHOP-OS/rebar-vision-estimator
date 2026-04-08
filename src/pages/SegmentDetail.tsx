@@ -378,7 +378,7 @@ export default function SegmentDetail() {
       {/* Estimate Item Edit Dialog */}
       <Dialog open={!!editItem} onOpenChange={(open) => !open && setEditItem(null)}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle className="text-sm">Edit Estimate Item</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="text-sm">{editItem === "new" ? "Add Estimate Item" : "Edit Estimate Item"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label className="text-xs">Description</Label><Input value={eiDesc} onChange={e => setEiDesc(e.target.value)} className="h-9 text-sm" /></div>
             <div className="grid grid-cols-2 gap-2">
