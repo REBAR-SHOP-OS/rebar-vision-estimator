@@ -185,6 +185,7 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
                 <th className="text-right px-3 py-2.5 font-semibold">Confidence</th>
                 <th className="text-left px-3 py-2.5 font-semibold">Drawing</th>
                 <th className="text-right px-3 py-2.5 font-semibold">Actions</th>
+              </tr>
             </thead>
             <tbody>
               {segments.map((s) => (
