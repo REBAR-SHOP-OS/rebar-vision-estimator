@@ -34,6 +34,10 @@
 
     --radius: 0.75rem;
 
+    --status-approved: 142 60% 40%;
+    --status-review: 38 92% 50%;
+    --status-blocked: 0 72% 51%;
+
     --sidebar-background: 220 12% 97%;
     --sidebar-foreground: 220 10% 25%;
     --sidebar-primary: 142 60% 40%;
@@ -76,6 +80,10 @@
     --border: 220 14% 16%;
     --input: 220 14% 16%;
     --ring: 142 60% 45%;
+
+    --status-approved: 142 60% 45%;
+    --status-review: 38 92% 50%;
+    --status-blocked: 0 62% 45%;
 
     --sidebar-background: 220 14% 5%;
     --sidebar-foreground: 220 10% 75%;

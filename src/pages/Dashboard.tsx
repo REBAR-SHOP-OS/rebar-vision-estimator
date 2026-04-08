@@ -21,6 +21,8 @@ import QuoteWorkflow from "@/components/dashboard/QuoteWorkflow";
 import FollowUpBoard from "@/components/dashboard/FollowUpBoard";
 import RevisionTracker from "@/components/dashboard/RevisionTracker";
 import StepProgress from "@/components/chat/StepProgress";
+import ProjectDashboard from "@/components/workspace/ProjectDashboard";
+import WorkspaceLayout from "@/components/workspace/WorkspaceLayout";
 import logoBg from "@/assets/logo.png";
 import {
   DropdownMenu,
@@ -565,80 +567,33 @@ const Dashboard: React.FC = () => {
             }}
           />
         ) : activeProjectId ? (
-          <ErrorBoundary fallbackMessage="Estimation session crashed">
-            <ChatArea
-              projectId={activeProjectId}
-              initialFiles={initialFiles}
-              onInitialFilesConsumed={() => setInitialFiles(null)}
-              onProjectNameChange={(name) => {
-                setProjects((prev) =>
-                  prev.map((p) => (p.id === activeProjectId ? { ...p, name } : p))
-                );
-              }}
-              onStepChange={(step) => setCurrentStep(step)}
-              onModeChange={(mode) => setCalculationMode(mode)}
-            />
-          </ErrorBoundary>
+          <WorkspaceLayout
+            projectId={activeProjectId}
+            project={projects.find((p) => p.id === activeProjectId) || { name: "Project" }}
+            initialFiles={initialFiles}
+            onInitialFilesConsumed={() => setInitialFiles(null)}
+            onProjectNameChange={(name) => {
+              setProjects((prev) =>
+                prev.map((p) => (p.id === activeProjectId ? { ...p, name } : p))
+              );
+            }}
+            onStepChange={(step) => setCurrentStep(step)}
+            onModeChange={(mode) => setCalculationMode(mode)}
+          />
         ) : (
-          <div className="flex flex-1 items-center justify-center blueprint-bg-major">
-            <div className="max-w-xl mx-auto text-center space-y-8 px-4">
-              <div className="space-y-3">
-                <img src={logoBg} alt="Logo" className="h-16 w-16 rounded-2xl mx-auto" />
-                <h2 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">
-                  {t("welcomeMessage")}
-                </h2>
-                <p className="text-muted-foreground text-sm max-w-md mx-auto">
-                  {t("uploadBlueprints")}
-                </p>
-              </div>
-
-              {/* 4-Step Visual Guide */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {[
-                  { num: 1, icon: "📄", title: "Upload Plans", desc: "PDF or image files" },
-                  { num: 2, icon: "🎯", title: "Set Scope", desc: "Define element types" },
-                  { num: 3, icon: "⚡", title: "AI Takeoff", desc: "Automated estimation" },
-                  { num: 4, icon: "📊", title: "Get Results", desc: "Export & review" },
-                ].map((step) => (
-                  <div key={step.num} className="glass-card rounded-xl p-4 text-center space-y-2">
-                    <div className="flex items-center justify-center gap-2">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-bold">{step.num}</span>
-                    </div>
-                    <p className="text-lg">{step.icon}</p>
-                    <p className="text-xs font-semibold text-foreground">{step.title}</p>
-                    <p className="text-[10px] text-muted-foreground">{step.desc}</p>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex gap-3 justify-center flex-wrap">
-                <Button onClick={handleNewEstimationClick} disabled={creatingProject} size="lg" className="gap-2 h-12 px-8 rounded-xl font-bold text-base">
-                  <Plus className="h-5 w-5" />
-                  {t("startNewEstimation")}
-                </Button>
-                <Button onClick={() => setShowCrm(true)} variant="outline" size="lg" className="gap-2 h-12 px-6 rounded-xl">
-                  <Building2 className="h-5 w-5" />
-                  CRM Deals
-                </Button>
-                <Button onClick={() => setShowOutcomes(true)} variant="outline" size="lg" className="gap-2 h-12 px-6 rounded-xl">
-                  <BarChart3 className="h-5 w-5" />
-                  Outcomes
-                </Button>
-                <Button onClick={() => setShowSearch(true)} variant="outline" size="lg" className="gap-2 h-12 px-6 rounded-xl">
-                  <Search className="h-5 w-5" />
-                  Search Drawings
-                </Button>
-                <Button onClick={() => setShowHealth(true)} variant="outline" size="lg" className="gap-2 h-12 px-6 rounded-xl">
-                  <HeartPulse className="h-5 w-5" />
-                  Health
-                </Button>
-                <Button onClick={() => setShowDiagnostics(true)} variant="outline" size="lg" className="gap-2 h-12 px-6 rounded-xl">
-                  <Activity className="h-5 w-5" />
-                  Diagnostics
-                </Button>
-              </div>
-            </div>
-          </div>
+          <ProjectDashboard
+            onSelectProject={(id) => {
+              setActiveProjectId(id);
+              setCurrentStep(null);
+              setCalculationMode(null);
+            }}
+            onNewEstimation={handleNewEstimationClick}
+            onShowCrm={() => setShowCrm(true)}
+            onShowOutcomes={() => setShowOutcomes(true)}
+            onShowHealth={() => setShowHealth(true)}
+            onShowDiagnostics={() => setShowDiagnostics(true)}
+            onShowSearch={() => setShowSearch(true)}
+          />
         )}
       </div>
     </div>
