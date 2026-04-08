@@ -1,61 +1,44 @@
 
 
-# Analysis: Why the System Estimated 12x Higher Than Manual
+# Add Wire Mesh (WWM) Support to Auto-Estimate
 
-## Weight Comparison
+## Problem
+When drawings specify wire mesh (e.g., "WWM 6x6 W2.9/W2.9" for slabs-on-grade), the system currently estimates rebar instead. It should detect WWM callouts in drawing text and generate wire mesh items with proper area/sheet-based calculations.
 
-| Source | Total Rebar (kg) | Notes |
-|--------|-----------------|-------|
-| Manual (LONDON_CRU1.xlsx) | **5,382 kg** | Foundation-only scope + SOG mesh |
-| System (auto-estimate) | **63,854 kg** | Full superstructure scope |
+## Changes
 
-## Root Cause: Scope Mismatch
+### 1. Auto-Estimate Edge Function — WWM Detection & Calculation
+**File**: `supabase/functions/auto-estimate/index.ts`
 
-The manual estimate covers **foundations only** (footings F1–F8, piers P1–P8, step-on-grade, foundation walls). The system auto-estimate generated items for the **entire building** including:
+Update the AI system prompt to:
+- Detect wire mesh callouts in drawing text (WWM, welded wire mesh, mesh designations like 6x6-W2.9/W2.9, 152x152 MW9.1/MW9.1)
+- When mesh is found, generate items with `item_type: "wwm"` instead of `"rebar"`
+- WWM items use different fields: `description` (mesh designation), `bar_size` (mesh spec e.g. "6x6-W2.9"), `quantity_count` (number of sheets), `total_weight` (kg), `total_length` (area in m²)
+- Include WWM weight reference in prompt: common mesh weights (kg/m²) — e.g. 6x6-W1.4/W1.4 = 0.93 kg/m², 6x6-W2.9/W2.9 = 1.90 kg/m², 6x6-W4.0/W4.0 = 2.63 kg/m²
+- For SOG/slab segments: if drawing text contains mesh notation, estimate mesh; if it contains rebar notation, estimate rebar; if both, estimate both
+- Apply sheet count calculation: standard sheets 5'x10' (1.52x3.05m = 4.65 m²), with 150mm (6") overlap allowance
 
-| Element | System Weight (kg) | In Manual? |
-|---------|-------------------|------------|
-| Slab (suspended) | 19,938 | NO — manual only has SOG mesh |
-| Wall | 5,409 | NO |
-| Beam | 2,434 | NO |
-| Column | 1,947 | NO |
-| Footing | 650 | YES — manual has ~2,500 kg |
-| Stair | 344 | NO |
+### 2. Rebar Weights Utility — Add WWM Weight Table
+**File**: `src/lib/rebar-weights.ts`
 
-The manual estimate is a **foundation-only** takeoff. The system estimated the **full structure** (slabs, walls, beams, columns, stairs) because the AI prompt generates items for all segment types it finds.
+Add a `WWM_KG_PER_M2` lookup table for common mesh designations and a `getWwmMassKgPerM2(designation)` function so the UI can compute weights consistently for WWM items (same pattern as `getMassKgPerM` for rebar).
 
-## Secondary Issues
+Common designations:
+- 6x6-W1.4/W1.4 = 0.93 kg/m²
+- 6x6-W2.1/W2.1 = 1.37 kg/m²
+- 6x6-W2.9/W2.9 = 1.90 kg/m²
+- 6x6-W4.0/W4.0 = 2.63 kg/m²
+- 4x4-W2.1/W2.1 = 2.05 kg/m²
+- 4x4-W4.0/W4.0 = 3.94 kg/m²
+- 152x152 MW9.1/MW9.1 = 1.90 kg/m² (metric equivalent)
 
-1. **Footing weight discrepancy**: Even for footings alone, manual = ~2,500 kg vs system = 650 kg. The system under-counted footings while over-counting everything else.
-2. **Slab overestimate**: 19,938 kg for slab is very heavy — the AI generated large quantities of 15M bars at 12m lengths (180 bars × 12m = 2,160m per layer). This suggests the AI assumed a large suspended slab area without drawing verification.
-3. **No drawing-based verification**: The auto-estimate uses AI inference from segment types, not actual drawing data. It guesses typical reinforcement patterns rather than reading schedules.
+### 3. SegmentDetail.tsx — Display WWM Items Properly
+**File**: `src/pages/SegmentDetail.tsx`
 
-## What Needs to Change (Fine-Tuning Plan)
+In the estimate items table and weight calculation box:
+- For `item_type === "wwm"`: show "Area (m²)" instead of "Length (m)" in the table
+- Weight calc explanation: `Weight = Area (m²) × mass (kg/m²)` instead of the rebar formula
+- Summary cards: separate rebar weight from mesh weight totals
 
-### 1. Scope-Aware Estimation
-Modify `auto-estimate` edge function to:
-- Check uploaded drawing disciplines (structural foundation vs structural superstructure)
-- Only estimate segments that match the uploaded drawing scope
-- Add a "scope_coverage" field so users know what's included vs excluded
-
-### 2. Drawing-Driven Estimation
-Instead of pure AI inference, the estimate should:
-- Use extracted text from PDFs (the `extract-pdf-text` function already exists)
-- Parse footing schedules, bar schedules, and rebar callouts from drawings
-- Cross-reference with the shop drawing data (SD06–SD12 shows exact bar marks, sizes, quantities)
-
-### 3. Footing Schedule Integration
-The SD06 PDF contains exact footing schedules (F-1 through F-8 with sizes, reinforcement, quantities). The system should parse these and use them directly instead of AI-guessing.
-
-### 4. Add Scope Filter to Auto-Estimate
-Add a parameter to `auto-estimate` that restricts generation to specific element types matching the drawing set (e.g., "foundation only" if only foundation drawings are uploaded).
-
-### 5. Weight Validation Gate
-Add a post-estimation check: compare AI-generated weights against typical ratios (kg/m² for slabs, kg/m³ for foundations) and flag outliers before saving.
-
-## Files to Modify
-- `supabase/functions/auto-estimate/index.ts` — add scope filtering, drawing text context, weight validation
-- `src/components/workspace/SegmentsTab.tsx` — show scope coverage badge per segment
-
-## No new files, no migrations
+## No new files, no migrations, no edge function changes (only prompt update to existing auto-estimate)
 
