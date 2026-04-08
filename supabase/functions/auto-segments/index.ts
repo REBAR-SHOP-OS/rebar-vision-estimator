@@ -26,11 +26,13 @@ serve(async (req) => {
     const { projectId } = await req.json();
     if (!projectId) throw new Error("projectId is required");
 
-    // Fetch project scope_items, project_type, and file names
-    const [projRes, filesRes, existingSegs] = await Promise.all([
+    // Fetch project scope_items, project_type, file names, and extracted drawing text
+    const [projRes, filesRes, existingSegs, searchIndexRes, docVersionsRes] = await Promise.all([
       supabase.from("projects").select("scope_items, project_type, name, client_name").eq("id", projectId).single(),
       supabase.from("project_files").select("file_name").eq("project_id", projectId),
       supabase.from("segments").select("name, segment_type").eq("project_id", projectId),
+      supabase.from("drawing_search_index").select("raw_text, page_number, extracted_entities").eq("project_id", projectId).limit(50),
+      supabase.from("document_versions").select("file_name, pdf_metadata, page_count").eq("project_id", projectId).limit(20),
     ]);
 
     const project = projRes.data;
@@ -39,6 +41,79 @@ serve(async (req) => {
     const scopeItems: string[] = project.scope_items || [];
     const fileNames = (filesRes.data || []).map((f: any) => f.file_name);
     const existingSegNames = new Set((existingSegs.data || []).map((s: any) => s.name.toLowerCase()));
+
+    // Classify files by discipline using filename patterns
+    const classifyDiscipline = (name: string): string => {
+      const n = name.toUpperCase();
+      if (/\bS[-_ ]?\d|STRUC|STRUCTURAL/i.test(n)) return "structural";
+      if (/\bA[-_ ]?\d|ARCH|ARCHITECTURAL/i.test(n)) return "architectural";
+      if (/\bM[-_ ]?\d|MECH/i.test(n)) return "mechanical";
+      if (/\bE[-_ ]?\d|ELEC/i.test(n)) return "electrical";
+      return "general";
+    };
+
+    // Build drawing text context from search index or document_versions
+    const drawingTextByDiscipline: Record<string, string[]> = {};
+    const searchPages = searchIndexRes.data || [];
+    const docVersions = docVersionsRes.data || [];
+
+    if (searchPages.length > 0) {
+      // Use search index data (preferred — already extracted)
+      for (const page of searchPages) {
+        const text = (page.raw_text || "").trim();
+        if (!text || text.length < 20) continue;
+        const tb = (page.extracted_entities as any)?.title_block || {};
+        const disc = tb.discipline?.toLowerCase() || "general";
+        if (!drawingTextByDiscipline[disc]) drawingTextByDiscipline[disc] = [];
+        drawingTextByDiscipline[disc].push(`[Page ${page.page_number}] ${text.substring(0, 1500)}`);
+      }
+    } else if (docVersions.length > 0) {
+      // Fallback: extract from document_versions pdf_metadata
+      for (const dv of docVersions) {
+        const disc = classifyDiscipline(dv.file_name || "");
+        const meta = dv.pdf_metadata as any;
+        if (!meta?.pages) continue;
+        if (!drawingTextByDiscipline[disc]) drawingTextByDiscipline[disc] = [];
+        for (const pg of (meta.pages || []).slice(0, 10)) {
+          const text = (pg.raw_text || pg.text || "").trim();
+          if (text.length > 20) {
+            drawingTextByDiscipline[disc].push(`[${dv.file_name} p${pg.page_number || "?"}] ${text.substring(0, 1500)}`);
+          }
+        }
+      }
+    }
+
+    // Also classify files themselves for context
+    const filesByDiscipline: Record<string, string[]> = {};
+    for (const fn of fileNames) {
+      const disc = classifyDiscipline(fn);
+      if (!filesByDiscipline[disc]) filesByDiscipline[disc] = [];
+      filesByDiscipline[disc].push(fn);
+    }
+
+    // Build drawing context string for prompt
+    let drawingContext = "";
+    const hasDrawingText = Object.keys(drawingTextByDiscipline).length > 0;
+    if (hasDrawingText) {
+      for (const [disc, texts] of Object.entries(drawingTextByDiscipline)) {
+        drawingContext += `\n=== ${disc.toUpperCase()} DRAWING TEXT ===\n`;
+        // Cap total text per discipline to ~4000 chars
+        let charCount = 0;
+        for (const t of texts) {
+          if (charCount + t.length > 4000) break;
+          drawingContext += t + "\n";
+          charCount += t.length;
+        }
+      }
+    } else {
+      drawingContext = "\n[No extracted drawing text available — segments will be inferred from file names and project type only]\n";
+    }
+
+    // File discipline summary
+    let fileDisciplineSummary = "";
+    for (const [disc, fns] of Object.entries(filesByDiscipline)) {
+      fileDisciplineSummary += `${disc}: ${fns.join(", ")}\n`;
+    }
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
