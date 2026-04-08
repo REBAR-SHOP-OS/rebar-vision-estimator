@@ -122,14 +122,17 @@ Deno.serve(async (req) => {
       }
 
       // Determine final state
+      const hasFiles = files.length > 0;
       const finalScore = hasEstimates && hasScope && hasDrawings ? "L3"
         : hasScope && hasDrawings ? "L2"
         : hasDrawings ? "L1"
+        : hasFiles ? "L1"
         : "L0";
 
       const finalStatus = finalScore === "L3" ? "estimated"
         : finalScore === "L2" ? "scope_detected"
-        : finalScore === "L1" ? (hasDrawings ? "drawings_indexed" : "files_uploaded")
+        : hasDrawings ? "drawings_indexed"
+        : hasFiles ? "files_uploaded"
         : "intake";
 
       await supabase.from("projects").update({
