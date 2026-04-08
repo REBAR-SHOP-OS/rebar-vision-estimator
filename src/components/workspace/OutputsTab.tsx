@@ -31,14 +31,18 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
       supabase.from("quote_versions").select("id", { count: "exact" }).eq("project_id", projectId),
       supabase.from("approvals").select("status").eq("project_id", projectId).is("segment_id", null).order("created_at", { ascending: false }).limit(1),
       supabase.from("validation_issues").select("id", { count: "exact" }).eq("project_id", projectId).eq("status", "open"),
-    ]).then(([est, shop, issues, quotes, appRes, openRes]) => {
+      supabase.from("estimate_items").select("id", { count: "exact" }).eq("project_id", projectId),
+      supabase.from("bar_items").select("id", { count: "exact" }).eq("project_id", projectId),
+    ]).then(([est, shop, issues, quotes, appRes, openRes, estItems, barItems]) => {
+      const estCount = (est.count || 0) + (estItems.count || 0);
+      const shopCount = (shop.count || 0);
+      const barCount = (barItems.count || 0);
       setOutputs([
-        { type: "estimate", label: "Estimate Summary", available: (est.count || 0) > 0, count: est.count || 0 },
-        { type: "shop_drawing", label: "Draft Shop Drawings", available: (shop.count || 0) > 0, count: shop.count || 0 },
+        { type: "estimate", label: "Estimate Summary", available: estCount > 0, count: estCount },
+        { type: "shop_drawing", label: "Draft Shop Drawings", available: shopCount > 0 || barCount > 0, count: shopCount || barCount },
         { type: "issues", label: "Issue Report", available: (issues.count || 0) > 0, count: issues.count || 0 },
         { type: "quote", label: "Quote Packages", available: (quotes.count || 0) > 0, count: quotes.count || 0 },
       ]);
-      // Project-level approvals gate outputs (segment-level are informational)
       setApprovalStatus(appRes.data?.[0]?.status || "none");
       setOpenIssues(openRes.count || 0);
       setLoading(false);
