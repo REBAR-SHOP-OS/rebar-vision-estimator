@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { buildShopDrawingHtml } from "@/lib/shop-drawing-template";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
@@ -94,19 +95,40 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
           const url = URL.createObjectURL(blob);
           window.open(url, "_blank");
         } else {
-          // Generate a simple bar schedule HTML from bar_items
-          const { data: segs } = await supabase.from("segments").select("id, name, segment_type").eq("project_id", projectId);
-          const segIds = (segs || []).map((s: any) => s.id);
-          const segMap: Record<string, string> = {};
-          (segs || []).forEach((s: any) => { segMap[s.id] = s.name; });
-          let bars: any[] = [];
-          if (segIds.length > 0) {
-            const { data: bi } = await supabase.from("bar_items").select("*").in("segment_id", segIds);
-            bars = bi || [];
+          // Generate professional shop drawing from bar_items
+          const [projRes2, segRes2] = await Promise.all([
+            supabase.from("projects").select("name, client_name").eq("id", projectId).single(),
+            supabase.from("segments").select("id, name, segment_type").eq("project_id", projectId),
+          ]);
+          const segs2 = segRes2.data || [];
+          const segIds2 = segs2.map((s: any) => s.id);
+          const segMap2: Record<string, { name: string; type: string }> = {};
+          segs2.forEach((s: any) => { segMap2[s.id] = { name: s.name, type: s.segment_type || s.name }; });
+          let bars2: any[] = [];
+          if (segIds2.length > 0) {
+            const { data: bi } = await supabase.from("bar_items").select("*").in("segment_id", segIds2);
+            bars2 = bi || [];
           }
-          if (bars.length === 0) { toast.error("No shop drawing data available"); return; }
-          const rows = bars.map((b: any, i: number) => `<tr><td>${i+1}</td><td>${segMap[b.segment_id] || ""}</td><td>${b.mark || ""}</td><td>${b.size || ""}</td><td>${b.shape_code || ""}</td><td>${b.cut_length || 0}</td><td>${b.quantity || 0}</td><td>${b.finish_type || ""}</td></tr>`).join("");
-          const html = `<html><head><title>Bar Schedule</title><style>table{border-collapse:collapse;width:100%}td,th{border:1px solid #999;padding:6px 10px;font-size:13px}th{background:#2a5c5c;color:#fff}</style></head><body><h2>Bar Schedule</h2><table><tr><th>#</th><th>Segment</th><th>Mark</th><th>Size</th><th>Shape</th><th>Cut Length</th><th>Qty</th><th>Finish</th></tr>${rows}</table></body></html>`;
+          if (bars2.length === 0) { toast.error("No shop drawing data available"); return; }
+          const barList2 = bars2.map((b: any) => ({
+            element_id: segMap2[b.segment_id]?.name || "",
+            element_type: (segMap2[b.segment_id]?.type || "OTHER").toUpperCase(),
+            bar_mark: b.mark || "",
+            size: b.size || "",
+            shape_code: b.shape_code || "straight",
+            qty: b.quantity || 0,
+            multiplier: 1,
+            length_mm: b.cut_length || 0,
+            weight_kg: (b.quantity || 0) * ((b.cut_length || 0) / 1000) * getMassKgPerM(b.size),
+          }));
+          const sizeBreak: Record<string, number> = {};
+          barList2.forEach((b: any) => { sizeBreak[b.size] = (sizeBreak[b.size] || 0) + b.weight_kg; });
+          const html = buildShopDrawingHtml({
+            projectName: projRes2.data?.name || "Rebar Takeoff",
+            clientName: projRes2.data?.client_name || "",
+            barList: barList2,
+            sizeBreakdown: sizeBreak,
+          });
           const blob = new Blob([html], { type: "text/html" });
           const url = URL.createObjectURL(blob);
           window.open(url, "_blank");
