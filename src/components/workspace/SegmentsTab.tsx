@@ -12,6 +12,7 @@ import { Loader2, Plus, Layers, Pencil, Trash2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 import { useNavigate } from "react-router-dom";
+import { getMassKgPerM } from "@/lib/rebar-weights";
 
 interface SegmentSuggestion {
   name: string;
@@ -67,6 +68,30 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
   const [suggestions, setSuggestions] = useState<SegmentSuggestion[]>([]);
   const [autoDialogOpen, setAutoDialogOpen] = useState(false);
   const [autoCreating, setAutoCreating] = useState(false);
+
+  // Stats per segment: items count, bar count, computed weight
+  const [segStats, setSegStats] = useState<Record<string, { items: number; bars: number; weightKg: number }>>({});
+
+  const loadStats = async (segIds: string[]) => {
+    if (segIds.length === 0) return;
+    const [barRes, estRes] = await Promise.all([
+      supabase.from("bar_items").select("segment_id, size, quantity, cut_length").in("segment_id", segIds),
+      supabase.from("estimate_items").select("segment_id").in("segment_id", segIds),
+    ]);
+    const stats: Record<string, { items: number; bars: number; weightKg: number }> = {};
+    for (const id of segIds) stats[id] = { items: 0, bars: 0, weightKg: 0 };
+    for (const e of estRes.data || []) {
+      if (stats[e.segment_id]) stats[e.segment_id].items++;
+    }
+    for (const b of barRes.data || []) {
+      if (!stats[b.segment_id]) continue;
+      stats[b.segment_id].bars++;
+      const qty = Number(b.quantity) || 0;
+      const cutMm = Number(b.cut_length) || 0;
+      stats[b.segment_id].weightKg += qty * (cutMm / 1000) * getMassKgPerM(b.size || "");
+    }
+    setSegStats(stats);
+  };
 
   const handleAutoDetect = async () => {
     if (!user) return;
@@ -129,8 +154,10 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
       .eq("project_id", projectId)
       .order("created_at", { ascending: true })
       .then(({ data }) => {
-        setSegments((data as Segment[]) || []);
+        const segs = (data as Segment[]) || [];
+        setSegments(segs);
         setLoading(false);
+        loadStats(segs.map(s => s.id));
       });
   };
 
@@ -261,6 +288,8 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
                 <th className="text-left px-3 py-2.5 font-semibold">Type</th>
                 <th className="text-left px-3 py-2.5 font-semibold">Level</th>
                 <th className="text-left px-3 py-2.5 font-semibold">Status</th>
+                <th className="text-right px-3 py-2.5 font-semibold">Items</th>
+                <th className="text-right px-3 py-2.5 font-semibold">Weight (kg)</th>
                 <th className="text-right px-3 py-2.5 font-semibold">Confidence</th>
                 <th className="text-left px-3 py-2.5 font-semibold">Drawing</th>
                 <th className="text-right px-3 py-2.5 font-semibold">Actions</th>
@@ -280,6 +309,12 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
                   <td className="px-3 py-2.5 text-muted-foreground">{s.level_label || "—"}</td>
                   <td className="px-3 py-2.5">
                     <Badge className={`text-[9px] ${statusColor(s.status)}`}>{s.status}</Badge>
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
+                    {(segStats[s.id]?.items || 0) + (segStats[s.id]?.bars || 0) || "—"}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
+                    {segStats[s.id]?.weightKg > 0 ? segStats[s.id].weightKg.toFixed(1) : "—"}
                   </td>
                   <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
                     {s.confidence > 0 ? `${Math.round(Number(s.confidence) * 100)}%` : "—"}

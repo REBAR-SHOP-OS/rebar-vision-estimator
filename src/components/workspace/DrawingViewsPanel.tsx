@@ -63,6 +63,9 @@ export default function DrawingViewsPanel({ segmentId, projectId }: { segmentId:
         toast.success("Draft drawing generated");
       }
 
+      // Update segment drawing_readiness to draft
+      await supabase.from("segments").update({ drawing_readiness: "draft" }).eq("id", segmentId).eq("drawing_readiness", "not_ready");
+
       await logAuditEvent(user.id, "created", "drawing_view", viewData?.id, projectId, segmentId);
       load();
     } catch {
