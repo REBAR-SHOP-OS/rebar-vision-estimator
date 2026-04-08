@@ -170,6 +170,42 @@ export type Database = {
         }
         Relationships: []
       }
+      audit_events: {
+        Row: {
+          action: string
+          created_at: string | null
+          entity_id: string | null
+          entity_type: string
+          id: string
+          metadata: Json | null
+          project_id: string | null
+          segment_id: string | null
+          user_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string | null
+          entity_id?: string | null
+          entity_type: string
+          id?: string
+          metadata?: Json | null
+          project_id?: string | null
+          segment_id?: string | null
+          user_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string | null
+          entity_id?: string | null
+          entity_type?: string
+          id?: string
+          metadata?: Json | null
+          project_id?: string | null
+          segment_id?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       audit_log: {
         Row: {
           action: string
@@ -530,6 +566,7 @@ export type Database = {
           project_id: string
           quantity_count: number | null
           segment_id: string
+          source_file_id: string | null
           status: string | null
           total_length: number | null
           total_weight: number | null
@@ -549,6 +586,7 @@ export type Database = {
           project_id: string
           quantity_count?: number | null
           segment_id: string
+          source_file_id?: string | null
           status?: string | null
           total_length?: number | null
           total_weight?: number | null
@@ -568,6 +606,7 @@ export type Database = {
           project_id?: string
           quantity_count?: number | null
           segment_id?: string
+          source_file_id?: string | null
           status?: string | null
           total_length?: number | null
           total_weight?: number | null
@@ -1359,6 +1398,30 @@ export type Database = {
         }
         Relationships: []
       }
+      segment_source_links: {
+        Row: {
+          file_id: string
+          id: string
+          linked_at: string | null
+          segment_id: string
+          user_id: string
+        }
+        Insert: {
+          file_id: string
+          id?: string
+          linked_at?: string | null
+          segment_id: string
+          user_id: string
+        }
+        Update: {
+          file_id?: string
+          id?: string
+          linked_at?: string | null
+          segment_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       segments: {
         Row: {
           confidence: number | null
@@ -1613,6 +1676,7 @@ export type Database = {
           segment_id: string | null
           severity: string | null
           sheet_id: string | null
+          source_file_id: string | null
           source_refs: Json | null
           status: string | null
           title: string
@@ -1630,6 +1694,7 @@ export type Database = {
           segment_id?: string | null
           severity?: string | null
           sheet_id?: string | null
+          source_file_id?: string | null
           source_refs?: Json | null
           status?: string | null
           title: string
@@ -1647,6 +1712,7 @@ export type Database = {
           segment_id?: string | null
           severity?: string | null
           sheet_id?: string | null
+          source_file_id?: string | null
           source_refs?: Json | null
           status?: string | null
           title?: string
