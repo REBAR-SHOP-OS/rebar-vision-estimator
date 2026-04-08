@@ -16,6 +16,8 @@ import AppShell from "./components/layout/AppShell";
 import ProjectWorkspace from "./pages/ProjectWorkspace";
 import SegmentDetail from "./pages/SegmentDetail";
 import StandardsPage from "./pages/StandardsPage";
+import OrdersPage from "./pages/OrdersPage";
+import OrderDetail from "./pages/OrderDetail";
 
 const queryClient = new QueryClient();
 
@@ -67,6 +69,8 @@ const App = () => (
                   <Route path="project/:id/outputs" element={<ProjectWorkspace />} />
                   <Route path="project/:id/settings" element={<ProjectWorkspace />} />
                   <Route path="standards" element={<StandardsPage />} />
+                  <Route path="orders" element={<OrdersPage />} />
+                  <Route path="orders/:orderId" element={<OrderDetail />} />
                 </Route>
 
                 <Route path="/blueprint-viewer" element={<ProtectedRoute><BlueprintViewerPage /></ProtectedRoute>} />
