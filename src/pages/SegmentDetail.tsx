@@ -360,6 +360,11 @@ export default function SegmentDetail() {
                         {segment ? [segment.level_label, segment.zone_label, segment.name].filter(Boolean).join(" · ") : "—"}
                       </td>
                       <td className="px-3 py-2"><Badge variant="outline" className="text-[9px]">{item.status}</Badge></td>
+                      <td className="px-2 py-2">
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => deleteEstimateItem(item.id, e)}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
