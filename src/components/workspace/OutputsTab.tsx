@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { buildShopDrawingHtml } from "@/lib/shop-drawing-template";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
