@@ -203,7 +203,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
     setLoading(true);
     Promise.all([
       supabase.from("project_files").select("id, file_name, file_type, file_size, file_path, created_at").eq("project_id", projectId).order("created_at", { ascending: false }),
-      supabase.from("document_versions").select("file_id, source_system, pdf_metadata").eq("project_id", projectId),
+      supabase.from("document_versions").select("file_id, source_system, pdf_metadata, page_count, is_scanned").eq("project_id", projectId),
       supabase.from("segment_source_links").select("file_id"),
       supabase.from("validation_issues").select("source_file_id, status").eq("project_id", projectId),
     ]).then(([filesRes, versionsRes, linksRes, issuesRes]) => {
@@ -223,11 +223,12 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       setIssueCounts(issCounts);
       const enriched: FileRow[] = rawFiles.map((f: any) => {
         const ver = versionMap.get(f.id);
+        const isParsed = ver?.page_count !== null && ver?.page_count !== undefined;
         return {
           ...f,
           discipline: ver?.pdf_metadata?.discipline || undefined,
           revision_label: ver?.pdf_metadata?.revision_label || undefined,
-          parse_status: ver ? "parsed" : "pending",
+          parse_status: isParsed ? "parsed" : "pending",
           is_superseded: ver?.pdf_metadata?.is_superseded || false,
         };
       });
