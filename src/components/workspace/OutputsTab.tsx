@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { FileText, Download, Loader2, ShieldAlert, CheckCircle2, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
+import { exportExcelFile } from "@/lib/excel-export";
+import { getMassKgPerM } from "@/lib/rebar-weights";
 
 interface OutputItem {
   type: string;
@@ -85,23 +87,76 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
         await logAuditEvent(user.id, "exported", "export", undefined, projectId, undefined, { export_type: "shop_drawing_html" });
         toast.success("Shop drawing opened");
       } else if (type === "estimate") {
-        // Export estimate summary as CSV
-        const { data } = await supabase.from("estimate_items")
-          .select("description, bar_size, quantity_count, total_length, total_weight, confidence, status")
-          .eq("project_id", projectId)
-          .neq("item_type", "source_link")
-          .order("created_at");
-        if (!data || data.length === 0) { toast.error("No estimate items to export"); return; }
-        const headers = ["Description", "Bar Size", "Qty", "Length", "Weight", "Confidence", "Status"];
-        const rows = data.map((r: any) => [r.description || "", r.bar_size || "", r.quantity_count, r.total_length, r.total_weight, r.confidence, r.status]);
-        const csv = [headers.join(","), ...rows.map((r: any) => r.map((c: any) => `"${String(c).replace(/"/g, '""')}"`).join(","))].join("\n");
-        const blob = new Blob([csv], { type: "text/csv" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = `estimate-summary-${projectId.slice(0, 8)}.csv`; a.click();
-        URL.revokeObjectURL(url);
-        await logAuditEvent(user.id, "exported", "export", undefined, projectId, undefined, { export_type: "estimate_csv" });
-        toast.success("Estimate summary exported");
+        // Fetch project, segments, estimate_items, bar_items
+        const [projRes, segRes, eiRes] = await Promise.all([
+          supabase.from("projects").select("name, client_name, address, deviations").eq("id", projectId).single(),
+          supabase.from("segments").select("id, name, segment_type").eq("project_id", projectId),
+          supabase.from("estimate_items").select("bar_size, quantity_count, total_weight, segment_id, description, confidence, status").eq("project_id", projectId).neq("item_type", "source_link"),
+        ]);
+        const segIds = (segRes.data || []).map((s: any) => s.id);
+        const segMap: Record<string, string> = {};
+        (segRes.data || []).forEach((s: any) => { segMap[s.id] = s.segment_type || s.name; });
+
+        let barItems: any[] = [];
+        if (segIds.length > 0) {
+          const { data: bi } = await supabase.from("bar_items").select("*").in("segment_id", segIds);
+          barItems = bi || [];
+        }
+
+        if ((eiRes.data || []).length === 0 && barItems.length === 0) { toast.error("No estimate items to export"); return; }
+
+        // Build bar_list for excel-export
+        const barList = barItems.map((b: any) => {
+          const massKgM = getMassKgPerM(b.size);
+          const lengthMm = (b.cut_length || 0);
+          const qty = b.quantity || 0;
+          const wtKg = qty * (lengthMm / 1000) * massKgM;
+          return {
+            element_type: segMap[b.segment_id] || "OTHER",
+            size: b.size || "",
+            qty,
+            multiplier: 1,
+            length_mm: lengthMm,
+            weight_kg: wtKg,
+            bend_type: b.shape_code || "",
+            bar_mark: b.mark || "",
+            description: b.mark || "",
+            notes: b.finish_type || "",
+          };
+        });
+
+        // Size breakdown
+        const sizeBreakdownKg: Record<string, number> = {};
+        barList.forEach((b: any) => { sizeBreakdownKg[b.size] = (sizeBreakdownKg[b.size] || 0) + b.weight_kg; });
+        // Also add from estimate_items
+        (eiRes.data || []).forEach((ei: any) => {
+          if (ei.bar_size && ei.total_weight) {
+            sizeBreakdownKg[ei.bar_size] = (sizeBreakdownKg[ei.bar_size] || 0) + Number(ei.total_weight);
+          }
+        });
+
+        const totalKg = Object.values(sizeBreakdownKg).reduce((a, b) => a + b, 0);
+        const proj = projRes.data;
+
+        const quoteResult = {
+          quote: {
+            bar_list: barList,
+            size_breakdown_kg: sizeBreakdownKg,
+            total_weight_kg: totalKg,
+            risk_flags: [],
+            reconciliation: { drawing_based_total: totalKg },
+          },
+        };
+        const scopeData = {
+          projectName: proj?.name || "Rebar Takeoff",
+          clientName: proj?.client_name || "",
+          address: proj?.address || "",
+          deviations: proj?.deviations || "None noted",
+        };
+
+        await exportExcelFile({ quoteResult, elements: [], scopeData });
+        await logAuditEvent(user.id, "exported", "export", undefined, projectId, undefined, { export_type: "estimate_xlsx" });
+        toast.success("Estimate Excel exported");
       } else if (type === "quote") {
         const { data } = await supabase.from("quote_versions")
           .select("version_number, quoted_price, currency, status, exclusions_text, terms_text, created_at")
