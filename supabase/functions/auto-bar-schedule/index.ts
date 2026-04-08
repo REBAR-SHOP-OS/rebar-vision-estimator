@@ -139,19 +139,25 @@ Generate bar schedule items for these estimate items. For each bar, return the "
       });
     }
 
-    const rows = items.map((item: any) => ({
-      segment_id,
-      user_id: user.id,
-      mark: String(item.mark || "").slice(0, 50),
-      size: String(item.size || "").slice(0, 20),
-      shape_code: String(item.shape_code || "straight").slice(0, 30),
-      cut_length: Math.max(0, Number(item.cut_length) || 0),
-      quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
-      finish_type: String(item.finish_type || "black").slice(0, 20),
-      cover_value: Math.max(0, Number(item.cover_value) || 0),
-      lap_length: Math.max(0, Number(item.lap_length) || 0),
-      confidence: Math.min(1, Math.max(0, Number(item.confidence) || 0)),
-    }));
+    const rows = items.map((item: any) => {
+      const eiIndex = Number(item.estimate_item_index);
+      const linkedEi = !isNaN(eiIndex) && eiIndex >= 0 && eiIndex < estimateItems.length
+        ? estimateItems[eiIndex] : null;
+      return {
+        segment_id,
+        user_id: user.id,
+        mark: String(item.mark || "").slice(0, 50),
+        size: String(item.size || "").slice(0, 20),
+        shape_code: String(item.shape_code || "straight").slice(0, 30),
+        cut_length: Math.max(0, Number(item.cut_length) || 0),
+        quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
+        finish_type: String(item.finish_type || "black").slice(0, 20),
+        cover_value: Math.max(0, Number(item.cover_value) || 0),
+        lap_length: Math.max(0, Number(item.lap_length) || 0),
+        confidence: Math.min(1, Math.max(0, Number(item.confidence) || 0)),
+        estimate_item_id: linkedEi?.id || null,
+      };
+    });
 
     const { data: inserted, error: insertErr } = await supabase
       .from("bar_items")
