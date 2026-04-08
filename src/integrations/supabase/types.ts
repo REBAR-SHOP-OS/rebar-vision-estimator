@@ -128,6 +128,48 @@ export type Database = {
         }
         Relationships: []
       }
+      approvals: {
+        Row: {
+          approval_type: string | null
+          created_at: string | null
+          id: string
+          notes: string | null
+          project_id: string
+          resolved_at: string | null
+          reviewer_email: string | null
+          reviewer_name: string | null
+          segment_id: string | null
+          status: string | null
+          user_id: string
+        }
+        Insert: {
+          approval_type?: string | null
+          created_at?: string | null
+          id?: string
+          notes?: string | null
+          project_id: string
+          resolved_at?: string | null
+          reviewer_email?: string | null
+          reviewer_name?: string | null
+          segment_id?: string | null
+          status?: string | null
+          user_id: string
+        }
+        Update: {
+          approval_type?: string | null
+          created_at?: string | null
+          id?: string
+          notes?: string | null
+          project_id?: string
+          resolved_at?: string | null
+          reviewer_email?: string | null
+          reviewer_name?: string | null
+          segment_id?: string | null
+          status?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       audit_log: {
         Row: {
           action: string
@@ -151,6 +193,57 @@ export type Database = {
           details?: Json | null
           id?: string
           project_id?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      bar_items: {
+        Row: {
+          confidence: number | null
+          cover_value: number | null
+          created_at: string | null
+          cut_length: number | null
+          estimate_item_id: string | null
+          finish_type: string | null
+          id: string
+          lap_length: number | null
+          mark: string | null
+          quantity: number | null
+          segment_id: string
+          shape_code: string | null
+          size: string | null
+          user_id: string
+        }
+        Insert: {
+          confidence?: number | null
+          cover_value?: number | null
+          created_at?: string | null
+          cut_length?: number | null
+          estimate_item_id?: string | null
+          finish_type?: string | null
+          id?: string
+          lap_length?: number | null
+          mark?: string | null
+          quantity?: number | null
+          segment_id: string
+          shape_code?: string | null
+          size?: string | null
+          user_id: string
+        }
+        Update: {
+          confidence?: number | null
+          cover_value?: number | null
+          created_at?: string | null
+          cut_length?: number | null
+          estimate_item_id?: string | null
+          finish_type?: string | null
+          id?: string
+          lap_length?: number | null
+          mark?: string | null
+          quantity?: number | null
+          segment_id?: string
+          shape_code?: string | null
+          size?: string | null
           user_id?: string
         }
         Relationships: []
@@ -383,6 +476,105 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      drawing_views: {
+        Row: {
+          confidence: number | null
+          created_at: string | null
+          generated_json: Json | null
+          id: string
+          revision_label: string | null
+          segment_id: string
+          status: string | null
+          title: string | null
+          user_id: string
+          view_type: string | null
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string | null
+          generated_json?: Json | null
+          id?: string
+          revision_label?: string | null
+          segment_id: string
+          status?: string | null
+          title?: string | null
+          user_id: string
+          view_type?: string | null
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string | null
+          generated_json?: Json | null
+          id?: string
+          revision_label?: string | null
+          segment_id?: string
+          status?: string | null
+          title?: string | null
+          user_id?: string
+          view_type?: string | null
+        }
+        Relationships: []
+      }
+      estimate_items: {
+        Row: {
+          assumptions_json: Json | null
+          bar_size: string | null
+          confidence: number | null
+          created_at: string | null
+          description: string | null
+          exclusions_json: Json | null
+          id: string
+          item_type: string | null
+          labor_factor: number | null
+          project_id: string
+          quantity_count: number | null
+          segment_id: string
+          status: string | null
+          total_length: number | null
+          total_weight: number | null
+          user_id: string
+          waste_factor: number | null
+        }
+        Insert: {
+          assumptions_json?: Json | null
+          bar_size?: string | null
+          confidence?: number | null
+          created_at?: string | null
+          description?: string | null
+          exclusions_json?: Json | null
+          id?: string
+          item_type?: string | null
+          labor_factor?: number | null
+          project_id: string
+          quantity_count?: number | null
+          segment_id: string
+          status?: string | null
+          total_length?: number | null
+          total_weight?: number | null
+          user_id: string
+          waste_factor?: number | null
+        }
+        Update: {
+          assumptions_json?: Json | null
+          bar_size?: string | null
+          confidence?: number | null
+          created_at?: string | null
+          description?: string | null
+          exclusions_json?: Json | null
+          id?: string
+          item_type?: string | null
+          labor_factor?: number | null
+          project_id?: string
+          quantity_count?: number | null
+          segment_id?: string
+          status?: string | null
+          total_length?: number | null
+          total_weight?: number | null
+          user_id?: string
+          waste_factor?: number | null
+        }
+        Relationships: []
       }
       estimate_outcomes: {
         Row: {
@@ -1167,6 +1359,54 @@ export type Database = {
         }
         Relationships: []
       }
+      segments: {
+        Row: {
+          confidence: number | null
+          created_at: string | null
+          drawing_readiness: string | null
+          id: string
+          level_label: string | null
+          name: string
+          notes: string | null
+          project_id: string
+          segment_type: string
+          status: string | null
+          updated_at: string | null
+          user_id: string
+          zone_label: string | null
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string | null
+          drawing_readiness?: string | null
+          id?: string
+          level_label?: string | null
+          name: string
+          notes?: string | null
+          project_id: string
+          segment_type?: string
+          status?: string | null
+          updated_at?: string | null
+          user_id: string
+          zone_label?: string | null
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string | null
+          drawing_readiness?: string | null
+          id?: string
+          level_label?: string | null
+          name?: string
+          notes?: string | null
+          project_id?: string
+          segment_type?: string
+          status?: string | null
+          updated_at?: string | null
+          user_id?: string
+          zone_label?: string | null
+        }
+        Relationships: []
+      }
       sheet_revisions: {
         Row: {
           created_at: string
@@ -1280,6 +1520,48 @@ export type Database = {
           },
         ]
       }
+      standards_profiles: {
+        Row: {
+          code_family: string | null
+          cover_defaults: Json | null
+          created_at: string | null
+          hook_defaults: Json | null
+          id: string
+          is_default: boolean | null
+          lap_defaults: Json | null
+          name: string
+          naming_rules: Json | null
+          units: string | null
+          user_id: string
+        }
+        Insert: {
+          code_family?: string | null
+          cover_defaults?: Json | null
+          created_at?: string | null
+          hook_defaults?: Json | null
+          id?: string
+          is_default?: boolean | null
+          lap_defaults?: Json | null
+          name: string
+          naming_rules?: Json | null
+          units?: string | null
+          user_id: string
+        }
+        Update: {
+          code_family?: string | null
+          cover_defaults?: Json | null
+          created_at?: string | null
+          hook_defaults?: Json | null
+          id?: string
+          is_default?: boolean | null
+          lap_defaults?: Json | null
+          name?: string
+          naming_rules?: Json | null
+          units?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       symbol_lexicon: {
         Row: {
           context: Json | null
@@ -1316,6 +1598,60 @@ export type Database = {
           symbol_id?: string
           unit_default?: string | null
           user_id?: string | null
+        }
+        Relationships: []
+      }
+      validation_issues: {
+        Row: {
+          assigned_to: string | null
+          created_at: string | null
+          description: string | null
+          id: string
+          issue_type: string
+          project_id: string
+          resolution_note: string | null
+          segment_id: string | null
+          severity: string | null
+          sheet_id: string | null
+          source_refs: Json | null
+          status: string | null
+          title: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          issue_type: string
+          project_id: string
+          resolution_note?: string | null
+          segment_id?: string | null
+          severity?: string | null
+          sheet_id?: string | null
+          source_refs?: Json | null
+          status?: string | null
+          title: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          assigned_to?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          issue_type?: string
+          project_id?: string
+          resolution_note?: string | null
+          segment_id?: string | null
+          severity?: string | null
+          sheet_id?: string | null
+          source_refs?: Json | null
+          status?: string | null
+          title?: string
+          updated_at?: string | null
+          user_id?: string
         }
         Relationships: []
       }
