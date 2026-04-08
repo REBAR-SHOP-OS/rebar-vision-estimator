@@ -54,6 +54,7 @@ export default function SegmentDetail() {
   const [bLap, setBLap] = useState("");
   const [barSaving, setBarSaving] = useState(false);
   const [autoEstimating, setAutoEstimating] = useState(false);
+  const [autoBarScheduling, setAutoBarScheduling] = useState(false);
 
   const runAutoEstimate = async () => {
     if (!user || !segId || !projectId) return;
@@ -70,6 +71,24 @@ export default function SegmentDetail() {
       toast.error(e.message || "Auto-estimate failed");
     } finally {
       setAutoEstimating(false);
+    }
+  };
+
+  const runAutoBarSchedule = async () => {
+    if (!user || !segId || !projectId) return;
+    setAutoBarScheduling(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("auto-bar-schedule", {
+        body: { segment_id: segId, project_id: projectId },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      toast.success(`Auto bar schedule created ${data.bars_created} items`);
+      loadData();
+    } catch (e: any) {
+      toast.error(e.message || "Auto bar schedule failed");
+    } finally {
+      setAutoBarScheduling(false);
     }
   };
 
@@ -339,9 +358,15 @@ export default function SegmentDetail() {
         <TabsContent value="bars" className="flex-1 overflow-auto p-4 m-0">
           <div className="flex items-center justify-between mb-3">
             <h4 className="text-sm font-semibold text-foreground">Bar Schedule</h4>
-            <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={() => openBarDialog()}>
-              <Plus className="h-3 w-3" />Add Bar
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={runAutoBarSchedule} disabled={autoBarScheduling || estimateItems.length === 0}>
+                {autoBarScheduling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                {autoBarScheduling ? "Generating…" : "Auto Schedule"}
+              </Button>
+              <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={() => openBarDialog()}>
+                <Plus className="h-3 w-3" />Add Bar
+              </Button>
+            </div>
           </div>
           {barItems.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-32 text-muted-foreground gap-2 border border-dashed border-border rounded-lg">
