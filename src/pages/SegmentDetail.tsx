@@ -116,6 +116,15 @@ export default function SegmentDetail() {
 
   useEffect(() => { loadData(); }, [segId, projectId]);
 
+  const deleteEstimateItem = async (itemId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("Delete this estimate item?")) return;
+    const { error } = await supabase.from("estimate_items").delete().eq("id", itemId);
+    if (error) { toast.error("Delete failed"); return; }
+    toast.success("Item deleted");
+    loadData();
+  };
+
   // Estimate item edit handlers
   const openEditItem = (item: any | null) => {
     setEditItem(item || "new");
