@@ -1,44 +1,55 @@
 
 
-# Add Wire Mesh (WWM) Support to Auto-Estimate
+# Auto-Segments: Cross-Reference ALL Uploaded Drawings
 
 ## Problem
-When drawings specify wire mesh (e.g., "WWM 6x6 W2.9/W2.9" for slabs-on-grade), the system currently estimates rebar instead. It should detect WWM callouts in drawing text and generate wire mesh items with proper area/sheet-based calculations.
+The `auto-segments` edge function only passes **file names** to the AI. It doesn't read any extracted drawing content. With scope_items, project_type, and description all null, the AI can only guess from file names like "CRU-1 Structral (4).pdf" — producing generic segments that ignore the architectural file entirely.
+
+The user wants the system to read BOTH structural and architectural drawings and cross-reference them to generate accurate, specific segments.
+
+## Root Cause
+1. `auto-segments/index.ts` fetches `project_files.file_name` only — no extracted text
+2. `drawing_search_index` and `logical_drawings` tables are empty for this project (blueprint analysis hasn't populated them)
+3. No `document_versions` data exists either
+4. The function has no fallback to read raw text from any source
 
 ## Changes
 
-### 1. Auto-Estimate Edge Function — WWM Detection & Calculation
-**File**: `supabase/functions/auto-estimate/index.ts`
+### 1. `supabase/functions/auto-segments/index.ts` — Inject extracted drawing text
 
-Update the AI system prompt to:
-- Detect wire mesh callouts in drawing text (WWM, welded wire mesh, mesh designations like 6x6-W2.9/W2.9, 152x152 MW9.1/MW9.1)
-- When mesh is found, generate items with `item_type: "wwm"` instead of `"rebar"`
-- WWM items use different fields: `description` (mesh designation), `bar_size` (mesh spec e.g. "6x6-W2.9"), `quantity_count` (number of sheets), `total_weight` (kg), `total_length` (area in m²)
-- Include WWM weight reference in prompt: common mesh weights (kg/m²) — e.g. 6x6-W1.4/W1.4 = 0.93 kg/m², 6x6-W2.9/W2.9 = 1.90 kg/m², 6x6-W4.0/W4.0 = 2.63 kg/m²
-- For SOG/slab segments: if drawing text contains mesh notation, estimate mesh; if it contains rebar notation, estimate rebar; if both, estimate both
-- Apply sheet count calculation: standard sheets 5'x10' (1.52x3.05m = 4.65 m²), with 150mm (6") overlap allowance
+Fetch extracted text from `drawing_search_index` for the project. If empty (as currently), fall back to fetching `document_versions.pdf_metadata` pages. Group text snippets by discipline (detected from file name patterns: S-/STR = Structural, A-/ARCH = Architectural).
 
-### 2. Rebar Weights Utility — Add WWM Weight Table
-**File**: `src/lib/rebar-weights.ts`
+Pass this grouped text context to the AI prompt so it can:
+- Parse actual footing schedules, slab callouts, wall types from structural drawings
+- Identify architectural elements (CMU walls, concrete curbs, equipment pads) from architectural drawings
+- Cross-reference: flag "Hidden Scope" (structural items found only on architectural sheets) and "Orphan Scope" (architectural concrete lacking structural details)
+- Tag each suggested segment's `notes` with which file(s) it was derived from (e.g., "Found on: S-101, A-201")
 
-Add a `WWM_KG_PER_M2` lookup table for common mesh designations and a `getWwmMassKgPerM2(designation)` function so the UI can compute weights consistently for WWM items (same pattern as `getMassKgPerM` for rebar).
+Updated prompt additions:
+```
+=== STRUCTURAL DRAWING TEXT ===
+[extracted text from structural files]
 
-Common designations:
-- 6x6-W1.4/W1.4 = 0.93 kg/m²
-- 6x6-W2.1/W2.1 = 1.37 kg/m²
-- 6x6-W2.9/W2.9 = 1.90 kg/m²
-- 6x6-W4.0/W4.0 = 2.63 kg/m²
-- 4x4-W2.1/W2.1 = 2.05 kg/m²
-- 4x4-W4.0/W4.0 = 3.94 kg/m²
-- 152x152 MW9.1/MW9.1 = 1.90 kg/m² (metric equivalent)
+=== ARCHITECTURAL DRAWING TEXT ===  
+[extracted text from architectural files]
 
-### 3. SegmentDetail.tsx — Display WWM Items Properly
-**File**: `src/pages/SegmentDetail.tsx`
+Cross-reference rules:
+- Check BOTH structural and architectural drawings for concrete elements
+- Architectural drawings may show concrete elements (curbs, pads, CMU walls) not on structural sheets
+- Structural drawings show rebar details; architectural shows dimensions and locations
+- Note which drawing(s) each segment was found on
+```
 
-In the estimate items table and weight calculation box:
-- For `item_type === "wwm"`: show "Area (m²)" instead of "Length (m)" in the table
-- Weight calc explanation: `Weight = Area (m²) × mass (kg/m²)` instead of the rebar formula
-- Summary cards: separate rebar weight from mesh weight totals
+### 2. Handle empty extraction gracefully
 
-## No new files, no migrations, no edge function changes (only prompt update to existing auto-estimate)
+If no extracted text is available from either `drawing_search_index` or `document_versions`, the function should still work (current behavior) but add a note: "No drawing text extracted — segments inferred from file names and project type only."
+
+### 3. Increase `max_tokens` to 3000
+
+With more context (drawing text from multiple files), the AI needs more room to respond.
+
+## Files Modified
+- `supabase/functions/auto-segments/index.ts` — fetch drawing text from `drawing_search_index` / `document_versions`, group by discipline, inject into prompt
+
+## No new files, no migrations
 
