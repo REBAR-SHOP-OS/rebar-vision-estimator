@@ -100,6 +100,40 @@ export default function FilesTab({ projectId }: { projectId: string }) {
     else toast.error("Could not generate file URL");
   };
 
+  const handleParseAll = async () => {
+    if (!user) return;
+    setParsing(true);
+    try {
+      // Create missing document_versions for files that lack them
+      const pendingFiles = files.filter(f => f.parse_status === "pending");
+      for (const f of pendingFiles) {
+        try {
+          const hash = `pending_${Date.now()}_${f.id}`;
+          const discipline = detectDiscipline(f.file_name);
+          await supabase.from("document_versions").insert({
+            project_id: projectId,
+            user_id: user.id,
+            file_id: f.id,
+            file_name: f.file_name,
+            file_path: f.file_path,
+            sha256: hash,
+            source_system: "upload",
+            pdf_metadata: discipline ? { discipline } : {},
+          });
+        } catch (_) { /* best effort */ }
+      }
+      // Trigger the processing pipeline
+      const { error } = await supabase.functions.invoke("process-pipeline", { body: { project_id: projectId } });
+      if (error) toast.error("Pipeline trigger failed");
+      else toast.success(`Parsing started for ${pendingFiles.length} file(s)`);
+      loadFiles();
+    } catch (err) {
+      toast.error("Failed to start parsing");
+    } finally {
+      setParsing(false);
+    }
+  };
+
   const loadFiles = () => {
     setLoading(true);
     Promise.all([
