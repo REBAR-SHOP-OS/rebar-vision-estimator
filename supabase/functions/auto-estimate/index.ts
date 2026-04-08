@@ -198,8 +198,22 @@ Generate estimate items for this segment. Base quantities on the ACTUAL drawing 
       });
     }
 
+    // Weight validation gate — flag outliers
+    const totalAiWeight = items.reduce((s: number, i: any) => s + (Number(i.total_weight) || 0), 0);
+    const segType = segment.segment_type;
+    const weightLimits: Record<string, number> = {
+      footing: 5000, pier: 3000, slab: 15000, wall: 8000, beam: 5000, column: 3000,
+      stair: 2000, pit: 2000, curb: 1000, retaining_wall: 10000, miscellaneous: 10000,
+    };
+    const maxWeight = weightLimits[segType] || 15000;
+    if (totalAiWeight > maxWeight) {
+      console.warn(`[weight-gate] AI estimated ${totalAiWeight.toFixed(0)}kg for ${segType} segment "${segment.name}" — exceeds ${maxWeight}kg limit. Flagging low confidence.`);
+      // Scale down confidence for all items to flag as suspicious
+      items.forEach((item: any) => { item.confidence = Math.min(item.confidence || 0.5, 0.4); });
+    }
+
     // Pick first project file as source reference (if any)
-    const sourceFileId = files.length > 0 ? (await supabase.from("project_files").select("id").eq("project_id", project_id).limit(1).single()).data?.id : null;
+    const sourceFileId = files.length > 0 ? files[0].id : null;
 
     // Insert items into estimate_items
     const rows = items.map((item: any) => ({
