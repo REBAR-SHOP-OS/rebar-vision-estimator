@@ -30,6 +30,8 @@ export default function SegmentDetail() {
   const [approvalStatus, setApprovalStatus] = useState<string>("none");
   const [loading, setLoading] = useState(true);
   const [projectFiles, setProjectFiles] = useState<any[]>([]);
+  const [docVersions, setDocVersions] = useState<any[]>([]);
+  const [searchIndexEntries, setSearchIndexEntries] = useState<any[]>([]);
 
   // Estimate item edit state
   const [editItem, setEditItem] = useState<any>(null);
