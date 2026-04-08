@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Loader2, Layers, AlertTriangle, FileText, Eye, CheckCircle2, ShieldAlert, Clock, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, Loader2, Layers, AlertTriangle, FileText, Eye, CheckCircle2, ShieldAlert, Clock, Pencil, Plus, Sparkles, Trash2, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 import SourcesPanel from "@/components/workspace/SourcesPanel";
@@ -30,6 +30,8 @@ export default function SegmentDetail() {
   const [approvalStatus, setApprovalStatus] = useState<string>("none");
   const [loading, setLoading] = useState(true);
   const [projectFiles, setProjectFiles] = useState<any[]>([]);
+  const [docVersions, setDocVersions] = useState<any[]>([]);
+  const [searchIndexEntries, setSearchIndexEntries] = useState<any[]>([]);
 
   // Estimate item edit state
   const [editItem, setEditItem] = useState<any>(null);
@@ -102,14 +104,18 @@ export default function SegmentDetail() {
       supabase.from("bar_items").select("*").eq("segment_id", segId).order("mark"),
       supabase.from("validation_issues").select("*").eq("segment_id", segId).order("created_at", { ascending: false }),
       supabase.from("approvals").select("status").eq("segment_id", segId).order("created_at", { ascending: false }).limit(1),
-      supabase.from("project_files").select("id, file_name").eq("project_id", projectId),
-    ]).then(([seg, est, bar, iss, app, files]) => {
+      supabase.from("project_files").select("id, file_name, file_path").eq("project_id", projectId),
+      supabase.from("document_versions").select("id, file_id, page_count, file_name").eq("project_id", projectId),
+      supabase.from("drawing_search_index").select("id, document_version_id, page_number").eq("project_id", projectId),
+    ]).then(([seg, est, bar, iss, app, files, docs, dsi]) => {
       setSegment(seg.data);
       setEstimateItems(est.data || []);
       setBarItems(bar.data || []);
       setIssues(iss.data || []);
       setApprovalStatus(app.data?.[0]?.status || "none");
       setProjectFiles(files.data || []);
+      setDocVersions(docs.data || []);
+      setSearchIndexEntries(dsi.data || []);
       setLoading(false);
     });
   };
@@ -264,6 +270,39 @@ export default function SegmentDetail() {
   };
 
   const fileNameById = (id: string) => projectFiles.find(f => f.id === id)?.file_name || "";
+
+  // Resolve page number for a source file
+  const getPageNumber = (sourceFileId: string | null): number | null => {
+    if (!sourceFileId) return null;
+    const dv = docVersions.find(d => d.file_id === sourceFileId);
+    if (!dv) return null;
+    const entry = searchIndexEntries.find(e => e.document_version_id === dv.id);
+    return entry?.page_number ?? null;
+  };
+
+  const segmentAddress = [segment.level_label, segment.zone_label, segment.segment_type?.replace(/_/g, " ")].filter(Boolean).join(" / ");
+
+  const openDrawingViewer = async (sourceFileId: string, pageNumber: number | null) => {
+    const file = projectFiles.find(f => f.id === sourceFileId);
+    if (!file?.file_path) return;
+    try {
+      const { data: urlData } = await supabase.storage.from("blueprints").createSignedUrl(file.file_path, 3600);
+      if (!urlData?.signedUrl) { toast.error("Could not load drawing"); return; }
+      const viewerData = {
+        imageUrl: urlData.signedUrl,
+        elements: [],
+        selectedElementId: null,
+        reviewStatuses: {},
+      };
+      sessionStorage.setItem("blueprint-viewer-data", JSON.stringify(viewerData));
+      // If PDF with page number, the viewer reads currentPage from session or defaults to 1
+      // We'll encode page in the URL hash for the viewer to pick up
+      const url = pageNumber ? `/blueprint-viewer#page=${pageNumber}` : "/blueprint-viewer";
+      window.open(url, "_blank");
+    } catch {
+      toast.error("Could not open drawing");
+    }
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -490,26 +529,40 @@ export default function SegmentDetail() {
                         : estimateItems.find(ei => ei.bar_size && b.size && ei.bar_size === b.size);
                       const sourceFileName = linkedEi?.source_file_id ? fileNameById(linkedEi.source_file_id) : "";
                       const conf = Number(b.confidence) || 0;
+                      const pageNum = linkedEi?.source_file_id ? getPageNumber(linkedEi.source_file_id) : null;
                       return (
-                        <div key={b.id} className="py-1 border-b border-border/30 last:border-0">
+                        <div key={b.id} className="py-1.5 border-b border-border/30 last:border-0">
                           <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
                             <span className="text-foreground font-medium w-12">{b.mark || "—"}</span>
+                            <span className="bg-primary/10 text-primary font-semibold px-1.5 rounded text-[10px] mr-1.5">{b.size || "?"}</span>
                             <span className="flex-1">
                               {qty} × ({cutMm.toLocaleString()} mm ÷ 1000) × {massKgM.toFixed(3)} kg/m
                             </span>
                             <span className="font-semibold text-primary ml-2">= {wKg.toFixed(1)} kg</span>
                           </div>
-                          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 ml-12 text-[9px] text-muted-foreground/80">
+                          <div className="flex flex-col gap-0.5 mt-1 ml-12 text-[9px] text-muted-foreground/80">
                             {linkedEi && (
-                              <span>Source: <span className="text-foreground/70">{linkedEi.description || "—"}</span></span>
+                              <span>📍 Source: <span className="text-foreground/70">{linkedEi.description || "—"}</span></span>
                             )}
                             {sourceFileName && (
-                              <span>Drawing: <span className="text-foreground/70">{sourceFileName}</span></span>
+                              <span className="flex items-center gap-1">
+                                Drawing: <span className="text-foreground/70">{sourceFileName}</span>
+                                {pageNum && <span>· Page {pageNum}</span>}
+                                {segmentAddress && <span>· Segment: {segmentAddress}</span>}
+                                {linkedEi?.source_file_id && (
+                                  <button
+                                    onClick={() => openDrawingViewer(linkedEi.source_file_id, pageNum)}
+                                    className="inline-flex items-center gap-0.5 text-primary hover:underline ml-1"
+                                  >
+                                    <ExternalLink className="h-2.5 w-2.5" />Open
+                                  </button>
+                                )}
+                              </span>
                             )}
-                            {conf > 0 && (
-                              <span>Confidence: <span className="text-foreground/70">{Math.round(conf * 100)}%</span></span>
-                            )}
-                            <span>{b.estimate_item_id ? "AI-generated" : conf > 0 ? "AI-generated (unlinked)" : "Manual"}</span>
+                            <span className="flex items-center gap-2">
+                              {conf > 0 && <span>Confidence: <span className="text-foreground/70">{Math.round(conf * 100)}%</span></span>}
+                              <span>{b.estimate_item_id ? "AI-generated" : conf > 0 ? "AI-generated (unlinked)" : "Manual"}</span>
+                            </span>
                           </div>
                         </div>
                       );
