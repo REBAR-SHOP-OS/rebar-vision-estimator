@@ -1,47 +1,37 @@
 
 
-# Estimate Export — Professional Excel Format (Like Reference File)
+# Wire Draft Shop Drawings Export to Professional Template
 
 ## Problem
-The Outputs tab "Estimate Summary" export currently produces a basic CSV. The user wants it to export a professional Excel file matching the uploaded reference file (20_york-5.xlsx), which has:
-- **Sheet 1**: Project header, weight-by-size summary, element-wise summary, grand totals, notes, mesh details
-- **Sheet 2**: Full bar list grouped by element with columns: SL.No., Identification, Multiplier, Qty, Bar Dia, Length ft-in, Length mm, Bend, Info, Total Length, Total Weight
+The "Draft Shop Drawings" export in the Outputs tab generates a basic HTML table when no saved `shop_drawings` record exists. The professional multi-sheet template (`buildShopDrawingHtml` in `src/lib/shop-drawing-template.ts`) — which matches the reference PDF format with plan layouts, bar bending schedules, shape keys, lap schedules, cover details, revision blocks, and REBAR.SHOP title block — is never called.
 
 ## What Changes
 
-### OutputsTab.tsx — Replace CSV export with Excel export
-When the user clicks "Export" on "Estimate Summary", instead of generating a plain CSV, fetch all `estimate_items`, `bar_items`, and `segments` for the project, assemble a `quoteResult`-like object, and call the existing `exportExcelFile()` from `src/lib/excel-export.ts`.
+### OutputsTab.tsx — Replace basic HTML fallback with professional template
+In the `handleExport` for `type === "shop_drawing"`, when no saved `shop_drawings` record exists, instead of building basic `<table>` HTML:
 
-### Existing excel-export.ts already matches the reference format
-The `buildEstimateSummarySheet` and `buildBarListSheet` functions already produce a 2-sheet Excel with:
-- Teal project header, weight-by-size table, element-wise breakdown, grand totals in yellow, notes, mesh details
-- Bar list grouped by element type with all columns from the reference
+1. Fetch `segments` (id, name, segment_type) and `bar_items` for the project
+2. Fetch project metadata (name, client_name, address)
+3. Map `bar_items` to the `ShopDrawingBar[]` format expected by `buildShopDrawingHtml`
+4. Call `buildShopDrawingHtml()` directly (client-side, no edge function call needed)
+5. Open the resulting HTML in a new tab (same as current behavior)
 
-The only missing piece is **wiring the OutputsTab export to use this function** instead of CSV.
+### Data mapping (bar_items → ShopDrawingBar)
+```
+element_id    → segment name
+element_type  → segment_type
+bar_mark      → mark
+size          → size
+shape_code    → shape_code
+qty           → quantity
+length_mm     → cut_length
+```
 
 ## Technical Details
 
-**File modified**: `src/components/workspace/OutputsTab.tsx` — patch the `handleExport` for `type === "estimate"`:
-
-1. Fetch `estimate_items` (with segment relation for element grouping)
-2. Fetch `bar_items` for all segments in the project
-3. Fetch `segments` for element type names
-4. Fetch project metadata from `projects` table
-5. Build a synthetic `quoteResult` object with `bar_list`, `size_breakdown_kg`, `total_weight_kg`
-6. Call `exportExcelFile({ quoteResult, elements: [], scopeData })` 
-7. Remove the old CSV logic for estimate
-
-### Data assembly (pseudo):
-```
-- segments → element types
-- estimate_items → weight/size aggregation
-- bar_items → detailed bar list rows with size, qty, cut_length, shape, finish
-- Compute weights using getMassKgPerM()
-- Group bars by segment.segment_type (= element_type)
-```
-
-## Files Modified
-- `src/components/workspace/OutputsTab.tsx` — replace estimate CSV export with Excel export using existing `exportExcelFile`
-
-## No new files, no migrations
+**File modified**: `src/components/workspace/OutputsTab.tsx`
+- Add import: `import { buildShopDrawingHtml } from "@/lib/shop-drawing-template"`
+- Replace lines 97-112 (the else block for shop_drawing) with the professional template call
+- Fetch project info for projectName/clientName
+- No new files, no migrations, no edge function changes
 
