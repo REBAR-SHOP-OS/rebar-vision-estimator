@@ -7,10 +7,20 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Loader2, Plus, Layers, Pencil, Trash2 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Loader2, Plus, Layers, Pencil, Trash2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 import { useNavigate } from "react-router-dom";
+
+interface SegmentSuggestion {
+  name: string;
+  segment_type: string;
+  level_label: string | null;
+  zone_label: string | null;
+  notes: string | null;
+  selected: boolean;
+}
 
 interface Segment {
   id: string;
@@ -51,6 +61,65 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
   const [editSaving, setEditSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Auto-detect state
+  const [autoDetecting, setAutoDetecting] = useState(false);
+  const [suggestions, setSuggestions] = useState<SegmentSuggestion[]>([]);
+  const [autoDialogOpen, setAutoDialogOpen] = useState(false);
+  const [autoCreating, setAutoCreating] = useState(false);
+
+  const handleAutoDetect = async () => {
+    if (!user) return;
+    setAutoDetecting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("auto-segments", {
+        body: { projectId },
+      });
+      if (error) throw error;
+      const items = (data?.suggestions || []).map((s: any) => ({ ...s, selected: true }));
+      if (items.length === 0) {
+        toast.info("No new segments suggested. Upload blueprints or define scope items first.");
+      } else {
+        setSuggestions(items);
+        setAutoDialogOpen(true);
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Auto-detect failed");
+    }
+    setAutoDetecting(false);
+  };
+
+  const toggleSuggestion = (idx: number) => {
+    setSuggestions(prev => prev.map((s, i) => i === idx ? { ...s, selected: !s.selected } : s));
+  };
+
+  const handleCreateSuggestions = async () => {
+    if (!user) return;
+    const selected = suggestions.filter(s => s.selected);
+    if (selected.length === 0) { toast.error("Select at least one segment"); return; }
+    setAutoCreating(true);
+    let created = 0;
+    for (const s of selected) {
+      const { error, data: inserted } = await supabase.from("segments").insert({
+        project_id: projectId,
+        user_id: user.id,
+        name: s.name,
+        segment_type: s.segment_type,
+        level_label: s.level_label,
+        zone_label: s.zone_label,
+        notes: s.notes,
+      }).select("id").single();
+      if (!error && inserted) {
+        await logAuditEvent(user.id, "created", "segment", inserted.id, projectId, undefined, { source: "auto-detect" });
+        created++;
+      }
+    }
+    toast.success(`${created} segment${created !== 1 ? "s" : ""} created`);
+    setAutoDialogOpen(false);
+    setSuggestions([]);
+    load();
+    setAutoCreating(false);
+  };
 
   const load = () => {
     setLoading(true);
@@ -142,10 +211,15 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
     <div className="p-4 md:p-6">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-foreground">Segments</h3>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm" className="gap-1.5 h-8 text-xs"><Plus className="h-3.5 w-3.5" />Add Segment</Button>
-          </DialogTrigger>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" className="gap-1.5 h-8 text-xs" onClick={handleAutoDetect} disabled={autoDetecting}>
+            {autoDetecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            Auto-detect
+          </Button>
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm" className="gap-1.5 h-8 text-xs"><Plus className="h-3.5 w-3.5" />Add Segment</Button>
+            </DialogTrigger>
           <DialogContent className="sm:max-w-md">
             <DialogHeader><DialogTitle>New Segment</DialogTitle></DialogHeader>
             <div className="space-y-3">
@@ -170,6 +244,7 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {segments.length === 0 ? (
@@ -255,6 +330,57 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
           <div className="flex gap-2 justify-end mt-2">
             <Button variant="outline" size="sm" onClick={() => setDeleteId(null)}>Cancel</Button>
             <Button variant="destructive" size="sm" onClick={handleDelete} disabled={deleting}>{deleting ? "Deleting…" : "Delete"}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Auto-detect Suggestions Dialog */}
+      <Dialog open={autoDialogOpen} onOpenChange={setAutoDialogOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-sm flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              Auto-detected Segments ({suggestions.filter(s => s.selected).length}/{suggestions.length} selected)
+            </DialogTitle>
+          </DialogHeader>
+          <div className="overflow-auto flex-1 space-y-1.5 pr-1">
+            {suggestions.map((s, idx) => (
+              <label
+                key={idx}
+                className={`flex items-start gap-3 p-2.5 rounded-lg border transition-colors cursor-pointer ${
+                  s.selected ? "border-primary/40 bg-primary/5" : "border-border bg-muted/20"
+                }`}
+              >
+                <Checkbox
+                  checked={s.selected}
+                  onCheckedChange={() => toggleSuggestion(idx)}
+                  className="mt-0.5"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-foreground">{s.name}</span>
+                    <Badge variant="outline" className="text-[9px] capitalize">{s.segment_type.replace(/_/g, " ")}</Badge>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted-foreground">
+                    {s.level_label && <span>Level: {s.level_label}</span>}
+                    {s.zone_label && <span>Zone: {s.zone_label}</span>}
+                  </div>
+                  {s.notes && <p className="text-[10px] text-muted-foreground mt-0.5">{s.notes}</p>}
+                </div>
+              </label>
+            ))}
+          </div>
+          <div className="flex items-center justify-between pt-3 border-t border-border">
+            <Button variant="ghost" size="sm" className="text-xs" onClick={() => setSuggestions(prev => prev.map(s => ({ ...s, selected: !suggestions.every(x => x.selected) })))}>
+              {suggestions.every(s => s.selected) ? "Deselect All" : "Select All"}
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => setAutoDialogOpen(false)}>Cancel</Button>
+              <Button size="sm" onClick={handleCreateSuggestions} disabled={autoCreating || suggestions.filter(s => s.selected).length === 0} className="gap-1.5">
+                {autoCreating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+                Create {suggestions.filter(s => s.selected).length} Segment{suggestions.filter(s => s.selected).length !== 1 ? "s" : ""}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
