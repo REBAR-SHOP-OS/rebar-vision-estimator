@@ -325,7 +325,7 @@ function normalizeElementRegions(
         synthetic: false,
       };
     })
-    .filter((region): region is NormalizedElementRegion => Boolean(region));
+    .filter((region): region is NormalizedElementRegion => region !== null && region !== undefined);
 
   if (directRegions.length > 0) {
     return directRegions.sort((a, b) => {
@@ -613,7 +613,7 @@ function selectViewsForElement(region: NormalizedElementRegion, bars: Normalized
       break;
   }
 
-  const flagForReview = region.synthetic && (complex || views.length > 1);
+  const flagForReview = !!(region.synthetic && (complex || views.length > 1));
   const reviewReason = flagForReview
     ? "Source geometry was incomplete, so these view frames were inferred from bar data. Verify dimensions and orientation before issue."
     : undefined;
@@ -1458,6 +1458,7 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
     coatingType,
     dateStr,
     logoDataUri,
+    estimateContext: estimateContext || "",
     options,
   })).join("");
 
