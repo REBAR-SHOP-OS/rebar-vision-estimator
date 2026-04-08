@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from "react-router-dom";
-import { getMassKgPerM } from "@/lib/rebar-weights";
+import { getMassKgPerM, getWwmMassKgPerM2 } from "@/lib/rebar-weights";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -242,8 +242,11 @@ export default function SegmentDetail() {
     );
   }
 
+  const rebarItems = estimateItems.filter(i => i.item_type !== "wwm");
+  const wwmItems = estimateItems.filter(i => i.item_type === "wwm");
   const totalWeight = estimateItems.reduce((sum, i) => sum + Number(i.total_weight || 0), 0);
-  const totalLength = estimateItems.reduce((sum, i) => sum + Number(i.total_length || 0), 0);
+  const totalLength = rebarItems.reduce((sum, i) => sum + Number(i.total_length || 0), 0);
+  const totalWwmArea = wwmItems.reduce((sum, i) => sum + Number(i.total_length || 0), 0);
   const openIssues = issues.filter(i => i.status === "open").length;
   const blockers = issues.filter(i => i.status === "open" && (i.severity === "error" || i.severity === "critical")).length;
 
@@ -311,9 +314,12 @@ export default function SegmentDetail() {
               </Button>
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <div className={`grid grid-cols-2 ${wwmItems.length > 0 ? "md:grid-cols-5" : "md:grid-cols-4"} gap-3 mb-4`}>
             <Card><CardContent className="p-3 text-center"><p className="text-lg font-bold">{estimateItems.length}</p><p className="text-[10px] text-muted-foreground uppercase">Items</p></CardContent></Card>
-            <Card><CardContent className="p-3 text-center"><p className="text-lg font-bold font-mono">{totalLength.toLocaleString()}</p><p className="text-[10px] text-muted-foreground uppercase">Total Length (m)</p></CardContent></Card>
+            <Card><CardContent className="p-3 text-center"><p className="text-lg font-bold font-mono">{totalLength.toLocaleString()}</p><p className="text-[10px] text-muted-foreground uppercase">Rebar Length (m)</p></CardContent></Card>
+            {wwmItems.length > 0 && (
+              <Card><CardContent className="p-3 text-center"><p className="text-lg font-bold font-mono">{totalWwmArea.toLocaleString()}</p><p className="text-[10px] text-muted-foreground uppercase">Mesh Area (m²)</p></CardContent></Card>
+            )}
             <Card><CardContent className="p-3 text-center"><p className="text-lg font-bold font-mono">{totalWeight.toLocaleString()}</p><p className="text-[10px] text-muted-foreground uppercase">Total Weight (kg)</p></CardContent></Card>
             <Card><CardContent className="p-3 text-center"><p className="text-lg font-bold">{openIssues}</p><p className="text-[10px] text-muted-foreground uppercase">Open Issues</p></CardContent></Card>
           </div>
@@ -339,8 +345,9 @@ export default function SegmentDetail() {
                     <th className="text-left px-3 py-2 font-semibold">Description</th>
                     <th className="text-left px-3 py-2 font-semibold">Bar Size</th>
                     <th className="text-right px-3 py-2 font-semibold">Qty</th>
-                    <th className="text-right px-3 py-2 font-semibold">Length</th>
+                    <th className="text-right px-3 py-2 font-semibold">Length / Area</th>
                     <th className="text-right px-3 py-2 font-semibold">Weight</th>
+                    <th className="text-left px-3 py-2 font-semibold">Type</th>
                     <th className="text-right px-3 py-2 font-semibold">Confidence</th>
                     <th className="text-left px-3 py-2 font-semibold">Source</th>
                     <th className="text-left px-3 py-2 font-semibold">Status</th>
@@ -353,8 +360,9 @@ export default function SegmentDetail() {
                       <td className="px-3 py-2 text-foreground">{item.description || "—"}</td>
                       <td className="px-3 py-2 text-muted-foreground">{item.bar_size || "—"}</td>
                       <td className="px-3 py-2 text-right font-mono">{item.quantity_count}</td>
-                      <td className="px-3 py-2 text-right font-mono">{Number(item.total_length).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-mono">{Number(item.total_length).toLocaleString()}{item.item_type === "wwm" ? " m²" : ""}</td>
                       <td className="px-3 py-2 text-right font-mono">{Number(item.total_weight).toLocaleString()}</td>
+                      <td className="px-3 py-2"><Badge variant="outline" className="text-[9px]">{item.item_type === "wwm" ? "WWM" : "Rebar"}</Badge></td>
                       <td className="px-3 py-2 text-right font-mono">{Number(item.confidence) > 0 ? `${Math.round(Number(item.confidence) * 100)}%` : "—"}</td>
                       <td className="px-3 py-2 text-muted-foreground text-[10px] truncate max-w-[160px]">
                         {segment ? [segment.level_label, segment.zone_label, segment.name].filter(Boolean).join(" · ") : "—"}

@@ -90,6 +90,32 @@ export function computeItemWeightKg(input: WeightComputationInput): number {
   return qty * multiplier * (length_mm / 1000) * massKgM;
 }
 
+// ── Wire Mesh (WWM) ─────────────────────────────────────────────
+
+/** Common welded wire mesh weights in kg/m² */
+export const WWM_KG_PER_M2: Record<string, number> = {
+  "6x6-W1.4/W1.4": 0.93,
+  "6x6-W2.1/W2.1": 1.37,
+  "6x6-W2.9/W2.9": 1.90,
+  "6x6-W4.0/W4.0": 2.63,
+  "4x4-W2.1/W2.1": 2.05,
+  "4x4-W2.9/W2.9": 2.84,
+  "4x4-W4.0/W4.0": 3.94,
+  "152x152 MW9.1/MW9.1": 1.90,
+  "152x152 MW18.7/MW18.7": 3.94,
+  "102x102 MW9.1/MW9.1": 2.84,
+};
+
+/** Returns mass in kg/m² for a recognized WWM designation */
+export function getWwmMassKgPerM2(designation: string): number {
+  if (WWM_KG_PER_M2[designation]) return WWM_KG_PER_M2[designation];
+  // Try case-insensitive match
+  const key = Object.keys(WWM_KG_PER_M2).find(
+    k => k.toLowerCase() === designation.toLowerCase()
+  );
+  return key ? WWM_KG_PER_M2[key] : 0;
+}
+
 /** kg → lbs */
 export function kgToLbs(kg: number): number {
   return kg / 0.453592;
