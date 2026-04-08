@@ -1,4 +1,5 @@
 import { useParams, useNavigate } from "react-router-dom";
+import { getMassKgPerM } from "@/lib/rebar-weights";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -368,44 +369,80 @@ export default function SegmentDetail() {
               </Button>
             </div>
           </div>
-          {barItems.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-32 text-muted-foreground gap-2 border border-dashed border-border rounded-lg">
-              <Layers className="h-6 w-6" />
-              <p className="text-xs">No bar items yet.</p>
-              <p className="text-[10px]">Add bars manually or run estimation.</p>
-            </div>
-          ) : (
-            <div className="border border-border rounded-lg overflow-hidden">
-              <table className="w-full text-xs">
-                <thead className="bg-muted/60">
-                  <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    <th className="text-left px-3 py-2 font-semibold">Mark</th>
-                    <th className="text-left px-3 py-2 font-semibold">Size</th>
-                    <th className="text-left px-3 py-2 font-semibold">Shape</th>
-                    <th className="text-right px-3 py-2 font-semibold">Cut Length</th>
-                    <th className="text-right px-3 py-2 font-semibold">Qty</th>
-                    <th className="text-left px-3 py-2 font-semibold">Finish</th>
-                    <th className="text-right px-3 py-2 font-semibold">Confidence</th>
-                    <th className="text-right px-3 py-2 font-semibold"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {barItems.map((b) => (
-                    <tr key={b.id} className="border-t border-border/50 hover:bg-muted/20 transition-colors cursor-pointer" onClick={() => openBarDialog(b)}>
-                      <td className="px-3 py-2 font-medium text-foreground">{b.mark || "—"}</td>
-                      <td className="px-3 py-2 text-muted-foreground">{b.size || "—"}</td>
-                      <td className="px-3 py-2 text-muted-foreground">{b.shape_code || "—"}</td>
-                      <td className="px-3 py-2 text-right font-mono">{Number(b.cut_length).toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right font-mono">{b.quantity}</td>
-                      <td className="px-3 py-2 text-muted-foreground capitalize">{b.finish_type}</td>
-                      <td className="px-3 py-2 text-right font-mono">{Number(b.confidence) > 0 ? `${Math.round(Number(b.confidence) * 100)}%` : "—"}</td>
-                      <td className="px-3 py-2 text-right"><Pencil className="h-3 w-3 text-muted-foreground" /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {(() => {
+            const computeBarWeightKg = (b: any) => {
+              const qty = Number(b.quantity) || 0;
+              const cutMm = Number(b.cut_length) || 0;
+              const massKgM = getMassKgPerM(b.size || "");
+              return qty * (cutMm / 1000) * massKgM;
+            };
+            const totalBarCount = barItems.length;
+            const totalBarQty = barItems.reduce((s, b) => s + (Number(b.quantity) || 0), 0);
+            const totalBarWeightKg = barItems.reduce((s, b) => s + computeBarWeightKg(b), 0);
+            const totalCutLength = barItems.reduce((s, b) => s + (Number(b.cut_length) || 0), 0);
+            const uniqueSizes = [...new Set(barItems.map(b => b.size).filter(Boolean))];
+
+            return barItems.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-32 text-muted-foreground gap-2 border border-dashed border-border rounded-lg">
+                <Layers className="h-6 w-6" />
+                <p className="text-xs">No bar items yet.</p>
+                <p className="text-[10px]">Add bars manually or run estimation.</p>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                  <Card><CardContent className="p-3 text-center"><p className="text-lg font-bold">{totalBarCount}</p><p className="text-[10px] text-muted-foreground uppercase">Bars</p></CardContent></Card>
+                  <Card><CardContent className="p-3 text-center"><p className="text-lg font-bold font-mono">{totalBarQty}</p><p className="text-[10px] text-muted-foreground uppercase">Total Qty</p></CardContent></Card>
+                  <Card><CardContent className="p-3 text-center"><p className="text-lg font-bold font-mono">{totalBarWeightKg.toLocaleString(undefined, { maximumFractionDigits: 1 })}</p><p className="text-[10px] text-muted-foreground uppercase">Weight (kg)</p></CardContent></Card>
+                  <Card><CardContent className="p-3 text-center"><p className="text-lg font-bold">{uniqueSizes.join(", ") || "—"}</p><p className="text-[10px] text-muted-foreground uppercase">Sizes</p></CardContent></Card>
+                </div>
+                <div className="border border-border rounded-lg overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/60">
+                      <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        <th className="text-left px-3 py-2 font-semibold">Mark</th>
+                        <th className="text-left px-3 py-2 font-semibold">Size</th>
+                        <th className="text-left px-3 py-2 font-semibold">Shape</th>
+                        <th className="text-right px-3 py-2 font-semibold">Cut Length</th>
+                        <th className="text-right px-3 py-2 font-semibold">Qty</th>
+                        <th className="text-left px-3 py-2 font-semibold">Finish</th>
+                        <th className="text-right px-3 py-2 font-semibold">Weight (kg)</th>
+                        <th className="text-right px-3 py-2 font-semibold">Confidence</th>
+                        <th className="text-right px-3 py-2 font-semibold"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {barItems.map((b) => {
+                        const wKg = computeBarWeightKg(b);
+                        return (
+                          <tr key={b.id} className="border-t border-border/50 hover:bg-muted/20 transition-colors cursor-pointer" onClick={() => openBarDialog(b)}>
+                            <td className="px-3 py-2 font-medium text-foreground">{b.mark || "—"}</td>
+                            <td className="px-3 py-2 text-muted-foreground">{b.size || "—"}</td>
+                            <td className="px-3 py-2 text-muted-foreground">{b.shape_code || "—"}</td>
+                            <td className="px-3 py-2 text-right font-mono">{Number(b.cut_length).toLocaleString()}</td>
+                            <td className="px-3 py-2 text-right font-mono">{b.quantity}</td>
+                            <td className="px-3 py-2 text-muted-foreground capitalize">{b.finish_type}</td>
+                            <td className="px-3 py-2 text-right font-mono font-semibold text-primary">{wKg > 0 ? wKg.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "—"}</td>
+                            <td className="px-3 py-2 text-right font-mono">{Number(b.confidence) > 0 ? `${Math.round(Number(b.confidence) * 100)}%` : "—"}</td>
+                            <td className="px-3 py-2 text-right"><Pencil className="h-3 w-3 text-muted-foreground" /></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-border bg-muted/40 font-semibold">
+                        <td className="px-3 py-2 text-foreground" colSpan={4}>Total</td>
+                        <td className="px-3 py-2 text-right font-mono">{totalBarQty}</td>
+                        <td className="px-3 py-2"></td>
+                        <td className="px-3 py-2 text-right font-mono text-primary">{totalBarWeightKg.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+                        <td className="px-3 py-2" colSpan={2}></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </>
+            );
+          })()}
         </TabsContent>
 
         <TabsContent value="drawings" className="flex-1 overflow-auto p-4 m-0">
