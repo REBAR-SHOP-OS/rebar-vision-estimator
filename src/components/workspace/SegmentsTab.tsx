@@ -7,8 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Loader2, Plus, Layers } from "lucide-react";
+import { Loader2, Plus, Layers, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { logAuditEvent } from "@/lib/audit-logger";
 import { useNavigate } from "react-router-dom";
 
 interface Segment {
@@ -38,6 +39,18 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("miscellaneous");
   const [creating, setCreating] = useState(false);
+
+  // Edit state
+  const [editSegment, setEditSegment] = useState<Segment | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editType, setEditType] = useState("");
+  const [editLevel, setEditLevel] = useState("");
+  const [editZone, setEditZone] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = () => {
     setLoading(true);
