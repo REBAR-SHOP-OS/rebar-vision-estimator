@@ -9,6 +9,7 @@ import { ArrowLeft, Loader2, Layers, AlertTriangle, FileText, Eye, CheckCircle2,
 import SourcesPanel from "@/components/workspace/SourcesPanel";
 import ApprovalPanel from "@/components/workspace/ApprovalPanel";
 import DrawingViewsPanel from "@/components/workspace/DrawingViewsPanel";
+import QATab from "@/components/workspace/QATab";
 
 export default function SegmentDetail() {
   const { id: projectId, segId } = useParams<{ id: string; segId: string }>();
@@ -200,36 +201,11 @@ export default function SegmentDetail() {
         </TabsContent>
 
         <TabsContent value="drawings" className="flex-1 overflow-auto p-4 m-0">
-          <DrawingViewsPanel segmentId={segId!} />
+          <DrawingViewsPanel segmentId={segId!} projectId={projectId} />
         </TabsContent>
 
-        <TabsContent value="issues" className="flex-1 overflow-auto p-4 m-0">
-          {issues.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-32 text-muted-foreground gap-2 border border-dashed border-border rounded-lg">
-              <CheckCircle2 className="h-6 w-6 text-primary" />
-              <p className="text-xs">No issues for this segment.</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {issues.map((issue) => (
-                <div key={issue.id} className="border border-border rounded-lg p-3 hover:bg-muted/20 transition-colors">
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className={`h-3.5 w-3.5 mt-0.5 flex-shrink-0 ${issue.severity === "error" || issue.severity === "critical" ? "text-destructive" : "text-[hsl(var(--status-review))]"}`} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-medium">{issue.title}</span>
-                        <Badge variant="outline" className="text-[9px]">{issue.severity}</Badge>
-                        <Badge variant={issue.status === "open" ? "destructive" : "default"} className="text-[9px]">{issue.status}</Badge>
-                      </div>
-                      {issue.description && <p className="text-xs text-muted-foreground mt-1">{issue.description}</p>}
-                      {issue.assigned_to && <p className="text-[10px] text-muted-foreground mt-1">Assigned: {issue.assigned_to}</p>}
-                      {issue.resolution_note && <p className="text-[10px] text-primary mt-1">Resolution: {issue.resolution_note}</p>}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+        <TabsContent value="issues" className="flex-1 overflow-auto m-0">
+          <QATab projectId={projectId!} segmentId={segId} />
         </TabsContent>
 
         <TabsContent value="sources" className="flex-1 overflow-auto p-4 m-0">

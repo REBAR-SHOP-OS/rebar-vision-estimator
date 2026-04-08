@@ -117,7 +117,7 @@ export default function StandardsPage() {
     if (!user) return;
     // Single atomic update: set all to false except this one
     // First unset all, then set the target — both scoped to user via RLS
-    const { error: e1 } = await supabase.from("standards_profiles").update({ is_default: false }).eq("is_default", true);
+    const { error: e1 } = await supabase.from("standards_profiles").update({ is_default: false }).neq("id", id);
     if (!e1) {
       const { error: e2 } = await supabase.from("standards_profiles").update({ is_default: true }).eq("id", id);
       if (e2) toast.error("Failed to set default");
