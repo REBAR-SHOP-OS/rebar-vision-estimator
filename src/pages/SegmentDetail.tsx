@@ -78,21 +78,21 @@ export default function SegmentDetail() {
   useEffect(() => { loadData(); }, [segId, projectId]);
 
   // Estimate item edit handlers
-  const openEditItem = (item: any) => {
-    setEditItem(item);
-    setEiDesc(item.description || "");
-    setEiBarSize(item.bar_size || "");
-    setEiQty(String(item.quantity_count || 0));
-    setEiLength(String(item.total_length || 0));
-    setEiWeight(String(item.total_weight || 0));
-    setEiStatus(item.status || "draft");
-    setEiSourceFileId(item.source_file_id || "");
+  const openEditItem = (item: any | null) => {
+    setEditItem(item || "new");
+    setEiDesc(item?.description || "");
+    setEiBarSize(item?.bar_size || "");
+    setEiQty(String(item?.quantity_count || 0));
+    setEiLength(String(item?.total_length || 0));
+    setEiWeight(String(item?.total_weight || 0));
+    setEiStatus(item?.status || "draft");
+    setEiSourceFileId(item?.source_file_id || "");
   };
 
   const saveEditItem = async () => {
-    if (!editItem || !user) return;
+    if (!editItem || !user || !segId || !projectId) return;
     setEiSaving(true);
-    const { error } = await supabase.from("estimate_items").update({
+    const payload = {
       description: eiDesc.trim() || null,
       bar_size: eiBarSize.trim() || null,
       quantity_count: parseInt(eiQty) || 0,
@@ -100,13 +100,30 @@ export default function SegmentDetail() {
       total_weight: parseFloat(eiWeight) || 0,
       status: eiStatus,
       source_file_id: eiSourceFileId || null,
-    }).eq("id", editItem.id);
-    if (error) toast.error("Failed to update item");
-    else {
-      await logAuditEvent(user.id, "updated", "estimate_item", editItem.id, projectId, segId);
-      toast.success("Item updated");
-      setEditItem(null);
-      loadData();
+    };
+    if (editItem === "new") {
+      const { error, data } = await supabase.from("estimate_items").insert({
+        ...payload,
+        segment_id: segId,
+        project_id: projectId,
+        user_id: user.id,
+      }).select("id").single();
+      if (error) toast.error("Failed to create item");
+      else {
+        await logAuditEvent(user.id, "created", "estimate_item", data.id, projectId, segId);
+        toast.success("Item created");
+        setEditItem(null);
+        loadData();
+      }
+    } else {
+      const { error } = await supabase.from("estimate_items").update(payload).eq("id", editItem.id);
+      if (error) toast.error("Failed to update item");
+      else {
+        await logAuditEvent(user.id, "updated", "estimate_item", editItem.id, projectId, segId);
+        toast.success("Item updated");
+        setEditItem(null);
+        loadData();
+      }
     }
     setEiSaving(false);
   };
@@ -234,6 +251,12 @@ export default function SegmentDetail() {
         </div>
 
         <TabsContent value="estimate" className="flex-1 overflow-auto p-4 m-0">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-semibold text-foreground">Estimate Items</h4>
+            <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={() => openEditItem(null)}>
+              <Plus className="h-3 w-3" />Add Item
+            </Button>
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <Card><CardContent className="p-3 text-center"><p className="text-lg font-bold">{estimateItems.length}</p><p className="text-[10px] text-muted-foreground uppercase">Items</p></CardContent></Card>
             <Card><CardContent className="p-3 text-center"><p className="text-lg font-bold font-mono">{totalLength.toLocaleString()}</p><p className="text-[10px] text-muted-foreground uppercase">Total Length (m)</p></CardContent></Card>
@@ -252,7 +275,7 @@ export default function SegmentDetail() {
             <div className="flex flex-col items-center justify-center h-32 text-muted-foreground gap-2 border border-dashed border-border rounded-lg">
               <FileText className="h-6 w-6" />
               <p className="text-xs">No estimate items yet.</p>
-              <p className="text-[10px]">Run AI analysis or add items manually.</p>
+              <p className="text-[10px]">Click <strong>"Add Item"</strong> above or run AI analysis.</p>
             </div>
           ) : (
             <div className="border border-border rounded-lg overflow-hidden">
@@ -355,7 +378,7 @@ export default function SegmentDetail() {
       {/* Estimate Item Edit Dialog */}
       <Dialog open={!!editItem} onOpenChange={(open) => !open && setEditItem(null)}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle className="text-sm">Edit Estimate Item</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="text-sm">{editItem === "new" ? "Add Estimate Item" : "Edit Estimate Item"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label className="text-xs">Description</Label><Input value={eiDesc} onChange={e => setEiDesc(e.target.value)} className="h-9 text-sm" /></div>
             <div className="grid grid-cols-2 gap-2">
@@ -384,7 +407,7 @@ export default function SegmentDetail() {
                 </SelectContent>
               </Select>
             </div>
-            <Button onClick={saveEditItem} disabled={eiSaving} className="w-full" size="sm">{eiSaving ? "Saving…" : "Save Changes"}</Button>
+            <Button onClick={saveEditItem} disabled={eiSaving} className="w-full" size="sm">{eiSaving ? "Saving…" : editItem === "new" ? "Create Item" : "Save Changes"}</Button>
           </div>
         </DialogContent>
       </Dialog>
