@@ -7,8 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Loader2, Plus, Layers } from "lucide-react";
+import { Loader2, Plus, Layers, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { logAuditEvent } from "@/lib/audit-logger";
 import { useNavigate } from "react-router-dom";
 
 interface Segment {
@@ -39,6 +40,18 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
   const [newType, setNewType] = useState("miscellaneous");
   const [creating, setCreating] = useState(false);
 
+  // Edit state
+  const [editSegment, setEditSegment] = useState<Segment | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editType, setEditType] = useState("");
+  const [editLevel, setEditLevel] = useState("");
+  const [editZone, setEditZone] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   const load = () => {
     setLoading(true);
     supabase
@@ -66,6 +79,49 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
     if (error) { toast.error("Failed to create segment"); }
     else { toast.success("Segment created"); setNewName(""); setDialogOpen(false); load(); }
     setCreating(false);
+  };
+
+  const handleOpenEdit = (s: Segment, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditSegment(s);
+    setEditName(s.name);
+    setEditType(s.segment_type);
+    setEditLevel(s.level_label || "");
+    setEditZone(s.zone_label || "");
+    setEditNotes(s.notes || "");
+    setEditOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editSegment || !user || !editName.trim()) return;
+    setEditSaving(true);
+    const { error } = await supabase.from("segments").update({
+      name: editName.trim(),
+      segment_type: editType,
+      level_label: editLevel.trim() || null,
+      zone_label: editZone.trim() || null,
+      notes: editNotes.trim() || null,
+    }).eq("id", editSegment.id);
+    if (error) toast.error("Failed to update segment");
+    else {
+      await logAuditEvent(user.id, "updated", "segment", editSegment.id, projectId);
+      toast.success("Segment updated");
+      setEditOpen(false);
+      load();
+    }
+    setEditSaving(false);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteId || !user) return;
+    setDeleting(true);
+    const seg = segments.find(s => s.id === deleteId);
+    await logAuditEvent(user.id, "deleted", "segment", deleteId, projectId, undefined, { name: seg?.name });
+    const { error } = await supabase.from("segments").delete().eq("id", deleteId);
+    if (error) toast.error("Failed to delete segment");
+    else { toast.success("Segment deleted"); load(); }
+    setDeleteId(null);
+    setDeleting(false);
   };
 
   const statusColor = (s: string) => {
@@ -128,6 +184,7 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
                 <th className="text-left px-3 py-2.5 font-semibold">Status</th>
                 <th className="text-right px-3 py-2.5 font-semibold">Confidence</th>
                 <th className="text-left px-3 py-2.5 font-semibold">Drawing</th>
+                <th className="text-right px-3 py-2.5 font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -151,12 +208,52 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
                   <td className="px-3 py-2.5">
                     <Badge variant="outline" className="text-[9px]">{s.drawing_readiness.replace(/_/g, " ")}</Badge>
                   </td>
+                  <td className="px-3 py-2.5 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => handleOpenEdit(s, e)}><Pencil className="h-3 w-3" /></Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteId(s.id); }}><Trash2 className="h-3 w-3" /></Button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      {/* Edit Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle className="text-sm">Edit Segment</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label className="text-xs">Name</Label><Input value={editName} onChange={(e) => setEditName(e.target.value)} className="h-9 text-sm" /></div>
+            <div><Label className="text-xs">Type</Label>
+              <Select value={editType} onValueChange={setEditType}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>{SEGMENT_TYPES.map((t) => (<SelectItem key={t} value={t} className="text-sm capitalize">{t.replace(/_/g, " ")}</SelectItem>))}</SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div><Label className="text-xs">Level</Label><Input value={editLevel} onChange={(e) => setEditLevel(e.target.value)} className="h-9 text-sm" placeholder="e.g. L1" /></div>
+              <div><Label className="text-xs">Zone</Label><Input value={editZone} onChange={(e) => setEditZone(e.target.value)} className="h-9 text-sm" placeholder="e.g. Zone A" /></div>
+            </div>
+            <div><Label className="text-xs">Notes</Label><Input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} className="h-9 text-sm" placeholder="Optional notes" /></div>
+            <Button onClick={handleSaveEdit} disabled={editSaving || !editName.trim()} className="w-full" size="sm">{editSaving ? "Saving…" : "Save Changes"}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation */}
+      <Dialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle className="text-sm">Delete Segment?</DialogTitle></DialogHeader>
+          <p className="text-xs text-muted-foreground">This will permanently delete the segment and cannot be undone.</p>
+          <div className="flex gap-2 justify-end mt-2">
+            <Button variant="outline" size="sm" onClick={() => setDeleteId(null)}>Cancel</Button>
+            <Button variant="destructive" size="sm" onClick={handleDelete} disabled={deleting}>{deleting ? "Deleting…" : "Delete"}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

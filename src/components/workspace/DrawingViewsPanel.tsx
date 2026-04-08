@@ -17,7 +17,7 @@ interface DrawingView {
   created_at: string;
 }
 
-export default function DrawingViewsPanel({ segmentId }: { segmentId: string }) {
+export default function DrawingViewsPanel({ segmentId, projectId }: { segmentId: string; projectId?: string }) {
   const { user } = useAuth();
   const [views, setViews] = useState<DrawingView[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,7 +46,7 @@ export default function DrawingViewsPanel({ segmentId }: { segmentId: string }) 
         revision_label: "R0",
       }).select("id").single();
       if (error) throw error;
-      await logAuditEvent(user.id, "created", "drawing_view", data?.id, undefined, segmentId);
+      await logAuditEvent(user.id, "created", "drawing_view", data?.id, projectId, segmentId);
       toast.success("Draft view created");
       load();
     } catch {

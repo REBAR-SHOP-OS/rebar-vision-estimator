@@ -25,7 +25,7 @@ interface Issue {
   created_at: string;
 }
 
-export default function QATab({ projectId }: { projectId: string }) {
+export default function QATab({ projectId, segmentId }: { projectId: string; segmentId?: string }) {
   const { user } = useAuth();
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,18 +46,19 @@ export default function QATab({ projectId }: { projectId: string }) {
 
   const load = () => {
     setLoading(true);
-    supabase
+    let query = supabase
       .from("validation_issues")
       .select("id, issue_type, severity, title, description, status, assigned_to, resolution_note, source_file_id, created_at")
-      .eq("project_id", projectId)
-      .order("created_at", { ascending: false })
+      .eq("project_id", projectId);
+    if (segmentId) query = query.eq("segment_id", segmentId);
+    query.order("created_at", { ascending: false })
       .then(({ data }) => {
         setIssues((data as Issue[]) || []);
         setLoading(false);
       });
   };
 
-  useEffect(() => { load(); }, [projectId]);
+  useEffect(() => { load(); }, [projectId, segmentId]);
 
   const filtered = filter === "all" ? issues : issues.filter((i) => filter === "open" ? i.status === "open" : i.status === "resolved");
   const openCount = issues.filter(i => i.status === "open").length;
@@ -115,6 +116,7 @@ export default function QATab({ projectId }: { projectId: string }) {
       issue_type: newType,
       severity: newSeverity,
       description: newDescription.trim() || null,
+      ...(segmentId ? { segment_id: segmentId } : {}),
     }).select("id").single();
     if (error) toast.error("Failed to create issue");
     else {

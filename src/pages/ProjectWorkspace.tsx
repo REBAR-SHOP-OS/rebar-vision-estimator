@@ -8,6 +8,7 @@ import FilesTab from "@/components/workspace/FilesTab";
 import SegmentsTab from "@/components/workspace/SegmentsTab";
 import QATab from "@/components/workspace/QATab";
 import OutputsTab from "@/components/workspace/OutputsTab";
+import ProjectSettingsTab from "@/components/workspace/ProjectSettingsTab";
 
 const TAB_SUFFIXES: Record<string, string> = {
   "": "overview",
@@ -97,7 +98,7 @@ export default function ProjectWorkspace() {
           <OutputsTab projectId={project.id} />
         </TabsContent>
         <TabsContent value="settings" className="flex-1 overflow-auto m-0">
-          <div className="p-6 text-sm text-muted-foreground">Project settings coming soon.</div>
+          <ProjectSettingsTab project={project} onUpdate={setProject} />
         </TabsContent>
       </Tabs>
     </div>
