@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Loader2, Layers, AlertTriangle, FileText, Eye, CheckCircle2, ShieldAlert, Clock, Pencil, Plus, Sparkles } from "lucide-react";
+import { ArrowLeft, Loader2, Layers, AlertTriangle, FileText, Eye, CheckCircle2, ShieldAlert, Clock, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 import SourcesPanel from "@/components/workspace/SourcesPanel";
@@ -115,6 +115,15 @@ export default function SegmentDetail() {
   };
 
   useEffect(() => { loadData(); }, [segId, projectId]);
+
+  const deleteEstimateItem = async (itemId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("Delete this estimate item?")) return;
+    const { error } = await supabase.from("estimate_items").delete().eq("id", itemId);
+    if (error) { toast.error("Delete failed"); return; }
+    toast.success("Item deleted");
+    loadData();
+  };
 
   // Estimate item edit handlers
   const openEditItem = (item: any | null) => {
@@ -335,6 +344,7 @@ export default function SegmentDetail() {
                     <th className="text-right px-3 py-2 font-semibold">Confidence</th>
                     <th className="text-left px-3 py-2 font-semibold">Source</th>
                     <th className="text-left px-3 py-2 font-semibold">Status</th>
+                    <th className="px-2 py-2 w-8"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -350,6 +360,11 @@ export default function SegmentDetail() {
                         {segment ? [segment.level_label, segment.zone_label, segment.name].filter(Boolean).join(" · ") : "—"}
                       </td>
                       <td className="px-3 py-2"><Badge variant="outline" className="text-[9px]">{item.status}</Badge></td>
+                      <td className="px-2 py-2">
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => deleteEstimateItem(item.id, e)}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
