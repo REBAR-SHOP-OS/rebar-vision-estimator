@@ -103,10 +103,15 @@ const Dashboard: React.FC = () => {
     }
 
     // Upload all selected files to the new project
+    let uploadedCount = 0;
     for (const file of files) {
       const path = `${user.id}/${data.id}/${Date.now()}_${file.name}`;
       const { error: storageErr } = await supabase.storage.from("blueprints").upload(path, file);
-      if (storageErr) { console.warn("Upload failed:", file.name); continue; }
+      if (storageErr) {
+        console.error("Storage upload error:", file.name, storageErr);
+        toast.error(`Upload failed: ${file.name} — ${storageErr.message}`);
+        continue;
+      }
       await supabase.from("project_files").insert({
         project_id: data.id,
         user_id: user.id,
@@ -115,6 +120,12 @@ const Dashboard: React.FC = () => {
         file_type: file.type || null,
         file_size: file.size,
       });
+      uploadedCount++;
+    }
+    if (uploadedCount > 0) {
+      toast.success(`${uploadedCount} file${uploadedCount > 1 ? "s" : ""} uploaded`);
+    } else {
+      toast.error("No files were uploaded successfully");
     }
 
     // Trigger automatic processing pipeline
