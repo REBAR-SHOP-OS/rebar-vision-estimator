@@ -62,6 +62,65 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Auto-detect state
+  const [autoDetecting, setAutoDetecting] = useState(false);
+  const [suggestions, setSuggestions] = useState<SegmentSuggestion[]>([]);
+  const [autoDialogOpen, setAutoDialogOpen] = useState(false);
+  const [autoCreating, setAutoCreating] = useState(false);
+
+  const handleAutoDetect = async () => {
+    if (!user) return;
+    setAutoDetecting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("auto-segments", {
+        body: { projectId },
+      });
+      if (error) throw error;
+      const items = (data?.suggestions || []).map((s: any) => ({ ...s, selected: true }));
+      if (items.length === 0) {
+        toast.info("No new segments suggested. Upload blueprints or define scope items first.");
+      } else {
+        setSuggestions(items);
+        setAutoDialogOpen(true);
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Auto-detect failed");
+    }
+    setAutoDetecting(false);
+  };
+
+  const toggleSuggestion = (idx: number) => {
+    setSuggestions(prev => prev.map((s, i) => i === idx ? { ...s, selected: !s.selected } : s));
+  };
+
+  const handleCreateSuggestions = async () => {
+    if (!user) return;
+    const selected = suggestions.filter(s => s.selected);
+    if (selected.length === 0) { toast.error("Select at least one segment"); return; }
+    setAutoCreating(true);
+    let created = 0;
+    for (const s of selected) {
+      const { error, data: inserted } = await supabase.from("segments").insert({
+        project_id: projectId,
+        user_id: user.id,
+        name: s.name,
+        segment_type: s.segment_type,
+        level_label: s.level_label,
+        zone_label: s.zone_label,
+        notes: s.notes,
+      }).select("id").single();
+      if (!error && inserted) {
+        await logAuditEvent(user.id, "created", "segment", inserted.id, projectId, undefined, { source: "auto-detect" });
+        created++;
+      }
+    }
+    toast.success(`${created} segment${created !== 1 ? "s" : ""} created`);
+    setAutoDialogOpen(false);
+    setSuggestions([]);
+    load();
+    setAutoCreating(false);
+  };
+
   const load = () => {
     setLoading(true);
     supabase
