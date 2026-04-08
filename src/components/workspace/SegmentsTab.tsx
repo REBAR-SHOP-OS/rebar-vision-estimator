@@ -150,17 +150,28 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
 
   const load = () => {
     setLoading(true);
-    supabase
-      .from("segments")
-      .select("*")
-      .eq("project_id", projectId)
-      .order("created_at", { ascending: true })
-      .then(({ data }) => {
-        const segs = (data as Segment[]) || [];
-        setSegments(segs);
-        setLoading(false);
-        loadStats(segs.map(s => s.id));
-      });
+    Promise.all([
+      supabase.from("segments").select("*").eq("project_id", projectId).order("created_at", { ascending: true }),
+      supabase.from("project_files").select("file_name").eq("project_id", projectId).limit(50),
+    ]).then(([segResult, fileResult]) => {
+      const segs = (segResult.data as Segment[]) || [];
+      setSegments(segs);
+      setLoading(false);
+      loadStats(segs.map(s => s.id));
+
+      // Determine scope coverage per segment based on file names
+      const fNames = (fileResult.data || []).map((f: any) => (f.file_name || "").toUpperCase());
+      const typeFilePatterns: Record<string, RegExp> = {
+        footing: /FOUND|FTG|FOOT/i, pier: /PIER|PILE/i, slab: /SLAB/i, wall: /WALL/i,
+        beam: /BEAM|FRM/i, column: /COL/i, stair: /STAIR/i, retaining_wall: /RETAIN/i,
+      };
+      const coverage: Record<string, "drawing" | "inferred"> = {};
+      for (const s of segs) {
+        const pattern = typeFilePatterns[s.segment_type];
+        coverage[s.id] = pattern && fNames.some((n: string) => pattern.test(n)) ? "drawing" : "inferred";
+      }
+      setScopeCoverage(coverage);
+    });
   };
 
   useEffect(() => { load(); }, [projectId]);
