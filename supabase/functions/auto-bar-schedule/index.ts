@@ -67,6 +67,7 @@ serve(async (req) => {
     const systemPrompt = `You are a rebar detailing expert. Generate bar schedule items from estimate line items.
 Rules:
 - Return ONLY a JSON array, no markdown, no explanation.
+- Each object MUST include "estimate_item_index": the [INDEX=N] number of the source estimate item.
 - Each object: { "mark": string, "size": string, "shape_code": string, "cut_length": number (mm), "quantity": number, "finish_type": string, "cover_value": number (mm), "lap_length": number (mm), "confidence": number (0-1) }
 - Mark format: sequential like "A1", "A2", "B1" etc.
 - shape_code: "straight", "L-shape", "U-shape", "Z-shape", "hook", "stirrup", "closed" as appropriate.
@@ -79,7 +80,7 @@ Rules:
 - Do NOT duplicate existing marks: ${existingMarks || "none yet"}.`;
 
     const estimateSummary = estimateItems.map((e: any, i: number) =>
-      `${i + 1}. ${e.description} — ${e.bar_size}, qty=${e.quantity_count}, length=${e.total_length}m, weight=${e.total_weight}kg`
+      `[INDEX=${i}] ${e.description} — ${e.bar_size}, qty=${e.quantity_count}, length=${e.total_length}m, weight=${e.total_weight}kg`
     ).join("\n");
 
     const userPrompt = `Project: ${project?.name || "Unknown"} (${project?.project_type || "Unknown"})
@@ -90,7 +91,7 @@ Standards: ${standard ? `${standard.name} (${standard.code_family}, ${standard.u
 Estimate items to detail into bar schedule:
 ${estimateSummary}
 
-Generate bar schedule items for these estimate items.`;
+Generate bar schedule items for these estimate items. For each bar, return the "estimate_item_index" matching the [INDEX=N] of the source estimate item.`;
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
@@ -138,19 +139,25 @@ Generate bar schedule items for these estimate items.`;
       });
     }
 
-    const rows = items.map((item: any) => ({
-      segment_id,
-      user_id: user.id,
-      mark: String(item.mark || "").slice(0, 50),
-      size: String(item.size || "").slice(0, 20),
-      shape_code: String(item.shape_code || "straight").slice(0, 30),
-      cut_length: Math.max(0, Number(item.cut_length) || 0),
-      quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
-      finish_type: String(item.finish_type || "black").slice(0, 20),
-      cover_value: Math.max(0, Number(item.cover_value) || 0),
-      lap_length: Math.max(0, Number(item.lap_length) || 0),
-      confidence: Math.min(1, Math.max(0, Number(item.confidence) || 0)),
-    }));
+    const rows = items.map((item: any) => {
+      const eiIndex = Number(item.estimate_item_index);
+      const linkedEi = !isNaN(eiIndex) && eiIndex >= 0 && eiIndex < estimateItems.length
+        ? estimateItems[eiIndex] : null;
+      return {
+        segment_id,
+        user_id: user.id,
+        mark: String(item.mark || "").slice(0, 50),
+        size: String(item.size || "").slice(0, 20),
+        shape_code: String(item.shape_code || "straight").slice(0, 30),
+        cut_length: Math.max(0, Number(item.cut_length) || 0),
+        quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
+        finish_type: String(item.finish_type || "black").slice(0, 20),
+        cover_value: Math.max(0, Number(item.cover_value) || 0),
+        lap_length: Math.max(0, Number(item.lap_length) || 0),
+        confidence: Math.min(1, Math.max(0, Number(item.confidence) || 0)),
+        estimate_item_id: linkedEi?.id || null,
+      };
+    });
 
     const { data: inserted, error: insertErr } = await supabase
       .from("bar_items")

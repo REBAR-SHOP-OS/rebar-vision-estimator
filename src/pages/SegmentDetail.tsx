@@ -472,6 +472,9 @@ export default function SegmentDetail() {
                     <AlertTriangle className="h-3.5 w-3.5 text-primary" />
                     Weight Calculation Breakdown
                   </h5>
+                  <p className="text-[10px] text-muted-foreground leading-relaxed italic">
+                    Pipeline: Drawing → Auto-Estimate → Auto-Bar-Schedule → Weight Calculation
+                  </p>
                   <p className="text-[10px] text-muted-foreground leading-relaxed">
                     <strong>Formula:</strong> Weight (kg) = Quantity × (Cut Length mm ÷ 1000) × Mass (kg/m)
                   </p>
@@ -481,13 +484,33 @@ export default function SegmentDetail() {
                       const cutMm = Number(b.cut_length) || 0;
                       const massKgM = getMassKgPerM(b.size || "");
                       const wKg = qty * (cutMm / 1000) * massKgM;
+                      // Provenance: try direct link, then heuristic match
+                      const linkedEi = b.estimate_item_id
+                        ? estimateItems.find(ei => ei.id === b.estimate_item_id)
+                        : estimateItems.find(ei => ei.bar_size && b.size && ei.bar_size === b.size);
+                      const sourceFileName = linkedEi?.source_file_id ? fileNameById(linkedEi.source_file_id) : "";
+                      const conf = Number(b.confidence) || 0;
                       return (
-                        <div key={b.id} className="flex items-center justify-between text-[10px] font-mono text-muted-foreground py-0.5 border-b border-border/30 last:border-0">
-                          <span className="text-foreground font-medium w-12">{b.mark || "—"}</span>
-                          <span className="flex-1">
-                            {qty} × ({cutMm.toLocaleString()} mm ÷ 1000) × {massKgM.toFixed(3)} kg/m
-                          </span>
-                          <span className="font-semibold text-primary ml-2">= {wKg.toFixed(1)} kg</span>
+                        <div key={b.id} className="py-1 border-b border-border/30 last:border-0">
+                          <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
+                            <span className="text-foreground font-medium w-12">{b.mark || "—"}</span>
+                            <span className="flex-1">
+                              {qty} × ({cutMm.toLocaleString()} mm ÷ 1000) × {massKgM.toFixed(3)} kg/m
+                            </span>
+                            <span className="font-semibold text-primary ml-2">= {wKg.toFixed(1)} kg</span>
+                          </div>
+                          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 ml-12 text-[9px] text-muted-foreground/80">
+                            {linkedEi && (
+                              <span>Source: <span className="text-foreground/70">{linkedEi.description || "—"}</span></span>
+                            )}
+                            {sourceFileName && (
+                              <span>Drawing: <span className="text-foreground/70">{sourceFileName}</span></span>
+                            )}
+                            {conf > 0 && (
+                              <span>Confidence: <span className="text-foreground/70">{Math.round(conf * 100)}%</span></span>
+                            )}
+                            <span>{b.estimate_item_id ? "AI-generated" : conf > 0 ? "AI-generated (unlinked)" : "Manual"}</span>
+                          </div>
                         </div>
                       );
                     })}
