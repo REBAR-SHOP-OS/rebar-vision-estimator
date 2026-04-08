@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FileText, Loader2, AlertTriangle, CheckCircle2, Clock, Archive, Upload, Eye } from "lucide-react";
+import { computeSHA256 } from "@/lib/file-hash";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
