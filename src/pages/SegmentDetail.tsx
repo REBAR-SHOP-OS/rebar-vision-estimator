@@ -344,6 +344,7 @@ export default function SegmentDetail() {
                     <th className="text-right px-3 py-2 font-semibold">Confidence</th>
                     <th className="text-left px-3 py-2 font-semibold">Source</th>
                     <th className="text-left px-3 py-2 font-semibold">Status</th>
+                    <th className="px-2 py-2 w-8"></th>
                   </tr>
                 </thead>
                 <tbody>
