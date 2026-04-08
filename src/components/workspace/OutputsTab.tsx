@@ -26,24 +26,33 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
   const [exporting, setExporting] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      supabase.from("estimate_versions").select("id", { count: "exact" }).eq("project_id", projectId),
-      supabase.from("shop_drawings").select("id", { count: "exact" }).eq("project_id", projectId),
-      supabase.from("validation_issues").select("id", { count: "exact" }).eq("project_id", projectId),
-      supabase.from("quote_versions").select("id", { count: "exact" }).eq("project_id", projectId),
-      supabase.from("approvals").select("status").eq("project_id", projectId).is("segment_id", null).order("created_at", { ascending: false }).limit(1),
-      supabase.from("validation_issues").select("id", { count: "exact" }).eq("project_id", projectId).eq("status", "open"),
-      supabase.from("estimate_items").select("id", { count: "exact" }).eq("project_id", projectId),
-      supabase.from("estimate_items").select("id", { count: "exact" }).eq("project_id", projectId).eq("item_type", "bar"),
-    ]).then(([est, shop, issues, quotes, appRes, openRes, estItems, barEstItems]) => {
+    // Fetch segment IDs first, then bar_items count
+    supabase.from("segments").select("id").eq("project_id", projectId).then(async (segRes) => {
+      const segIds = (segRes.data || []).map((s: any) => s.id);
+      const barItemsCountPromise = segIds.length > 0
+        ? supabase.from("bar_items").select("id", { count: "exact" }).in("segment_id", segIds)
+        : Promise.resolve({ count: 0 });
+
+      const [est, shop, issues, quotes, appRes, openRes, estItems, barItemsRes] = await Promise.all([
+        supabase.from("estimate_versions").select("id", { count: "exact" }).eq("project_id", projectId),
+        supabase.from("shop_drawings").select("id", { count: "exact" }).eq("project_id", projectId),
+        supabase.from("validation_issues").select("id", { count: "exact" }).eq("project_id", projectId),
+        supabase.from("quote_versions").select("id", { count: "exact" }).eq("project_id", projectId),
+        supabase.from("approvals").select("status").eq("project_id", projectId).is("segment_id", null).order("created_at", { ascending: false }).limit(1),
+        supabase.from("validation_issues").select("id", { count: "exact" }).eq("project_id", projectId).eq("status", "open"),
+        supabase.from("estimate_items").select("id", { count: "exact" }).eq("project_id", projectId),
+        barItemsCountPromise,
+      ]);
+
       const estCount = (est.count || 0) + (estItems.count || 0);
       const shopCount = (shop.count || 0);
-      const barCount = (barEstItems.count || 0);
+      const barCount = (barItemsRes as any).count || 0;
+      const hasEstData = estCount > 0 || barCount > 0;
       setOutputs([
-        { type: "estimate", label: "Estimate Summary", available: estCount > 0, count: estCount },
+        { type: "estimate", label: "Estimate Summary", available: hasEstData, count: estCount || barCount },
         { type: "shop_drawing", label: "Draft Shop Drawings", available: shopCount > 0 || barCount > 0, count: shopCount || barCount },
-        { type: "issues", label: "Issue Report", available: (issues.count || 0) > 0, count: issues.count || 0 },
-        { type: "quote", label: "Quote Packages", available: (quotes.count || 0) > 0, count: quotes.count || 0 },
+        { type: "issues", label: "Issue Report", available: hasEstData, count: issues.count || 0 },
+        { type: "quote", label: "Quote Packages", available: hasEstData, count: (quotes.count || 0) || (hasEstData ? 1 : 0) },
       ]);
       setApprovalStatus(appRes.data?.[0]?.status || "none");
       setOpenIssues(openRes.count || 0);
