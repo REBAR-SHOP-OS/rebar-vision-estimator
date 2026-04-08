@@ -1,29 +1,24 @@
-import { Outlet, useParams } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import AppSidebar from "./AppSidebar";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 export default function AppShell() {
-  const { id: projectId } = useParams<{ id: string }>();
+  const location = useLocation();
   const [projectName, setProjectName] = useState<string>("");
 
-  // Resolve the project name from any nested route
-  useEffect(() => {
-    // Try to extract projectId from the URL path if not in params
-    const match = window.location.pathname.match(/\/app\/project\/([^/]+)/);
-    const pid = projectId || (match ? match[1] : null);
-    if (!pid) { setProjectName(""); return; }
+  const activeProjectId = useMemo(() => {
+    const m = location.pathname.match(/\/app\/project\/([^/]+)/);
+    return m ? m[1] : null;
+  }, [location.pathname]);
 
-    supabase.from("projects").select("name").eq("id", pid).single().then(({ data }) => {
+  useEffect(() => {
+    if (!activeProjectId) { setProjectName(""); return; }
+    supabase.from("projects").select("name").eq("id", activeProjectId).single().then(({ data }) => {
       setProjectName(data?.name || "");
     });
-  }, [projectId, window.location.pathname]);
-
-  const activeProjectId = projectId || (() => {
-    const m = window.location.pathname.match(/\/app\/project\/([^/]+)/);
-    return m ? m[1] : null;
-  })();
+  }, [activeProjectId]);
 
   return (
     <SidebarProvider>
