@@ -21,7 +21,15 @@ import QuoteWorkflow from "@/components/dashboard/QuoteWorkflow";
 import FollowUpBoard from "@/components/dashboard/FollowUpBoard";
 import RevisionTracker from "@/components/dashboard/RevisionTracker";
 import StepProgress from "@/components/chat/StepProgress";
+import ProjectDashboard from "@/components/workspace/ProjectDashboard";
+import WorkspaceLayout from "@/components/workspace/WorkspaceLayout";
 import logoBg from "@/assets/logo.png";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,

@@ -81,6 +81,10 @@
     --input: 220 14% 16%;
     --ring: 142 60% 45%;
 
+    --status-approved: 142 60% 45%;
+    --status-review: 38 92% 50%;
+    --status-blocked: 0 62% 45%;
+
     --sidebar-background: 220 14% 5%;
     --sidebar-foreground: 220 10% 75%;
     --sidebar-primary: 142 60% 45%;
