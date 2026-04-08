@@ -156,6 +156,9 @@ Generate estimate items for this segment.`;
       });
     }
 
+    // Pick first project file as source reference (if any)
+    const sourceFileId = files.length > 0 ? (await supabase.from("project_files").select("id").eq("project_id", project_id).limit(1).single()).data?.id : null;
+
     // Insert items into estimate_items
     const rows = items.map((item: any) => ({
       segment_id,
@@ -169,6 +172,7 @@ Generate estimate items for this segment.`;
       confidence: Math.min(1, Math.max(0, Number(item.confidence) || 0)),
       item_type: "rebar",
       status: "draft",
+      source_file_id: sourceFileId || null,
     }));
 
     const { data: inserted, error: insertErr } = await supabase
