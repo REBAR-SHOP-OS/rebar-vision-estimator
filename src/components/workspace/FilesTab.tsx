@@ -142,10 +142,15 @@ export default function FilesTab({ projectId }: { projectId: string }) {
 
   if (files.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-40 text-muted-foreground gap-2">
+      <div className="flex flex-col items-center justify-center h-40 text-muted-foreground gap-3">
         <FileText className="h-8 w-8" />
         <p className="text-sm">No files uploaded yet.</p>
         <p className="text-[10px]">Upload structural drawings to begin estimation.</p>
+        <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs relative" disabled={uploading}>
+          {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+          {uploading ? `Uploading ${uploadProgress}…` : "Upload Files"}
+          <input type="file" multiple className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleUpload} accept="*" />
+        </Button>
       </div>
     );
   }
