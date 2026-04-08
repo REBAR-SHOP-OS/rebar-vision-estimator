@@ -529,26 +529,40 @@ export default function SegmentDetail() {
                         : estimateItems.find(ei => ei.bar_size && b.size && ei.bar_size === b.size);
                       const sourceFileName = linkedEi?.source_file_id ? fileNameById(linkedEi.source_file_id) : "";
                       const conf = Number(b.confidence) || 0;
+                      const pageNum = linkedEi?.source_file_id ? getPageNumber(linkedEi.source_file_id) : null;
                       return (
-                        <div key={b.id} className="py-1 border-b border-border/30 last:border-0">
+                        <div key={b.id} className="py-1.5 border-b border-border/30 last:border-0">
                           <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
                             <span className="text-foreground font-medium w-12">{b.mark || "—"}</span>
+                            <span className="bg-primary/10 text-primary font-semibold px-1.5 rounded text-[10px] mr-1.5">{b.size || "?"}</span>
                             <span className="flex-1">
                               {qty} × ({cutMm.toLocaleString()} mm ÷ 1000) × {massKgM.toFixed(3)} kg/m
                             </span>
                             <span className="font-semibold text-primary ml-2">= {wKg.toFixed(1)} kg</span>
                           </div>
-                          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 ml-12 text-[9px] text-muted-foreground/80">
+                          <div className="flex flex-col gap-0.5 mt-1 ml-12 text-[9px] text-muted-foreground/80">
                             {linkedEi && (
-                              <span>Source: <span className="text-foreground/70">{linkedEi.description || "—"}</span></span>
+                              <span>📍 Source: <span className="text-foreground/70">{linkedEi.description || "—"}</span></span>
                             )}
                             {sourceFileName && (
-                              <span>Drawing: <span className="text-foreground/70">{sourceFileName}</span></span>
+                              <span className="flex items-center gap-1">
+                                Drawing: <span className="text-foreground/70">{sourceFileName}</span>
+                                {pageNum && <span>· Page {pageNum}</span>}
+                                {segmentAddress && <span>· Segment: {segmentAddress}</span>}
+                                {linkedEi?.source_file_id && (
+                                  <button
+                                    onClick={() => openDrawingViewer(linkedEi.source_file_id, pageNum)}
+                                    className="inline-flex items-center gap-0.5 text-primary hover:underline ml-1"
+                                  >
+                                    <ExternalLink className="h-2.5 w-2.5" />Open
+                                  </button>
+                                )}
+                              </span>
                             )}
-                            {conf > 0 && (
-                              <span>Confidence: <span className="text-foreground/70">{Math.round(conf * 100)}%</span></span>
-                            )}
-                            <span>{b.estimate_item_id ? "AI-generated" : conf > 0 ? "AI-generated (unlinked)" : "Manual"}</span>
+                            <span className="flex items-center gap-2">
+                              {conf > 0 && <span>Confidence: <span className="text-foreground/70">{Math.round(conf * 100)}%</span></span>}
+                              <span>{b.estimate_item_id ? "AI-generated" : conf > 0 ? "AI-generated (unlinked)" : "Manual"}</span>
+                            </span>
                           </div>
                         </div>
                       );
