@@ -86,7 +86,7 @@ export default function ProjectWorkspace() {
           <ProjectOverview project={project} />
         </TabsContent>
         <TabsContent value="files" className="flex-1 overflow-auto m-0">
-          <FilesTab projectId={project.id} />
+          <FilesTab projectId={project.id} onProjectRefresh={() => loadProject(false)} />
         </TabsContent>
         <TabsContent value="segments" className="flex-1 overflow-auto m-0">
           <SegmentsTab projectId={project.id} />

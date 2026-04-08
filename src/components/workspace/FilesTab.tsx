@@ -21,7 +21,7 @@ interface FileRow {
   is_superseded?: boolean;
 }
 
-export default function FilesTab({ projectId }: { projectId: string }) {
+export default function FilesTab({ projectId, onProjectRefresh }: { projectId: string; onProjectRefresh?: () => void }) {
   const { user } = useAuth();
   const [files, setFiles] = useState<FileRow[]>([]);
   const [segmentCounts, setSegmentCounts] = useState<Record<string, number>>({});
@@ -87,8 +87,9 @@ export default function FilesTab({ projectId }: { projectId: string }) {
     }
     toast.success(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
     loadFiles();
-    // Trigger automatic processing pipeline
-    supabase.functions.invoke("process-pipeline", { body: { project_id: projectId } }).catch(console.warn);
+    const { error: pipelineErr } = await supabase.functions.invoke("process-pipeline", { body: { project_id: projectId } });
+    if (pipelineErr) console.warn("process-pipeline failed after upload:", pipelineErr);
+    else onProjectRefresh?.();
     setUploading(false);
     setUploadProgress("");
     e.target.value = "";
@@ -181,7 +182,8 @@ export default function FilesTab({ projectId }: { projectId: string }) {
       }
 
       // 6. Run process-pipeline to update workflow status
-      await supabase.functions.invoke("process-pipeline", { body: { project_id: projectId } });
+      const { error: pipelineErr } = await supabase.functions.invoke("process-pipeline", { body: { project_id: projectId } });
+      if (!pipelineErr) onProjectRefresh?.();
 
       if (successCount > 0) {
         toast.success(`Parsed & indexed ${successCount} of ${pendingFiles.length} file(s)`);
