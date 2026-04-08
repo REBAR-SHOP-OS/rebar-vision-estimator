@@ -77,7 +77,22 @@ Deno.serve(async (req) => {
       await updateJob("processing", 20);
       await log("pipeline_files_found", { file_count: files.length });
 
-      // Step 2: Check drawings indexed
+      // Step 2: Check parsed document versions
+      const { count: parsedCount } = await supabase
+        .from("document_versions")
+        .select("id", { count: "exact", head: true })
+        .eq("project_id", project_id)
+        .not("page_count", "is", null);
+
+      const hasParsedFiles = (parsedCount || 0) > 0;
+
+      if (hasParsedFiles) {
+        await supabase.from("projects").update({ workflow_status: "parsing" }).eq("id", project_id);
+        await updateJob("processing", 40);
+        await log("pipeline_parsing_complete", { parsed_count: parsedCount });
+      }
+
+      // Step 3: Check drawings indexed
       const { count: drawingCount } = await supabase
         .from("drawing_search_index")
         .select("id", { count: "exact", head: true })
@@ -91,7 +106,7 @@ Deno.serve(async (req) => {
         await log("pipeline_drawings_indexed", { drawing_count: drawingCount });
       }
 
-      // Step 3: Check scope
+      // Step 4: Check scope
       const { data: project } = await supabase
         .from("projects")
         .select("scope_items, project_type")
@@ -132,6 +147,7 @@ Deno.serve(async (req) => {
       const finalStatus = finalScore === "L3" ? "estimated"
         : finalScore === "L2" ? "scope_detected"
         : hasDrawings ? "drawings_indexed"
+        : hasParsedFiles ? "parsing"
         : hasFiles ? "files_uploaded"
         : "intake";
 
@@ -145,6 +161,7 @@ Deno.serve(async (req) => {
         linkage_score: finalScore,
         workflow_status: finalStatus,
         file_count: files.length,
+        parsed_count: parsedCount || 0,
         drawing_count: drawingCount || 0,
         estimate_count: estimateCount || 0,
         has_scope: hasScope,

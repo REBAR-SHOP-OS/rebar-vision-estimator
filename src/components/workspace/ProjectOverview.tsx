@@ -24,8 +24,17 @@ interface ProjectOverviewProps {
 }
 
 const WORKFLOW_STEPS = ["intake", "files_uploaded", "parsing", "review_needed", "estimating", "draft_ready", "approved", "archived"];
-
-export default function ProjectOverview({ project }: ProjectOverviewProps) {
+const WORKFLOW_STEP_MAP: Record<string, string> = {
+  intake: "intake",
+  files_uploaded: "files_uploaded",
+  parsing: "parsing",
+  drawings_indexed: "parsing",
+  scope_detected: "review_needed",
+  estimated: "estimating",
+  draft_ready: "draft_ready",
+  approved: "approved",
+  archived: "archived",
+};
   const [counts, setCounts] = useState({ files: 0, segments: 0, issues: 0, approvals: 0, estimates: 0, blockers: 0 });
 
   useEffect(() => {
@@ -48,7 +57,7 @@ export default function ProjectOverview({ project }: ProjectOverviewProps) {
     });
   }, [project.id]);
 
-  const currentStepIdx = WORKFLOW_STEPS.indexOf(project.workflow_status || "intake");
+  const currentStepIdx = WORKFLOW_STEPS.indexOf(WORKFLOW_STEP_MAP[project.workflow_status || "intake"] || "intake");
 
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-5xl">
