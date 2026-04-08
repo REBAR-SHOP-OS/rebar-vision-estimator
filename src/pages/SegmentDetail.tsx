@@ -271,6 +271,39 @@ export default function SegmentDetail() {
 
   const fileNameById = (id: string) => projectFiles.find(f => f.id === id)?.file_name || "";
 
+  // Resolve page number for a source file
+  const getPageNumber = (sourceFileId: string | null): number | null => {
+    if (!sourceFileId) return null;
+    const dv = docVersions.find(d => d.file_id === sourceFileId);
+    if (!dv) return null;
+    const entry = searchIndexEntries.find(e => e.document_version_id === dv.id);
+    return entry?.page_number ?? null;
+  };
+
+  const segmentAddress = [segment.level_label, segment.zone_label, segment.segment_type?.replace(/_/g, " ")].filter(Boolean).join(" / ");
+
+  const openDrawingViewer = async (sourceFileId: string, pageNumber: number | null) => {
+    const file = projectFiles.find(f => f.id === sourceFileId);
+    if (!file?.file_path) return;
+    try {
+      const { data: urlData } = await supabase.storage.from("blueprints").createSignedUrl(file.file_path, 3600);
+      if (!urlData?.signedUrl) { toast.error("Could not load drawing"); return; }
+      const viewerData = {
+        imageUrl: urlData.signedUrl,
+        elements: [],
+        selectedElementId: null,
+        reviewStatuses: {},
+      };
+      sessionStorage.setItem("blueprint-viewer-data", JSON.stringify(viewerData));
+      // If PDF with page number, the viewer reads currentPage from session or defaults to 1
+      // We'll encode page in the URL hash for the viewer to pick up
+      const url = pageNumber ? `/blueprint-viewer#page=${pageNumber}` : "/blueprint-viewer";
+      window.open(url, "_blank");
+    } catch {
+      toast.error("Could not open drawing");
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
