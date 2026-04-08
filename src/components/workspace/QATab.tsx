@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { Loader2, AlertTriangle, CheckCircle2, ShieldAlert, User, MessageSquare } from "lucide-react";
+import { toast } from "sonner";
 
 interface Issue {
   id: string;
@@ -12,6 +18,7 @@ interface Issue {
   description: string | null;
   status: string;
   assigned_to: string | null;
+  resolution_note: string | null;
   created_at: string;
 }
 
@@ -19,26 +26,55 @@ export default function QATab({ projectId }: { projectId: string }) {
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "open" | "resolved">("all");
+  const [editIssue, setEditIssue] = useState<Issue | null>(null);
+  const [editStatus, setEditStatus] = useState("");
+  const [editAssignee, setEditAssignee] = useState("");
+  const [editResolution, setEditResolution] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
+  const load = () => {
     setLoading(true);
     supabase
       .from("validation_issues")
-      .select("id, issue_type, severity, title, description, status, assigned_to, created_at")
+      .select("id, issue_type, severity, title, description, status, assigned_to, resolution_note, created_at")
       .eq("project_id", projectId)
       .order("created_at", { ascending: false })
       .then(({ data }) => {
         setIssues((data as Issue[]) || []);
         setLoading(false);
       });
-  }, [projectId]);
+  };
+
+  useEffect(() => { load(); }, [projectId]);
 
   const filtered = filter === "all" ? issues : issues.filter((i) => filter === "open" ? i.status === "open" : i.status === "resolved");
+  const openCount = issues.filter(i => i.status === "open").length;
+  const blockerCount = issues.filter(i => i.status === "open" && (i.severity === "error" || i.severity === "critical")).length;
 
   const severityColor = (s: string) => {
     if (s === "error" || s === "critical") return "bg-destructive/15 text-destructive";
     if (s === "warning") return "bg-[hsl(var(--status-review))]/15 text-[hsl(var(--status-review))]";
     return "bg-muted text-muted-foreground";
+  };
+
+  const handleOpenEdit = (issue: Issue) => {
+    setEditIssue(issue);
+    setEditStatus(issue.status);
+    setEditAssignee(issue.assigned_to || "");
+    setEditResolution(issue.resolution_note || "");
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editIssue) return;
+    setSaving(true);
+    const { error } = await supabase.from("validation_issues").update({
+      status: editStatus,
+      assigned_to: editAssignee || null,
+      resolution_note: editResolution || null,
+    }).eq("id", editIssue.id);
+    if (error) toast.error("Failed to update issue");
+    else { toast.success("Issue updated"); setEditIssue(null); load(); }
+    setSaving(false);
   };
 
   if (loading) {
@@ -47,12 +83,20 @@ export default function QATab({ projectId }: { projectId: string }) {
 
   return (
     <div className="p-4 md:p-6">
+      {/* Blocker Banner */}
+      {blockerCount > 0 && (
+        <div className="flex items-center gap-2 p-3 mb-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+          <ShieldAlert className="h-4 w-4 text-destructive flex-shrink-0" />
+          <span className="text-xs text-destructive font-medium">{blockerCount} critical/error issue{blockerCount !== 1 ? "s" : ""} blocking approvals and outputs.</span>
+        </div>
+      )}
+
       <div className="flex items-center gap-3 mb-3">
         <h3 className="text-sm font-semibold text-foreground">QA / Issues</h3>
         <div className="flex gap-1">
           {(["all", "open", "resolved"] as const).map((f) => (
             <Button key={f} variant={filter === f ? "default" : "ghost"} size="sm" className="text-[10px] h-7 px-2" onClick={() => setFilter(f)}>
-              {f === "all" ? `All (${issues.length})` : f === "open" ? `Open (${issues.filter(i => i.status === "open").length})` : `Resolved (${issues.filter(i => i.status === "resolved").length})`}
+              {f === "all" ? `All (${issues.length})` : f === "open" ? `Open (${openCount})` : `Resolved (${issues.filter(i => i.status === "resolved").length})`}
             </Button>
           ))}
         </div>
@@ -66,7 +110,7 @@ export default function QATab({ projectId }: { projectId: string }) {
       ) : (
         <div className="space-y-2">
           {filtered.map((issue) => (
-            <div key={issue.id} className="border border-border rounded-lg p-3 hover:bg-muted/20 transition-colors">
+            <div key={issue.id} className="border border-border rounded-lg p-3 hover:bg-muted/20 transition-colors cursor-pointer" onClick={() => handleOpenEdit(issue)}>
               <div className="flex items-start gap-2">
                 <AlertTriangle className={`h-4 w-4 mt-0.5 flex-shrink-0 ${issue.severity === "error" || issue.severity === "critical" ? "text-destructive" : "text-[hsl(var(--status-review))]"}`} />
                 <div className="flex-1 min-w-0">
@@ -77,16 +121,64 @@ export default function QATab({ projectId }: { projectId: string }) {
                     <Badge variant={issue.status === "open" ? "destructive" : "default"} className="text-[9px]">{issue.status}</Badge>
                   </div>
                   {issue.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{issue.description}</p>}
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    {new Date(issue.created_at).toLocaleDateString()}
-                    {issue.assigned_to && ` · Assigned to ${issue.assigned_to}`}
-                  </p>
+                  <div className="flex items-center gap-3 mt-1.5">
+                    <p className="text-[10px] text-muted-foreground">{new Date(issue.created_at).toLocaleDateString()}</p>
+                    {issue.assigned_to && (
+                      <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                        <User className="h-2.5 w-2.5" />{issue.assigned_to}
+                      </span>
+                    )}
+                    {issue.resolution_note && (
+                      <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                        <MessageSquare className="h-2.5 w-2.5" />Has resolution note
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
           ))}
         </div>
       )}
+
+      {/* Edit Dialog */}
+      <Dialog open={!!editIssue} onOpenChange={(open) => !open && setEditIssue(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle className="text-sm">Edit Issue: {editIssue?.title}</DialogTitle></DialogHeader>
+          {editIssue && (
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <Badge className={`text-[9px] ${severityColor(editIssue.severity)}`}>{editIssue.severity}</Badge>
+                <Badge variant="outline" className="text-[9px]">{editIssue.issue_type.replace(/_/g, " ")}</Badge>
+              </div>
+              {editIssue.description && <p className="text-xs text-muted-foreground">{editIssue.description}</p>}
+              <div>
+                <Label className="text-xs">Status</Label>
+                <Select value={editStatus} onValueChange={setEditStatus}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="open">Open</SelectItem>
+                    <SelectItem value="in_progress">In Progress</SelectItem>
+                    <SelectItem value="resolved">Resolved</SelectItem>
+                    <SelectItem value="wont_fix">Won't Fix</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs">Assigned To</Label>
+                <Input value={editAssignee} onChange={(e) => setEditAssignee(e.target.value)} className="h-9 text-sm" placeholder="e.g. estimator@company.com" />
+              </div>
+              <div>
+                <Label className="text-xs">Resolution Note</Label>
+                <Textarea value={editResolution} onChange={(e) => setEditResolution(e.target.value)} className="text-sm min-h-[60px]" placeholder="Describe how this issue was resolved…" />
+              </div>
+              <Button onClick={handleSaveEdit} disabled={saving} className="w-full" size="sm">
+                {saving ? "Saving…" : "Save Changes"}
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
