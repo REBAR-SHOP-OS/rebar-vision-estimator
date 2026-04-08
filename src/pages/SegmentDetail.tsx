@@ -402,8 +402,8 @@ export default function SegmentDetail() {
               <Select value={eiSourceFileId} onValueChange={setEiSourceFileId}>
                 <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="None" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="" className="text-sm">None</SelectItem>
-                  {projectFiles.map(f => <SelectItem key={f.id} value={f.id} className="text-sm">{f.file_name}</SelectItem>)}
+                  <SelectItem value="__none__" className="text-sm">None</SelectItem>
+                  {projectFiles.filter(f => f.id).map(f => <SelectItem key={f.id} value={f.id} className="text-sm">{f.file_name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
