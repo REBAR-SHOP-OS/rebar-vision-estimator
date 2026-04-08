@@ -457,6 +457,41 @@ export default function SegmentDetail() {
                     </tfoot>
                   </table>
                 </div>
+
+                {/* Calculation Breakdown */}
+                <div className="mt-4 border border-border rounded-lg bg-muted/20 p-4 space-y-3">
+                  <h5 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <AlertTriangle className="h-3.5 w-3.5 text-primary" />
+                    Weight Calculation Breakdown
+                  </h5>
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    <strong>Formula:</strong> Weight (kg) = Quantity × (Cut Length mm ÷ 1000) × Mass (kg/m)
+                  </p>
+                  <div className="space-y-1">
+                    {barItems.map((b) => {
+                      const qty = Number(b.quantity) || 0;
+                      const cutMm = Number(b.cut_length) || 0;
+                      const massKgM = getMassKgPerM(b.size || "");
+                      const wKg = qty * (cutMm / 1000) * massKgM;
+                      return (
+                        <div key={b.id} className="flex items-center justify-between text-[10px] font-mono text-muted-foreground py-0.5 border-b border-border/30 last:border-0">
+                          <span className="text-foreground font-medium w-12">{b.mark || "—"}</span>
+                          <span className="flex-1">
+                            {qty} × ({cutMm.toLocaleString()} mm ÷ 1000) × {massKgM.toFixed(3)} kg/m
+                          </span>
+                          <span className="font-semibold text-primary ml-2">= {wKg.toFixed(1)} kg</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center justify-between text-xs font-semibold border-t border-border pt-2">
+                    <span className="text-foreground">Grand Total</span>
+                    <span className="text-primary font-mono">{totalBarWeightKg.toFixed(1)} kg ({(totalBarWeightKg / 1000).toFixed(3)} tonnes)</span>
+                  </div>
+                  <p className="text-[9px] text-muted-foreground/70 italic">
+                    Mass values: CSA G30.18 (10M=0.785, 15M=1.570, 20M=2.355, 25M=3.925, 30M=5.495, 35M=7.850 kg/m). Imperial converted at 1 lb/ft = 1.48816 kg/m.
+                  </p>
+                </div>
               </>
             );
           })()}
