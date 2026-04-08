@@ -1,44 +1,24 @@
 
 
-# Enhance Provenance with Full Address + Clickable Drawing Navigation
+# Fix Reconciliation Sheet TOTAL Mismatch
 
-## What Changes
+## Problem
+The Reconciliation sheet TOTAL cell shows 13,061 kg (from the AI `recon.drawing_based_total` value) while the individual element rows sum to only 6,155.1 kg. The TOTAL should be the sum of the visible rows, not a separate AI-provided number.
 
-### 1. `src/pages/SegmentDetail.tsx` — Fetch additional context for provenance
+## Root Cause
+Line 454 in `src/lib/excel-export.ts` hardcodes `recon.drawing_based_total` into the TOTAL cell. This value comes from the AI response and may be stale or computed differently than the per-element breakdown shown above it.
 
-In `loadData()`, add a query to fetch `drawing_search_index` entries for this project to get page numbers per source file. Also fetch `document_versions` for page metadata.
+## Fix
 
-Use this data to enrich the provenance line:
-- **Page number**: from `drawing_search_index.page_number` matched via `source_file_id` → `document_version_id`
-- **Segment address**: show `segment.level_label`, `zone_label`, `segment_type`
-- **Full file name**: already available from `projectFiles`
+### `src/lib/excel-export.ts` — Use SUM formula for TOTAL row
 
-Display format per bar line:
-```
-A1  [15M]  72 × (6,000 mm ÷ 1000) × 1.570 kg/m = 678.2 kg
-📍 Source: Continuous Wall Footing - Longitudinal Reinforcement
-   Drawing: CRU-1 Structral (4).pdf · Page 3 · Segment: L1 / Zone A / Foundation
-   Confidence: 90% · AI-generated
-```
+Replace the hardcoded total values with Excel `SUM()` formulas that reference the actual data rows in columns B and C. This ensures the TOTAL always matches the visible element weights.
 
-### 2. `src/pages/SegmentDetail.tsx` — Make drawing reference clickable
-
-Add a click handler on the drawing/page reference that:
-1. Fetches a signed URL for the source file from storage
-2. Sets `sessionStorage` with `blueprint-viewer-data` including the page number and any overlay elements for this segment
-3. Opens `/blueprint-viewer` in a new tab via `window.open`
-
-The blueprint viewer already supports PDF page navigation (`currentPage`) and element highlighting via `selectedElementId`, so passing the correct page number and element data will auto-navigate and highlight.
-
-### 3. Data joining approach
-
-- Match `estimate_item.source_file_id` → `project_files.id` for file name
-- Match `estimate_item.source_file_id` → `document_versions.file_id` → get `page_count` and `pdf_metadata`
-- Match `source_file_id` → `drawing_search_index` entries (via `document_version_id`) to find relevant page numbers
-- Use segment's `level_label`, `zone_label`, `segment_type` for the address
+- Track the first and last data row numbers during element row insertion
+- TOTAL cell B = `=SUM(B{first}:B{last})` instead of `recon.drawing_based_total`
+- TOTAL cell C = `=SUM(C{first}:C{last})` instead of `recon.industry_norm_total`
+- Keep `recon.variance_pct` and `recon.risk_level` as-is (they are metadata, not sums)
 
 ## Files Modified
-- `src/pages/SegmentDetail.tsx` — add drawing_search_index + document_versions queries, enrich provenance display, add click-to-open handler
-
-## No new files, no migrations, no edge function changes
+- `src/lib/excel-export.ts` — Reconciliation sheet TOTAL row uses SUM formulas
 
