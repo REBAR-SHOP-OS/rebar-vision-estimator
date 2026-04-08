@@ -1,112 +1,78 @@
 
 
-# Comprehensive Audit & Remediation Plan
+# Audit Remediation — Fill Remaining Genuine Gaps
 
-## Audit Summary
+## Audit Cross-Reference
 
-### What Works (Verified)
-- **Database**: All 9 tables exist with RLS (`segments`, `estimate_items`, `bar_items`, `validation_issues`, `drawing_views`, `standards_profiles`, `approvals`, `segment_source_links`, `audit_events`). `source_file_id` columns confirmed on `estimate_items` and `validation_issues`.
-- **Routing**: Full nested route structure under `/app` with `AppShell`.
-- **SourcesPanel**: Real CRUD via `segment_source_links` with audit logging + unlink.
-- **QATab**: Issue creation, edit, status transitions, resolution notes required, audit logging.
-- **ApprovalPanel**: Create/approve/reject with blocker gating + audit logging.
-- **OutputsTab**: Real CSV/HTML export handlers with approval-gate banners.
-- **DrawingViewsPanel**: Read + "Generate Draft" creates records.
-- **StandardsPage**: Full CRUD with cover/lap/hook defaults, naming rules JSON, delete, set default.
-- **FilesTab**: Enriched table with segment counts from `segment_source_links` and issue counts from `source_file_id`.
-- **Audit logging**: `logAuditEvent` utility integrated across panels.
+Many findings in the audit are stale (written against an earlier snapshot). Here is what is **already implemented** and what **genuinely remains**:
 
-### Gaps Found
+### Already Working (No Action Needed)
+- Source traceability via `segment_source_links` table with link/unlink + audit logging
+- Issue creation, edit, resolution note requirement, reopen handling
+- Audit event logging across all panels (QA, Approvals, Sources, Settings, Files, Standards)
+- File upload from Files tab with storage + audit
+- Segment CRUD (create, edit, delete with confirmation)
+- Project settings tab (name, client, type, address, status, workflow, delete)
+- Real export handlers (CSV for issues/estimates/quotes, HTML viewer for shop drawings)
+- Approval blocker gating (blocks approve when critical/error issues exist)
+- QA segmentId filtering
+- DrawingViewsPanel generates draft DB records
+- Standards profile default selection with audit logging
 
-| # | Gap | Severity | Location |
-|---|-----|----------|----------|
-| 1 | **Settings tab is a placeholder** — just says "coming soon" | Medium | `ProjectWorkspace.tsx:100` |
-| 2 | **No project edit UI** — can't update name, client, address, type, description after creation | Medium | Missing |
-| 3 | **No file upload from Files tab** — files only uploadable from Dashboard file input | Medium | `FilesTab.tsx` |
-| 4 | **Segment detail Issues tab is read-only** — no create/edit inline, unlike the project QA tab | Medium | `SegmentDetail.tsx:206-232` |
-| 5 | **No estimate item inline editing** — estimate items table is display-only | Low | `SegmentDetail.tsx:131-160` |
-| 6 | **No bar item creation/editing** — bar schedule is display-only | Low | `SegmentDetail.tsx:163-199` |
-| 7 | **DrawingViewsPanel "Generate Draft" only inserts a DB record** — doesn't call the shop drawing edge function | Low | `DrawingViewsPanel.tsx:39-47` |
-| 8 | **Standards default race condition** — two separate UPDATE calls (clear all, then set one) | Low | `StandardsPage.tsx:120-129` |
-| 9 | **SegmentDetail doesn't pass `projectId` to DrawingViewsPanel** — audit event has no project context | Trivial | `SegmentDetail.tsx:203` |
-| 10 | **Segment edit/delete** — no way to rename, change type, or delete segments | Low | `SegmentsTab.tsx` |
-| 11 | **Dashboard doesn't show file counts or issue summaries per project** | Low | `ProjectDashboard.tsx` |
+### Genuinely Missing (To Fix Now)
 
----
-
-## Remediation Plan (Minimal Patches)
-
-### 1. Build Settings Tab (fills the placeholder)
-**File**: Create `src/components/workspace/ProjectSettingsTab.tsx`
-
-Editable fields from `projects` table:
-- `name`, `client_name`, `address`, `project_type`, `description`, `status`, `workflow_status`
-- Delete project action (with confirmation)
-
-**File**: `ProjectWorkspace.tsx` — import and render `ProjectSettingsTab` in the settings `TabsContent` instead of the placeholder text.
-
-### 2. Add File Upload to Files Tab
-**File**: `FilesTab.tsx`
-
-Add an "Upload File" button that:
-- Opens a file picker
-- Uploads to Supabase storage (`project-files` bucket)
-- Inserts a `project_files` row
-- Logs audit event
-- Refreshes the file list
-
-### 3. Wire Segment-Scoped Issue Create/Edit
-**File**: `SegmentDetail.tsx`
-
-Replace the read-only issues list with a reuse of the `QATab` component, passing `segmentId` as an additional filter prop.
-
-**File**: `QATab.tsx` — add optional `segmentId` prop. When present, filter by `segment_id` and pass it on insert.
-
-### 4. Add Estimate Item Inline Editing
-**File**: `SegmentDetail.tsx`
-
-Add an edit dialog for estimate items (description, bar_size, quantity_count, total_length, total_weight, status). Log audit events on save.
-
-### 5. Add Segment Edit/Delete
-**File**: `SegmentsTab.tsx`
-
-Add edit dialog (name, type, level_label, zone_label, notes) and delete action with confirmation. Log audit events.
-
-### 6. Fix Standards Default Race Condition
-**File**: `StandardsPage.tsx:116-130`
-
-Replace two-step update with a single RPC or use `.neq("id", id)` to clear others atomically:
-```
-await supabase.from("standards_profiles").update({ is_default: false }).neq("id", id);
-await supabase.from("standards_profiles").update({ is_default: true }).eq("id", id);
-```
-
-### 7. Pass projectId to DrawingViewsPanel
-**File**: `SegmentDetail.tsx:203`
-
-Add `projectId` prop to `DrawingViewsPanel`.
-
-**File**: `DrawingViewsPanel.tsx` — accept optional `projectId`, pass to `logAuditEvent`.
-
-### 8. Add QA segmentId Support
-**File**: `QATab.tsx`
-
-Add optional `segmentId?: string` prop. When set, add `.eq("segment_id", segmentId)` to queries and include `segment_id` in insert payload.
+| # | Gap | File | Effort |
+|---|-----|------|--------|
+| 1 | Estimate item inline edit dialog | SegmentDetail.tsx | Medium |
+| 2 | Bar item add/edit dialog | SegmentDetail.tsx | Medium |
+| 3 | Source file "View" button is a no-op | SourcesPanel.tsx | Small |
+| 4 | DrawingViewsPanel doesn't call shop-drawing edge function | DrawingViewsPanel.tsx | Small |
+| 5 | Estimate item source_file_id linking UI | SegmentDetail.tsx | Small |
+| 6 | FilesTab "View file" action missing | FilesTab.tsx | Small |
+| 7 | Segment create missing audit log | SegmentsTab.tsx | Trivial |
 
 ---
 
-## Files Modified (8)
-- `src/pages/ProjectWorkspace.tsx` — import ProjectSettingsTab
-- `src/components/workspace/FilesTab.tsx` — add upload button
-- `src/components/workspace/QATab.tsx` — add segmentId prop
-- `src/components/workspace/DrawingViewsPanel.tsx` — add projectId prop
-- `src/pages/SegmentDetail.tsx` — use QATab for issues, add estimate edit, pass projectId
-- `src/components/workspace/SegmentsTab.tsx` — add edit/delete
-- `src/pages/StandardsPage.tsx` — fix race condition (2-line patch)
+## Implementation Plan
 
-## Files Created (1)
-- `src/components/workspace/ProjectSettingsTab.tsx` — project settings form
+### 1. Estimate Item Inline Edit Dialog (SegmentDetail.tsx)
+Add an edit dialog triggered by clicking a table row. Editable fields: `description`, `bar_size`, `quantity_count`, `total_length`, `total_weight`, `status`, `source_file_id`. Uses existing `supabase.from("estimate_items").update()`. Logs audit event on save.
 
-## No Migrations Needed
-All referenced columns already exist in the database.
+### 2. Bar Item Add/Edit Dialog (SegmentDetail.tsx)
+Add "Add Bar" button and row-click edit dialog. Fields: `mark`, `size`, `shape_code`, `cut_length`, `quantity`, `finish_type`, `cover_value`, `lap_length`. Insert/update via `bar_items` table. Logs audit event.
+
+### 3. Source File View Button (SourcesPanel.tsx)
+Wire the existing `ExternalLink` button to fetch a signed URL from Supabase storage and open in new tab:
+```typescript
+const { data } = await supabase.storage.from("blueprints").createSignedUrl(filePath, 3600);
+window.open(data?.signedUrl, "_blank");
+```
+Requires joining `project_files.file_path` into the source link data.
+
+### 4. DrawingViewsPanel — Call Edge Function (DrawingViewsPanel.tsx)
+Change "Generate Draft" to invoke the `generate-shop-drawing` edge function with segment data, then store the returned HTML in `shop_drawings` table and update the `drawing_views` record status to "review".
+
+### 5. Estimate Item Source File Linking (SegmentDetail.tsx)
+Add a `source_file_id` selector (dropdown of project files) in the estimate item edit dialog. Shows linked file name in the table.
+
+### 6. Files Tab View Action (FilesTab.tsx)
+Add a "View" button per file row that fetches a signed URL and opens the file in a new tab.
+
+### 7. Segment Create Audit Log (SegmentsTab.tsx)
+Add `logAuditEvent` call after successful segment creation (currently missing, edit/delete already have it).
+
+---
+
+## Files Modified (4)
+- `src/pages/SegmentDetail.tsx` — add estimate item edit dialog, bar item add/edit dialog, source_file_id linking
+- `src/components/workspace/SourcesPanel.tsx` — wire view button with signed URL
+- `src/components/workspace/DrawingViewsPanel.tsx` — call edge function on generate
+- `src/components/workspace/FilesTab.tsx` — add view file action
+- `src/components/workspace/SegmentsTab.tsx` — add audit log on create
+
+## Files Created
+None.
+
+## Migrations
+None needed — all referenced columns already exist.
 
