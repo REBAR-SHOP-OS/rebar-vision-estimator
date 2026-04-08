@@ -103,32 +103,95 @@ export default function FilesTab({ projectId }: { projectId: string }) {
   const handleParseAll = async () => {
     if (!user) return;
     setParsing(true);
+    const pendingFiles = files.filter(f => f.parse_status === "pending");
+    let successCount = 0;
+
     try {
-      // Create missing document_versions for files that lack them
-      const pendingFiles = files.filter(f => f.parse_status === "pending");
       for (const f of pendingFiles) {
         try {
-          const hash = `pending_${Date.now()}_${f.id}`;
-          const discipline = detectDiscipline(f.file_name);
-          await supabase.from("document_versions").insert({
-            project_id: projectId,
-            user_id: user.id,
-            file_id: f.id,
-            file_name: f.file_name,
-            file_path: f.file_path,
-            sha256: hash,
-            source_system: "upload",
-            pdf_metadata: discipline ? { discipline } : {},
+          // 1. Ensure document_version exists
+          const { data: existingDv } = await supabase
+            .from("document_versions")
+            .select("id")
+            .eq("file_id", f.id)
+            .maybeSingle();
+
+          let dvId = existingDv?.id;
+          if (!dvId) {
+            const hash = `pending_${Date.now()}_${f.id}`;
+            const discipline = detectDiscipline(f.file_name);
+            const { data: newDv } = await supabase.from("document_versions").insert({
+              project_id: projectId,
+              user_id: user.id,
+              file_id: f.id,
+              file_name: f.file_name,
+              file_path: f.file_path,
+              sha256: hash,
+              source_system: "upload",
+              pdf_metadata: discipline ? { discipline } : {},
+            }).select("id").single();
+            dvId = newDv?.id;
+          }
+
+          // 2. Get signed URL for PDF
+          const { data: urlData } = await supabase.storage
+            .from("blueprints")
+            .createSignedUrl(f.file_path, 3600);
+
+          if (!urlData?.signedUrl) continue;
+
+          // 3. Call extract-pdf-text to get text content
+          const { data: extraction, error: extractErr } = await supabase.functions.invoke("extract-pdf-text", {
+            body: { pdf_url: urlData.signedUrl, project_id: projectId },
           });
-        } catch (_) { /* best effort */ }
+
+          if (extractErr || !extraction) {
+            console.warn(`Extraction failed for ${f.file_name}:`, extractErr);
+            continue;
+          }
+
+          // 4. Call populate-search-index with the extracted pages
+          const { error: indexErr } = await supabase.functions.invoke("populate-search-index", {
+            body: {
+              project_id: projectId,
+              document_version_id: dvId,
+              pages: extraction.pages || [],
+              file_name: f.file_name,
+              sha256: extraction.sha256 || `file_${f.id}`,
+            },
+          });
+
+          if (indexErr) {
+            console.warn(`Indexing failed for ${f.file_name}:`, indexErr);
+          } else {
+            successCount++;
+          }
+
+          // 5. Update document_version with extraction metadata
+          if (dvId) {
+            await supabase.from("document_versions").update({
+              sha256: extraction.sha256 || `file_${f.id}`,
+              page_count: extraction.total_pages || 0,
+              is_scanned: !extraction.has_text_layer,
+            }).eq("id", dvId);
+          }
+        } catch (fileErr) {
+          console.warn(`Parse failed for ${f.file_name}:`, fileErr);
+        }
       }
-      // Trigger the processing pipeline
-      const { error } = await supabase.functions.invoke("process-pipeline", { body: { project_id: projectId } });
-      if (error) toast.error("Pipeline trigger failed");
-      else toast.success(`Parsing started for ${pendingFiles.length} file(s)`);
+
+      // 6. Run process-pipeline to update workflow status
+      await supabase.functions.invoke("process-pipeline", { body: { project_id: projectId } });
+
+      if (successCount > 0) {
+        toast.success(`Parsed & indexed ${successCount} of ${pendingFiles.length} file(s)`);
+      } else if (pendingFiles.length > 0) {
+        toast.warning("Files processed but no text extracted (scanned PDFs). Use the chat to analyze with AI Vision.");
+      }
       loadFiles();
     } catch (err) {
       toast.error("Failed to start parsing");
+      console.error("Parse all error:", err);
     } finally {
       setParsing(false);
     }
