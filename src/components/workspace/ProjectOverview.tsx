@@ -35,6 +35,8 @@ const WORKFLOW_STEP_MAP: Record<string, string> = {
   approved: "approved",
   archived: "archived",
 };
+
+export default function ProjectOverview({ project }: ProjectOverviewProps) {
   const [counts, setCounts] = useState({ files: 0, segments: 0, issues: 0, approvals: 0, estimates: 0, blockers: 0 });
 
   useEffect(() => {
