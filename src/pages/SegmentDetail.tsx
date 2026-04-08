@@ -272,9 +272,15 @@ export default function SegmentDetail() {
         <TabsContent value="estimate" className="flex-1 overflow-auto p-4 m-0">
           <div className="flex items-center justify-between mb-3">
             <h4 className="text-sm font-semibold text-foreground">Estimate Items</h4>
-            <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={() => openEditItem(null)}>
-              <Plus className="h-3 w-3" />Add Item
-            </Button>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={runAutoEstimate} disabled={autoEstimating}>
+                {autoEstimating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                {autoEstimating ? "Estimating…" : "Auto Estimate"}
+              </Button>
+              <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={() => openEditItem(null)}>
+                <Plus className="h-3 w-3" />Add Item
+              </Button>
+            </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <Card><CardContent className="p-3 text-center"><p className="text-lg font-bold">{estimateItems.length}</p><p className="text-[10px] text-muted-foreground uppercase">Items</p></CardContent></Card>
