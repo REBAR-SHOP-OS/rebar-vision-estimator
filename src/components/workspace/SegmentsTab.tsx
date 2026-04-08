@@ -244,6 +244,7 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {segments.length === 0 ? (
