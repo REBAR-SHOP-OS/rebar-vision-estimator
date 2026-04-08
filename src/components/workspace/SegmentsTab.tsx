@@ -71,6 +71,8 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
 
   // Stats per segment: items count, bar count, computed weight
   const [segStats, setSegStats] = useState<Record<string, { items: number; bars: number; weightKg: number }>>({});
+  // Scope coverage: does this segment type have matching files?
+  const [scopeCoverage, setScopeCoverage] = useState<Record<string, "drawing" | "inferred">>({}); 
 
   const loadStats = async (segIds: string[]) => {
     if (segIds.length === 0) return;
@@ -148,17 +150,28 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
 
   const load = () => {
     setLoading(true);
-    supabase
-      .from("segments")
-      .select("*")
-      .eq("project_id", projectId)
-      .order("created_at", { ascending: true })
-      .then(({ data }) => {
-        const segs = (data as Segment[]) || [];
-        setSegments(segs);
-        setLoading(false);
-        loadStats(segs.map(s => s.id));
-      });
+    Promise.all([
+      supabase.from("segments").select("*").eq("project_id", projectId).order("created_at", { ascending: true }),
+      supabase.from("project_files").select("file_name").eq("project_id", projectId).limit(50),
+    ]).then(([segResult, fileResult]) => {
+      const segs = (segResult.data as Segment[]) || [];
+      setSegments(segs);
+      setLoading(false);
+      loadStats(segs.map(s => s.id));
+
+      // Determine scope coverage per segment based on file names
+      const fNames = (fileResult.data || []).map((f: any) => (f.file_name || "").toUpperCase());
+      const typeFilePatterns: Record<string, RegExp> = {
+        footing: /FOUND|FTG|FOOT/i, pier: /PIER|PILE/i, slab: /SLAB/i, wall: /WALL/i,
+        beam: /BEAM|FRM/i, column: /COL/i, stair: /STAIR/i, retaining_wall: /RETAIN/i,
+      };
+      const coverage: Record<string, "drawing" | "inferred"> = {};
+      for (const s of segs) {
+        const pattern = typeFilePatterns[s.segment_type];
+        coverage[s.id] = pattern && fNames.some((n: string) => pattern.test(n)) ? "drawing" : "inferred";
+      }
+      setScopeCoverage(coverage);
+    });
   };
 
   useEffect(() => { load(); }, [projectId]);
@@ -292,6 +305,7 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
                 <th className="text-right px-3 py-2.5 font-semibold">Weight (kg)</th>
                 <th className="text-right px-3 py-2.5 font-semibold">Confidence</th>
                 <th className="text-left px-3 py-2.5 font-semibold">Drawing</th>
+                <th className="text-left px-3 py-2.5 font-semibold">Scope</th>
                 <th className="text-right px-3 py-2.5 font-semibold">Actions</th>
               </tr>
             </thead>
@@ -321,6 +335,11 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
                   </td>
                   <td className="px-3 py-2.5">
                     <Badge variant="outline" className="text-[9px]">{s.drawing_readiness.replace(/_/g, " ")}</Badge>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <Badge variant="outline" className={`text-[9px] ${scopeCoverage[s.id] === "drawing" ? "border-green-500/40 text-green-600 bg-green-500/10" : "border-amber-500/40 text-amber-600 bg-amber-500/10"}`}>
+                      {scopeCoverage[s.id] === "drawing" ? "Drawing" : "Inferred"}
+                    </Badge>
                   </td>
                   <td className="px-3 py-2.5 text-right">
                     <div className="flex items-center justify-end gap-1">

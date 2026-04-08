@@ -46,7 +46,7 @@ serve(async (req) => {
     const [segRes, projRes, filesRes, stdRes, existingRes] = await Promise.all([
       supabase.from("segments").select("*").eq("id", segment_id).single(),
       supabase.from("projects").select("name, project_type, scope_items, description").eq("id", project_id).single(),
-      supabase.from("project_files").select("file_name, file_type").eq("project_id", project_id).limit(20),
+      supabase.from("project_files").select("id, file_name, file_type").eq("project_id", project_id).limit(20),
       supabase.from("standards_profiles").select("*").eq("user_id", user.id).eq("is_default", true).limit(1),
       supabase.from("estimate_items").select("description, bar_size").eq("segment_id", segment_id).limit(50),
     ]);
@@ -56,6 +56,43 @@ serve(async (req) => {
     const files = filesRes.data || [];
     const standard = stdRes.data?.[0];
     const existing = existingRes.data || [];
+
+    // Gather extracted drawing text for context (from document_versions / extract-pdf-text)
+    let drawingTextContext = "";
+    try {
+      const { data: docVersions } = await supabase
+        .from("document_versions")
+        .select("pdf_metadata, file_name")
+        .eq("project_id", project_id)
+        .limit(10);
+      if (docVersions && docVersions.length > 0) {
+        const textSnippets: string[] = [];
+        for (const dv of docVersions) {
+          const meta = dv.pdf_metadata as any;
+          if (meta?.pages) {
+            for (const page of meta.pages.slice(0, 5)) {
+              if (page.raw_text) {
+                textSnippets.push(`[${dv.file_name} p${page.page_number}] ${page.raw_text.slice(0, 1500)}`);
+              }
+            }
+          }
+        }
+        drawingTextContext = textSnippets.join("\n\n").slice(0, 8000);
+      }
+    } catch (drawErr) {
+      console.warn("Could not fetch drawing text:", drawErr);
+    }
+
+    // Detect scope coverage from file disciplines
+    const fileNames = files.map((f: any) => (f.file_name || "").toUpperCase());
+    const hasStructuralFoundation = fileNames.some((n: string) => /FOUND|FTG|FOOT|PIER|PILE/.test(n));
+    const hasStructuralSuper = fileNames.some((n: string) => /SLAB|BEAM|COL|WALL|FRAME|SUPER/.test(n));
+    const hasArchitectural = fileNames.some((n: string) => /^A[-_]|ARCH/.test(n));
+    const scopeHint = project?.scope_items?.length
+      ? project.scope_items.join(", ")
+      : (hasStructuralFoundation && !hasStructuralSuper)
+        ? "FOUNDATION SCOPE ONLY — do NOT estimate superstructure elements"
+        : "";
 
     if (!segment) {
       return new Response(JSON.stringify({ error: "Segment not found" }), {
@@ -73,7 +110,10 @@ Rules:
 - Bar sizes: use metric (10M, 15M, 20M, 25M, 30M, 35M) or imperial (#3, #4, #5, #6, #7, #8) based on standards.
 - Confidence should reflect how typical this item is for this segment type (0.7-0.95 for standard items).
 - Generate 3-8 items that are realistic for the segment type.
-- Weight must be consistent with bar size and length using standard rebar weights.
+- Weight must be consistent with bar size and length using standard rebar weights. Use these mass values (kg/m): 10M=0.785, 15M=1.570, 20M=2.355, 25M=3.925, 30M=5.495, 35M=7.850, #3=0.561, #4=0.994, #5=1.552, #6=2.235, #7=3.042, #8=3.973.
+- CRITICAL: If drawing text is provided below, use the ACTUAL bar sizes, quantities, and lengths from the drawings — do NOT guess or inflate. Parse footing schedules, bar schedules, and rebar callouts directly.
+- CRITICAL: Only estimate items that belong to THIS segment type. Do NOT add superstructure items to foundation segments or vice versa.
+- ${scopeHint ? `SCOPE RESTRICTION: ${scopeHint}` : ""}
 - Do NOT duplicate items already estimated: ${existingDesc || "none yet"}.`;
 
     const userPrompt = `Project: ${project?.name || "Unknown"}
@@ -91,7 +131,9 @@ Standards: ${standard ? `${standard.name} (${standard.code_family}, ${standard.u
 Cover defaults: ${standard?.cover_defaults ? JSON.stringify(standard.cover_defaults) : "Standard"}
 Lap defaults: ${standard?.lap_defaults ? JSON.stringify(standard.lap_defaults) : "Standard"}
 
-Generate estimate items for this segment.`;
+${drawingTextContext ? `=== DRAWING TEXT (use this as primary source for bar sizes, quantities, schedules) ===\n${drawingTextContext}\n=== END DRAWING TEXT ===` : "No drawing text available — estimate based on typical construction practice for this element type. Be conservative."}
+
+Generate estimate items for this segment. Base quantities on the ACTUAL drawing data if available, not assumptions.`;
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
@@ -156,8 +198,22 @@ Generate estimate items for this segment.`;
       });
     }
 
+    // Weight validation gate — flag outliers
+    const totalAiWeight = items.reduce((s: number, i: any) => s + (Number(i.total_weight) || 0), 0);
+    const segType = segment.segment_type;
+    const weightLimits: Record<string, number> = {
+      footing: 5000, pier: 3000, slab: 15000, wall: 8000, beam: 5000, column: 3000,
+      stair: 2000, pit: 2000, curb: 1000, retaining_wall: 10000, miscellaneous: 10000,
+    };
+    const maxWeight = weightLimits[segType] || 15000;
+    if (totalAiWeight > maxWeight) {
+      console.warn(`[weight-gate] AI estimated ${totalAiWeight.toFixed(0)}kg for ${segType} segment "${segment.name}" — exceeds ${maxWeight}kg limit. Flagging low confidence.`);
+      // Scale down confidence for all items to flag as suspicious
+      items.forEach((item: any) => { item.confidence = Math.min(item.confidence || 0.5, 0.4); });
+    }
+
     // Pick first project file as source reference (if any)
-    const sourceFileId = files.length > 0 ? (await supabase.from("project_files").select("id").eq("project_id", project_id).limit(1).single()).data?.id : null;
+    const sourceFileId = files.length > 0 ? files[0].id : null;
 
     // Insert items into estimate_items
     const rows = items.map((item: any) => ({
