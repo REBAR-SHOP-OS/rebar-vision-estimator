@@ -46,7 +46,7 @@ serve(async (req) => {
     const [segRes, projRes, filesRes, stdRes, existingRes] = await Promise.all([
       supabase.from("segments").select("*").eq("id", segment_id).single(),
       supabase.from("projects").select("name, project_type, scope_items, description").eq("id", project_id).single(),
-      supabase.from("project_files").select("file_name, file_type").eq("project_id", project_id).limit(20),
+      supabase.from("project_files").select("id, file_name, file_type").eq("project_id", project_id).limit(20),
       supabase.from("standards_profiles").select("*").eq("user_id", user.id).eq("is_default", true).limit(1),
       supabase.from("estimate_items").select("description, bar_size").eq("segment_id", segment_id).limit(50),
     ]);
@@ -56,6 +56,43 @@ serve(async (req) => {
     const files = filesRes.data || [];
     const standard = stdRes.data?.[0];
     const existing = existingRes.data || [];
+
+    // Gather extracted drawing text for context (from document_versions / extract-pdf-text)
+    let drawingTextContext = "";
+    try {
+      const { data: docVersions } = await supabase
+        .from("document_versions")
+        .select("pdf_metadata, file_name")
+        .eq("project_id", project_id)
+        .limit(10);
+      if (docVersions && docVersions.length > 0) {
+        const textSnippets: string[] = [];
+        for (const dv of docVersions) {
+          const meta = dv.pdf_metadata as any;
+          if (meta?.pages) {
+            for (const page of meta.pages.slice(0, 5)) {
+              if (page.raw_text) {
+                textSnippets.push(`[${dv.file_name} p${page.page_number}] ${page.raw_text.slice(0, 1500)}`);
+              }
+            }
+          }
+        }
+        drawingTextContext = textSnippets.join("\n\n").slice(0, 8000);
+      }
+    } catch (drawErr) {
+      console.warn("Could not fetch drawing text:", drawErr);
+    }
+
+    // Detect scope coverage from file disciplines
+    const fileNames = files.map((f: any) => (f.file_name || "").toUpperCase());
+    const hasStructuralFoundation = fileNames.some((n: string) => /FOUND|FTG|FOOT|PIER|PILE/.test(n));
+    const hasStructuralSuper = fileNames.some((n: string) => /SLAB|BEAM|COL|WALL|FRAME|SUPER/.test(n));
+    const hasArchitectural = fileNames.some((n: string) => /^A[-_]|ARCH/.test(n));
+    const scopeHint = project?.scope_items?.length
+      ? project.scope_items.join(", ")
+      : (hasStructuralFoundation && !hasStructuralSuper)
+        ? "FOUNDATION SCOPE ONLY — do NOT estimate superstructure elements"
+        : "";
 
     if (!segment) {
       return new Response(JSON.stringify({ error: "Segment not found" }), {
