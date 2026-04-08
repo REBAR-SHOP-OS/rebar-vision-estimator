@@ -7,10 +7,20 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Loader2, Plus, Layers, Pencil, Trash2 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Loader2, Plus, Layers, Pencil, Trash2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 import { useNavigate } from "react-router-dom";
+
+interface SegmentSuggestion {
+  name: string;
+  segment_type: string;
+  level_label: string | null;
+  zone_label: string | null;
+  notes: string | null;
+  selected: boolean;
+}
 
 interface Segment {
   id: string;
