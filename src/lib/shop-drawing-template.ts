@@ -2049,6 +2049,23 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
             line-height: 1.5;
           }
 
+
+          .company-address {
+            font-size: 7px;
+            color: #444;
+            margin-top: 1px;
+          }
+
+          .eor-note {
+            margin-top: 6px;
+            padding: 3px 6px;
+            border: 1.5px solid #111;
+            font-size: 8px;
+            font-weight: 700;
+            text-align: center;
+            letter-spacing: 0.04em;
+          }
+
           @media print {
             html, body {
               background: #fff;
