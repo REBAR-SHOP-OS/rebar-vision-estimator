@@ -175,6 +175,12 @@ export default function FilesTab({ projectId }: { projectId: string }) {
         <h3 className="text-sm font-semibold text-foreground">Files & Revisions</h3>
         <div className="flex items-center gap-2">
           <Badge variant="secondary" className="text-[10px]">{files.length} file{files.length !== 1 ? "s" : ""}</Badge>
+          {files.some(f => f.parse_status === "pending") && (
+            <Button size="sm" variant="default" className="gap-1.5 h-7 text-xs" disabled={parsing} onClick={handleParseAll}>
+              {parsing ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
+              {parsing ? "Parsing…" : "Parse All"}
+            </Button>
+          )}
           <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs relative" disabled={uploading}>
             {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
             {uploading ? `Uploading ${uploadProgress}…` : "Upload"}
