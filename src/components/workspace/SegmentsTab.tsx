@@ -213,11 +213,46 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteId(s.id); }}><Trash2 className="h-3 w-3" /></Button>
                     </div>
                   </td>
+                </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      {/* Edit Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle className="text-sm">Edit Segment</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label className="text-xs">Name</Label><Input value={editName} onChange={(e) => setEditName(e.target.value)} className="h-9 text-sm" /></div>
+            <div><Label className="text-xs">Type</Label>
+              <Select value={editType} onValueChange={setEditType}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>{SEGMENT_TYPES.map((t) => (<SelectItem key={t} value={t} className="text-sm capitalize">{t.replace(/_/g, " ")}</SelectItem>))}</SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div><Label className="text-xs">Level</Label><Input value={editLevel} onChange={(e) => setEditLevel(e.target.value)} className="h-9 text-sm" placeholder="e.g. L1" /></div>
+              <div><Label className="text-xs">Zone</Label><Input value={editZone} onChange={(e) => setEditZone(e.target.value)} className="h-9 text-sm" placeholder="e.g. Zone A" /></div>
+            </div>
+            <div><Label className="text-xs">Notes</Label><Input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} className="h-9 text-sm" placeholder="Optional notes" /></div>
+            <Button onClick={handleSaveEdit} disabled={editSaving || !editName.trim()} className="w-full" size="sm">{editSaving ? "Saving…" : "Save Changes"}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation */}
+      <Dialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle className="text-sm">Delete Segment?</DialogTitle></DialogHeader>
+          <p className="text-xs text-muted-foreground">This will permanently delete the segment and cannot be undone.</p>
+          <div className="flex gap-2 justify-end mt-2">
+            <Button variant="outline" size="sm" onClick={() => setDeleteId(null)}>Cancel</Button>
+            <Button variant="destructive" size="sm" onClick={handleDelete} disabled={deleting}>{deleting ? "Deleting…" : "Delete"}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
