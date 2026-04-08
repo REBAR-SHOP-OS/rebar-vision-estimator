@@ -110,7 +110,10 @@ Rules:
 - Bar sizes: use metric (10M, 15M, 20M, 25M, 30M, 35M) or imperial (#3, #4, #5, #6, #7, #8) based on standards.
 - Confidence should reflect how typical this item is for this segment type (0.7-0.95 for standard items).
 - Generate 3-8 items that are realistic for the segment type.
-- Weight must be consistent with bar size and length using standard rebar weights.
+- Weight must be consistent with bar size and length using standard rebar weights. Use these mass values (kg/m): 10M=0.785, 15M=1.570, 20M=2.355, 25M=3.925, 30M=5.495, 35M=7.850, #3=0.561, #4=0.994, #5=1.552, #6=2.235, #7=3.042, #8=3.973.
+- CRITICAL: If drawing text is provided below, use the ACTUAL bar sizes, quantities, and lengths from the drawings — do NOT guess or inflate. Parse footing schedules, bar schedules, and rebar callouts directly.
+- CRITICAL: Only estimate items that belong to THIS segment type. Do NOT add superstructure items to foundation segments or vice versa.
+- ${scopeHint ? `SCOPE RESTRICTION: ${scopeHint}` : ""}
 - Do NOT duplicate items already estimated: ${existingDesc || "none yet"}.`;
 
     const userPrompt = `Project: ${project?.name || "Unknown"}
@@ -128,7 +131,9 @@ Standards: ${standard ? `${standard.name} (${standard.code_family}, ${standard.u
 Cover defaults: ${standard?.cover_defaults ? JSON.stringify(standard.cover_defaults) : "Standard"}
 Lap defaults: ${standard?.lap_defaults ? JSON.stringify(standard.lap_defaults) : "Standard"}
 
-Generate estimate items for this segment.`;
+${drawingTextContext ? `=== DRAWING TEXT (use this as primary source for bar sizes, quantities, schedules) ===\n${drawingTextContext}\n=== END DRAWING TEXT ===` : "No drawing text available — estimate based on typical construction practice for this element type. Be conservative."}
+
+Generate estimate items for this segment. Base quantities on the ACTUAL drawing data if available, not assumptions.`;
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
