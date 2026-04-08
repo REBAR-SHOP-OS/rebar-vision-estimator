@@ -32,28 +32,62 @@ export default function FilesTab({ projectId }: { projectId: string }) {
 
   useEffect(() => { loadFiles(); }, [projectId]);
 
+  const detectDiscipline = (name: string): string | null => {
+    const n = name.toUpperCase();
+    if (/\bS[-_]?\d|STRUCTURAL|STR[-_]/i.test(n)) return "Structural";
+    if (/\bA[-_]?\d|ARCHITECTURAL|ARCH[-_]/i.test(n)) return "Architectural";
+    if (/\bC[-_]?\d|CIVIL/i.test(n)) return "Civil";
+    if (/\bM[-_]?\d|MECHANICAL/i.test(n)) return "Mechanical";
+    if (/\bE[-_]?\d|ELECTRICAL/i.test(n)) return "Electrical";
+    if (/\bP[-_]?\d|PLUMBING/i.test(n)) return "Plumbing";
+    if (/\bL[-_]?\d|LANDSCAPE/i.test(n)) return "Landscape";
+    return null;
+  };
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !user) return;
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0 || !user) return;
+    const files = Array.from(fileList);
     setUploading(true);
-    const path = `${user.id}/${projectId}/${Date.now()}_${file.name}`;
-    const { error: storageErr } = await supabase.storage.from("blueprints").upload(path, file);
-    if (storageErr) { toast.error("Upload failed"); setUploading(false); return; }
-    const { data, error: dbErr } = await supabase.from("project_files").insert({
-      project_id: projectId,
-      user_id: user.id,
-      file_name: file.name,
-      file_path: path,
-      file_type: file.type || null,
-      file_size: file.size,
-    }).select("id").single();
-    if (dbErr) toast.error("Failed to save file record");
-    else {
-      await logAuditEvent(user.id, "uploaded", "project_file", data?.id, projectId);
-      toast.success("File uploaded");
-      loadFiles();
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      setUploadProgress(`${i + 1}/${files.length}`);
+      const path = `${user.id}/${projectId}/${Date.now()}_${file.name}`;
+      const { error: storageErr } = await supabase.storage.from("blueprints").upload(path, file);
+      if (storageErr) { toast.error(`Upload failed: ${file.name}`); continue; }
+      const { data, error: dbErr } = await supabase.from("project_files").insert({
+        project_id: projectId,
+        user_id: user.id,
+        file_name: file.name,
+        file_path: path,
+        file_type: file.type || null,
+        file_size: file.size,
+      }).select("id").single();
+      if (dbErr) { toast.error(`Failed to save: ${file.name}`); continue; }
+
+      // Create document_version with discipline tag
+      const discipline = detectDiscipline(file.name);
+      try {
+        const hash = await computeSHA256(file);
+        await supabase.from("document_versions").insert({
+          project_id: projectId,
+          user_id: user.id,
+          file_id: data.id,
+          file_name: file.name,
+          file_path: path,
+          sha256: hash,
+          source_system: "upload",
+          pdf_metadata: discipline ? { discipline } : {},
+        });
+      } catch (_) { /* hash/version insert is best-effort */ }
+
+      await logAuditEvent(user.id, "uploaded", "project_file", data.id, projectId);
     }
+    toast.success(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
+    loadFiles();
     setUploading(false);
+    setUploadProgress("");
     e.target.value = "";
   };
 
