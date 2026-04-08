@@ -28,8 +28,6 @@ export default function FilesTab({ projectId }: { projectId: string }) {
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => { loadFiles(); }, [projectId]);
-    });
-  }, [projectId]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
