@@ -78,21 +78,21 @@ export default function SegmentDetail() {
   useEffect(() => { loadData(); }, [segId, projectId]);
 
   // Estimate item edit handlers
-  const openEditItem = (item: any) => {
-    setEditItem(item);
-    setEiDesc(item.description || "");
-    setEiBarSize(item.bar_size || "");
-    setEiQty(String(item.quantity_count || 0));
-    setEiLength(String(item.total_length || 0));
-    setEiWeight(String(item.total_weight || 0));
-    setEiStatus(item.status || "draft");
-    setEiSourceFileId(item.source_file_id || "");
+  const openEditItem = (item: any | null) => {
+    setEditItem(item || "new");
+    setEiDesc(item?.description || "");
+    setEiBarSize(item?.bar_size || "");
+    setEiQty(String(item?.quantity_count || 0));
+    setEiLength(String(item?.total_length || 0));
+    setEiWeight(String(item?.total_weight || 0));
+    setEiStatus(item?.status || "draft");
+    setEiSourceFileId(item?.source_file_id || "");
   };
 
   const saveEditItem = async () => {
-    if (!editItem || !user) return;
+    if (!editItem || !user || !segId || !projectId) return;
     setEiSaving(true);
-    const { error } = await supabase.from("estimate_items").update({
+    const payload = {
       description: eiDesc.trim() || null,
       bar_size: eiBarSize.trim() || null,
       quantity_count: parseInt(eiQty) || 0,
@@ -100,13 +100,30 @@ export default function SegmentDetail() {
       total_weight: parseFloat(eiWeight) || 0,
       status: eiStatus,
       source_file_id: eiSourceFileId || null,
-    }).eq("id", editItem.id);
-    if (error) toast.error("Failed to update item");
-    else {
-      await logAuditEvent(user.id, "updated", "estimate_item", editItem.id, projectId, segId);
-      toast.success("Item updated");
-      setEditItem(null);
-      loadData();
+    };
+    if (editItem === "new") {
+      const { error, data } = await supabase.from("estimate_items").insert({
+        ...payload,
+        segment_id: segId,
+        project_id: projectId,
+        user_id: user.id,
+      }).select("id").single();
+      if (error) toast.error("Failed to create item");
+      else {
+        await logAuditEvent(user.id, "created", "estimate_item", data.id, projectId, segId);
+        toast.success("Item created");
+        setEditItem(null);
+        loadData();
+      }
+    } else {
+      const { error } = await supabase.from("estimate_items").update(payload).eq("id", editItem.id);
+      if (error) toast.error("Failed to update item");
+      else {
+        await logAuditEvent(user.id, "updated", "estimate_item", editItem.id, projectId, segId);
+        toast.success("Item updated");
+        setEditItem(null);
+        loadData();
+      }
     }
     setEiSaving(false);
   };
