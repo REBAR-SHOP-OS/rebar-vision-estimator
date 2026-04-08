@@ -117,6 +117,9 @@ const Dashboard: React.FC = () => {
       });
     }
 
+    // Trigger automatic processing pipeline
+    supabase.functions.invoke("process-pipeline", { body: { project_id: data.id } }).catch(console.warn);
+
     setCreatingProject(false);
     if (newProjectFileInputRef.current) newProjectFileInputRef.current.value = "";
     navigate(`/app/project/${data.id}`);

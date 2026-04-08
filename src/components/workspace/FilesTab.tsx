@@ -86,6 +86,8 @@ export default function FilesTab({ projectId }: { projectId: string }) {
     }
     toast.success(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
     loadFiles();
+    // Trigger automatic processing pipeline
+    supabase.functions.invoke("process-pipeline", { body: { project_id: projectId } }).catch(console.warn);
     setUploading(false);
     setUploadProgress("");
     e.target.value = "";
