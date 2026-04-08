@@ -322,7 +322,7 @@ function normalizeElementRegions(
         y1: bbox[1],
         x2: bbox[2],
         y2: bbox[3],
-        synthetic: false,
+        synthetic: false as boolean | undefined,
       };
     })
     .filter((region): region is NormalizedElementRegion => region !== null && region !== undefined);
