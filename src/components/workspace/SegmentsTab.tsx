@@ -305,6 +305,7 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
                 <th className="text-right px-3 py-2.5 font-semibold">Weight (kg)</th>
                 <th className="text-right px-3 py-2.5 font-semibold">Confidence</th>
                 <th className="text-left px-3 py-2.5 font-semibold">Drawing</th>
+                <th className="text-left px-3 py-2.5 font-semibold">Scope</th>
                 <th className="text-right px-3 py-2.5 font-semibold">Actions</th>
               </tr>
             </thead>
@@ -334,6 +335,11 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
                   </td>
                   <td className="px-3 py-2.5">
                     <Badge variant="outline" className="text-[9px]">{s.drawing_readiness.replace(/_/g, " ")}</Badge>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <Badge variant="outline" className={`text-[9px] ${scopeCoverage[s.id] === "drawing" ? "border-green-500/40 text-green-600 bg-green-500/10" : "border-amber-500/40 text-amber-600 bg-amber-500/10"}`}>
+                      {scopeCoverage[s.id] === "drawing" ? "Drawing" : "Inferred"}
+                    </Badge>
                   </td>
                   <td className="px-3 py-2.5 text-right">
                     <div className="flex items-center justify-end gap-1">
