@@ -144,6 +144,7 @@ export default function ProjectOverview({ project }: ProjectOverviewProps) {
       </Card>
     </div>
   );
+}
 
 function SummaryCard({ icon: Icon, label, value, color }: { icon: any; label: string; value: number; color?: string }) {
   return (
