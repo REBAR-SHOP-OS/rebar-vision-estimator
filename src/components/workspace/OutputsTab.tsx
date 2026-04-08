@@ -93,6 +93,8 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
         if (data?.html_content) {
           const blob = new Blob([data.html_content], { type: "text/html" });
           const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url; a.download = `shop-drawing-${projectId.slice(0, 8)}.html`; a.click();
           window.open(url, "_blank");
         } else {
           // Generate professional shop drawing from bar_items
@@ -131,10 +133,12 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
           });
           const blob = new Blob([html], { type: "text/html" });
           const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url; a.download = `shop-drawing-${projectId.slice(0, 8)}.html`; a.click();
           window.open(url, "_blank");
         }
         await logAuditEvent(user.id, "exported", "export", undefined, projectId, undefined, { export_type: "shop_drawing_html" });
-        toast.success("Shop drawing opened");
+        toast.success("Shop drawing downloaded — use Ctrl+P / Cmd+P to save as PDF");
       } else if (type === "estimate") {
         // Fetch project, segments, estimate_items, bar_items
         const [projRes, segRes, eiRes] = await Promise.all([

@@ -1339,8 +1339,9 @@ function buildSheetHtml(
             <div class="mini-title">Revision and issue record</div>
             <table class="mini-table">
               <tr><th>Issue</th><th>Remarks</th><th>Date</th><th>By</th></tr>
-              <tr><td>A</td><td>Draft issue for review</td><td>${escapeHtml(params.dateStr)}</td><td>${escapeHtml(revisionInitials)}</td></tr>
-              <tr><td>B</td><td>Paginated schedule output</td><td>${escapeHtml(params.dateStr)}</td><td>RS</td></tr>
+              <tr><td>△ A</td><td>FOR APPROVAL</td><td>${escapeHtml(params.dateStr)}</td><td>${escapeHtml(revisionInitials)}</td></tr>
+              <tr><td>△ B</td><td>AS PER A/E COMMENTS</td><td>${escapeHtml(params.dateStr)}</td><td>RS</td></tr>
+              <tr><td>△ C</td><td>AS PER NEW DRAWING</td><td>${escapeHtml(params.dateStr)}</td><td>RS</td></tr>
             </table>
           </aside>
 
@@ -1354,6 +1355,7 @@ function buildSheetHtml(
               <div>
                 <div class="company-name">REBAR.SHOP</div>
                 <div class="company-tagline">AN INNOVATIVE METHOD OF FABRICATION</div>
+                <div class="company-address">Professional Rebar Detailing &amp; Fabrication</div>
               </div>
             </div>
 
@@ -1375,6 +1377,7 @@ function buildSheetHtml(
               <div><strong>Detailed by:</strong> REBAR.SHOP</div>
               <div><strong>Checked by:</strong> —</div>
             </div>
+            <div class="eor-note">E.O.R. ALL REBAR ON THIS DWG IS 400/R</div>
           </section>
         </div>
       </div>
@@ -2044,6 +2047,23 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
             border-top: 1px solid #111;
             font-size: 8.5px;
             line-height: 1.5;
+          }
+
+
+          .company-address {
+            font-size: 7px;
+            color: #444;
+            margin-top: 1px;
+          }
+
+          .eor-note {
+            margin-top: 6px;
+            padding: 3px 6px;
+            border: 1.5px solid #111;
+            font-size: 8px;
+            font-weight: 700;
+            text-align: center;
+            letter-spacing: 0.04em;
           }
 
           @media print {
