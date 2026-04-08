@@ -33,21 +33,37 @@ export default function DrawingViewsPanel({ segmentId, projectId }: { segmentId:
   useEffect(() => { load(); }, [segmentId]);
 
   const handleGenerate = async () => {
-    if (!user) return;
+    if (!user || !projectId) return;
     setGenerating(true);
     try {
-      const { data, error } = await supabase.from("drawing_views").insert({
+      // Create the drawing_views record first
+      const { data: viewData, error: viewErr } = await supabase.from("drawing_views").insert({
         segment_id: segmentId,
         user_id: user.id,
         view_type: "plan",
         title: `Draft View ${views.length + 1}`,
-        status: "draft",
+        status: "generating",
         confidence: 0,
         revision_label: "R0",
       }).select("id").single();
-      if (error) throw error;
-      await logAuditEvent(user.id, "created", "drawing_view", data?.id, projectId, segmentId);
-      toast.success("Draft view created");
+      if (viewErr) throw viewErr;
+
+      // Call the shop-drawing edge function
+      const { data: fnData, error: fnErr } = await supabase.functions.invoke("generate-shop-drawing", {
+        body: { projectId, segmentId },
+      });
+
+      if (fnErr) {
+        // Fallback: mark as draft if edge function fails
+        await supabase.from("drawing_views").update({ status: "draft" }).eq("id", viewData.id);
+        toast.warning("Draft record created but drawing generation failed");
+      } else {
+        // Update view status to review
+        await supabase.from("drawing_views").update({ status: "review", confidence: 0.5 }).eq("id", viewData.id);
+        toast.success("Draft drawing generated");
+      }
+
+      await logAuditEvent(user.id, "created", "drawing_view", viewData?.id, projectId, segmentId);
       load();
     } catch {
       toast.error("Failed to create drawing view");
