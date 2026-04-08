@@ -27,45 +27,7 @@ export default function FilesTab({ projectId }: { projectId: string }) {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
 
-  useEffect(() => {
-    setLoading(true);
-    Promise.all([
-      supabase.from("project_files").select("id, file_name, file_type, file_size, created_at").eq("project_id", projectId).order("created_at", { ascending: false }),
-      supabase.from("document_versions").select("file_id, source_system, pdf_metadata").eq("project_id", projectId),
-      supabase.from("segment_source_links").select("file_id"),
-      supabase.from("validation_issues").select("source_file_id, status").eq("project_id", projectId),
-    ]).then(([filesRes, versionsRes, linksRes, issuesRes]) => {
-      const rawFiles = filesRes.data || [];
-      const versions = versionsRes.data || [];
-      const versionMap = new Map<string, any>();
-      versions.forEach((v: any) => { if (v.file_id) versionMap.set(v.file_id, v); });
-
-      // Count segments linked per file via segment_source_links
-      const segCounts: Record<string, number> = {};
-      (linksRes.data || []).forEach((link: any) => {
-        if (link.file_id) segCounts[link.file_id] = (segCounts[link.file_id] || 0) + 1;
-      });
-      setSegmentCounts(segCounts);
-
-      // Count open issues per source_file_id
-      const issCounts: Record<string, number> = {};
-      (issuesRes.data || []).forEach((iss: any) => {
-        if (iss.source_file_id && iss.status === "open") issCounts[iss.source_file_id] = (issCounts[iss.source_file_id] || 0) + 1;
-      });
-      setIssueCounts(issCounts);
-
-      const enriched: FileRow[] = rawFiles.map((f: any) => {
-        const ver = versionMap.get(f.id);
-        return {
-          ...f,
-          discipline: ver?.pdf_metadata?.discipline || undefined,
-          revision_label: ver?.pdf_metadata?.revision_label || undefined,
-          parse_status: ver ? "parsed" : "pending",
-          is_superseded: ver?.pdf_metadata?.is_superseded || false,
-        };
-      });
-      setFiles(enriched);
-      setLoading(false);
+  useEffect(() => { loadFiles(); }, [projectId]);
     });
   }, [projectId]);
 
