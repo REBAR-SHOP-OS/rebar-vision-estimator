@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Loader2, Layers, AlertTriangle, FileText, Eye, CheckCircle2, ShieldAlert, Clock, Pencil, Plus } from "lucide-react";
+import { ArrowLeft, Loader2, Layers, AlertTriangle, FileText, Eye, CheckCircle2, ShieldAlert, Clock, Pencil, Plus, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 import SourcesPanel from "@/components/workspace/SourcesPanel";
@@ -53,6 +53,25 @@ export default function SegmentDetail() {
   const [bCover, setBCover] = useState("");
   const [bLap, setBLap] = useState("");
   const [barSaving, setBarSaving] = useState(false);
+  const [autoEstimating, setAutoEstimating] = useState(false);
+
+  const runAutoEstimate = async () => {
+    if (!user || !segId || !projectId) return;
+    setAutoEstimating(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("auto-estimate", {
+        body: { segment_id: segId, project_id: projectId },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      toast.success(`Auto-estimate created ${data.items_created} items`);
+      loadData();
+    } catch (e: any) {
+      toast.error(e.message || "Auto-estimate failed");
+    } finally {
+      setAutoEstimating(false);
+    }
+  };
 
   const loadData = () => {
     if (!segId || !projectId) return;
@@ -253,9 +272,15 @@ export default function SegmentDetail() {
         <TabsContent value="estimate" className="flex-1 overflow-auto p-4 m-0">
           <div className="flex items-center justify-between mb-3">
             <h4 className="text-sm font-semibold text-foreground">Estimate Items</h4>
-            <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={() => openEditItem(null)}>
-              <Plus className="h-3 w-3" />Add Item
-            </Button>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={runAutoEstimate} disabled={autoEstimating}>
+                {autoEstimating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                {autoEstimating ? "Estimating…" : "Auto Estimate"}
+              </Button>
+              <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={() => openEditItem(null)}>
+                <Plus className="h-3 w-3" />Add Item
+              </Button>
+            </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <Card><CardContent className="p-3 text-center"><p className="text-lg font-bold">{estimateItems.length}</p><p className="text-[10px] text-muted-foreground uppercase">Items</p></CardContent></Card>
