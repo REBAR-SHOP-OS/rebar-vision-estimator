@@ -104,14 +104,18 @@ export default function SegmentDetail() {
       supabase.from("bar_items").select("*").eq("segment_id", segId).order("mark"),
       supabase.from("validation_issues").select("*").eq("segment_id", segId).order("created_at", { ascending: false }),
       supabase.from("approvals").select("status").eq("segment_id", segId).order("created_at", { ascending: false }).limit(1),
-      supabase.from("project_files").select("id, file_name").eq("project_id", projectId),
-    ]).then(([seg, est, bar, iss, app, files]) => {
+      supabase.from("project_files").select("id, file_name, file_path").eq("project_id", projectId),
+      supabase.from("document_versions").select("id, file_id, page_count, file_name").eq("project_id", projectId),
+      supabase.from("drawing_search_index").select("id, document_version_id, page_number").eq("project_id", projectId),
+    ]).then(([seg, est, bar, iss, app, files, docs, dsi]) => {
       setSegment(seg.data);
       setEstimateItems(est.data || []);
       setBarItems(bar.data || []);
       setIssues(iss.data || []);
       setApprovalStatus(app.data?.[0]?.status || "none");
       setProjectFiles(files.data || []);
+      setDocVersions(docs.data || []);
+      setSearchIndexEntries(dsi.data || []);
       setLoading(false);
     });
   };
