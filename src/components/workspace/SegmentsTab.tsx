@@ -77,7 +77,11 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
       segment_type: newType,
     });
     if (error) { toast.error("Failed to create segment"); }
-    else { toast.success("Segment created"); setNewName(""); setDialogOpen(false); load(); }
+    else {
+      const { data: newSeg } = await supabase.from("segments").select("id").eq("project_id", projectId).eq("name", newName.trim()).order("created_at", { ascending: false }).limit(1).single();
+      if (newSeg) await logAuditEvent(user.id, "created", "segment", newSeg.id, projectId);
+      toast.success("Segment created"); setNewName(""); setDialogOpen(false); load();
+    }
     setCreating(false);
   };
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FileText, Loader2, AlertTriangle, CheckCircle2, Clock, Archive, Upload } from "lucide-react";
+import { FileText, Loader2, AlertTriangle, CheckCircle2, Clock, Archive, Upload, Eye } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
@@ -12,6 +12,7 @@ interface FileRow {
   file_name: string;
   file_type: string | null;
   file_size: number | null;
+  file_path: string;
   created_at: string;
   discipline?: string;
   revision_label?: string;
@@ -54,10 +55,16 @@ export default function FilesTab({ projectId }: { projectId: string }) {
     e.target.value = "";
   };
 
+  const handleViewFile = async (filePath: string) => {
+    const { data } = await supabase.storage.from("blueprints").createSignedUrl(filePath, 3600);
+    if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+    else toast.error("Could not generate file URL");
+  };
+
   const loadFiles = () => {
     setLoading(true);
     Promise.all([
-      supabase.from("project_files").select("id, file_name, file_type, file_size, created_at").eq("project_id", projectId).order("created_at", { ascending: false }),
+      supabase.from("project_files").select("id, file_name, file_type, file_size, file_path, created_at").eq("project_id", projectId).order("created_at", { ascending: false }),
       supabase.from("document_versions").select("file_id, source_system, pdf_metadata").eq("project_id", projectId),
       supabase.from("segment_source_links").select("file_id"),
       supabase.from("validation_issues").select("source_file_id, status").eq("project_id", projectId),
@@ -144,6 +151,7 @@ export default function FilesTab({ projectId }: { projectId: string }) {
               <th className="text-center px-3 py-2.5 font-semibold">Links</th>
               <th className="text-center px-3 py-2.5 font-semibold">Issues</th>
               <th className="text-right px-3 py-2.5 font-semibold">Uploaded</th>
+              <th className="text-center px-3 py-2.5 font-semibold">View</th>
             </tr>
           </thead>
           <tbody>
@@ -178,6 +186,11 @@ export default function FilesTab({ projectId }: { projectId: string }) {
                   ) : <span className="text-muted-foreground">—</span>}
                 </td>
                 <td className="px-3 py-2.5 text-right text-muted-foreground">{new Date(f.created_at).toLocaleDateString()}</td>
+                <td className="px-3 py-2.5 text-center">
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewFile(f.file_path)} title="View file">
+                    <Eye className="h-3 w-3" />
+                  </Button>
+                </td>
               </tr>
             ))}
           </tbody>

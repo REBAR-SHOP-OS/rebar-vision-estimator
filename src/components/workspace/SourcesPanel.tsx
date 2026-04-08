@@ -15,6 +15,7 @@ interface SourceLink {
   file_name: string;
   file_type: string | null;
   linked_at: string;
+  file_path: string;
 }
 
 interface ProjectFile {
@@ -35,7 +36,7 @@ export default function SourcesPanel({ segmentId, projectId }: { segmentId: stri
   const load = async () => {
     setLoading(true);
     const [filesRes, linksRes] = await Promise.all([
-      supabase.from("project_files").select("id, file_name, file_type").eq("project_id", projectId),
+      supabase.from("project_files").select("id, file_name, file_type, file_path").eq("project_id", projectId),
       supabase.from("segment_source_links").select("id, file_id, linked_at").eq("segment_id", segmentId),
     ]);
 
@@ -51,6 +52,7 @@ export default function SourcesPanel({ segmentId, projectId }: { segmentId: stri
         file_name: file?.file_name || "Unknown file",
         file_type: file?.file_type || null,
         linked_at: link.linked_at || "",
+        file_path: (file as any)?.file_path || "",
       };
     });
 
@@ -152,7 +154,12 @@ export default function SourcesPanel({ segmentId, projectId }: { segmentId: stri
                 </div>
               </div>
               <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="h-7 w-7" title="View file">
+                <Button variant="ghost" size="icon" className="h-7 w-7" title="View file" onClick={async () => {
+                  if (!s.file_path) { toast.error("No file path available"); return; }
+                  const { data } = await supabase.storage.from("blueprints").createSignedUrl(s.file_path, 3600);
+                  if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+                  else toast.error("Could not generate file URL");
+                }}>
                   <ExternalLink className="h-3.5 w-3.5" />
                 </Button>
                 <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="Unlink" onClick={() => handleUnlink(s.id, s.file_id, s.file_name)}>

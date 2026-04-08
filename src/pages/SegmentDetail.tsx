@@ -1,11 +1,18 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, Loader2, Layers, AlertTriangle, FileText, Eye, CheckCircle2, ShieldAlert, Clock } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ArrowLeft, Loader2, Layers, AlertTriangle, FileText, Eye, CheckCircle2, ShieldAlert, Clock, Pencil, Plus } from "lucide-react";
+import { toast } from "sonner";
+import { logAuditEvent } from "@/lib/audit-logger";
 import SourcesPanel from "@/components/workspace/SourcesPanel";
 import ApprovalPanel from "@/components/workspace/ApprovalPanel";
 import DrawingViewsPanel from "@/components/workspace/DrawingViewsPanel";
@@ -14,15 +21,41 @@ import QATab from "@/components/workspace/QATab";
 export default function SegmentDetail() {
   const { id: projectId, segId } = useParams<{ id: string; segId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [segment, setSegment] = useState<any>(null);
   const [estimateItems, setEstimateItems] = useState<any[]>([]);
   const [barItems, setBarItems] = useState<any[]>([]);
   const [issues, setIssues] = useState<any[]>([]);
   const [approvalStatus, setApprovalStatus] = useState<string>("none");
   const [loading, setLoading] = useState(true);
+  const [projectFiles, setProjectFiles] = useState<any[]>([]);
 
-  useEffect(() => {
-    if (!segId) return;
+  // Estimate item edit state
+  const [editItem, setEditItem] = useState<any>(null);
+  const [eiDesc, setEiDesc] = useState("");
+  const [eiBarSize, setEiBarSize] = useState("");
+  const [eiQty, setEiQty] = useState("");
+  const [eiLength, setEiLength] = useState("");
+  const [eiWeight, setEiWeight] = useState("");
+  const [eiStatus, setEiStatus] = useState("draft");
+  const [eiSourceFileId, setEiSourceFileId] = useState("");
+  const [eiSaving, setEiSaving] = useState(false);
+
+  // Bar item add/edit state
+  const [editBar, setEditBar] = useState<any>(null);
+  const [barDialogOpen, setBarDialogOpen] = useState(false);
+  const [bMark, setBMark] = useState("");
+  const [bSize, setBSize] = useState("");
+  const [bShape, setBShape] = useState("");
+  const [bCutLen, setBCutLen] = useState("");
+  const [bQty, setBQty] = useState("");
+  const [bFinish, setBFinish] = useState("black");
+  const [bCover, setBCover] = useState("");
+  const [bLap, setBLap] = useState("");
+  const [barSaving, setBarSaving] = useState(false);
+
+  const loadData = () => {
+    if (!segId || !projectId) return;
     setLoading(true);
     Promise.all([
       supabase.from("segments").select("*").eq("id", segId).single(),
@@ -30,15 +63,105 @@ export default function SegmentDetail() {
       supabase.from("bar_items").select("*").eq("segment_id", segId).order("mark"),
       supabase.from("validation_issues").select("*").eq("segment_id", segId).order("created_at", { ascending: false }),
       supabase.from("approvals").select("status").eq("segment_id", segId).order("created_at", { ascending: false }).limit(1),
-    ]).then(([seg, est, bar, iss, app]) => {
+      supabase.from("project_files").select("id, file_name").eq("project_id", projectId),
+    ]).then(([seg, est, bar, iss, app, files]) => {
       setSegment(seg.data);
       setEstimateItems(est.data || []);
       setBarItems(bar.data || []);
       setIssues(iss.data || []);
       setApprovalStatus(app.data?.[0]?.status || "none");
+      setProjectFiles(files.data || []);
       setLoading(false);
     });
-  }, [segId]);
+  };
+
+  useEffect(() => { loadData(); }, [segId, projectId]);
+
+  // Estimate item edit handlers
+  const openEditItem = (item: any) => {
+    setEditItem(item);
+    setEiDesc(item.description || "");
+    setEiBarSize(item.bar_size || "");
+    setEiQty(String(item.quantity_count || 0));
+    setEiLength(String(item.total_length || 0));
+    setEiWeight(String(item.total_weight || 0));
+    setEiStatus(item.status || "draft");
+    setEiSourceFileId(item.source_file_id || "");
+  };
+
+  const saveEditItem = async () => {
+    if (!editItem || !user) return;
+    setEiSaving(true);
+    const { error } = await supabase.from("estimate_items").update({
+      description: eiDesc.trim() || null,
+      bar_size: eiBarSize.trim() || null,
+      quantity_count: parseInt(eiQty) || 0,
+      total_length: parseFloat(eiLength) || 0,
+      total_weight: parseFloat(eiWeight) || 0,
+      status: eiStatus,
+      source_file_id: eiSourceFileId || null,
+    }).eq("id", editItem.id);
+    if (error) toast.error("Failed to update item");
+    else {
+      await logAuditEvent(user.id, "updated", "estimate_item", editItem.id, projectId, segId);
+      toast.success("Item updated");
+      setEditItem(null);
+      loadData();
+    }
+    setEiSaving(false);
+  };
+
+  // Bar item handlers
+  const openBarDialog = (bar?: any) => {
+    setEditBar(bar || null);
+    setBMark(bar?.mark || "");
+    setBSize(bar?.size || "");
+    setBShape(bar?.shape_code || "");
+    setBCutLen(String(bar?.cut_length || ""));
+    setBQty(String(bar?.quantity || ""));
+    setBFinish(bar?.finish_type || "black");
+    setBCover(String(bar?.cover_value || ""));
+    setBLap(String(bar?.lap_length || ""));
+    setBarDialogOpen(true);
+  };
+
+  const saveBar = async () => {
+    if (!user || !segId) return;
+    setBarSaving(true);
+    const payload = {
+      mark: bMark.trim() || null,
+      size: bSize.trim() || null,
+      shape_code: bShape.trim() || null,
+      cut_length: parseFloat(bCutLen) || 0,
+      quantity: parseInt(bQty) || 0,
+      finish_type: bFinish,
+      cover_value: parseFloat(bCover) || null,
+      lap_length: parseFloat(bLap) || null,
+    };
+
+    if (editBar) {
+      const { error } = await supabase.from("bar_items").update(payload).eq("id", editBar.id);
+      if (error) toast.error("Failed to update bar");
+      else {
+        await logAuditEvent(user.id, "updated", "bar_item", editBar.id, projectId, segId);
+        toast.success("Bar updated");
+      }
+    } else {
+      const { data, error } = await supabase.from("bar_items").insert({
+        ...payload,
+        segment_id: segId,
+        user_id: user.id,
+      }).select("id").single();
+      if (error) toast.error("Failed to add bar");
+      else {
+        await logAuditEvent(user.id, "created", "bar_item", data?.id, projectId, segId);
+        toast.success("Bar added");
+      }
+    }
+    setBarDialogOpen(false);
+    setBarSaving(false);
+    loadData();
+  };
 
   if (loading) {
     return <div className="flex items-center justify-center h-full"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
@@ -71,6 +194,8 @@ export default function SegmentDetail() {
     if (approvalStatus === "pending") return <Clock className="h-3.5 w-3.5 text-[hsl(var(--status-review))]" />;
     return null;
   };
+
+  const fileNameById = (id: string) => projectFiles.find(f => f.id === id)?.file_name || "";
 
   return (
     <div className="flex flex-col h-full">
@@ -140,18 +265,20 @@ export default function SegmentDetail() {
                     <th className="text-right px-3 py-2 font-semibold">Length</th>
                     <th className="text-right px-3 py-2 font-semibold">Weight</th>
                     <th className="text-right px-3 py-2 font-semibold">Confidence</th>
+                    <th className="text-left px-3 py-2 font-semibold">Source</th>
                     <th className="text-left px-3 py-2 font-semibold">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {estimateItems.map((item) => (
-                    <tr key={item.id} className="border-t border-border/50 hover:bg-muted/20 transition-colors">
+                    <tr key={item.id} className="border-t border-border/50 hover:bg-muted/20 transition-colors cursor-pointer" onClick={() => openEditItem(item)}>
                       <td className="px-3 py-2 text-foreground">{item.description || "—"}</td>
                       <td className="px-3 py-2 text-muted-foreground">{item.bar_size || "—"}</td>
                       <td className="px-3 py-2 text-right font-mono">{item.quantity_count}</td>
                       <td className="px-3 py-2 text-right font-mono">{Number(item.total_length).toLocaleString()}</td>
                       <td className="px-3 py-2 text-right font-mono">{Number(item.total_weight).toLocaleString()}</td>
                       <td className="px-3 py-2 text-right font-mono">{Number(item.confidence) > 0 ? `${Math.round(Number(item.confidence) * 100)}%` : "—"}</td>
+                      <td className="px-3 py-2 text-muted-foreground text-[10px] truncate max-w-[120px]">{item.source_file_id ? fileNameById(item.source_file_id) || "Linked" : "—"}</td>
                       <td className="px-3 py-2"><Badge variant="outline" className="text-[9px]">{item.status}</Badge></td>
                     </tr>
                   ))}
@@ -162,11 +289,17 @@ export default function SegmentDetail() {
         </TabsContent>
 
         <TabsContent value="bars" className="flex-1 overflow-auto p-4 m-0">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-semibold text-foreground">Bar Schedule</h4>
+            <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={() => openBarDialog()}>
+              <Plus className="h-3 w-3" />Add Bar
+            </Button>
+          </div>
           {barItems.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-32 text-muted-foreground gap-2 border border-dashed border-border rounded-lg">
               <Layers className="h-6 w-6" />
               <p className="text-xs">No bar items yet.</p>
-              <p className="text-[10px]">Bar schedules appear after estimation.</p>
+              <p className="text-[10px]">Add bars manually or run estimation.</p>
             </div>
           ) : (
             <div className="border border-border rounded-lg overflow-hidden">
@@ -180,11 +313,12 @@ export default function SegmentDetail() {
                     <th className="text-right px-3 py-2 font-semibold">Qty</th>
                     <th className="text-left px-3 py-2 font-semibold">Finish</th>
                     <th className="text-right px-3 py-2 font-semibold">Confidence</th>
+                    <th className="text-right px-3 py-2 font-semibold"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {barItems.map((b) => (
-                    <tr key={b.id} className="border-t border-border/50 hover:bg-muted/20 transition-colors">
+                    <tr key={b.id} className="border-t border-border/50 hover:bg-muted/20 transition-colors cursor-pointer" onClick={() => openBarDialog(b)}>
                       <td className="px-3 py-2 font-medium text-foreground">{b.mark || "—"}</td>
                       <td className="px-3 py-2 text-muted-foreground">{b.size || "—"}</td>
                       <td className="px-3 py-2 text-muted-foreground">{b.shape_code || "—"}</td>
@@ -192,6 +326,7 @@ export default function SegmentDetail() {
                       <td className="px-3 py-2 text-right font-mono">{b.quantity}</td>
                       <td className="px-3 py-2 text-muted-foreground capitalize">{b.finish_type}</td>
                       <td className="px-3 py-2 text-right font-mono">{Number(b.confidence) > 0 ? `${Math.round(Number(b.confidence) * 100)}%` : "—"}</td>
+                      <td className="px-3 py-2 text-right"><Pencil className="h-3 w-3 text-muted-foreground" /></td>
                     </tr>
                   ))}
                 </tbody>
@@ -216,6 +351,74 @@ export default function SegmentDetail() {
           <ApprovalPanel projectId={projectId!} segmentId={segId} />
         </TabsContent>
       </Tabs>
+
+      {/* Estimate Item Edit Dialog */}
+      <Dialog open={!!editItem} onOpenChange={(open) => !open && setEditItem(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle className="text-sm">Edit Estimate Item</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label className="text-xs">Description</Label><Input value={eiDesc} onChange={e => setEiDesc(e.target.value)} className="h-9 text-sm" /></div>
+            <div className="grid grid-cols-2 gap-2">
+              <div><Label className="text-xs">Bar Size</Label><Input value={eiBarSize} onChange={e => setEiBarSize(e.target.value)} className="h-9 text-sm" placeholder="e.g. 20M" /></div>
+              <div><Label className="text-xs">Status</Label>
+                <Select value={eiStatus} onValueChange={setEiStatus}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["draft","pending","approved","rejected"].map(s => <SelectItem key={s} value={s} className="text-sm capitalize">{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div><Label className="text-xs">Quantity</Label><Input type="number" value={eiQty} onChange={e => setEiQty(e.target.value)} className="h-9 text-sm" /></div>
+              <div><Label className="text-xs">Length</Label><Input type="number" value={eiLength} onChange={e => setEiLength(e.target.value)} className="h-9 text-sm" /></div>
+              <div><Label className="text-xs">Weight</Label><Input type="number" value={eiWeight} onChange={e => setEiWeight(e.target.value)} className="h-9 text-sm" /></div>
+            </div>
+            <div>
+              <Label className="text-xs">Source File</Label>
+              <Select value={eiSourceFileId} onValueChange={setEiSourceFileId}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="None" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="" className="text-sm">None</SelectItem>
+                  {projectFiles.map(f => <SelectItem key={f.id} value={f.id} className="text-sm">{f.file_name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button onClick={saveEditItem} disabled={eiSaving} className="w-full" size="sm">{eiSaving ? "Saving…" : "Save Changes"}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bar Item Add/Edit Dialog */}
+      <Dialog open={barDialogOpen} onOpenChange={setBarDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle className="text-sm">{editBar ? "Edit Bar" : "Add Bar"}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-2">
+              <div><Label className="text-xs">Mark</Label><Input value={bMark} onChange={e => setBMark(e.target.value)} className="h-9 text-sm" placeholder="e.g. A1" /></div>
+              <div><Label className="text-xs">Size</Label><Input value={bSize} onChange={e => setBSize(e.target.value)} className="h-9 text-sm" placeholder="e.g. 15M" /></div>
+              <div><Label className="text-xs">Shape Code</Label><Input value={bShape} onChange={e => setBShape(e.target.value)} className="h-9 text-sm" placeholder="e.g. 11" /></div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div><Label className="text-xs">Cut Length</Label><Input type="number" value={bCutLen} onChange={e => setBCutLen(e.target.value)} className="h-9 text-sm" /></div>
+              <div><Label className="text-xs">Quantity</Label><Input type="number" value={bQty} onChange={e => setBQty(e.target.value)} className="h-9 text-sm" /></div>
+              <div><Label className="text-xs">Finish</Label>
+                <Select value={bFinish} onValueChange={setBFinish}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["black","galvanized","epoxy","stainless"].map(f => <SelectItem key={f} value={f} className="text-sm capitalize">{f}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div><Label className="text-xs">Cover (mm)</Label><Input type="number" value={bCover} onChange={e => setBCover(e.target.value)} className="h-9 text-sm" /></div>
+              <div><Label className="text-xs">Lap Length (mm)</Label><Input type="number" value={bLap} onChange={e => setBLap(e.target.value)} className="h-9 text-sm" /></div>
+            </div>
+            <Button onClick={saveBar} disabled={barSaving} className="w-full" size="sm">{barSaving ? "Saving…" : editBar ? "Save Changes" : "Add Bar"}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
