@@ -432,10 +432,19 @@ function buildReconciliationSheet(wb: ExcelJS.Workbook, params: ExportParams) {
   });
 
   const elemRecon: any[] = recon.element_reconciliation || [];
+  let firstDataRow = 0;
+  let lastDataRow = 0;
+  const addDataRow = (values: any[]) => {
+    const r = ws.addRow(values);
+    const currentRow = ws.rowCount;
+    if (!firstDataRow) firstDataRow = currentRow;
+    lastDataRow = currentRow;
+    r.eachCell((cell) => { cell.border = THIN_BORDER; });
+  };
+
   if (elemRecon.length > 0) {
     for (const er of elemRecon) {
-      const r = ws.addRow([er.element || "", er.drawing_weight != null ? r1(er.drawing_weight) : "", er.norm_weight != null ? r1(er.norm_weight) : "", er.variance_percent != null ? r1(er.variance_percent) : "", er.status || "", er.notes || ""]);
-      r.eachCell((cell) => { cell.border = THIN_BORDER; });
+      addDataRow([er.element || "", er.drawing_weight != null ? r1(er.drawing_weight) : "", er.norm_weight != null ? r1(er.norm_weight) : "", er.variance_percent != null ? r1(er.variance_percent) : "", er.status || "", er.notes || ""]);
     }
   } else {
     const elemWeights: Record<string, number> = {};
@@ -445,13 +454,20 @@ function buildReconciliationSheet(wb: ExcelJS.Workbook, params: ExportParams) {
       elemWeights[t] = (elemWeights[t] || 0) + wtKg;
     }
     for (const [elem, wt] of Object.entries(elemWeights)) {
-      const r = ws.addRow([elem, r1(wt), "", "", "", ""]);
-      r.eachCell((cell) => { cell.border = THIN_BORDER; });
+      addDataRow([elem, r1(wt), "", "", "", ""]);
     }
   }
 
   ws.addRow([]);
-  const totalRow = ws.addRow(["TOTAL", recon.drawing_based_total ? r1(recon.drawing_based_total) : "", recon.industry_norm_total ? r1(recon.industry_norm_total) : "", recon.variance_pct != null ? r1(recon.variance_pct) : "", recon.risk_level || "", ""]);
+  const hasSumRange = firstDataRow > 0 && lastDataRow > 0;
+  const totalRow = ws.addRow([
+    "TOTAL",
+    hasSumRange ? { formula: `SUM(B${firstDataRow}:B${lastDataRow})` } : "",
+    hasSumRange ? { formula: `SUM(C${firstDataRow}:C${lastDataRow})` } : "",
+    recon.variance_pct != null ? r1(recon.variance_pct) : "",
+    recon.risk_level || "",
+    "",
+  ]);
   totalRow.eachCell((cell) => {
     cell.fill = YELLOW_FILL;
     cell.font = BOLD_FONT;
