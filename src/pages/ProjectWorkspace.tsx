@@ -26,19 +26,23 @@ export default function ProjectWorkspace() {
   const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
+  const loadProject = (withLoading = false) => {
+    if (!id) return;
+    if (withLoading) setLoading(true);
+    supabase.from("projects").select("*").eq("id", id).single().then(({ data }) => {
+      if (data) setProject(data);
+      if (withLoading) setLoading(false);
+    });
+  };
+
+  useEffect(() => {
+    loadProject(true);
+  }, [id]);
+
   // Determine active tab from URL
   const basePath = `/app/project/${id}`;
   const suffix = location.pathname.replace(basePath, "") || "";
   const activeTab = TAB_SUFFIXES[suffix] || "overview";
-
-  useEffect(() => {
-    if (!id) return;
-    setLoading(true);
-    supabase.from("projects").select("*").eq("id", id).single().then(({ data, error }) => {
-      if (data) setProject(data);
-      setLoading(false);
-    });
-  }, [id]);
 
   if (loading) {
     return (
@@ -86,7 +90,7 @@ export default function ProjectWorkspace() {
           <ProjectOverview project={project} />
         </TabsContent>
         <TabsContent value="files" className="flex-1 overflow-auto m-0">
-          <FilesTab projectId={project.id} />
+          <FilesTab projectId={project.id} onProjectRefresh={() => loadProject(false)} />
         </TabsContent>
         <TabsContent value="segments" className="flex-1 overflow-auto m-0">
           <SegmentsTab projectId={project.id} />
