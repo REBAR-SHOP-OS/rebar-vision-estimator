@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { FileText, Download, Loader2, ShieldAlert, CheckCircle2, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
+import { exportExcelFile } from "@/lib/excel-export";
+import { getMassKgPerM } from "@/lib/rebar-weights";
 
 interface OutputItem {
   type: string;
