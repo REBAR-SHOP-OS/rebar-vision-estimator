@@ -309,8 +309,8 @@ function normalizeElementRegions(
   elements: ShopDrawingElement[],
   bars: NormalizedBar[],
 ): NormalizedElementRegion[] {
-  const directRegions = elements
-    .map((element) => {
+  const directRegions: NormalizedElementRegion[] = elements
+    .map((element): NormalizedElementRegion | null => {
       const bbox = getElementBBox(element);
       if (!bbox) return null;
 
@@ -322,10 +322,10 @@ function normalizeElementRegions(
         y1: bbox[1],
         x2: bbox[2],
         y2: bbox[3],
-        synthetic: false as boolean | undefined,
+        synthetic: false,
       };
     })
-    .filter((region): region is NormalizedElementRegion => region !== null && region !== undefined);
+    .filter((region): region is NonNullable<typeof region> => region !== null);
 
   if (directRegions.length > 0) {
     return directRegions.sort((a, b) => {
