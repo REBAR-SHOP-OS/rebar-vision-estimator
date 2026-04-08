@@ -53,6 +53,25 @@ export default function SegmentDetail() {
   const [bCover, setBCover] = useState("");
   const [bLap, setBLap] = useState("");
   const [barSaving, setBarSaving] = useState(false);
+  const [autoEstimating, setAutoEstimating] = useState(false);
+
+  const runAutoEstimate = async () => {
+    if (!user || !segId || !projectId) return;
+    setAutoEstimating(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("auto-estimate", {
+        body: { segment_id: segId, project_id: projectId },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      toast.success(`Auto-estimate created ${data.items_created} items`);
+      loadData();
+    } catch (e: any) {
+      toast.error(e.message || "Auto-estimate failed");
+    } finally {
+      setAutoEstimating(false);
+    }
+  };
 
   const loadData = () => {
     if (!segId || !projectId) return;
