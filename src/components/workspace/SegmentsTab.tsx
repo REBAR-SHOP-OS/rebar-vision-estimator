@@ -71,6 +71,8 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
 
   // Stats per segment: items count, bar count, computed weight
   const [segStats, setSegStats] = useState<Record<string, { items: number; bars: number; weightKg: number }>>({});
+  // Scope coverage: does this segment type have matching files?
+  const [scopeCoverage, setScopeCoverage] = useState<Record<string, "drawing" | "inferred">>({}); 
 
   const loadStats = async (segIds: string[]) => {
     if (segIds.length === 0) return;
