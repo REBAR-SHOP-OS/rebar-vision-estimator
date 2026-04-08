@@ -33,10 +33,10 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
       supabase.from("validation_issues").select("id", { count: "exact" }).eq("project_id", projectId).eq("status", "open"),
       supabase.from("estimate_items").select("id", { count: "exact" }).eq("project_id", projectId),
       supabase.from("estimate_items").select("id", { count: "exact" }).eq("project_id", projectId).eq("item_type", "bar"),
-    ]).then(([est, shop, issues, quotes, appRes, openRes, estItems, barItems]) => {
+    ]).then(([est, shop, issues, quotes, appRes, openRes, estItems, barEstItems]) => {
       const estCount = (est.count || 0) + (estItems.count || 0);
       const shopCount = (shop.count || 0);
-      const barCount = (barItems.count || 0);
+      const barCount = (barEstItems.count || 0);
       setOutputs([
         { type: "estimate", label: "Estimate Summary", available: estCount > 0, count: estCount },
         { type: "shop_drawing", label: "Draft Shop Drawings", available: shopCount > 0 || barCount > 0, count: shopCount || barCount },
