@@ -79,22 +79,19 @@ export default function OrderDetail() {
     setPricingStatus(o.pricing_status || "pending");
     setNotes(o.notes || "");
 
-    // Load related data in parallel
-    const promises: Promise<any>[] = [
-      supabase.from("audit_events").select("*").eq("entity_id", orderId!).order("created_at", { ascending: false }).limit(50),
-    ];
-    if (o.project_id) {
-      promises.push(supabase.from("projects").select("id, name, client_name, address, project_type, status").eq("id", o.project_id).single());
-      promises.push(supabase.from("estimate_items").select("*").eq("project_id", o.project_id).neq("item_type", "source_link").order("created_at"));
-      promises.push(supabase.from("validation_issues").select("*").eq("project_id", o.project_id).order("created_at", { ascending: false }));
-    }
+    // Load related data
+    const auditRes = await supabase.from("audit_events").select("*").eq("entity_id", orderId!).order("created_at", { ascending: false }).limit(50);
+    setAuditEvents(auditRes.data || []);
 
-    const results = await Promise.all(promises);
-    setAuditEvents(results[0]?.data || []);
     if (o.project_id) {
-      setProject(results[1]?.data || null);
-      setEstimateItems(results[2]?.data || []);
-      setIssues(results[3]?.data || []);
+      const [projRes, estRes, issRes] = await Promise.all([
+        supabase.from("projects").select("id, name, client_name, address, project_type, status").eq("id", o.project_id).single(),
+        supabase.from("estimate_items").select("*").eq("project_id", o.project_id).neq("item_type", "source_link").order("created_at"),
+        supabase.from("validation_issues").select("*").eq("project_id", o.project_id).order("created_at", { ascending: false }),
+      ]);
+      setProject(projRes.data || null);
+      setEstimateItems(estRes.data || []);
+      setIssues(issRes.data || []);
     }
     setLoading(false);
   };
