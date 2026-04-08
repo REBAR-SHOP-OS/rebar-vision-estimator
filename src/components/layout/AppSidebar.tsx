@@ -35,6 +35,7 @@ import {
   Moon,
   Globe,
   Brain,
+  Package,
 } from "lucide-react";
 import logoBg from "@/assets/logo.png";
 import BrainKnowledgeDialog from "@/components/chat/BrainKnowledgeDialog";
@@ -46,6 +47,7 @@ interface AppSidebarProps {
 
 const mainNav = [
   { title: "Dashboard", url: "/app", icon: LayoutDashboard, end: true },
+  { title: "Orders", url: "/app/orders", icon: Package },
   { title: "Standards", url: "/app/standards", icon: Ruler },
 ];
 

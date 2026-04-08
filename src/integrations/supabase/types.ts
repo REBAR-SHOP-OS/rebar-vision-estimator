@@ -924,6 +924,74 @@ export type Database = {
         }
         Relationships: []
       }
+      orders: {
+        Row: {
+          created_at: string
+          currency: string | null
+          customer_email: string | null
+          customer_name: string | null
+          due_date: string | null
+          id: string
+          notes: string | null
+          order_number: string
+          price_per_ton: number | null
+          pricing_status: string | null
+          project_id: string | null
+          status: string
+          total_price: number | null
+          total_weight_kg: number | null
+          updated_at: string
+          user_id: string
+          validation_status: string | null
+        }
+        Insert: {
+          created_at?: string
+          currency?: string | null
+          customer_email?: string | null
+          customer_name?: string | null
+          due_date?: string | null
+          id?: string
+          notes?: string | null
+          order_number?: string
+          price_per_ton?: number | null
+          pricing_status?: string | null
+          project_id?: string | null
+          status?: string
+          total_price?: number | null
+          total_weight_kg?: number | null
+          updated_at?: string
+          user_id: string
+          validation_status?: string | null
+        }
+        Update: {
+          created_at?: string
+          currency?: string | null
+          customer_email?: string | null
+          customer_name?: string | null
+          due_date?: string | null
+          id?: string
+          notes?: string | null
+          order_number?: string
+          price_per_ton?: number | null
+          pricing_status?: string | null
+          project_id?: string | null
+          status?: string
+          total_price?: number | null
+          total_weight_kg?: number | null
+          updated_at?: string
+          user_id?: string
+          validation_status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "orders_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       processing_jobs: {
         Row: {
           completed_at: string | null
