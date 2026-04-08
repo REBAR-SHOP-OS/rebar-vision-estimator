@@ -39,6 +39,11 @@ export default function ProjectWorkspace() {
     loadProject(true);
   }, [id]);
 
+  // Determine active tab from URL
+  const basePath = `/app/project/${id}`;
+  const suffix = location.pathname.replace(basePath, "") || "";
+  const activeTab = TAB_SUFFIXES[suffix] || "overview";
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
