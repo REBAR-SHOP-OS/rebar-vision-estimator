@@ -1,10 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FileText, Loader2, ExternalLink, AlertTriangle, CheckCircle2, Clock, Archive } from "lucide-react";
-import { toast } from "sonner";
+import { FileText, Loader2, AlertTriangle, CheckCircle2, Clock, Archive } from "lucide-react";
 
 interface FileRow {
   id: string;
@@ -12,15 +9,11 @@ interface FileRow {
   file_type: string | null;
   file_size: number | null;
   created_at: string;
-  // Extended fields stored via metadata approach
   discipline?: string;
   revision_label?: string;
   parse_status?: string;
   is_superseded?: boolean;
 }
-
-const DISCIPLINES = ["Structural", "Architectural", "Civil", "Mechanical", "Electrical", "Other"];
-const PARSE_STATUSES = ["pending", "parsed", "review_needed", "failed"];
 
 export default function FilesTab({ projectId }: { projectId: string }) {
   const [files, setFiles] = useState<FileRow[]>([]);
@@ -33,26 +26,25 @@ export default function FilesTab({ projectId }: { projectId: string }) {
     Promise.all([
       supabase.from("project_files").select("id, file_name, file_type, file_size, created_at").eq("project_id", projectId).order("created_at", { ascending: false }),
       supabase.from("document_versions").select("file_id, source_system, pdf_metadata").eq("project_id", projectId),
-      supabase.from("estimate_items").select("assumptions_json").eq("project_id", projectId),
-      supabase.from("validation_issues").select("sheet_id, status").eq("project_id", projectId),
-    ]).then(([filesRes, versionsRes, itemsRes, issuesRes]) => {
+      supabase.from("segment_source_links").select("file_id"),
+      supabase.from("validation_issues").select("source_file_id, status").eq("project_id", projectId),
+    ]).then(([filesRes, versionsRes, linksRes, issuesRes]) => {
       const rawFiles = filesRes.data || [];
       const versions = versionsRes.data || [];
       const versionMap = new Map<string, any>();
       versions.forEach((v: any) => { if (v.file_id) versionMap.set(v.file_id, v); });
 
-      // Count segments linked per file via assumptions_json.source_file_ids
+      // Count segments linked per file via segment_source_links
       const segCounts: Record<string, number> = {};
-      (itemsRes.data || []).forEach((item: any) => {
-        const ids = item.assumptions_json?.source_file_ids;
-        if (Array.isArray(ids)) ids.forEach((id: string) => { segCounts[id] = (segCounts[id] || 0) + 1; });
+      (linksRes.data || []).forEach((link: any) => {
+        if (link.file_id) segCounts[link.file_id] = (segCounts[link.file_id] || 0) + 1;
       });
       setSegmentCounts(segCounts);
 
-      // Count issues per sheet_id (using file id as proxy)
+      // Count open issues per source_file_id
       const issCounts: Record<string, number> = {};
       (issuesRes.data || []).forEach((iss: any) => {
-        if (iss.sheet_id && iss.status === "open") issCounts[iss.sheet_id] = (issCounts[iss.sheet_id] || 0) + 1;
+        if (iss.source_file_id && iss.status === "open") issCounts[iss.source_file_id] = (issCounts[iss.source_file_id] || 0) + 1;
       });
       setIssueCounts(issCounts);
 

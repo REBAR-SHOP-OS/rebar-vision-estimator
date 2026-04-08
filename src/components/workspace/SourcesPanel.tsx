@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FileText, Link2, Plus, Loader2, Unlink, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
+import { logAuditEvent } from "@/lib/audit-logger";
 
 interface SourceLink {
   id: string;
@@ -33,25 +34,25 @@ export default function SourcesPanel({ segmentId, projectId }: { segmentId: stri
 
   const load = async () => {
     setLoading(true);
-    // Get segment source links from estimate_items that have source references
-    const [filesRes, itemsRes] = await Promise.all([
+    const [filesRes, linksRes] = await Promise.all([
       supabase.from("project_files").select("id, file_name, file_type").eq("project_id", projectId),
-      supabase.from("estimate_items").select("id, description, assumptions_json").eq("segment_id", segmentId),
+      supabase.from("segment_source_links").select("id, file_id, linked_at").eq("segment_id", segmentId),
     ]);
 
     const files = filesRes.data || [];
+    const links = linksRes.data || [];
     setAvailableFiles(files);
 
-    // Extract linked file IDs from estimate items' assumptions_json.source_file_ids
-    const linkedFileIds = new Set<string>();
-    (itemsRes.data || []).forEach((item: any) => {
-      const srcIds = item.assumptions_json?.source_file_ids;
-      if (Array.isArray(srcIds)) srcIds.forEach((id: string) => linkedFileIds.add(id));
+    const linked: SourceLink[] = links.map((link: any) => {
+      const file = files.find((f) => f.id === link.file_id);
+      return {
+        id: link.id,
+        file_id: link.file_id,
+        file_name: file?.file_name || "Unknown file",
+        file_type: file?.file_type || null,
+        linked_at: link.linked_at || "",
+      };
     });
-
-    const linked: SourceLink[] = files
-      .filter((f) => linkedFileIds.has(f.id))
-      .map((f) => ({ id: f.id, file_id: f.id, file_name: f.file_name, file_type: f.file_type, linked_at: "" }));
 
     setSources(linked);
     setLoading(false);
@@ -62,19 +63,34 @@ export default function SourcesPanel({ segmentId, projectId }: { segmentId: stri
   const handleLink = async () => {
     if (!selectedFileId || !user) return;
     setLinking(true);
-    // Store source link in an estimate_items assumptions_json entry for this segment
-    // Create a placeholder estimate item to hold the source link
-    const { error } = await supabase.from("estimate_items").insert({
+    const { error } = await supabase.from("segment_source_links").insert({
       segment_id: segmentId,
-      project_id: projectId,
+      file_id: selectedFileId,
       user_id: user.id,
-      description: `Source: ${availableFiles.find(f => f.id === selectedFileId)?.file_name || "file"}`,
-      item_type: "source_link",
-      assumptions_json: { source_file_ids: [selectedFileId] },
     });
-    if (error) toast.error("Failed to link source");
-    else { toast.success("Source linked"); setDialogOpen(false); setSelectedFileId(""); load(); }
+    if (error) {
+      toast.error(error.code === "23505" ? "File already linked" : "Failed to link source");
+    } else {
+      await logAuditEvent(user.id, "linked", "source_link", selectedFileId, projectId, segmentId, {
+        file_name: availableFiles.find(f => f.id === selectedFileId)?.file_name,
+      });
+      toast.success("Source linked");
+      setDialogOpen(false);
+      setSelectedFileId("");
+      load();
+    }
     setLinking(false);
+  };
+
+  const handleUnlink = async (linkId: string, fileId: string, fileName: string) => {
+    if (!user) return;
+    const { error } = await supabase.from("segment_source_links").delete().eq("id", linkId);
+    if (error) toast.error("Failed to unlink");
+    else {
+      await logAuditEvent(user.id, "unlinked", "source_link", fileId, projectId, segmentId, { file_name: fileName });
+      toast.success("Source unlinked");
+      load();
+    }
   };
 
   const unlinkedFiles = availableFiles.filter((f) => !sources.find((s) => s.file_id === f.id));
@@ -129,12 +145,18 @@ export default function SourcesPanel({ segmentId, projectId }: { segmentId: stri
                 <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-foreground truncate">{s.file_name}</p>
-                  {s.file_type && <Badge variant="outline" className="text-[9px] mt-0.5">{s.file_type}</Badge>}
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {s.file_type && <Badge variant="outline" className="text-[9px]">{s.file_type}</Badge>}
+                    {s.linked_at && <span className="text-[9px] text-muted-foreground">{new Date(s.linked_at).toLocaleDateString()}</span>}
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-1">
                 <Button variant="ghost" size="icon" className="h-7 w-7" title="View file">
                   <ExternalLink className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="Unlink" onClick={() => handleUnlink(s.id, s.file_id, s.file_name)}>
+                  <Unlink className="h-3.5 w-3.5" />
                 </Button>
               </div>
             </div>

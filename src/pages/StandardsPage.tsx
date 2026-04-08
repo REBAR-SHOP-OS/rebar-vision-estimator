@@ -5,11 +5,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Plus, Ruler, Star, Pencil } from "lucide-react";
+import { Loader2, Plus, Ruler, Star, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { logAuditEvent } from "@/lib/audit-logger";
 
 interface StandardsProfile {
   id: string;
@@ -40,6 +42,7 @@ export default function StandardsPage() {
   const [coverDefaults, setCoverDefaults] = useState<Record<string, string>>(DEFAULT_COVERS);
   const [lapDefaults, setLapDefaults] = useState<Record<string, string>>(DEFAULT_LAPS);
   const [hookDefaults, setHookDefaults] = useState<Record<string, string>>(DEFAULT_HOOKS);
+  const [namingRules, setNamingRules] = useState("");
   const [saving, setSaving] = useState(false);
 
   const load = () => {
@@ -60,6 +63,7 @@ export default function StandardsPage() {
     setCoverDefaults({ ...DEFAULT_COVERS });
     setLapDefaults({ ...DEFAULT_LAPS });
     setHookDefaults({ ...DEFAULT_HOOKS });
+    setNamingRules("");
     setDialogOpen(true);
   };
 
@@ -71,12 +75,17 @@ export default function StandardsPage() {
     setCoverDefaults(Object.keys(p.cover_defaults || {}).length > 0 ? p.cover_defaults as any : { ...DEFAULT_COVERS });
     setLapDefaults(Object.keys(p.lap_defaults || {}).length > 0 ? p.lap_defaults as any : { ...DEFAULT_LAPS });
     setHookDefaults(Object.keys(p.hook_defaults || {}).length > 0 ? p.hook_defaults as any : { ...DEFAULT_HOOKS });
+    setNamingRules(typeof p.naming_rules === "object" && p.naming_rules ? JSON.stringify(p.naming_rules, null, 2) : "");
     setDialogOpen(true);
   };
 
   const handleSave = async () => {
     if (!newName.trim() || !user) return;
     setSaving(true);
+    let parsedNaming: Record<string, any> = {};
+    if (namingRules.trim()) {
+      try { parsedNaming = JSON.parse(namingRules); } catch { toast.error("Naming rules must be valid JSON"); setSaving(false); return; }
+    }
     const payload = {
       name: newName.trim(),
       code_family: newCodeFamily,
@@ -84,6 +93,7 @@ export default function StandardsPage() {
       cover_defaults: coverDefaults,
       lap_defaults: lapDefaults,
       hook_defaults: hookDefaults,
+      naming_rules: parsedNaming,
     };
 
     if (editProfile) {
@@ -91,19 +101,43 @@ export default function StandardsPage() {
       if (error) toast.error("Failed to update profile");
       else { toast.success("Profile updated"); setDialogOpen(false); load(); }
     } else {
-      const { error } = await supabase.from("standards_profiles").insert({ ...payload, user_id: user.id });
+      const { data, error } = await supabase.from("standards_profiles").insert({ ...payload, user_id: user.id }).select("id").single();
       if (error) toast.error("Failed to create profile");
-      else { toast.success("Profile created"); setDialogOpen(false); load(); }
+      else {
+        await logAuditEvent(user.id, "created", "standards_profile", data?.id);
+        toast.success("Profile created");
+        setDialogOpen(false);
+        load();
+      }
     }
     setSaving(false);
   };
 
   const handleSetDefault = async (id: string) => {
-    // Clear all defaults first, then set this one
-    await supabase.from("standards_profiles").update({ is_default: false }).neq("id", "00000000-0000-0000-0000-000000000000");
-    const { error } = await supabase.from("standards_profiles").update({ is_default: true }).eq("id", id);
-    if (error) toast.error("Failed to set default");
-    else { toast.success("Default profile updated"); load(); }
+    if (!user) return;
+    // Single atomic update: set all to false except this one
+    // First unset all, then set the target — both scoped to user via RLS
+    const { error: e1 } = await supabase.from("standards_profiles").update({ is_default: false }).eq("is_default", true);
+    if (!e1) {
+      const { error: e2 } = await supabase.from("standards_profiles").update({ is_default: true }).eq("id", id);
+      if (e2) toast.error("Failed to set default");
+      else {
+        await logAuditEvent(user.id, "set_default", "standards_profile", id);
+        toast.success("Default profile updated");
+        load();
+      }
+    }
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!user) return;
+    const { error } = await supabase.from("standards_profiles").delete().eq("id", id);
+    if (error) toast.error("Failed to delete profile");
+    else {
+      await logAuditEvent(user.id, "deleted", "standards_profile", id, undefined, undefined, { name });
+      toast.success("Profile deleted");
+      load();
+    }
   };
 
   if (loading) {
@@ -145,9 +179,9 @@ export default function StandardsPage() {
                   <div className="flex gap-1">
                     {!p.is_default && <Button variant="ghost" size="sm" className="text-xs h-8" onClick={() => handleSetDefault(p.id)}>Set Default</Button>}
                     <Button variant="outline" size="sm" className="text-xs h-8 gap-1" onClick={() => openEdit(p)}><Pencil className="h-3 w-3" />Edit</Button>
+                    <Button variant="ghost" size="sm" className="text-xs h-8 text-destructive hover:text-destructive" onClick={() => handleDelete(p.id, p.name)}><Trash2 className="h-3 w-3" /></Button>
                   </div>
                 </div>
-                {/* Quick preview of defaults */}
                 <div className="grid grid-cols-3 gap-3 mt-2">
                   <div className="bg-muted/40 rounded p-2">
                     <p className="text-[10px] text-muted-foreground uppercase font-semibold mb-1">Cover Defaults</p>
@@ -177,7 +211,6 @@ export default function StandardsPage() {
         </div>
       )}
 
-      {/* Create/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editProfile ? "Edit Standards Profile" : "New Standards Profile"}</DialogTitle></DialogHeader>
@@ -211,7 +244,6 @@ export default function StandardsPage() {
               </div>
             </div>
 
-            {/* Cover Defaults */}
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Cover Defaults (mm)</Label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1.5">
@@ -224,7 +256,6 @@ export default function StandardsPage() {
               </div>
             </div>
 
-            {/* Lap Defaults */}
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Lap Lengths (mm)</Label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1.5">
@@ -237,7 +268,6 @@ export default function StandardsPage() {
               </div>
             </div>
 
-            {/* Hook Defaults */}
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Hook Rules</Label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1.5">
@@ -248,6 +278,17 @@ export default function StandardsPage() {
                   </div>
                 ))}
               </div>
+            </div>
+
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Naming Rules (JSON)</Label>
+              <Textarea
+                value={namingRules}
+                onChange={(e) => setNamingRules(e.target.value)}
+                className="text-xs min-h-[60px] font-mono mt-1.5"
+                placeholder='{"prefix": "F", "separator": "-", "zero_pad": 3}'
+              />
+              <p className="text-[9px] text-muted-foreground mt-1">Optional JSON object for bar mark naming conventions.</p>
             </div>
 
             <Button onClick={handleSave} disabled={saving || !newName.trim()} className="w-full">
