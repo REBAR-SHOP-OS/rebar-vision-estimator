@@ -1,37 +1,28 @@
 
 
-# Multi-File Upload + Structural & Architectural Analysis
+# Fix Automatic Pipeline — Trigger Processing After Upload
 
 ## Problem
-1. **FilesTab**: Upload button only accepts one file at a time (`e.target.files?.[0]`).
-2. **Dashboard "New Estimation"**: Accepts `multiple` attribute but only reads `files[0]` for naming — doesn't upload any files to the created project.
-3. No discipline tagging (structural vs architectural) on upload, so estimation only considers files generically.
+When a project is created and files uploaded from the Dashboard, the `process-pipeline` edge function is never called. It's only triggered from `ChatArea.tsx`. This leaves every new project stuck at **"intake" / L0 / Intake Pending**.
 
 ## What Changes
 
-### 1. FilesTab.tsx — Multi-file upload
-- Add `multiple` attribute to the file input
-- Loop over all selected files in `handleUpload`, uploading each sequentially
-- Show progress count (e.g. "Uploading 2/5…")
-- Call `loadFiles()` once after all uploads complete
+### 1. Dashboard.tsx — Trigger pipeline after file uploads
+After the file upload loop (line 118), before navigating, call:
+```typescript
+await supabase.functions.invoke("process-pipeline", { body: { project_id: data.id } });
+```
+This kicks off the full pipeline (L0→L1→parsing→scope detection→workflow advancement).
 
-### 2. Dashboard.tsx — Upload all files to new project on creation
-After creating the project, before navigating:
-- Loop through all selected files from the file input
-- Upload each to `blueprints` storage and insert into `project_files`
-- Then navigate to the project workspace
-
-### 3. FilesTab.tsx — Add discipline badge on upload
-- Detect discipline from filename patterns: files containing "S-", "STR", "structural" → "Structural"; "A-", "ARCH", "architectural" → "Architectural"; etc.
-- Store as a `document_versions` record with `pdf_metadata.discipline` so the existing enrichment logic picks it up
-- Display discipline badge in the files table (already wired)
-
-### 4. Auto-estimation considers all disciplines
-The existing `auto-estimate` and `auto-segments` edge functions already process all `project_files` for a project. By uploading both structural and architectural files and tagging their discipline, the AI analysis pipeline will see and process both sets. No edge function changes needed.
+### 2. FilesTab.tsx — Trigger pipeline after uploading new files
+After the upload loop completes and `loadFiles()` is called, invoke the pipeline so that newly added files are processed and the project advances:
+```typescript
+await supabase.functions.invoke("process-pipeline", { body: { project_id: projectId } });
+```
 
 ## Files Modified
-- `src/components/workspace/FilesTab.tsx` — multi-file upload loop, discipline detection
-- `src/pages/Dashboard.tsx` — upload all selected files to new project after creation
+- `src/pages/Dashboard.tsx` — add pipeline invoke after file uploads (1 line)
+- `src/components/workspace/FilesTab.tsx` — add pipeline invoke after upload completes (1 line)
 
 ## No new files, no migrations, no edge function changes
 
