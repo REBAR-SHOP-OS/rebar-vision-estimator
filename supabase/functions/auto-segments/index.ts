@@ -118,34 +118,43 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
-    const prompt = `You are a rebar estimation expert. Given the following project information, generate a list of structural segments that should be created for estimation.
+    const prompt = `You are a rebar estimation expert. Given the following project information and EXTRACTED DRAWING TEXT, generate a list of structural segments that should be created for estimation.
 
 Project: ${project.name}
 Client: ${project.client_name || "N/A"}
 Project Type: ${project.project_type || "unknown"}
 Scope Items: ${scopeItems.length > 0 ? scopeItems.join(", ") : "None detected yet"}
-Uploaded Files: ${fileNames.length > 0 ? fileNames.join(", ") : "None"}
+
+Files by Discipline:
+${fileDisciplineSummary || "No files uploaded"}
+
 Existing Segments (DO NOT duplicate these): ${existingSegs.data?.map((s: any) => s.name).join(", ") || "None"}
 
+${drawingContext}
+
 Rules:
-- Generate realistic, specific segments based on the scope items and project type
+- Analyze ALL uploaded drawings — both structural AND architectural
+- Cross-reference: structural drawings show rebar details; architectural drawings show dimensions, layouts, and concrete elements (curbs, pads, CMU walls)
+- Flag "Hidden Scope" items found ONLY on architectural sheets (e.g., equipment pads on M/E drawings, concrete curbs on site plans)
+- Generate realistic, specific segments based on ACTUAL drawing content when available
 - Each segment should represent a distinct structural element or zone
 - Use industry-standard naming (e.g., "Footings F1-F4", "Ground Floor Slab", "Columns Level 1", "Stair ST-1")
 - Include level/zone labels where appropriate
 - Map each to a segment_type from this list: footing, slab, wall, beam, column, pier, stair, pit, curb, retaining_wall, miscellaneous
-- If scope_items is empty, infer reasonable defaults from the project type and file names
+- If no drawing text is available, infer from file names and project type
 - Do NOT suggest segments that already exist (case-insensitive match)
 - Generate 3-15 segments depending on project complexity
+- In the notes field, indicate which drawing(s) each segment was found on (e.g., "Found on: S-101, A-201")
 
 Return ONLY a JSON array of objects with these fields:
 - name (string): descriptive segment name
 - segment_type (string): one of the allowed types
 - level_label (string|null): e.g. "L1", "B1", "Ground"
 - zone_label (string|null): e.g. "Zone A", "Grid 1-5"
-- notes (string|null): brief context for why this segment was suggested
+- notes (string|null): brief context including source drawing references
 
 Example:
-[{"name":"Strip Footings F1-F6","segment_type":"footing","level_label":"B1","zone_label":null,"notes":"Based on FOOTING scope item"},{"name":"Ground Floor SOG","segment_type":"slab","level_label":"Ground","zone_label":null,"notes":"Based on SLAB_ON_GRADE scope item"}]`;
+[{"name":"Strip Footings F1-F6","segment_type":"footing","level_label":"B1","zone_label":null,"notes":"Found on: S-101. Footing schedule shows 6 strip footings."},{"name":"Ground Floor SOG","segment_type":"slab","level_label":"Ground","zone_label":null,"notes":"Found on: S-102, A-101. WWM 6x6-W2.9 specified."}]`;
 
     const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -156,11 +165,11 @@ Example:
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         messages: [
-          { role: "system", content: "You are a structural engineering assistant. Return ONLY valid JSON arrays, no markdown fences." },
+          { role: "system", content: "You are a structural engineering assistant. Analyze ALL provided drawing text from EVERY discipline (structural, architectural, etc.) to identify concrete/rebar segments. Return ONLY valid JSON arrays, no markdown fences." },
           { role: "user", content: prompt },
         ],
         temperature: 0.3,
-        max_tokens: 2000,
+        max_tokens: 3000,
       }),
     });
 
