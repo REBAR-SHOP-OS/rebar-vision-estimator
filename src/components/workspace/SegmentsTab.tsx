@@ -81,6 +81,49 @@ export default function SegmentsTab({ projectId }: { projectId: string }) {
     setCreating(false);
   };
 
+  const handleOpenEdit = (s: Segment, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditSegment(s);
+    setEditName(s.name);
+    setEditType(s.segment_type);
+    setEditLevel(s.level_label || "");
+    setEditZone(s.zone_label || "");
+    setEditNotes(s.notes || "");
+    setEditOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editSegment || !user || !editName.trim()) return;
+    setEditSaving(true);
+    const { error } = await supabase.from("segments").update({
+      name: editName.trim(),
+      segment_type: editType,
+      level_label: editLevel.trim() || null,
+      zone_label: editZone.trim() || null,
+      notes: editNotes.trim() || null,
+    }).eq("id", editSegment.id);
+    if (error) toast.error("Failed to update segment");
+    else {
+      await logAuditEvent(user.id, "updated", "segment", editSegment.id, projectId);
+      toast.success("Segment updated");
+      setEditOpen(false);
+      load();
+    }
+    setEditSaving(false);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteId || !user) return;
+    setDeleting(true);
+    const seg = segments.find(s => s.id === deleteId);
+    await logAuditEvent(user.id, "deleted", "segment", deleteId, projectId, undefined, { name: seg?.name });
+    const { error } = await supabase.from("segments").delete().eq("id", deleteId);
+    if (error) toast.error("Failed to delete segment");
+    else { toast.success("Segment deleted"); load(); }
+    setDeleteId(null);
+    setDeleting(false);
+  };
+
   const statusColor = (s: string) => {
     if (s === "approved") return "bg-[hsl(var(--status-approved))]/15 text-[hsl(var(--status-approved))]";
     if (s === "review") return "bg-[hsl(var(--status-review))]/15 text-[hsl(var(--status-review))]";
