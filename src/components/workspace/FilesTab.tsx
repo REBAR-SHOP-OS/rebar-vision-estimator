@@ -28,6 +28,7 @@ export default function FilesTab({ projectId }: { projectId: string }) {
   const [issueCounts, setIssueCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState("");
 
   useEffect(() => { loadFiles(); }, [projectId]);
 
