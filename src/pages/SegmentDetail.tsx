@@ -38,7 +38,7 @@ export default function SegmentDetail() {
   const [eiLength, setEiLength] = useState("");
   const [eiWeight, setEiWeight] = useState("");
   const [eiStatus, setEiStatus] = useState("draft");
-  const [eiSourceFileId, setEiSourceFileId] = useState("");
+  const [eiSourceFileId, setEiSourceFileId] = useState("__none__");
   const [eiSaving, setEiSaving] = useState(false);
 
   // Bar item add/edit state
@@ -86,7 +86,7 @@ export default function SegmentDetail() {
     setEiLength(String(item?.total_length || 0));
     setEiWeight(String(item?.total_weight || 0));
     setEiStatus(item?.status || "draft");
-    setEiSourceFileId(item?.source_file_id || "");
+    setEiSourceFileId(item?.source_file_id || "__none__");
   };
 
   const saveEditItem = async () => {
@@ -99,7 +99,7 @@ export default function SegmentDetail() {
       total_length: parseFloat(eiLength) || 0,
       total_weight: parseFloat(eiWeight) || 0,
       status: eiStatus,
-      source_file_id: eiSourceFileId || null,
+      source_file_id: eiSourceFileId === "__none__" ? null : eiSourceFileId,
     };
     if (editItem === "new") {
       const { error, data } = await supabase.from("estimate_items").insert({
