@@ -106,11 +106,16 @@ serve(async (req) => {
     const systemPrompt = `You are a rebar estimating expert. Generate realistic estimate line items for a construction segment.
 Rules:
 - Return ONLY a JSON array of objects, no markdown, no explanation.
-- Each object: { "description": string, "bar_size": string, "quantity_count": number, "total_length": number (meters), "total_weight": number (kg), "confidence": number (0-1), "item_type": "rebar" }
+- Each object: { "description": string, "bar_size": string, "quantity_count": number, "total_length": number (meters for rebar, m² for wwm), "total_weight": number (kg), "confidence": number (0-1), "item_type": "rebar" | "wwm" }
 - Bar sizes: use metric (10M, 15M, 20M, 25M, 30M, 35M) or imperial (#3, #4, #5, #6, #7, #8) based on standards.
 - Confidence should reflect how typical this item is for this segment type (0.7-0.95 for standard items).
 - Generate 3-8 items that are realistic for the segment type.
 - Weight must be consistent with bar size and length using standard rebar weights. Use these mass values (kg/m): 10M=0.785, 15M=1.570, 20M=2.355, 25M=3.925, 30M=5.495, 35M=7.850, #3=0.561, #4=0.994, #5=1.552, #6=2.235, #7=3.042, #8=3.973.
+- WIRE MESH (WWM) DETECTION: If drawing text mentions "WWM", "welded wire mesh", "wire mesh", "W2.9", "W4.0", "MW9.1", mesh designations like "6x6-W2.9/W2.9" or "152x152 MW9.1/MW9.1", generate items with item_type "wwm" instead of "rebar".
+  - For WWM items: bar_size = mesh designation (e.g. "6x6-W2.9"), total_length = area in m², quantity_count = number of sheets (standard sheet = 5'×10' = 4.65 m², add 150mm overlap).
+  - WWM mass references (kg/m²): 6x6-W1.4/W1.4=0.93, 6x6-W2.1/W2.1=1.37, 6x6-W2.9/W2.9=1.90, 6x6-W4.0/W4.0=2.63, 4x4-W2.1/W2.1=2.05, 4x4-W4.0/W4.0=3.94.
+  - Weight formula for WWM: total_weight = total_length (m²) × mass (kg/m²).
+  - If a slab/SOG segment has BOTH rebar and mesh callouts, generate items for BOTH.
 - CRITICAL: If drawing text is provided below, use the ACTUAL bar sizes, quantities, and lengths from the drawings — do NOT guess or inflate. Parse footing schedules, bar schedules, and rebar callouts directly.
 - CRITICAL: Only estimate items that belong to THIS segment type. Do NOT add superstructure items to foundation segments or vice versa.
 - ${scopeHint ? `SCOPE RESTRICTION: ${scopeHint}` : ""}
