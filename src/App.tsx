@@ -12,6 +12,10 @@ import Dashboard from "./pages/Dashboard";
 import ReviewPage from "./pages/ReviewPage";
 import BlueprintViewerPage from "./pages/BlueprintViewerPage";
 import NotFound from "./pages/NotFound";
+import AppShell from "./components/layout/AppShell";
+import ProjectWorkspace from "./pages/ProjectWorkspace";
+import SegmentDetail from "./pages/SegmentDetail";
+import StandardsPage from "./pages/StandardsPage";
 
 const queryClient = new QueryClient();
 
@@ -51,7 +55,20 @@ const App = () => (
               <Routes>
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/auth" element={<AuthRoute><AuthPage /></AuthRoute>} />
-                <Route path="/app" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+
+                {/* App Shell with sidebar — all protected routes */}
+                <Route path="/app" element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
+                  <Route index element={<Dashboard />} />
+                  <Route path="project/:id" element={<ProjectWorkspace />} />
+                  <Route path="project/:id/files" element={<ProjectWorkspace />} />
+                  <Route path="project/:id/segments" element={<ProjectWorkspace />} />
+                  <Route path="project/:id/segments/:segId" element={<SegmentDetail />} />
+                  <Route path="project/:id/qa" element={<ProjectWorkspace />} />
+                  <Route path="project/:id/outputs" element={<ProjectWorkspace />} />
+                  <Route path="project/:id/settings" element={<ProjectWorkspace />} />
+                  <Route path="standards" element={<StandardsPage />} />
+                </Route>
+
                 <Route path="/blueprint-viewer" element={<ProtectedRoute><BlueprintViewerPage /></ProtectedRoute>} />
                 <Route path="/review/:token" element={<ReviewPage />} />
                 <Route path="*" element={<NotFound />} />

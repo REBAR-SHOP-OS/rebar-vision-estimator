@@ -107,7 +107,7 @@ export default function AppSidebar({ activeProjectId, activeProjectName }: AppSi
 
         {/* Active Project Navigation */}
         {projectBase && (
-          <SidebarGroup defaultOpen>
+          <SidebarGroup>
             <SidebarGroupLabel>
               {collapsed ? "Proj" : (activeProjectName || "Project")}
             </SidebarGroupLabel>
