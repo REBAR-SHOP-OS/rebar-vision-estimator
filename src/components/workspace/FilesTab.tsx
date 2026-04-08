@@ -170,8 +170,8 @@ export default function FilesTab({ projectId }: { projectId: string }) {
           <Badge variant="secondary" className="text-[10px]">{files.length} file{files.length !== 1 ? "s" : ""}</Badge>
           <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs relative" disabled={uploading}>
             {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-            {uploading ? "Uploading…" : "Upload"}
-            <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleUpload} accept=".pdf,.dwg,.dxf,.xlsx,.csv,.png,.jpg" />
+            {uploading ? `Uploading ${uploadProgress}…` : "Upload"}
+            <input type="file" multiple className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleUpload} accept=".pdf,.dwg,.dxf,.xlsx,.csv,.png,.jpg" />
           </Button>
         </div>
       </div>
