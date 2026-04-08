@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Loader2, AlertTriangle, CheckCircle2, ShieldAlert, User, MessageSquare } from "lucide-react";
+import { Loader2, AlertTriangle, CheckCircle2, ShieldAlert, User, MessageSquare, Plus } from "lucide-react";
 import { toast } from "sonner";
+import { logAuditEvent } from "@/lib/audit-logger";
 
 interface Issue {
   id: string;
@@ -19,10 +21,12 @@ interface Issue {
   status: string;
   assigned_to: string | null;
   resolution_note: string | null;
+  source_file_id: string | null;
   created_at: string;
 }
 
 export default function QATab({ projectId }: { projectId: string }) {
+  const { user } = useAuth();
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "open" | "resolved">("all");
@@ -32,11 +36,19 @@ export default function QATab({ projectId }: { projectId: string }) {
   const [editResolution, setEditResolution] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Create issue state
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newType, setNewType] = useState("missing_dimension");
+  const [newSeverity, setNewSeverity] = useState("warning");
+  const [newDescription, setNewDescription] = useState("");
+  const [creating, setCreating] = useState(false);
+
   const load = () => {
     setLoading(true);
     supabase
       .from("validation_issues")
-      .select("id, issue_type, severity, title, description, status, assigned_to, resolution_note, created_at")
+      .select("id, issue_type, severity, title, description, status, assigned_to, resolution_note, source_file_id, created_at")
       .eq("project_id", projectId)
       .order("created_at", { ascending: false })
       .then(({ data }) => {
@@ -65,16 +77,58 @@ export default function QATab({ projectId }: { projectId: string }) {
   };
 
   const handleSaveEdit = async () => {
-    if (!editIssue) return;
+    if (!editIssue || !user) return;
+    // Require resolution note when resolving
+    if (editStatus === "resolved" && !editResolution.trim()) {
+      toast.error("Resolution note is required when resolving an issue.");
+      return;
+    }
     setSaving(true);
+    const prevStatus = editIssue.status;
     const { error } = await supabase.from("validation_issues").update({
       status: editStatus,
       assigned_to: editAssignee || null,
       resolution_note: editResolution || null,
     }).eq("id", editIssue.id);
     if (error) toast.error("Failed to update issue");
-    else { toast.success("Issue updated"); setEditIssue(null); load(); }
+    else {
+      const action = editStatus !== prevStatus ? (editStatus === "resolved" ? "resolved" : editStatus === "open" && prevStatus === "resolved" ? "reopened" : "updated") : "updated";
+      await logAuditEvent(user.id, action, "issue", editIssue.id, projectId, undefined, {
+        title: editIssue.title,
+        prev_status: prevStatus,
+        new_status: editStatus,
+      });
+      toast.success("Issue updated");
+      setEditIssue(null);
+      load();
+    }
     setSaving(false);
+  };
+
+  const handleCreate = async () => {
+    if (!user || !newTitle.trim()) return;
+    setCreating(true);
+    const { data, error } = await supabase.from("validation_issues").insert({
+      project_id: projectId,
+      user_id: user.id,
+      title: newTitle.trim(),
+      issue_type: newType,
+      severity: newSeverity,
+      description: newDescription.trim() || null,
+    }).select("id").single();
+    if (error) toast.error("Failed to create issue");
+    else {
+      await logAuditEvent(user.id, "created", "issue", data?.id, projectId, undefined, {
+        title: newTitle,
+        severity: newSeverity,
+      });
+      toast.success("Issue created");
+      setCreateOpen(false);
+      setNewTitle("");
+      setNewDescription("");
+      load();
+    }
+    setCreating(false);
   };
 
   if (loading) {
@@ -83,7 +137,6 @@ export default function QATab({ projectId }: { projectId: string }) {
 
   return (
     <div className="p-4 md:p-6">
-      {/* Blocker Banner */}
       {blockerCount > 0 && (
         <div className="flex items-center gap-2 p-3 mb-4 bg-destructive/10 border border-destructive/20 rounded-lg">
           <ShieldAlert className="h-4 w-4 text-destructive flex-shrink-0" />
@@ -99,6 +152,48 @@ export default function QATab({ projectId }: { projectId: string }) {
               {f === "all" ? `All (${issues.length})` : f === "open" ? `Open (${openCount})` : `Resolved (${issues.filter(i => i.status === "resolved").length})`}
             </Button>
           ))}
+        </div>
+        <div className="ml-auto">
+          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs"><Plus className="h-3 w-3" />New Issue</Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader><DialogTitle className="text-sm">Create Issue</DialogTitle></DialogHeader>
+              <div className="space-y-3">
+                <div><Label className="text-xs">Title</Label><Input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} className="h-9 text-sm" placeholder="Issue title" /></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-xs">Type</Label>
+                    <Select value={newType} onValueChange={setNewType}>
+                      <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="missing_dimension">Missing Dimension</SelectItem>
+                        <SelectItem value="extraction_conflict">Extraction Conflict</SelectItem>
+                        <SelectItem value="review_required">Review Required</SelectItem>
+                        <SelectItem value="data_quality">Data Quality</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Severity</Label>
+                    <Select value={newSeverity} onValueChange={setNewSeverity}>
+                      <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="info">Info</SelectItem>
+                        <SelectItem value="warning">Warning</SelectItem>
+                        <SelectItem value="error">Error</SelectItem>
+                        <SelectItem value="critical">Critical</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div><Label className="text-xs">Description</Label><Textarea value={newDescription} onChange={(e) => setNewDescription(e.target.value)} className="text-sm min-h-[60px]" placeholder="Describe the issue…" /></div>
+                <Button onClick={handleCreate} disabled={creating || !newTitle.trim()} className="w-full" size="sm">{creating ? "Creating…" : "Create Issue"}</Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
@@ -169,8 +264,11 @@ export default function QATab({ projectId }: { projectId: string }) {
                 <Input value={editAssignee} onChange={(e) => setEditAssignee(e.target.value)} className="h-9 text-sm" placeholder="e.g. estimator@company.com" />
               </div>
               <div>
-                <Label className="text-xs">Resolution Note</Label>
+                <Label className="text-xs">Resolution Note {editStatus === "resolved" && <span className="text-destructive">*</span>}</Label>
                 <Textarea value={editResolution} onChange={(e) => setEditResolution(e.target.value)} className="text-sm min-h-[60px]" placeholder="Describe how this issue was resolved…" />
+                {editStatus === "resolved" && !editResolution.trim() && (
+                  <p className="text-[10px] text-destructive mt-1">Required when resolving an issue.</p>
+                )}
               </div>
               <Button onClick={handleSaveEdit} disabled={saving} className="w-full" size="sm">
                 {saving ? "Saving…" : "Save Changes"}

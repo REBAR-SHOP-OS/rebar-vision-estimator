@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Eye, Layers } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Loader2, Eye, Layers, Plus } from "lucide-react";
+import { toast } from "sonner";
+import { logAuditEvent } from "@/lib/audit-logger";
 
 interface DrawingView {
   id: string;
@@ -14,15 +18,42 @@ interface DrawingView {
 }
 
 export default function DrawingViewsPanel({ segmentId }: { segmentId: string }) {
+  const { user } = useAuth();
   const [views, setViews] = useState<DrawingView[]>([]);
   const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
 
-  useEffect(() => {
+  const load = () => {
     supabase.from("drawing_views").select("*").eq("segment_id", segmentId).order("created_at").then(({ data }) => {
       setViews((data as DrawingView[]) || []);
       setLoading(false);
     });
-  }, [segmentId]);
+  };
+
+  useEffect(() => { load(); }, [segmentId]);
+
+  const handleGenerate = async () => {
+    if (!user) return;
+    setGenerating(true);
+    try {
+      const { data, error } = await supabase.from("drawing_views").insert({
+        segment_id: segmentId,
+        user_id: user.id,
+        view_type: "plan",
+        title: `Draft View ${views.length + 1}`,
+        status: "draft",
+        confidence: 0,
+        revision_label: "R0",
+      }).select("id").single();
+      if (error) throw error;
+      await logAuditEvent(user.id, "created", "drawing_view", data?.id, undefined, segmentId);
+      toast.success("Draft view created");
+      load();
+    } catch {
+      toast.error("Failed to create drawing view");
+    }
+    setGenerating(false);
+  };
 
   if (loading) return <div className="flex items-center justify-center h-24"><Loader2 className="h-4 w-4 animate-spin text-primary" /></div>;
 
@@ -34,14 +65,20 @@ export default function DrawingViewsPanel({ segmentId }: { segmentId: string }) 
 
   return (
     <div className="space-y-3">
-      <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
-        <Eye className="h-4 w-4 text-muted-foreground" />Drawing Views
-      </h4>
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+          <Eye className="h-4 w-4 text-muted-foreground" />Drawing Views
+        </h4>
+        <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={handleGenerate} disabled={generating}>
+          {generating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+          Generate Draft
+        </Button>
+      </div>
       {views.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-28 text-muted-foreground gap-1.5 border border-dashed border-border rounded-lg">
           <Layers className="h-6 w-6" />
           <p className="text-xs">No drawing views generated yet.</p>
-          <p className="text-[10px]">Views will appear here after draft detailing.</p>
+          <p className="text-[10px]">Click "Generate Draft" to create a view.</p>
         </div>
       ) : (
         <div className="border border-border rounded-lg overflow-hidden">
@@ -53,6 +90,7 @@ export default function DrawingViewsPanel({ segmentId }: { segmentId: string }) 
                 <th className="text-left px-3 py-2 font-semibold">Status</th>
                 <th className="text-right px-3 py-2 font-semibold">Confidence</th>
                 <th className="text-left px-3 py-2 font-semibold">Rev</th>
+                <th className="text-right px-3 py-2 font-semibold">Created</th>
               </tr>
             </thead>
             <tbody>
@@ -63,6 +101,7 @@ export default function DrawingViewsPanel({ segmentId }: { segmentId: string }) 
                   <td className="px-3 py-2"><Badge className={`text-[9px] ${statusColor(v.status)}`}>{v.status}</Badge></td>
                   <td className="px-3 py-2 text-right font-mono text-muted-foreground">{Number(v.confidence) > 0 ? `${Math.round(Number(v.confidence) * 100)}%` : "—"}</td>
                   <td className="px-3 py-2 text-muted-foreground">{v.revision_label || "—"}</td>
+                  <td className="px-3 py-2 text-right text-muted-foreground">{new Date(v.created_at).toLocaleDateString()}</td>
                 </tr>
               ))}
             </tbody>

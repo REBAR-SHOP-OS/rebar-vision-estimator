@@ -4,12 +4,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { CheckCircle2, XCircle, Clock, ShieldAlert, Plus, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { logAuditEvent } from "@/lib/audit-logger";
 
 interface Approval {
   id: string;
@@ -33,6 +33,7 @@ export default function ApprovalPanel({ projectId, segmentId }: { projectId: str
   const { user } = useAuth();
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [openIssueCount, setOpenIssueCount] = useState(0);
+  const [blockerCount, setBlockerCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newType, setNewType] = useState("estimate");
@@ -45,11 +46,13 @@ export default function ApprovalPanel({ projectId, segmentId }: { projectId: str
     let q = supabase.from("approvals").select("*").eq("project_id", projectId).order("created_at", { ascending: false });
     if (segmentId) q = q.eq("segment_id", segmentId);
 
-    const issueQ = supabase.from("validation_issues").select("id", { count: "exact" }).eq("project_id", projectId).eq("status", "open");
+    const issueQ = supabase.from("validation_issues").select("id, severity", { count: "exact" }).eq("project_id", projectId).eq("status", "open");
 
     const [appRes, issRes] = await Promise.all([q, issueQ]);
     setApprovals((appRes.data as Approval[]) || []);
     setOpenIssueCount(issRes.count || 0);
+    const blockers = (issRes.data || []).filter((i: any) => i.severity === "error" || i.severity === "critical").length;
+    setBlockerCount(blockers);
     setLoading(false);
   };
 
@@ -59,7 +62,7 @@ export default function ApprovalPanel({ projectId, segmentId }: { projectId: str
     if (!user) return;
     setCreating(true);
     const status = openIssueCount > 0 ? "blocked" : "pending";
-    const { error } = await supabase.from("approvals").insert({
+    const { data, error } = await supabase.from("approvals").insert({
       project_id: projectId,
       segment_id: segmentId || null,
       user_id: user.id,
@@ -68,16 +71,33 @@ export default function ApprovalPanel({ projectId, segmentId }: { projectId: str
       reviewer_name: newReviewer || null,
       reviewer_email: newEmail || null,
       notes: openIssueCount > 0 ? `Blocked: ${openIssueCount} open issue(s) must be resolved first.` : null,
-    });
+    }).select("id").single();
     if (error) toast.error("Failed to create approval");
-    else { toast.success("Approval request created"); setDialogOpen(false); setNewReviewer(""); setNewEmail(""); load(); }
+    else {
+      await logAuditEvent(user.id, "created", "approval", data?.id, projectId, segmentId, { approval_type: newType, status });
+      toast.success("Approval request created");
+      setDialogOpen(false);
+      setNewReviewer("");
+      setNewEmail("");
+      load();
+    }
     setCreating(false);
   };
 
   const handleResolve = async (id: string, newStatus: "approved" | "rejected") => {
+    if (!user) return;
+    // Prevent approval when blockers exist
+    if (newStatus === "approved" && blockerCount > 0) {
+      toast.error(`Cannot approve: ${blockerCount} critical/error issue(s) must be resolved first.`);
+      return;
+    }
     const { error } = await supabase.from("approvals").update({ status: newStatus, resolved_at: new Date().toISOString() }).eq("id", id);
     if (error) toast.error("Failed to update");
-    else { toast.success(`Approval ${newStatus}`); load(); }
+    else {
+      await logAuditEvent(user.id, newStatus, "approval", id, projectId, segmentId);
+      toast.success(`Approval ${newStatus}`);
+      load();
+    }
   };
 
   if (loading) {
@@ -144,7 +164,10 @@ export default function ApprovalPanel({ projectId, segmentId }: { projectId: str
                       </div>
                       {a.reviewer_name && <p className="text-[10px] text-muted-foreground mt-0.5">Reviewer: {a.reviewer_name}</p>}
                       {a.notes && <p className="text-xs text-muted-foreground mt-1">{a.notes}</p>}
-                      <p className="text-[10px] text-muted-foreground mt-1">{new Date(a.created_at).toLocaleDateString()}</p>
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        Created: {new Date(a.created_at).toLocaleDateString()}
+                        {a.resolved_at && ` · Resolved: ${new Date(a.resolved_at).toLocaleDateString()}`}
+                      </p>
                     </div>
                   </div>
                   {a.status === "pending" && (
