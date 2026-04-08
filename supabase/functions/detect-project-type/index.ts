@@ -93,35 +93,30 @@ serve(async (req) => {
     let accessToken: string | null = null;
     try { accessToken = await getGoogleAccessToken(); } catch (e) { console.error("Vision token failed:", e); }
 
-    const filesToScan = fileUrls.slice(0, 6);
-    const contentParts: any[] = [];
+    // Only use pre-rendered image URLs (PDFs should be pre-rendered by client)
+    const supportedImageExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif'];
+    const imageUrls = fileUrls.filter((url: string) => {
+      const ext = url.toLowerCase().split('?')[0].split('.').pop() || '';
+      return supportedImageExts.some(e => e === `.${ext}`);
+    });
 
-    for (const url of filesToScan) {
-      const urlLower = url.toLowerCase().split('?')[0];
-      if (urlLower.endsWith('.pdf')) {
+    // Limit: 3 images for AI vision, 2 for OCR to stay within CPU budget
+    const contentParts: any[] = imageUrls.slice(0, 3).map((url: string) => ({
+      type: "image_url", image_url: { url },
+    }));
+
+    // Quick OCR on first 2 images only
+    const ocrUrls = imageUrls.slice(0, 2);
+    if (accessToken) {
+      for (const url of ocrUrls) {
         try {
-          const pdfResp = await fetch(url);
-          if (!pdfResp.ok) continue;
-          const buf = await pdfResp.arrayBuffer();
-          if (buf.byteLength > 4 * 1024 * 1024) continue;
-          contentParts.push({ type: "image_url", image_url: { url: `data:application/pdf;base64,${encodeBase64(buf)}` } });
+          const imgResp = await fetch(url);
+          if (!imgResp.ok) continue;
+          const imgBuf = await imgResp.arrayBuffer();
+          if (imgBuf.byteLength > 2 * 1024 * 1024) continue; // skip large images
+          const text = await quickOCR(accessToken, encodeBase64(imgBuf));
+          if (text) ocrText += `\n--- OCR from ${url.split('/').pop()?.split('?')[0]} ---\n${text}\n`;
         } catch {}
-      } else {
-        const supportedImageExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif'];
-        const fileExt = urlLower.split('.').pop()?.split('?')[0] || '';
-        const isSupportedImage = supportedImageExts.some(ext => ext === `.${fileExt}`);
-        if (!isSupportedImage) { console.log(`Skipping unsupported: .${fileExt}`); continue; }
-        
-        contentParts.push({ type: "image_url", image_url: { url } });
-        if (accessToken) {
-          try {
-            const imgResp = await fetch(url);
-            if (!imgResp.ok) continue;
-            const imgBuf = await imgResp.arrayBuffer();
-            const text = await quickOCR(accessToken, encodeBase64(imgBuf));
-            if (text) ocrText += `\n--- OCR from ${url.split('/').pop()?.split('?')[0]} ---\n${text}\n`;
-          } catch {}
-        }
       }
     }
 
