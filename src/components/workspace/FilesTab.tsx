@@ -28,6 +28,7 @@ export default function FilesTab({ projectId }: { projectId: string }) {
   const [issueCounts, setIssueCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [parsing, setParsing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
 
   useEffect(() => { loadFiles(); }, [projectId]);
@@ -97,6 +98,40 @@ export default function FilesTab({ projectId }: { projectId: string }) {
     const { data } = await supabase.storage.from("blueprints").createSignedUrl(filePath, 3600);
     if (data?.signedUrl) window.open(data.signedUrl, "_blank");
     else toast.error("Could not generate file URL");
+  };
+
+  const handleParseAll = async () => {
+    if (!user) return;
+    setParsing(true);
+    try {
+      // Create missing document_versions for files that lack them
+      const pendingFiles = files.filter(f => f.parse_status === "pending");
+      for (const f of pendingFiles) {
+        try {
+          const hash = `pending_${Date.now()}_${f.id}`;
+          const discipline = detectDiscipline(f.file_name);
+          await supabase.from("document_versions").insert({
+            project_id: projectId,
+            user_id: user.id,
+            file_id: f.id,
+            file_name: f.file_name,
+            file_path: f.file_path,
+            sha256: hash,
+            source_system: "upload",
+            pdf_metadata: discipline ? { discipline } : {},
+          });
+        } catch (_) { /* best effort */ }
+      }
+      // Trigger the processing pipeline
+      const { error } = await supabase.functions.invoke("process-pipeline", { body: { project_id: projectId } });
+      if (error) toast.error("Pipeline trigger failed");
+      else toast.success(`Parsing started for ${pendingFiles.length} file(s)`);
+      loadFiles();
+    } catch (err) {
+      toast.error("Failed to start parsing");
+    } finally {
+      setParsing(false);
+    }
   };
 
   const loadFiles = () => {
@@ -175,6 +210,12 @@ export default function FilesTab({ projectId }: { projectId: string }) {
         <h3 className="text-sm font-semibold text-foreground">Files & Revisions</h3>
         <div className="flex items-center gap-2">
           <Badge variant="secondary" className="text-[10px]">{files.length} file{files.length !== 1 ? "s" : ""}</Badge>
+          {files.some(f => f.parse_status === "pending") && (
+            <Button size="sm" variant="default" className="gap-1.5 h-7 text-xs" disabled={parsing} onClick={handleParseAll}>
+              {parsing ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
+              {parsing ? "Parsing…" : "Parse All"}
+            </Button>
+          )}
           <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs relative" disabled={uploading}>
             {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
             {uploading ? `Uploading ${uploadProgress}…` : "Upload"}
