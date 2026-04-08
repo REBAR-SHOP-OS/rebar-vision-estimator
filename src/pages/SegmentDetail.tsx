@@ -234,6 +234,12 @@ export default function SegmentDetail() {
         </div>
 
         <TabsContent value="estimate" className="flex-1 overflow-auto p-4 m-0">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-semibold text-foreground">Estimate Items</h4>
+            <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={() => openEditItem(null)}>
+              <Plus className="h-3 w-3" />Add Item
+            </Button>
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <Card><CardContent className="p-3 text-center"><p className="text-lg font-bold">{estimateItems.length}</p><p className="text-[10px] text-muted-foreground uppercase">Items</p></CardContent></Card>
             <Card><CardContent className="p-3 text-center"><p className="text-lg font-bold font-mono">{totalLength.toLocaleString()}</p><p className="text-[10px] text-muted-foreground uppercase">Total Length (m)</p></CardContent></Card>
@@ -252,7 +258,7 @@ export default function SegmentDetail() {
             <div className="flex flex-col items-center justify-center h-32 text-muted-foreground gap-2 border border-dashed border-border rounded-lg">
               <FileText className="h-6 w-6" />
               <p className="text-xs">No estimate items yet.</p>
-              <p className="text-[10px]">Run AI analysis or add items manually.</p>
+              <p className="text-[10px]">Click <strong>"Add Item"</strong> above or run AI analysis.</p>
             </div>
           ) : (
             <div className="border border-border rounded-lg overflow-hidden">
