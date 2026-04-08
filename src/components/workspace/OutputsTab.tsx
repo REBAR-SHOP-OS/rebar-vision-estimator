@@ -65,14 +65,14 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
     setExporting(type);
     try {
       if (type === "issues") {
-        // Generate CSV of issues
         const { data } = await supabase.from("validation_issues")
           .select("title, issue_type, severity, status, assigned_to, resolution_note, created_at")
           .eq("project_id", projectId)
           .order("created_at", { ascending: false });
-        if (!data || data.length === 0) { toast.error("No issues to export"); return; }
         const headers = ["Title", "Type", "Severity", "Status", "Assigned To", "Resolution Note", "Created"];
-        const rows = data.map((r: any) => [r.title, r.issue_type, r.severity, r.status, r.assigned_to || "", r.resolution_note || "", r.created_at]);
+        const rows = (data || []).length > 0
+          ? (data || []).map((r: any) => [r.title, r.issue_type, r.severity, r.status, r.assigned_to || "", r.resolution_note || "", r.created_at])
+          : [["No issues found", "", "", "", "", "", new Date().toISOString()]];
         const csv = [headers.join(","), ...rows.map((r: any) => r.map((c: any) => `"${String(c).replace(/"/g, '""')}"`).join(","))].join("\n");
         const blob = new Blob([csv], { type: "text/csv" });
         const url = URL.createObjectURL(blob);
@@ -82,17 +82,35 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
         await logAuditEvent(user.id, "exported", "export", undefined, projectId, undefined, { export_type: "issues_csv" });
         toast.success("Issues report exported");
       } else if (type === "shop_drawing") {
-        // Fetch latest shop drawing HTML and open in new tab
+        // Try existing shop drawing first
         const { data } = await supabase.from("shop_drawings")
           .select("html_content")
           .eq("project_id", projectId)
           .order("created_at", { ascending: false })
           .limit(1)
-          .single();
-        if (!data?.html_content) { toast.error("No shop drawing available"); return; }
-        const blob = new Blob([data.html_content], { type: "text/html" });
-        const url = URL.createObjectURL(blob);
-        window.open(url, "_blank");
+          .maybeSingle();
+        if (data?.html_content) {
+          const blob = new Blob([data.html_content], { type: "text/html" });
+          const url = URL.createObjectURL(blob);
+          window.open(url, "_blank");
+        } else {
+          // Generate a simple bar schedule HTML from bar_items
+          const { data: segs } = await supabase.from("segments").select("id, name, segment_type").eq("project_id", projectId);
+          const segIds = (segs || []).map((s: any) => s.id);
+          const segMap: Record<string, string> = {};
+          (segs || []).forEach((s: any) => { segMap[s.id] = s.name; });
+          let bars: any[] = [];
+          if (segIds.length > 0) {
+            const { data: bi } = await supabase.from("bar_items").select("*").in("segment_id", segIds);
+            bars = bi || [];
+          }
+          if (bars.length === 0) { toast.error("No shop drawing data available"); return; }
+          const rows = bars.map((b: any, i: number) => `<tr><td>${i+1}</td><td>${segMap[b.segment_id] || ""}</td><td>${b.mark || ""}</td><td>${b.size || ""}</td><td>${b.shape_code || ""}</td><td>${b.cut_length || 0}</td><td>${b.quantity || 0}</td><td>${b.finish_type || ""}</td></tr>`).join("");
+          const html = `<html><head><title>Bar Schedule</title><style>table{border-collapse:collapse;width:100%}td,th{border:1px solid #999;padding:6px 10px;font-size:13px}th{background:#2a5c5c;color:#fff}</style></head><body><h2>Bar Schedule</h2><table><tr><th>#</th><th>Segment</th><th>Mark</th><th>Size</th><th>Shape</th><th>Cut Length</th><th>Qty</th><th>Finish</th></tr>${rows}</table></body></html>`;
+          const blob = new Blob([html], { type: "text/html" });
+          const url = URL.createObjectURL(blob);
+          window.open(url, "_blank");
+        }
         await logAuditEvent(user.id, "exported", "export", undefined, projectId, undefined, { export_type: "shop_drawing_html" });
         toast.success("Shop drawing opened");
       } else if (type === "estimate") {
