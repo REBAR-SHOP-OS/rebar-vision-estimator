@@ -407,7 +407,7 @@ export default function SegmentDetail() {
                 </SelectContent>
               </Select>
             </div>
-            <Button onClick={saveEditItem} disabled={eiSaving} className="w-full" size="sm">{eiSaving ? "Saving…" : "Save Changes"}</Button>
+            <Button onClick={saveEditItem} disabled={eiSaving} className="w-full" size="sm">{eiSaving ? "Saving…" : editItem === "new" ? "Create Item" : "Save Changes"}</Button>
           </div>
         </DialogContent>
       </Dialog>
