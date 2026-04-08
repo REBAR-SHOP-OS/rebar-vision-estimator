@@ -189,15 +189,31 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
           .select("version_number, quoted_price, currency, status, exclusions_text, terms_text, created_at")
           .eq("project_id", projectId)
           .order("version_number", { ascending: false });
-        if (!data || data.length === 0) { toast.error("No quotes to export"); return; }
-        const headers = ["Version", "Price", "Currency", "Status", "Exclusions", "Terms", "Created"];
-        const rows = data.map((r: any) => [r.version_number, r.quoted_price, r.currency, r.status, r.exclusions_text || "", r.terms_text || "", r.created_at]);
-        const csv = [headers.join(","), ...rows.map((r: any) => r.map((c: any) => `"${String(c).replace(/"/g, '""')}"`).join(","))].join("\n");
-        const blob = new Blob([csv], { type: "text/csv" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = `quotes-${projectId.slice(0, 8)}.csv`; a.click();
-        URL.revokeObjectURL(url);
+        if (data && data.length > 0) {
+          const headers = ["Version", "Price", "Currency", "Status", "Exclusions", "Terms", "Created"];
+          const rows = data.map((r: any) => [r.version_number, r.quoted_price, r.currency, r.status, r.exclusions_text || "", r.terms_text || "", r.created_at]);
+          const csv = [headers.join(","), ...rows.map((r: any) => r.map((c: any) => `"${String(c).replace(/"/g, '""')}"`).join(","))].join("\n");
+          const blob = new Blob([csv], { type: "text/csv" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url; a.download = `quotes-${projectId.slice(0, 8)}.csv`; a.click();
+          URL.revokeObjectURL(url);
+        } else {
+          // Generate draft quote from estimate data
+          const { data: eiData } = await supabase.from("estimate_items")
+            .select("description, bar_size, quantity_count, total_weight, confidence")
+            .eq("project_id", projectId).neq("item_type", "source_link");
+          const totalWt = (eiData || []).reduce((s: number, r: any) => s + (Number(r.total_weight) || 0), 0);
+          const headers = ["Item", "Bar Size", "Qty", "Weight (kg)", "Confidence"];
+          const rows = (eiData || []).map((r: any) => [r.description || "", r.bar_size || "", r.quantity_count, r.total_weight, r.confidence]);
+          rows.push(["TOTAL", "", "", totalWt.toFixed(1), ""]);
+          const csv = [headers.join(","), ...rows.map((r: any) => r.map((c: any) => `"${String(c).replace(/"/g, '""')}"`).join(","))].join("\n");
+          const blob = new Blob([csv], { type: "text/csv" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url; a.download = `draft-quote-${projectId.slice(0, 8)}.csv`; a.click();
+          URL.revokeObjectURL(url);
+        }
         await logAuditEvent(user.id, "exported", "export", undefined, projectId, undefined, { export_type: "quote_csv" });
         toast.success("Quote package exported");
       }
