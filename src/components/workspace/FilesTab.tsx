@@ -45,15 +45,77 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
     return null;
   };
 
+  const parseFile = async (fileId: string, fileName: string, filePath: string) => {
+    try {
+      // Ensure document_version exists
+      const { data: existingDv } = await supabase
+        .from("document_versions")
+        .select("id")
+        .eq("file_id", fileId)
+        .maybeSingle();
+
+      let dvId = existingDv?.id;
+      if (!dvId) {
+        const hash = `pending_${Date.now()}_${fileId}`;
+        const discipline = detectDiscipline(fileName);
+        const { data: newDv } = await supabase.from("document_versions").insert({
+          project_id: projectId,
+          user_id: user!.id,
+          file_id: fileId,
+          file_name: fileName,
+          file_path: filePath,
+          sha256: hash,
+          source_system: "upload",
+          pdf_metadata: discipline ? { discipline } : {},
+        }).select("id").single();
+        dvId = newDv?.id;
+      }
+
+      const { data: urlData } = await supabase.storage
+        .from("blueprints")
+        .createSignedUrl(filePath, 3600);
+      if (!urlData?.signedUrl) return false;
+
+      const { data: extraction, error: extractErr } = await supabase.functions.invoke("extract-pdf-text", {
+        body: { pdf_url: urlData.signedUrl, project_id: projectId },
+      });
+      if (extractErr || !extraction) return false;
+
+      const { error: indexErr } = await supabase.functions.invoke("populate-search-index", {
+        body: {
+          project_id: projectId,
+          document_version_id: dvId,
+          pages: extraction.pages || [],
+          file_name: fileName,
+          sha256: extraction.sha256 || `file_${fileId}`,
+        },
+      });
+
+      if (dvId) {
+        await supabase.from("document_versions").update({
+          sha256: extraction.sha256 || `file_${fileId}`,
+          page_count: extraction.total_pages || 0,
+          is_scanned: !extraction.has_text_layer,
+        }).eq("id", dvId);
+      }
+
+      return !indexErr;
+    } catch {
+      return false;
+    }
+  };
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0 || !user) return;
     const files = Array.from(fileList);
     setUploading(true);
 
+    const uploadedFiles: { id: string; name: string; path: string }[] = [];
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      setUploadProgress(`${i + 1}/${files.length}`);
+      setUploadProgress(`Uploading ${i + 1}/${files.length}`);
       const path = `${user.id}/${projectId}/${Date.now()}_${file.name}`;
       const { error: storageErr } = await supabase.storage.from("blueprints").upload(path, file);
       if (storageErr) { toast.error(`Upload failed: ${file.name}`); continue; }
@@ -84,8 +146,22 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       } catch (_) { /* hash/version insert is best-effort */ }
 
       await logAuditEvent(user.id, "uploaded", "project_file", data.id, projectId);
+      uploadedFiles.push({ id: data.id, name: file.name, path });
     }
     toast.success(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
+
+    // Auto-parse each uploaded file
+    let parsedCount = 0;
+    for (let i = 0; i < uploadedFiles.length; i++) {
+      setUploadProgress(`Parsing ${i + 1}/${uploadedFiles.length}`);
+      const uf = uploadedFiles[i];
+      const ok = await parseFile(uf.id, uf.name, uf.path);
+      if (ok) parsedCount++;
+    }
+    if (parsedCount > 0) {
+      toast.success(`Parsed ${parsedCount} of ${uploadedFiles.length} file(s)`);
+    }
+
     loadFiles();
     const { error: pipelineErr } = await supabase.functions.invoke("process-pipeline", { body: { project_id: projectId } });
     if (pipelineErr) console.warn("process-pipeline failed after upload:", pipelineErr);
