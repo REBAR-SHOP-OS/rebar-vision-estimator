@@ -1,43 +1,63 @@
 
 
-# Fix: Reconciliation Sheet Empty Totals + WWM Weight = 0
+# Fix: Use Real Shop Drawing Data to Fine-Tune Estimation
 
-## Problems Found
+## Problem Summary
+The current project has 3 generic segments ("Foundation Plan", "Parking Structure Concrete", "Suspended Slabs/Beams") with 19 fabricated bar_items (marks like A1, B1, C1) that don't match the real shop drawings at all.
 
-### Bug 1: WWM bar_items get weight = 0
-In `OutputsTab.tsx` line 166, weight is calculated as `qty * (lengthMm / 1000) * getMassKgPerM(size)`. For WWM sizes like `6x6-W2.9/W2.9`, `getMassKgPerM` returns 0 (it's not rebar). The system already has `getWwmMassKgPerM2()` in rebar-weights.ts but it's never called during export.
+The real SD06-SD12 drawings contain:
+- **SD06**: Foundation Plan — SOG mesh (152X152XMW18.7/18.7, 510 sheets), plus 10M corner/continuous bars (B1001, BS31, BS38, BS48)
+- **SD07**: Isolated Footings F1-F8 schedule (F1=1000x1000, F2=1500x1500 ×8, F3=1600x1600 ×4, F4=1700x1700 ×4, F5=1800x1800 ×4, F6=2000x2000 ×2, F7=2100x2100 ×1, F8=2200x2200 ×4), plus 10M/15M tie wire bars
+- **SD08**: W1 Wall Elevation — 10M verticals, 15M/20M continuous, dowels, ties, pier D/V bars
+- **SD09**: W1/W2 Wall Elevations continued — pier dowels, corner bars, slab dowels
+- **SD10**: W3/W4 Wall Elevations — wall bars, 20M continuous, 10M verticals
+- **SD11**: Pier/Grade Beam details — 15M ties, 20M mains, 10M stirrups
+- **SD12**: W5/W6 Wall Elevations — wall rebar
 
-The DB has: qty=45, cut_length=185000 for mesh. This represents 45 sheets × area. WWM weight should use area × kg/m², not linear length × kg/m.
+## Plan
 
-**Fix** (`OutputsTab.tsx` lines 162-179): Detect WWM items (size matches mesh pattern). For WWM, use `getWwmMassKgPerM2(size)` and compute weight from area. If cut_length represents a dimension (like 185m total length of mesh coverage), compute area from that. Mark WWM items with a flag so the export handles them correctly.
+### 1. Fine-tune `auto-segments` prompt to recognize real drawing elements
 
-### Bug 2: Reconciliation sheet has no Norm Weight, Variance, Status data
-The `element_reconciliation` array from `recon` is empty (line 444), so it falls back to the barList grouping (line 460-468) which only populates column B (Drawing Weight). Columns C-F stay blank because there's no norm data to compare against.
+**File: `supabase/functions/auto-segments/index.ts`**
 
-**Fix** (`excel-export.ts` lines 459-468): When falling back to barList-derived weights, also compute industry-norm estimates using simple kg/m³ ratios from RSIC standards. This gives the Reconciliation sheet actual comparison data instead of blank cells.
+Update the AI prompt (lines 121-157) to include:
+- Explicit instruction to parse bar list tables for bar marks and extract element references (F-1 through F-8, W1-W8, P1-P8, SOG, etc.)
+- Add reference to RSIC standards already stored in `agent_knowledge` — query the knowledge table and include key rules in the prompt context
+- Increase `max_tokens` from 3000 to 4000 to allow more detailed segment descriptions
+- Add instruction: "If bar lists are found, extract ACTUAL element names from bar marks (e.g., B1001 = SOG slab bar, BS03 = Footing F-1 bar, B2001 = Wall corner bar). Map bar marks to structural elements."
 
-### Bug 3: Grand Total in Estimate Summary doesn't match Reconciliation
-Since WWM weight is 0, the slab total is wrong (194.1 instead of ~545 with mesh), which cascades to Grand Total.
+### 2. Fine-tune `auto-estimate` prompt with RSIC weight standards
 
-**Fix**: Resolved by fixing Bug 1 — correct WWM weight flows through all sheets.
+**File: `supabase/functions/auto-estimate/index.ts`**
 
-## Changes
+Update the prompt (lines 106-141) to:
+- Fetch `agent_knowledge` entries for RSIC standards and include mass table + estimating rules in system prompt
+- Add instruction to parse the drawing_search_index text directly (not just pdf_metadata which may be empty for large files)
+- Query `drawing_search_index` for the specific segment's drawing pages and pass that text to the AI
+- Add explicit rule: "Parse bar list tables from the drawing text. Each row typically has: Bar Mark, Qty, Size, Total Length, Type, and shape dimensions. Use these EXACT values."
 
-### 1. `src/components/workspace/OutputsTab.tsx` — Fix WWM weight calculation (lines 162-179)
+### 3. Fine-tune `auto-bar-schedule` prompt to use real bar marks
 
-Add WWM detection before weight calc. If size matches a mesh pattern (`/\d.*x.*\d.*W/i`), use `getWwmMassKgPerM2()` for weight. Treat the bar_item's qty × cut_length as total area coverage in m² (or compute from dimensions). Import `getWwmMassKgPerM2` from rebar-weights.
+**File: `supabase/functions/auto-bar-schedule/index.ts`**
 
-```text
-Current: wtKg = qty * (lengthMm / 1000) * getMassKgPerM(size)  → 0 for WWM
-Fixed:   if isWWM → wtKg = qty * areaSqM * getWwmMassKgPerM2(size)
-         else     → wtKg = qty * (lengthMm / 1000) * getMassKgPerM(size)
-```
+Update the prompt (lines 67-94) to:
+- Also fetch `drawing_search_index` text for the segment's related pages
+- Add instruction: "Use the ACTUAL bar marks from the drawings (e.g., BS03, B1001, B2001) instead of generic sequential marks (A1, A2, B1)."
+- Include bar shape dimension columns from the drawing text so cut_length and shape_code are accurate
 
-For the mesh bar_item (qty=45, cut_length=185000mm=185m): this likely means 45 sheets. Standard WWM sheet = 1.52m × 3.05m = 4.636 m². Total area = 45 × 4.636 = 208.6 m². Weight = 208.6 × 1.90 = 396.4 kg. Alternatively if cut_length=185000mm represents total linear coverage, area = (185000/1000) × standard_width. We'll use the area interpretation that gives a reasonable result.
+### 4. Delete incorrect data and re-run
 
-### 2. `src/lib/excel-export.ts` — No changes needed
-The Reconciliation sheet's TOTAL SUM formulas already work correctly (lines 473-476). The blank columns C-F are expected when there's no `element_reconciliation` data from the AI — this is a data issue, not a code bug. The TOTAL row will show correct sums once WWM weight is fixed.
+**Database migration**: Delete the 3 wrong segments and their 19 fabricated bar_items for project `2fbf1ab0-a319-4f66-bbca-2571b0573ee6` so the user can re-run auto-segments with the improved prompts.
+
+## Technical Details
+
+All three edge functions currently only read drawing text from `document_versions.pdf_metadata`, which is empty for large PDFs. The fix adds a fallback to query `drawing_search_index` (which was populated by the OCR pipeline we built earlier) and passes that text to the AI prompts.
+
+The RSIC standards data is already stored in `agent_knowledge` — we just need to query it and inject it into the prompts.
 
 ## Files Modified
-- `src/components/workspace/OutputsTab.tsx` — WWM weight calc fix (~5 lines changed)
+- `supabase/functions/auto-segments/index.ts` — enhanced prompt with bar list parsing instructions + knowledge query
+- `supabase/functions/auto-estimate/index.ts` — add drawing_search_index query + RSIC standards injection
+- `supabase/functions/auto-bar-schedule/index.ts` — add drawing_search_index context + real bar mark instructions
+- Database migration to clean wrong segments/bar_items for this project
 
