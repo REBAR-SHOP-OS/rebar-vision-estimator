@@ -219,7 +219,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
     for (let i = 0; i < uploadedFiles.length; i++) {
       setUploadProgress(`Parsing ${i + 1}/${uploadedFiles.length}`);
       const uf = uploadedFiles[i];
-      const ok = await parseFile(uf.id, uf.name, uf.path);
+      const ok = await parseFile(uf.id, uf.name, uf.path, (msg) => setUploadProgress(`File ${i + 1}/${uploadedFiles.length}: ${msg}`));
       if (ok) parsedCount++;
     }
     if (parsedCount > 0) {
