@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { computeSHA256 } from "@/lib/file-hash";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
+import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 
 interface FileRow {
   id: string;
