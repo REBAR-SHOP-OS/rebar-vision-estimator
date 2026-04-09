@@ -62,7 +62,15 @@ function buildEstimateSummarySheet(wb: ExcelJS.Workbook, params: ExportParams) {
   const barList: any[] = quoteResult.quote.bar_list || [];
   const sizeBreakdownKg: Record<string, number> = quoteResult.quote.size_breakdown_kg || {};
   const sizeBreakdown: Record<string, number> = quoteResult.quote.size_breakdown || {};
-  const meshDetails: any[] = quoteResult.quote.mesh_details || scopeData?.meshDetails || [];
+  const rawMeshDetails: any[] = quoteResult.quote.mesh_details || scopeData?.meshDetails || [];
+  // Extract WWM items from bar_list if mesh_details is empty
+  const meshDetails: any[] = rawMeshDetails.length > 0 ? rawMeshDetails : barList
+    .filter((b) => b.size && /\d.*x.*\d.*W/i.test(b.size))
+    .map((b) => ({
+      location: b.element_type || b.sub_element || "—",
+      mesh_size: b.size,
+      area_sqft: b.area_sqft || b.qty || "—",
+    }));
   const recon = quoteResult.quote.reconciliation || {};
 
   // Compute weight-by-size
@@ -86,7 +94,9 @@ function buildEstimateSummarySheet(wb: ExcelJS.Workbook, params: ExportParams) {
   }
   const elemEntries = Object.entries(elemWeights).sort((a, b) => b[1] - a[1]);
 
-  const totalKg = recon.drawing_based_total || quoteResult.quote.total_weight_kg || (quoteResult.quote.total_weight_lbs ? quoteResult.quote.total_weight_lbs * 0.453592 : 0);
+  // Compute totalKg from actual visible data instead of stale AI value
+  const computedKg = elemEntries.reduce((s, e) => s + e[1], 0) || sizeEntries.reduce((s, e) => s + e[1], 0);
+  const totalKg = computedKg > 0 ? computedKg : (recon.drawing_based_total || quoteResult.quote.total_weight_kg || (quoteResult.quote.total_weight_lbs ? quoteResult.quote.total_weight_lbs * 0.453592 : 0));
   const totalTons = totalKg / 1000;
 
   // Column widths
@@ -336,8 +346,10 @@ function buildBarListSheet(wb: ExcelJS.Workbook, params: ExportParams) {
         const multiplier = b.multiplier || 1;
         const qty = b.qty || 0;
         const totalPieces = qty * multiplier;
-        const totalLenM = (totalPieces * lengthMm) / 1000;
-        const wtKg = typeof b.weight_kg === "number" ? b.weight_kg : totalLenM * massKgM;
+        // Prefer AI-provided weight_kg; back-calculate length for display
+        const calcLenM = (totalPieces * lengthMm) / 1000;
+        const wtKg = typeof b.weight_kg === "number" ? b.weight_kg : calcLenM * massKgM;
+        const totalLenM = (typeof b.weight_kg === "number" && massKgM > 0) ? b.weight_kg / massKgM : calcLenM;
 
         const identification = [b.size, b.spacing ? `@ ${b.spacing}` : "", b.bar_mark || b.description || ""].filter(Boolean).join(" ");
 
