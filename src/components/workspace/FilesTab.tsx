@@ -45,15 +45,77 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
     return null;
   };
 
+  const parseFile = async (fileId: string, fileName: string, filePath: string) => {
+    try {
+      // Ensure document_version exists
+      const { data: existingDv } = await supabase
+        .from("document_versions")
+        .select("id")
+        .eq("file_id", fileId)
+        .maybeSingle();
+
+      let dvId = existingDv?.id;
+      if (!dvId) {
+        const hash = `pending_${Date.now()}_${fileId}`;
+        const discipline = detectDiscipline(fileName);
+        const { data: newDv } = await supabase.from("document_versions").insert({
+          project_id: projectId,
+          user_id: user!.id,
+          file_id: fileId,
+          file_name: fileName,
+          file_path: filePath,
+          sha256: hash,
+          source_system: "upload",
+          pdf_metadata: discipline ? { discipline } : {},
+        }).select("id").single();
+        dvId = newDv?.id;
+      }
+
+      const { data: urlData } = await supabase.storage
+        .from("blueprints")
+        .createSignedUrl(filePath, 3600);
+      if (!urlData?.signedUrl) return false;
+
+      const { data: extraction, error: extractErr } = await supabase.functions.invoke("extract-pdf-text", {
+        body: { pdf_url: urlData.signedUrl, project_id: projectId },
+      });
+      if (extractErr || !extraction) return false;
+
+      const { error: indexErr } = await supabase.functions.invoke("populate-search-index", {
+        body: {
+          project_id: projectId,
+          document_version_id: dvId,
+          pages: extraction.pages || [],
+          file_name: fileName,
+          sha256: extraction.sha256 || `file_${fileId}`,
+        },
+      });
+
+      if (dvId) {
+        await supabase.from("document_versions").update({
+          sha256: extraction.sha256 || `file_${fileId}`,
+          page_count: extraction.total_pages || 0,
+          is_scanned: !extraction.has_text_layer,
+        }).eq("id", dvId);
+      }
+
+      return !indexErr;
+    } catch {
+      return false;
+    }
+  };
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0 || !user) return;
     const files = Array.from(fileList);
     setUploading(true);
 
+    const uploadedFiles: { id: string; name: string; path: string }[] = [];
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      setUploadProgress(`${i + 1}/${files.length}`);
+      setUploadProgress(`Uploading ${i + 1}/${files.length}`);
       const path = `${user.id}/${projectId}/${Date.now()}_${file.name}`;
       const { error: storageErr } = await supabase.storage.from("blueprints").upload(path, file);
       if (storageErr) { toast.error(`Upload failed: ${file.name}`); continue; }
@@ -84,8 +146,22 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       } catch (_) { /* hash/version insert is best-effort */ }
 
       await logAuditEvent(user.id, "uploaded", "project_file", data.id, projectId);
+      uploadedFiles.push({ id: data.id, name: file.name, path });
     }
     toast.success(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
+
+    // Auto-parse each uploaded file
+    let parsedCount = 0;
+    for (let i = 0; i < uploadedFiles.length; i++) {
+      setUploadProgress(`Parsing ${i + 1}/${uploadedFiles.length}`);
+      const uf = uploadedFiles[i];
+      const ok = await parseFile(uf.id, uf.name, uf.path);
+      if (ok) parsedCount++;
+    }
+    if (parsedCount > 0) {
+      toast.success(`Parsed ${parsedCount} of ${uploadedFiles.length} file(s)`);
+    }
+
     loadFiles();
     const { error: pipelineErr } = await supabase.functions.invoke("process-pipeline", { body: { project_id: projectId } });
     if (pipelineErr) console.warn("process-pipeline failed after upload:", pipelineErr);
@@ -109,79 +185,10 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
 
     try {
       for (const f of pendingFiles) {
-        try {
-          // 1. Ensure document_version exists
-          const { data: existingDv } = await supabase
-            .from("document_versions")
-            .select("id")
-            .eq("file_id", f.id)
-            .maybeSingle();
-
-          let dvId = existingDv?.id;
-          if (!dvId) {
-            const hash = `pending_${Date.now()}_${f.id}`;
-            const discipline = detectDiscipline(f.file_name);
-            const { data: newDv } = await supabase.from("document_versions").insert({
-              project_id: projectId,
-              user_id: user.id,
-              file_id: f.id,
-              file_name: f.file_name,
-              file_path: f.file_path,
-              sha256: hash,
-              source_system: "upload",
-              pdf_metadata: discipline ? { discipline } : {},
-            }).select("id").single();
-            dvId = newDv?.id;
-          }
-
-          // 2. Get signed URL for PDF
-          const { data: urlData } = await supabase.storage
-            .from("blueprints")
-            .createSignedUrl(f.file_path, 3600);
-
-          if (!urlData?.signedUrl) continue;
-
-          // 3. Call extract-pdf-text to get text content
-          const { data: extraction, error: extractErr } = await supabase.functions.invoke("extract-pdf-text", {
-            body: { pdf_url: urlData.signedUrl, project_id: projectId },
-          });
-
-          if (extractErr || !extraction) {
-            console.warn(`Extraction failed for ${f.file_name}:`, extractErr);
-            continue;
-          }
-
-          // 4. Call populate-search-index with the extracted pages
-          const { error: indexErr } = await supabase.functions.invoke("populate-search-index", {
-            body: {
-              project_id: projectId,
-              document_version_id: dvId,
-              pages: extraction.pages || [],
-              file_name: f.file_name,
-              sha256: extraction.sha256 || `file_${f.id}`,
-            },
-          });
-
-          if (indexErr) {
-            console.warn(`Indexing failed for ${f.file_name}:`, indexErr);
-          } else {
-            successCount++;
-          }
-
-          // 5. Update document_version with extraction metadata
-          if (dvId) {
-            await supabase.from("document_versions").update({
-              sha256: extraction.sha256 || `file_${f.id}`,
-              page_count: extraction.total_pages || 0,
-              is_scanned: !extraction.has_text_layer,
-            }).eq("id", dvId);
-          }
-        } catch (fileErr) {
-          console.warn(`Parse failed for ${f.file_name}:`, fileErr);
-        }
+        const ok = await parseFile(f.id, f.file_name, f.file_path);
+        if (ok) successCount++;
       }
 
-      // 6. Run process-pipeline to update workflow status
       const { error: pipelineErr } = await supabase.functions.invoke("process-pipeline", { body: { project_id: projectId } });
       if (!pipelineErr) onProjectRefresh?.();
 
@@ -249,7 +256,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
         <p className="text-[10px]">Upload structural drawings to begin estimation.</p>
         <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs relative" disabled={uploading}>
           {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-          {uploading ? `Uploading ${uploadProgress}…` : "Upload Files"}
+          {uploading ? `${uploadProgress}…` : "Upload Files"}
           <input type="file" multiple className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleUpload} accept="*" />
         </Button>
       </div>
@@ -284,7 +291,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
           )}
           <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs relative" disabled={uploading}>
             {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-            {uploading ? `Uploading ${uploadProgress}…` : "Upload"}
+            {uploading ? `${uploadProgress}…` : "Upload"}
             <input type="file" multiple className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleUpload} accept=".pdf,.dwg,.dxf,.xlsx,.csv,.png,.jpg" />
           </Button>
         </div>
