@@ -40,6 +40,7 @@ interface ShopDrawingModalProps {
   elements: any[];
   scopeData?: any;
   projectId?: string;
+  exportBlocked?: boolean;
 }
 
 type ModalPhase = "options" | "generating" | "preview";
@@ -59,7 +60,7 @@ const PROGRESS_STEPS = [
   { pct: 90, label: "Adding dimensions and annotations..." },
 ];
 
-export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elements, scopeData, projectId }: ShopDrawingModalProps) {
+export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elements, scopeData, projectId, exportBlocked }: ShopDrawingModalProps) {
   const [phase, setPhase] = useState<ModalPhase>("options");
   const [options, setOptions] = useState<ShopDrawingOptions>(DEFAULT_OPTIONS);
   const [progress, setProgress] = useState(0);
@@ -105,6 +106,10 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
   }, [open]);
 
   const handleGenerate = async () => {
+    if (exportBlocked) {
+      toast.error("Shop drawing export is blocked until verification passes.");
+      return;
+    }
     setPhase("generating");
     setProgress(0);
     setProgressLabel(PROGRESS_STEPS[0].label);
@@ -253,7 +258,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
                   <Textarea value={options.notes} onChange={e => setOptions(o => ({ ...o, notes: e.target.value }))} placeholder="Any notes to include on the drawing..." rows={3} />
                 </div>
 
-                <Button onClick={handleGenerate} className="w-full">Generate Shop Drawing</Button>
+                <Button onClick={handleGenerate} disabled={exportBlocked} className="w-full">Generate Shop Drawing</Button>
               </div>
             )}
 

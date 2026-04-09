@@ -34,6 +34,22 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
 
   useEffect(() => { loadFiles(); }, [projectId]);
 
+  const classifyUploadedFile = (fileName: string, mime: string | null): string => {
+    const n = fileName.toLowerCase();
+    if (/\.(xlsx|xls|csv)$/.test(n)) {
+      if (/answer|correct|reference|benchmark/.test(n)) return "reference_estimate_xlsx";
+      return "unknown";
+    }
+    if (/\.pdf$/.test(n) || (mime || "").includes("pdf")) {
+      if (/shop|fab|placing/.test(n)) return "reference_shop_drawing_pdf";
+      const d = detectDiscipline(fileName);
+      if (d === "Structural") return "structural_pdf";
+      if (d === "Architectural") return "architectural_pdf";
+      return "unknown";
+    }
+    return "unknown";
+  };
+
   const detectDiscipline = (name: string): string | null => {
     const n = name.toUpperCase();
     if (/\bS[-_]?\d|STRUCTURAL|STR[-_]/i.test(n)) return "Structural";
@@ -163,6 +179,18 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
         }).eq("id", dvId);
       }
 
+      if (!indexErr) {
+        try {
+          await supabase
+            .from("document_registry")
+            .update({ parse_status: "parsed", extraction_status: "indexed" })
+            .eq("file_id", fileId)
+            .eq("project_id", projectId);
+        } catch {
+          /* optional table */
+        }
+      }
+
       return !indexErr;
     } catch {
       return false;
@@ -210,6 +238,23 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       } catch (_) { /* hash/version insert is best-effort */ }
 
       await logAuditEvent(user.id, "uploaded", "project_file", data.id, projectId);
+      try {
+        await supabase.from("document_registry").upsert(
+          {
+            project_id: projectId,
+            user_id: user.id,
+            file_id: data.id,
+            classification: classifyUploadedFile(file.name, file.type),
+            validation_role: /answer|reference|correct|benchmark/i.test(file.name) ? "reference_answer" : "input",
+            parse_status: "pending",
+            extraction_status: "pending",
+            detected_discipline: discipline,
+          },
+          { onConflict: "project_id,file_id" },
+        );
+      } catch {
+        /* document_registry may not exist until migration applied */
+      }
       uploadedFiles.push({ id: data.id, name: file.name, path });
     }
     toast.success(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);

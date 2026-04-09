@@ -18,6 +18,7 @@ import SourcesPanel from "@/components/workspace/SourcesPanel";
 import ApprovalPanel from "@/components/workspace/ApprovalPanel";
 import DrawingViewsPanel from "@/components/workspace/DrawingViewsPanel";
 import QATab from "@/components/workspace/QATab";
+import { getCurrentVerifiedEstimate, refreshVerifiedEstimateFromWorkspace } from "@/lib/verified-estimate/verified-estimate-store";
 
 export default function SegmentDetail() {
   const { id: projectId, segId } = useParams<{ id: string; segId: string }>();
@@ -32,6 +33,7 @@ export default function SegmentDetail() {
   const [projectFiles, setProjectFiles] = useState<any[]>([]);
   const [docVersions, setDocVersions] = useState<any[]>([]);
   const [searchIndexEntries, setSearchIndexEntries] = useState<any[]>([]);
+  const [verifiedSnapshot, setVerifiedSnapshot] = useState<{ status: string; blocked_reasons?: unknown } | null>(null);
 
   // Estimate item edit state
   const [editItem, setEditItem] = useState<any>(null);
@@ -69,6 +71,11 @@ export default function SegmentDetail() {
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       toast.success(`Auto-estimate created ${data.items_created} items`);
+      try {
+        await refreshVerifiedEstimateFromWorkspace(supabase, projectId, user.id);
+      } catch {
+        /* verified_estimate_results may not exist until migration */
+      }
       loadData();
     } catch (e: any) {
       toast.error(e.message || "Auto-estimate failed");
@@ -87,6 +94,11 @@ export default function SegmentDetail() {
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       toast.success(`Auto bar schedule created ${data.bars_created} items`);
+      try {
+        await refreshVerifiedEstimateFromWorkspace(supabase, projectId, user.id);
+      } catch {
+        /* optional */
+      }
       loadData();
     } catch (e: any) {
       toast.error(e.message || "Auto bar schedule failed");
@@ -107,7 +119,8 @@ export default function SegmentDetail() {
       supabase.from("project_files").select("id, file_name, file_path").eq("project_id", projectId),
       supabase.from("document_versions").select("id, file_id, page_count, file_name").eq("project_id", projectId),
       supabase.from("drawing_search_index").select("id, document_version_id, page_number").eq("project_id", projectId),
-    ]).then(([seg, est, bar, iss, app, files, docs, dsi]) => {
+      getCurrentVerifiedEstimate(supabase, projectId),
+    ]).then(([seg, est, bar, iss, app, files, docs, dsi, ver]) => {
       setSegment(seg.data);
       setEstimateItems(est.data || []);
       setBarItems(bar.data || []);
@@ -116,6 +129,7 @@ export default function SegmentDetail() {
       setProjectFiles(files.data || []);
       setDocVersions(docs.data || []);
       setSearchIndexEntries(dsi.data || []);
+      setVerifiedSnapshot(ver);
       setLoading(false);
     });
   };
@@ -370,6 +384,18 @@ export default function SegmentDetail() {
             </div>
           )}
 
+          {verifiedSnapshot?.status === "blocked" && (
+            <div className="mb-3 p-2.5 rounded-lg bg-destructive/10 border border-destructive/25 text-xs text-destructive">
+              <p className="font-semibold">Project export blocked</p>
+              <p className="text-[10px] mt-1 opacity-90">Open Outputs → refresh canonical estimate after linking source files to segments.</p>
+            </div>
+          )}
+          {verifiedSnapshot && verifiedSnapshot.status !== "blocked" && (
+            <div className="mb-3 p-2.5 rounded-lg bg-primary/5 border border-primary/20 text-xs text-muted-foreground">
+              Canonical verified snapshot is current — workspace exports use the same totals as the Outputs tab.
+            </div>
+          )}
+
           {estimateItems.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-32 text-muted-foreground gap-2 border border-dashed border-border rounded-lg">
               <FileText className="h-6 w-6" />
@@ -388,7 +414,7 @@ export default function SegmentDetail() {
                     <th className="text-right px-3 py-2 font-semibold">Weight</th>
                     <th className="text-left px-3 py-2 font-semibold">Type</th>
                     <th className="text-right px-3 py-2 font-semibold">Confidence</th>
-                    <th className="text-left px-3 py-2 font-semibold">Source</th>
+                    <th className="text-left px-3 py-2 font-semibold">Source file</th>
                     <th className="text-left px-3 py-2 font-semibold">Status</th>
                     <th className="px-2 py-2 w-8"></th>
                   </tr>
@@ -403,8 +429,15 @@ export default function SegmentDetail() {
                       <td className="px-3 py-2 text-right font-mono">{Number(item.total_weight).toLocaleString()}</td>
                       <td className="px-3 py-2"><Badge variant="outline" className="text-[9px]">{item.item_type === "wwm" ? "WWM" : "Rebar"}</Badge></td>
                       <td className="px-3 py-2 text-right font-mono">{Number(item.confidence) > 0 ? `${Math.round(Number(item.confidence) * 100)}%` : "—"}</td>
-                      <td className="px-3 py-2 text-muted-foreground text-[10px] truncate max-w-[160px]">
-                        {segment ? [segment.level_label, segment.zone_label, segment.name].filter(Boolean).join(" · ") : "—"}
+                      <td className="px-3 py-2 text-muted-foreground text-[10px] truncate max-w-[180px]">
+                        {item.source_file_id ? (
+                          <>
+                            {fileNameById(item.source_file_id)}
+                            {getPageNumber(item.source_file_id) != null ? ` · p${getPageNumber(item.source_file_id)}` : ""}
+                          </>
+                        ) : (
+                          <span className="text-amber-600 dark:text-amber-500">No file linked</span>
+                        )}
                       </td>
                       <td className="px-3 py-2"><Badge variant="outline" className="text-[9px]">{item.status}</Badge></td>
                       <td className="px-2 py-2">

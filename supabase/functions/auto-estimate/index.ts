@@ -103,13 +103,14 @@ serve(async (req) => {
 
     const existingDesc = existing.map((e: any) => e.description).filter(Boolean).join(", ");
 
-    const systemPrompt = `You are a rebar estimating expert. Generate realistic estimate line items for a construction segment.
+    const systemPrompt = `You are a rebar estimating expert. Output estimate line items ONLY from drawing evidence in the user message.
 Rules:
 - Return ONLY a JSON array of objects, no markdown, no explanation.
 - Each object: { "description": string, "bar_size": string, "quantity_count": number, "total_length": number (meters for rebar, m² for wwm), "total_weight": number (kg), "confidence": number (0-1), "item_type": "rebar" | "wwm" }
 - Bar sizes: use metric (10M, 15M, 20M, 25M, 30M, 35M) or imperial (#3, #4, #5, #6, #7, #8) based on standards.
-- Confidence should reflect how typical this item is for this segment type (0.7-0.95 for standard items).
-- Generate 3-8 items that are realistic for the segment type.
+- Confidence must reflect evidence strength from schedules/callouts — use low values when inferring.
+- If the drawing text section is present, extract ONLY what is explicitly supported; do not invent quantities.
+- If drawing text is absent or insufficient, return an empty JSON array [] — do NOT fabricate "typical practice" items.
 - Weight must be consistent with bar size and length using standard rebar weights. Use these mass values (kg/m): 10M=0.785, 15M=1.570, 20M=2.355, 25M=3.925, 30M=5.495, 35M=7.850, #3=0.561, #4=0.994, #5=1.552, #6=2.235, #7=3.042, #8=3.973.
 - WIRE MESH (WWM) DETECTION: If drawing text mentions "WWM", "welded wire mesh", "wire mesh", "W2.9", "W4.0", "MW9.1", mesh designations like "6x6-W2.9/W2.9" or "152x152 MW9.1/MW9.1", generate items with item_type "wwm" instead of "rebar".
   - For WWM items: bar_size = mesh designation (e.g. "6x6-W2.9"), total_length = area in m², quantity_count = number of sheets (standard sheet = 5'×10' = 4.65 m², add 150mm overlap).
@@ -136,7 +137,7 @@ Standards: ${standard ? `${standard.name} (${standard.code_family}, ${standard.u
 Cover defaults: ${standard?.cover_defaults ? JSON.stringify(standard.cover_defaults) : "Standard"}
 Lap defaults: ${standard?.lap_defaults ? JSON.stringify(standard.lap_defaults) : "Standard"}
 
-${drawingTextContext ? `=== DRAWING TEXT (use this as primary source for bar sizes, quantities, schedules) ===\n${drawingTextContext}\n=== END DRAWING TEXT ===` : "No drawing text available — estimate based on typical construction practice for this element type. Be conservative."}
+${drawingTextContext ? `=== DRAWING TEXT (use this as primary source for bar sizes, quantities, schedules) ===\n${drawingTextContext}\n=== END DRAWING TEXT ===` : "No drawing text available — return [] (empty array). Do not estimate from assumptions."}
 
 Generate estimate items for this segment. Base quantities on the ACTUAL drawing data if available, not assumptions.`;
 
@@ -160,7 +161,7 @@ Generate estimate items for this segment. Base quantities on the ACTUAL drawing 
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        temperature: 0.3,
+        temperature: 0,
       }),
     });
 
@@ -217,8 +218,12 @@ Generate estimate items for this segment. Base quantities on the ACTUAL drawing 
       items.forEach((item: any) => { item.confidence = Math.min(item.confidence || 0.5, 0.4); });
     }
 
-    // Pick first project file as source reference (if any)
-    const sourceFileId = files.length > 0 ? files[0].id : null;
+    // Prefer first structural-tagged file from names; else first file (per-line provenance still weak until pipeline links rows)
+    const upperNames = files.map((f: { file_name?: string }) => (f.file_name || "").toUpperCase());
+    let sourceFileId: string | null = null;
+    const structIdx = upperNames.findIndex((n: string) => /STRUCTURAL|^S[-_]|\bSTR\b|FTG|FOOT|FOUND/i.test(n));
+    if (structIdx >= 0) sourceFileId = files[structIdx].id;
+    else if (files.length > 0) sourceFileId = files[0].id;
 
     // Insert items into estimate_items
     const rows = items.map((item: any) => ({

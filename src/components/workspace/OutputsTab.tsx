@@ -9,7 +9,10 @@ import { FileText, Download, Loader2, ShieldAlert, CheckCircle2, Clock } from "l
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 import { exportExcelFile } from "@/lib/excel-export";
-import { getMassKgPerM, getWwmMassKgPerM2 } from "@/lib/rebar-weights";
+import {
+  getCurrentVerifiedEstimate,
+  refreshVerifiedEstimateFromWorkspace,
+} from "@/lib/verified-estimate/verified-estimate-store";
 
 interface OutputItem {
   type: string;
@@ -25,6 +28,13 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
   const [openIssues, setOpenIssues] = useState(0);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [verifiedRow, setVerifiedRow] = useState<{
+    id: string;
+    status: string;
+    blocked_reasons: unknown;
+    result_json: unknown;
+  } | null>(null);
+  const [refreshingCanonical, setRefreshingCanonical] = useState(false);
 
   useEffect(() => {
     // Fetch segment IDs first, then bar_items count
@@ -59,7 +69,23 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
       setOpenIssues(openRes.count || 0);
       setLoading(false);
     });
+    getCurrentVerifiedEstimate(supabase, projectId).then((r) => setVerifiedRow(r));
   }, [projectId]);
+
+  const refreshCanonical = async () => {
+    if (!user) return;
+    setRefreshingCanonical(true);
+    try {
+      await refreshVerifiedEstimateFromWorkspace(supabase, projectId, user.id);
+      const row = await getCurrentVerifiedEstimate(supabase, projectId);
+      setVerifiedRow(row);
+      toast.success("Canonical estimate refreshed from workspace data");
+    } catch {
+      toast.error("Could not refresh canonical estimate");
+    } finally {
+      setRefreshingCanonical(false);
+    }
+  };
 
   const handleExport = async (type: string) => {
     if (!user) return;
@@ -83,66 +109,27 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
         await logAuditEvent(user.id, "exported", "export", undefined, projectId, undefined, { export_type: "issues_csv" });
         toast.success("Issues report exported");
       } else if (type === "shop_drawing") {
-        // Try existing shop drawing first
-        const { data } = await supabase.from("shop_drawings")
-          .select("html_content")
-          .eq("project_id", projectId)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (data?.html_content) {
-          const blob = new Blob([data.html_content], { type: "text/html" });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url; a.download = `shop-drawing-${projectId.slice(0, 8)}.html`; a.click();
-          window.open(url, "_blank");
-        } else {
-          // Generate professional shop drawing from bar_items
-          const [projRes2, segRes2] = await Promise.all([
-            supabase.from("projects").select("name, client_name").eq("id", projectId).single(),
-            supabase.from("segments").select("id, name, segment_type").eq("project_id", projectId),
-          ]);
-          const segs2 = segRes2.data || [];
-          const segIds2 = segs2.map((s: any) => s.id);
-          const segMap2: Record<string, { name: string; type: string }> = {};
-          segs2.forEach((s: any) => { segMap2[s.id] = { name: s.name, type: s.segment_type || s.name }; });
-          let bars2: any[] = [];
-          if (segIds2.length > 0) {
-            const { data: bi } = await supabase.from("bar_items").select("*").in("segment_id", segIds2);
-            bars2 = bi || [];
-          }
-          if (bars2.length === 0) { toast.error("No shop drawing data available"); return; }
-          const barList2 = bars2.map((b: any) => {
-            const size = b.size || "";
-            const qty = b.quantity || 0;
-            const lengthMm = b.cut_length || 0;
-            const isWwm = /\d.*x.*\d.*W/i.test(size) || getWwmMassKgPerM2(size) > 0;
-            let wtKg: number;
-            if (isWwm) {
-              const sheetAreaM2 = 1.52 * 3.05;
-              const massPerM2 = getWwmMassKgPerM2(size);
-              wtKg = massPerM2 > 0 ? qty * sheetAreaM2 * massPerM2 : 0;
-            } else {
-              wtKg = qty * (lengthMm / 1000) * getMassKgPerM(size);
-            }
-            return {
-              element_id: segMap2[b.segment_id]?.name || "",
-              element_type: (segMap2[b.segment_id]?.type || "OTHER").toUpperCase(),
-              bar_mark: b.mark || "",
-              size,
-              shape_code: b.shape_code || "straight",
-              qty,
-              multiplier: 1,
-              length_mm: lengthMm,
-              weight_kg: wtKg,
-            };
-          });
-          const sizeBreak: Record<string, number> = {};
-          barList2.forEach((b: any) => { sizeBreak[b.size] = (sizeBreak[b.size] || 0) + b.weight_kg; });
+        let ver = await getCurrentVerifiedEstimate(supabase, projectId);
+        if (!ver) {
+          await refreshVerifiedEstimateFromWorkspace(supabase, projectId, user.id);
+          ver = await getCurrentVerifiedEstimate(supabase, projectId);
+        }
+        if (!ver || ver.status === "blocked") {
+          const br = Array.isArray(ver?.blocked_reasons)
+            ? (ver!.blocked_reasons as string[]).join(" ")
+            : "Refresh canonical estimate from the Outputs tab or fix validation issues.";
+          toast.error(br || "Export blocked — canonical estimate not verified.");
+          return;
+        }
+        const canon = ver.result_json as { quote?: { bar_list?: any[]; size_breakdown_kg?: Record<string, number> } };
+        const projRes2 = await supabase.from("projects").select("name, client_name").eq("id", projectId).single();
+        let opened = false;
+        if (canon?.quote?.bar_list && canon.quote.bar_list.length > 0) {
+          const sizeBreak = canon.quote.size_breakdown_kg || {};
           const html = buildShopDrawingHtml({
             projectName: projRes2.data?.name || "Rebar Takeoff",
             clientName: projRes2.data?.client_name || "",
-            barList: barList2,
+            barList: canon.quote.bar_list as any[],
             sizeBreakdown: sizeBreak,
           });
           const blob = new Blob([html], { type: "text/html" });
@@ -150,90 +137,77 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
           const a = document.createElement("a");
           a.href = url; a.download = `shop-drawing-${projectId.slice(0, 8)}.html`; a.click();
           window.open(url, "_blank");
+          opened = true;
+        } else {
+          const { data } = await supabase.from("shop_drawings")
+            .select("html_content")
+            .eq("project_id", projectId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (data?.html_content) {
+            const blob = new Blob([data.html_content], { type: "text/html" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url; a.download = `shop-drawing-${projectId.slice(0, 8)}.html`; a.click();
+            window.open(url, "_blank");
+            opened = true;
+          }
         }
+        if (!opened) {
+          toast.error("No shop drawing data in canonical snapshot — add bar items or run chat estimate first.");
+          return;
+        }
+        try {
+          await supabase.from("export_jobs").insert({
+            project_id: projectId,
+            user_id: user.id,
+            verified_estimate_result_id: ver.id,
+            export_type: "shop_drawing_html",
+            status: "completed",
+            metadata: {},
+          });
+        } catch { /* export_jobs optional */ }
         await logAuditEvent(user.id, "exported", "export", undefined, projectId, undefined, { export_type: "shop_drawing_html" });
         toast.success("Shop drawing downloaded — use Ctrl+P / Cmd+P to save as PDF");
       } else if (type === "estimate") {
-        // Fetch project, segments, estimate_items, bar_items
-        const [projRes, segRes, eiRes] = await Promise.all([
-          supabase.from("projects").select("name, client_name, address, deviations").eq("id", projectId).single(),
-          supabase.from("segments").select("id, name, segment_type").eq("project_id", projectId),
-          supabase.from("estimate_items").select("bar_size, quantity_count, total_weight, segment_id, description, confidence, status").eq("project_id", projectId).neq("item_type", "source_link"),
-        ]);
-        const segIds = (segRes.data || []).map((s: any) => s.id);
-        const segMap: Record<string, string> = {};
-        (segRes.data || []).forEach((s: any) => { segMap[s.id] = s.segment_type || s.name; });
-
-        let barItems: any[] = [];
-        if (segIds.length > 0) {
-          const { data: bi } = await supabase.from("bar_items").select("*").in("segment_id", segIds);
-          barItems = bi || [];
+        let ver = await getCurrentVerifiedEstimate(supabase, projectId);
+        if (!ver) {
+          await refreshVerifiedEstimateFromWorkspace(supabase, projectId, user.id);
+          ver = await getCurrentVerifiedEstimate(supabase, projectId);
         }
-
-        if ((eiRes.data || []).length === 0 && barItems.length === 0) { toast.error("No estimate items to export"); return; }
-
-        // Build bar_list for excel-export
-        const barList = barItems.map((b: any) => {
-          const size = b.size || "";
-          const qty = b.quantity || 0;
-          const lengthMm = (b.cut_length || 0);
-          const isWwm = /\d.*x.*\d.*W/i.test(size) || getWwmMassKgPerM2(size) > 0;
-          let wtKg: number;
-          if (isWwm) {
-            // WWM: qty = number of sheets, standard sheet 1.52m × 3.05m = 4.636 m²
-            const sheetAreaM2 = 1.52 * 3.05; // 4.636 m²
-            const massPerM2 = getWwmMassKgPerM2(size);
-            wtKg = massPerM2 > 0 ? qty * sheetAreaM2 * massPerM2 : 0;
-          } else {
-            const massKgM = getMassKgPerM(size);
-            wtKg = qty * (lengthMm / 1000) * massKgM;
-          }
-          return {
-            element_type: segMap[b.segment_id] || "OTHER",
-            size,
-            qty,
-            multiplier: 1,
-            length_mm: lengthMm,
-            weight_kg: wtKg,
-            bend_type: b.shape_code || "",
-            bar_mark: b.mark || "",
-            description: b.mark || "",
-            notes: b.finish_type || "",
-          };
-        });
-
-        // Size breakdown
-        const sizeBreakdownKg: Record<string, number> = {};
-        barList.forEach((b: any) => { sizeBreakdownKg[b.size] = (sizeBreakdownKg[b.size] || 0) + b.weight_kg; });
-        // Only add estimate_items weights if no bar_items exist (avoid double-counting)
-        if (barList.length === 0) {
-          (eiRes.data || []).forEach((ei: any) => {
-            if (ei.bar_size && ei.total_weight) {
-              sizeBreakdownKg[ei.bar_size] = (sizeBreakdownKg[ei.bar_size] || 0) + Number(ei.total_weight);
-            }
-          });
+        if (!ver || ver.status === "blocked") {
+          const br = Array.isArray(ver?.blocked_reasons)
+            ? (ver!.blocked_reasons as string[]).join(" ")
+            : "Use Refresh canonical estimate or complete the chat pipeline.";
+          toast.error(br || "Export blocked — canonical estimate not verified.");
+          return;
         }
-
-        const totalKg = Object.values(sizeBreakdownKg).reduce((a, b) => a + b, 0);
+        const result = ver.result_json as { quote?: Record<string, unknown> };
+        if (!result?.quote) {
+          toast.error("Canonical snapshot has no quote payload.");
+          return;
+        }
+        const projRes = await supabase.from("projects").select("name, client_name, address, deviations").eq("id", projectId).single();
         const proj = projRes.data;
-
-        const quoteResult = {
-          quote: {
-            bar_list: barList,
-            size_breakdown_kg: sizeBreakdownKg,
-            total_weight_kg: totalKg,
-            risk_flags: [],
-            reconciliation: { drawing_based_total: totalKg },
-          },
-        };
         const scopeData = {
           projectName: proj?.name || "Rebar Takeoff",
           clientName: proj?.client_name || "",
           address: proj?.address || "",
           deviations: proj?.deviations || "None noted",
         };
-
+        const quoteResult = { quote: result.quote, elements: [] as any[] };
         await exportExcelFile({ quoteResult, elements: [], scopeData });
+        try {
+          await supabase.from("export_jobs").insert({
+            project_id: projectId,
+            user_id: user.id,
+            verified_estimate_result_id: ver.id,
+            export_type: "estimate_xlsx",
+            status: "completed",
+            metadata: {},
+          });
+        } catch { /* optional table */ }
         await logAuditEvent(user.id, "exported", "export", undefined, projectId, undefined, { export_type: "estimate_xlsx" });
         toast.success("Estimate Excel exported");
       } else if (type === "quote") {
@@ -283,9 +257,31 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
   const isBlocked = openIssues > 0;
   const isApproved = approvalStatus === "approved";
 
+  const verifiedBlocked = verifiedRow?.status === "blocked";
+  const blockedList = Array.isArray(verifiedRow?.blocked_reasons)
+    ? (verifiedRow!.blocked_reasons as string[])
+    : [];
+
   return (
     <div className="p-4 md:p-6">
-      <h3 className="text-sm font-semibold text-foreground mb-3">Outputs & Exports</h3>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <h3 className="text-sm font-semibold text-foreground">Outputs & Exports</h3>
+        <Button variant="outline" size="sm" className="text-xs h-8" disabled={refreshingCanonical} onClick={refreshCanonical}>
+          {refreshingCanonical ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
+          Refresh canonical estimate
+        </Button>
+      </div>
+
+      {verifiedBlocked && blockedList.length > 0 && (
+        <div className="mb-4 p-3 rounded-lg bg-destructive/10 border border-destructive/25 text-destructive text-xs space-y-1">
+          <p className="font-semibold">Export blocked (canonical verification)</p>
+          <ul className="list-disc pl-4">
+            {blockedList.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {isBlocked && (
         <div className="flex items-center gap-2 p-3 mb-4 bg-destructive/10 border border-destructive/20 rounded-lg">

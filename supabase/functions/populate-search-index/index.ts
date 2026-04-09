@@ -321,6 +321,48 @@ Deno.serve(async (req) => {
             .update(updateFields)
             .eq("id", latest.id);
         }
+
+        // Persist per-page sheet index + normalized extraction entity (verified pipeline)
+        if (document_version_id) {
+          const { data: sheetRows, error: sheetErr } = await supabase
+            .from("document_sheets")
+            .upsert(
+              {
+                project_id,
+                user_id: userId,
+                document_version_id,
+                page_number: page.page_number || 1,
+                sheet_number: sheetId,
+                sheet_title: (tb as Record<string, string>).sheet_title || null,
+                discipline,
+                title_block_json: tb as Record<string, unknown>,
+              },
+              { onConflict: "document_version_id,page_number" },
+            )
+            .select("id")
+            .limit(1);
+          const sheetIdRow = sheetRows?.[0];
+          if (!sheetErr && sheetIdRow?.id) {
+            await supabase.from("extracted_entities").insert({
+              project_id,
+              user_id: userId,
+              document_version_id,
+              document_sheet_id: sheetIdRow.id,
+              page_number: page.page_number || null,
+              entity_type: "page_bar_mark_index",
+              payload: {
+                bar_marks: barMarks,
+                quality_flags: qualityFlags,
+                page_number: page.page_number,
+              },
+              extraction_method: is_ocr || page.is_ocr ? "ocr" : "vector_pdf",
+              confidence,
+              validation_status: needsReview ? "pending" : "ok",
+              review_required: needsReview,
+            });
+          }
+        }
+
         indexed++;
       }
     }

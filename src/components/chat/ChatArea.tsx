@@ -26,6 +26,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import BarListTable from "./BarListTable";
 import BendingScheduleTable from "./BendingScheduleTable";
 import ApprovalWorkflow from "./ApprovalWorkflow";
+import { persistVerifiedEstimateFromChat, getCurrentVerifiedEstimate } from "@/lib/verified-estimate";
+import type { ExportGateResult } from "@/lib/verified-estimate/export-gate";
 
 interface MessageFile {
   name: string;
@@ -125,6 +127,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const messageCountSinceLastLearn = useRef(0);
   const [validationData, setValidationData] = useState<any>(null);
   const [quoteResult, setQuoteResult] = useState<any>(null);
+  const [exportGate, setExportGate] = useState<ExportGateResult | null>(null);
   const [userAnswers, setUserAnswers] = useState<{ element_id: string; field: string; value: string }[]>([]);
   const [showScopePanel, setShowScopePanel] = useState(false);
   const [scopeData, setScopeData] = useState<ScopeData | null>(null);
@@ -157,12 +160,37 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     setDetectionResult(null);
     setIsDetecting(false);
     setImportedBarList(null);
+    setExportGate(null);
     initialFilesProcessed.current = false;
     onModeChange?.(null);
     onStepChange?.(null);
     loadMessages();
     loadUploadedFiles();
   }, [projectId]);
+
+  useEffect(() => {
+    if (!user?.id || !projectId) return;
+    getCurrentVerifiedEstimate(supabase, projectId)
+      .then((row) => {
+        if (!row) {
+          setExportGate(null);
+          return;
+        }
+        const reasons = Array.isArray(row.blocked_reasons)
+          ? (row.blocked_reasons as unknown[]).filter((x): x is string => typeof x === "string")
+          : [];
+        setExportGate({ canExport: row.status !== "blocked", blocked_reasons: reasons });
+      })
+      .catch(() => setExportGate(null));
+  }, [projectId, user?.id]);
+
+  const assertExportAllowed = useCallback(() => {
+    if (exportGate && !exportGate.canExport) {
+      toast.error(exportGate.blocked_reasons[0] || "Export blocked until validation passes.");
+      return false;
+    }
+    return true;
+  }, [exportGate]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -797,6 +825,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       }
       const data = await resp.json();
       setQuoteResult(data);
+      if (user && data?.quote && elements?.length) {
+        persistVerifiedEstimateFromChat(supabase, {
+          projectId,
+          userId: user.id,
+          elements,
+          quote: data.quote,
+          usedFallbackJson: false,
+        }).then(setExportGate);
+      }
     } catch (err: any) {
       toast.error("Pricing failed: " + (err.message || "Unknown error"));
     }
@@ -912,9 +949,29 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       setQuoteResult({ elements: atomicData.elements, summary: atomicData.summary || null, quote: syntheticQuote });
       // Persist estimate to DB
       persistEstimateVersion(atomicData.elements, syntheticQuote);
+      if (user) {
+        void persistVerifiedEstimateFromChat(supabase, {
+          projectId,
+          userId: user.id,
+          elements: atomicData.elements,
+          quote: syntheticQuote,
+          usedFallbackJson: false,
+        }).then(setExportGate);
+      }
       // Background: run validation and merge results
       setSubStep("validating");
-      runValidation(atomicData.elements).then(() => {
+      runValidation(atomicData.elements).then((vdata) => {
+        if (vdata?.elements && user) {
+          const sq2 = buildSyntheticQuote(vdata.elements, atomicData.summary || null);
+          setQuoteResult({ elements: vdata.elements, summary: atomicData.summary || null, quote: sq2 });
+          void persistVerifiedEstimateFromChat(supabase, {
+            projectId,
+            userId: user.id,
+            elements: vdata.elements,
+            quote: sq2,
+            usedFallbackJson: false,
+          }).then(setExportGate);
+        }
         setSubStep("ready");
         setTimeout(() => setSubStep(null), 2000);
       });
@@ -927,8 +984,28 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       setValidationData({ elements: fallbackElements, summary: null, questions: [] });
       const syntheticQuote = buildSyntheticQuote(fallbackElements, null);
       setQuoteResult({ elements: fallbackElements, summary: null, quote: syntheticQuote });
+      if (user) {
+        void persistVerifiedEstimateFromChat(supabase, {
+          projectId,
+          userId: user.id,
+          elements: fallbackElements,
+          quote: syntheticQuote,
+          usedFallbackJson: true,
+        }).then(setExportGate);
+      }
       setSubStep("validating");
-      runValidation(fallbackElements).then(() => {
+      runValidation(fallbackElements).then((vdata) => {
+        if (vdata?.elements && user) {
+          const sq2 = buildSyntheticQuote(vdata.elements, null);
+          setQuoteResult({ elements: vdata.elements, summary: null, quote: sq2 });
+          void persistVerifiedEstimateFromChat(supabase, {
+            projectId,
+            userId: user.id,
+            elements: vdata.elements,
+            quote: sq2,
+            usedFallbackJson: true,
+          }).then(setExportGate);
+        }
         setSubStep("ready");
         setTimeout(() => setSubStep(null), 2000);
       });
@@ -1964,7 +2041,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                         {quoteResult.excluded.map((ex: any, i: number) => <p key={i}>• {ex.element_id}: {ex.reason}</p>)}
                       </div>
                     )}
-                    <ExportButtons ref={(el) => { if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 300); }} quoteResult={quoteResult} elements={validationData?.elements || []} scopeData={scopeData} />
+                    <ExportButtons ref={(el) => { if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 300); }} quoteResult={quoteResult} elements={validationData?.elements || []} scopeData={scopeData} projectId={projectId} exportGate={exportGate} />
                   </div>
                 )}
 
@@ -2072,9 +2149,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                     key={card.title}
                     onClick={async () => {
                       if (card.action === 'exportExcel') {
+                        if (!assertExportAllowed()) return;
                         await exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData });
                         toast.success("Excel exported");
                       } else if (card.action === 'exportPdf') {
+                        if (!assertExportAllowed()) return;
                         await exportPdfFile({ quoteResult, elements: validationData?.elements || [], scopeData, projectId });
                         toast.success("PDF exported");
                       }
@@ -2144,6 +2223,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                             toast.error("Complete estimation first to export");
                             return;
                           }
+                          if (!assertExportAllowed()) return;
                           await exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData });
                           toast.success("Excel exported");
                         } else if (card.action === 'exportPdf') {
@@ -2151,6 +2231,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                             toast.error("Complete estimation first to export");
                             return;
                           }
+                          if (!assertExportAllowed()) return;
                           await exportPdfFile({ quoteResult, elements: validationData?.elements || [], scopeData, projectId });
                           toast.success("PDF exported");
                         } else if (card.sendText) {
