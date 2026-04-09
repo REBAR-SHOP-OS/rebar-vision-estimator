@@ -43,12 +43,14 @@ serve(async (req) => {
     }
 
     // Gather context
-    const [segRes, projRes, filesRes, stdRes, existingRes] = await Promise.all([
+    const [segRes, projRes, filesRes, stdRes, existingRes, searchIndexRes, knowledgeRes] = await Promise.all([
       supabase.from("segments").select("*").eq("id", segment_id).single(),
       supabase.from("projects").select("name, project_type, scope_items, description").eq("id", project_id).single(),
       supabase.from("project_files").select("id, file_name, file_type").eq("project_id", project_id).limit(20),
       supabase.from("standards_profiles").select("*").eq("user_id", user.id).eq("is_default", true).limit(1),
       supabase.from("estimate_items").select("description, bar_size").eq("segment_id", segment_id).limit(50),
+      supabase.from("drawing_search_index").select("raw_text, page_number, extracted_entities").eq("project_id", project_id).limit(50),
+      supabase.from("agent_knowledge").select("title, content").eq("user_id", user.id).limit(10),
     ]);
 
     const segment = segRes.data;
@@ -57,30 +59,58 @@ serve(async (req) => {
     const standard = stdRes.data?.[0];
     const existing = existingRes.data || [];
 
-    // Gather extracted drawing text for context (from document_versions / extract-pdf-text)
+    // Build drawing text from search index (OCR) first, fallback to doc versions
     let drawingTextContext = "";
-    try {
-      const { data: docVersions } = await supabase
-        .from("document_versions")
-        .select("pdf_metadata, file_name")
-        .eq("project_id", project_id)
-        .limit(10);
-      if (docVersions && docVersions.length > 0) {
-        const textSnippets: string[] = [];
-        for (const dv of docVersions) {
-          const meta = dv.pdf_metadata as any;
-          if (meta?.pages) {
-            for (const page of meta.pages.slice(0, 5)) {
-              if (page.raw_text) {
-                textSnippets.push(`[${dv.file_name} p${page.page_number}] ${page.raw_text.slice(0, 1500)}`);
+    const searchPages = searchIndexRes.data || [];
+    if (searchPages.length > 0) {
+      const textSnippets: string[] = [];
+      for (const page of searchPages) {
+        const text = (page.raw_text || "").trim();
+        if (text.length > 20) {
+          textSnippets.push(`[Page ${page.page_number}] ${text.substring(0, 2000)}`);
+        }
+      }
+      drawingTextContext = textSnippets.join("\n\n").slice(0, 12000);
+    } else {
+      try {
+        const { data: docVersions } = await supabase
+          .from("document_versions")
+          .select("pdf_metadata, file_name")
+          .eq("project_id", project_id)
+          .limit(10);
+        if (docVersions && docVersions.length > 0) {
+          const textSnippets: string[] = [];
+          for (const dv of docVersions) {
+            const meta = dv.pdf_metadata as any;
+            if (meta?.pages) {
+              for (const page of meta.pages.slice(0, 5)) {
+                if (page.raw_text) {
+                  textSnippets.push(`[${dv.file_name} p${page.page_number}] ${page.raw_text.slice(0, 1500)}`);
+                }
               }
             }
           }
+          drawingTextContext = textSnippets.join("\n\n").slice(0, 8000);
         }
-        drawingTextContext = textSnippets.join("\n\n").slice(0, 8000);
+      } catch (drawErr) {
+        console.warn("Could not fetch drawing text:", drawErr);
       }
-    } catch (drawErr) {
-      console.warn("Could not fetch drawing text:", drawErr);
+    }
+
+    // Build RSIC knowledge context
+    let knowledgeContext = "";
+    const knowledgeEntries = knowledgeRes.data || [];
+    if (knowledgeEntries.length > 0) {
+      const relevant = knowledgeEntries.filter((k: any) =>
+        /RSIC|standard|rebar|mass|weight|bar.*size|estimat/i.test(k.title || "") ||
+        /RSIC|standard|rebar|mass|weight|bar.*size|estimat/i.test((k.content || "").substring(0, 200))
+      );
+      if (relevant.length > 0) {
+        knowledgeContext = "\n=== RSIC STANDARDS REFERENCE ===\n";
+        for (const k of relevant.slice(0, 3)) {
+          knowledgeContext += `[${k.title}]\n${(k.content || "").substring(0, 2000)}\n\n`;
+        }
+      }
     }
 
     // Detect scope coverage from file disciplines
@@ -118,6 +148,7 @@ Rules:
   - Weight formula for WWM: total_weight = total_length (m²) × mass (kg/m²).
   - If a slab/SOG segment has BOTH rebar and mesh callouts, generate items for BOTH.
 - CRITICAL: If drawing text is provided below, use the ACTUAL bar sizes, quantities, and lengths from the drawings — do NOT guess or inflate. Parse footing schedules, bar schedules, and rebar callouts directly.
+- CRITICAL: Parse bar list tables from the drawing text. Each row typically has: Bar Mark, Qty, Size, Total Length, Type, and shape dimensions (A, B, C, D, E). Use these EXACT values for quantity_count and total_length.
 - CRITICAL: Only estimate items that belong to THIS segment type. Do NOT add superstructure items to foundation segments or vice versa.
 - ${scopeHint ? `SCOPE RESTRICTION: ${scopeHint}` : ""}
 - Do NOT duplicate items already estimated: ${existingDesc || "none yet"}.`;
@@ -137,7 +168,9 @@ Standards: ${standard ? `${standard.name} (${standard.code_family}, ${standard.u
 Cover defaults: ${standard?.cover_defaults ? JSON.stringify(standard.cover_defaults) : "Standard"}
 Lap defaults: ${standard?.lap_defaults ? JSON.stringify(standard.lap_defaults) : "Standard"}
 
-${drawingTextContext ? `=== DRAWING TEXT (use this as primary source for bar sizes, quantities, schedules) ===\n${drawingTextContext}\n=== END DRAWING TEXT ===` : "No drawing text available — return [] (empty array). Do not estimate from assumptions."}
+${knowledgeContext}
+
+${drawingTextContext ? `=== DRAWING TEXT (use this as primary source — parse bar lists, footing schedules, rebar callouts) ===\n${drawingTextContext}\n=== END DRAWING TEXT ===` : "No drawing text available — estimate based on typical construction practice for this element type. Be conservative."}
 
 Generate estimate items for this segment. Base quantities on the ACTUAL drawing data if available, not assumptions.`;
 
