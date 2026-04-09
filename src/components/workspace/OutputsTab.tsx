@@ -159,7 +159,7 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
           return;
         }
         try {
-          await supabase.from("export_jobs").insert({
+          await (supabase as any).from("export_jobs").insert({
             project_id: projectId,
             user_id: user.id,
             verified_estimate_result_id: ver.id,
@@ -199,7 +199,7 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
         const quoteResult = { quote: result.quote, elements: [] as any[] };
         await exportExcelFile({ quoteResult, elements: [], scopeData });
         try {
-          await supabase.from("export_jobs").insert({
+          await (supabase as any).from("export_jobs").insert({
             project_id: projectId,
             user_id: user.id,
             verified_estimate_result_id: ver.id,
