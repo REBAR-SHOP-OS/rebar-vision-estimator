@@ -256,7 +256,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
         <p className="text-[10px]">Upload structural drawings to begin estimation.</p>
         <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs relative" disabled={uploading}>
           {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-          {uploading ? `Uploading ${uploadProgress}…` : "Upload Files"}
+          {uploading ? `${uploadProgress}…` : "Upload Files"}
           <input type="file" multiple className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleUpload} accept="*" />
         </Button>
       </div>
