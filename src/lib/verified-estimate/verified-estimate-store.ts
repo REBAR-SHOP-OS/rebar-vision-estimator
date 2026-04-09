@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+
+// Helper to bypass type checking for tables not yet in generated types
+const fromAny = (supabase: SupabaseClient<Database>, table: string) =>
+  (supabase as any).from(table);
 import { sha256HexOfJson } from "./canonical-hash";
 import type { CanonicalEstimateResultV1 } from "./canonical-types";
 import {
