@@ -181,12 +181,14 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
         // Size breakdown
         const sizeBreakdownKg: Record<string, number> = {};
         barList.forEach((b: any) => { sizeBreakdownKg[b.size] = (sizeBreakdownKg[b.size] || 0) + b.weight_kg; });
-        // Also add from estimate_items
-        (eiRes.data || []).forEach((ei: any) => {
-          if (ei.bar_size && ei.total_weight) {
-            sizeBreakdownKg[ei.bar_size] = (sizeBreakdownKg[ei.bar_size] || 0) + Number(ei.total_weight);
-          }
-        });
+        // Only add estimate_items weights if no bar_items exist (avoid double-counting)
+        if (barList.length === 0) {
+          (eiRes.data || []).forEach((ei: any) => {
+            if (ei.bar_size && ei.total_weight) {
+              sizeBreakdownKg[ei.bar_size] = (sizeBreakdownKg[ei.bar_size] || 0) + Number(ei.total_weight);
+            }
+          });
+        }
 
         const totalKg = Object.values(sizeBreakdownKg).reduce((a, b) => a + b, 0);
         const proj = projRes.data;
