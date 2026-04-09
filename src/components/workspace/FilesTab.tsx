@@ -291,7 +291,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
           )}
           <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs relative" disabled={uploading}>
             {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-            {uploading ? `Uploading ${uploadProgress}…` : "Upload"}
+            {uploading ? `${uploadProgress}…` : "Upload"}
             <input type="file" multiple className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleUpload} accept=".pdf,.dwg,.dxf,.xlsx,.csv,.png,.jpg" />
           </Button>
         </div>
