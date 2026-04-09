@@ -36,12 +36,13 @@ serve(async (req) => {
       });
     }
 
-    const [segRes, projRes, estRes, existingRes, stdRes] = await Promise.all([
+    const [segRes, projRes, estRes, existingRes, stdRes, searchIndexRes] = await Promise.all([
       supabase.from("segments").select("*").eq("id", segment_id).single(),
       supabase.from("projects").select("name, project_type, scope_items").eq("id", project_id).single(),
       supabase.from("estimate_items").select("description, bar_size, quantity_count, total_length, total_weight").eq("segment_id", segment_id).limit(50),
       supabase.from("bar_items").select("mark, size").eq("segment_id", segment_id).limit(50),
       supabase.from("standards_profiles").select("*").eq("user_id", user.id).eq("is_default", true).limit(1),
+      supabase.from("drawing_search_index").select("raw_text, page_number").eq("project_id", project_id).limit(50),
     ]);
 
     const segment = segRes.data;
@@ -56,6 +57,8 @@ serve(async (req) => {
     const existingBars = existingRes.data || [];
     const standard = stdRes.data?.[0];
 
+    const searchPages = searchIndexRes.data || [];
+
     if (estimateItems.length === 0) {
       return new Response(JSON.stringify({ error: "No estimate items found. Run Auto Estimate first." }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -64,18 +67,32 @@ serve(async (req) => {
 
     const existingMarks = existingBars.map((b: any) => b.mark).filter(Boolean).join(", ");
 
+    // Build drawing text context from OCR search index
+    let drawingTextContext = "";
+    if (searchPages.length > 0) {
+      const snippets: string[] = [];
+      for (const page of searchPages) {
+        const text = (page.raw_text || "").trim();
+        if (text.length > 20) {
+          snippets.push(`[Page ${page.page_number}] ${text.substring(0, 2000)}`);
+        }
+      }
+      drawingTextContext = snippets.join("\n\n").slice(0, 10000);
+    }
+
     const systemPrompt = `You are a rebar detailing expert. Generate bar schedule items from estimate line items.
 Rules:
 - Return ONLY a JSON array, no markdown, no explanation.
 - Each object MUST include "estimate_item_index": the [INDEX=N] number of the source estimate item.
 - Each object: { "mark": string, "size": string, "shape_code": string, "cut_length": number (mm), "quantity": number, "finish_type": string, "cover_value": number (mm), "lap_length": number (mm), "confidence": number (0-1) }
-- Mark format: sequential like "A1", "A2", "B1" etc.
-- shape_code: "straight", "L-shape", "U-shape", "Z-shape", "hook", "stirrup", "closed" as appropriate.
+- **BAR MARKS (CRITICAL)**: If drawing text is provided with ACTUAL bar marks (e.g., B1001, BS03, BS31, B2001, BD01, BT01), use those EXACT marks instead of generic sequential marks (A1, A2, B1). Parse the bar list tables from the drawing text.
+- If no drawing text is available, use sequential marks like "A1", "A2", "B1" etc.
+- shape_code: "straight", "L-shape", "U-shape", "Z-shape", "hook", "stirrup", "closed" as appropriate. If drawing text provides shape dimensions (A, B, C, D, E columns), use them to determine shape_code and cut_length.
 - finish_type: "black", "epoxy", "galvanized" — default "black".
 - cover_value: typical 40-75mm based on exposure.
 - lap_length: standard lap splice length for the bar size (e.g. 40db).
-- cut_length in mm. Convert from meters if estimate gives meters.
-- confidence 0.7-0.95 for standard items.
+- cut_length in mm. Convert from meters if estimate gives meters. If drawing provides shape dimensions, compute cut_length from the sum of dimensions.
+- confidence 0.7-0.95 for standard items. Higher confidence when using actual drawing data.
 - Generate 1-3 bar items per estimate line item. Break complex items into individual bar marks.
 - Do NOT duplicate existing marks: ${existingMarks || "none yet"}.`;
 
@@ -91,7 +108,9 @@ Standards: ${standard ? `${standard.name} (${standard.code_family}, ${standard.u
 Estimate items to detail into bar schedule:
 ${estimateSummary}
 
-Generate bar schedule items for these estimate items. For each bar, return the "estimate_item_index" matching the [INDEX=N] of the source estimate item.`;
+${drawingTextContext ? `=== DRAWING TEXT (parse bar lists for ACTUAL marks, sizes, quantities, shape dimensions) ===\n${drawingTextContext}\n=== END DRAWING TEXT ===` : ""}
+
+Generate bar schedule items for these estimate items. Use ACTUAL bar marks from drawings if available. For each bar, return the "estimate_item_index" matching the [INDEX=N] of the source estimate item.`;
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
