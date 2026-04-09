@@ -12,6 +12,10 @@ import {
 import { diffReferenceVsCanonical } from "./reference-diff";
 import { evaluateExportGate, type ExportGateResult } from "./export-gate";
 
+// Helper to bypass type checking for tables not yet in generated types
+const fromAny = (supabase: SupabaseClient<Database>, table: string) =>
+  (supabase as any).from(table);
+
 export async function fetchWorkspaceCanonicalInputs(
   supabase: SupabaseClient<Database>,
   projectId: string,
@@ -20,11 +24,11 @@ export async function fetchWorkspaceCanonicalInputs(
     supabase.from("segments").select("id, name, segment_type").eq("project_id", projectId),
     supabase.from("project_files").select("id, file_name").eq("project_id", projectId),
     supabase.from("document_versions").select("id, file_id").eq("project_id", projectId),
-    supabase.from("document_sheets").select("document_version_id, page_number, sheet_number").eq("project_id", projectId),
+    fromAny(supabase, "document_sheets").select("document_version_id, page_number, sheet_number").eq("project_id", projectId),
   ]);
 
   const segments = segRes.data || [];
-  const segIds = segments.map((s) => s.id);
+  const segIds = segments.map((s: any) => s.id);
   const files = filesRes.data || [];
 
   const linksRes =
@@ -64,7 +68,7 @@ export async function fetchWorkspaceCanonicalInputs(
     }
   }
 
-  const documentSheets: SheetIndexRow[] = (sheetsRes.data || []).map((r) => ({
+  const documentSheets: SheetIndexRow[] = ((sheetsRes as any).data || []).map((r: any) => ({
     document_version_id: r.document_version_id,
     page_number: r.page_number,
     sheet_number: r.sheet_number,
@@ -94,27 +98,24 @@ export async function saveVerifiedEstimateResult(
   const content_hash = await sha256HexOfJson(params.result);
   const inputs_hash = await sha256HexOfJson(params.result.inputs_summary || {});
 
-  await supabase
-    .from("verified_estimate_results")
+  await fromAny(supabase, "verified_estimate_results")
     .update({ is_current: false })
     .eq("project_id", params.projectId)
     .eq("user_id", params.userId);
 
-  const { count } = await supabase
-    .from("verified_estimate_results")
+  const { count } = await fromAny(supabase, "verified_estimate_results")
     .select("id", { count: "exact", head: true })
     .eq("project_id", params.projectId);
 
   const version_number = (count || 0) + 1;
 
-  const { data, error } = await supabase
-    .from("verified_estimate_results")
+  const { data, error } = await fromAny(supabase, "verified_estimate_results")
     .insert({
       project_id: params.projectId,
       user_id: params.userId,
       version_number,
       status: params.status,
-      result_json: params.result as unknown as Database["public"]["Tables"]["verified_estimate_results"]["Insert"]["result_json"],
+      result_json: params.result,
       content_hash,
       inputs_hash,
       blocked_reasons: params.blockedReasons,
@@ -138,13 +139,13 @@ export async function refreshVerifiedEstimateFromWorkspace(
 
   const [issuesRes, refRes, rulesRes] = await Promise.all([
     supabase.from("validation_issues").select("severity, status, issue_type").eq("project_id", projectId),
-    supabase.from("reference_answer_lines").select("normalized_key, mark, quantity, unit").eq("project_id", projectId),
-    supabase.from("estimation_validation_rules").select("rule_type, payload, is_active").eq("user_id", userId),
+    fromAny(supabase, "reference_answer_lines").select("normalized_key, mark, quantity, unit").eq("project_id", projectId),
+    fromAny(supabase, "estimation_validation_rules").select("rule_type, payload, is_active").eq("user_id", userId),
   ]);
 
   const referenceDiff =
     refRes.data && refRes.data.length > 0
-      ? diffReferenceVsCanonical(refRes.data, result.lines)
+      ? diffReferenceVsCanonical(refRes.data as any[], result.lines)
       : null;
 
   const gate = evaluateExportGate({
@@ -175,9 +176,8 @@ export async function refreshVerifiedEstimateFromWorkspace(
 export async function getCurrentVerifiedEstimate(
   supabase: SupabaseClient<Database>,
   projectId: string,
-): Promise<Database["public"]["Tables"]["verified_estimate_results"]["Row"] | null> {
-  const { data } = await supabase
-    .from("verified_estimate_results")
+): Promise<any | null> {
+  const { data } = await fromAny(supabase, "verified_estimate_results")
     .select("*")
     .eq("project_id", projectId)
     .eq("is_current", true)
@@ -206,13 +206,13 @@ export async function persistVerifiedEstimateFromChat(
 
   const [issuesRes, refRes, rulesRes] = await Promise.all([
     supabase.from("validation_issues").select("severity, status, issue_type").eq("project_id", params.projectId),
-    supabase.from("reference_answer_lines").select("normalized_key, mark, quantity, unit").eq("project_id", params.projectId),
-    supabase.from("estimation_validation_rules").select("rule_type, payload, is_active").eq("user_id", params.userId),
+    fromAny(supabase, "reference_answer_lines").select("normalized_key, mark, quantity, unit").eq("project_id", params.projectId),
+    fromAny(supabase, "estimation_validation_rules").select("rule_type, payload, is_active").eq("user_id", params.userId),
   ]);
 
   const referenceDiff =
     refRes.data && refRes.data.length > 0
-      ? diffReferenceVsCanonical(refRes.data, result.lines)
+      ? diffReferenceVsCanonical(refRes.data as any[], result.lines)
       : null;
 
   const gate = evaluateExportGate({

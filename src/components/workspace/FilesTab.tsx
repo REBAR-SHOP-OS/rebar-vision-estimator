@@ -181,7 +181,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
 
       if (!indexErr) {
         try {
-          await supabase
+          await (supabase as any)
             .from("document_registry")
             .update({ parse_status: "parsed", extraction_status: "indexed" })
             .eq("file_id", fileId)
@@ -239,7 +239,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
 
       await logAuditEvent(user.id, "uploaded", "project_file", data.id, projectId);
       try {
-        await supabase.from("document_registry").upsert(
+        await (supabase as any).from("document_registry").upsert(
           {
             project_id: projectId,
             user_id: user.id,
