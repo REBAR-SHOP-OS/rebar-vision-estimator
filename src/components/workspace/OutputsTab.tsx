@@ -112,17 +112,31 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
             bars2 = bi || [];
           }
           if (bars2.length === 0) { toast.error("No shop drawing data available"); return; }
-          const barList2 = bars2.map((b: any) => ({
-            element_id: segMap2[b.segment_id]?.name || "",
-            element_type: (segMap2[b.segment_id]?.type || "OTHER").toUpperCase(),
-            bar_mark: b.mark || "",
-            size: b.size || "",
-            shape_code: b.shape_code || "straight",
-            qty: b.quantity || 0,
-            multiplier: 1,
-            length_mm: b.cut_length || 0,
-            weight_kg: (b.quantity || 0) * ((b.cut_length || 0) / 1000) * getMassKgPerM(b.size),
-          }));
+          const barList2 = bars2.map((b: any) => {
+            const size = b.size || "";
+            const qty = b.quantity || 0;
+            const lengthMm = b.cut_length || 0;
+            const isWwm = /\d.*x.*\d.*W/i.test(size) || getWwmMassKgPerM2(size) > 0;
+            let wtKg: number;
+            if (isWwm) {
+              const sheetAreaM2 = 1.52 * 3.05;
+              const massPerM2 = getWwmMassKgPerM2(size);
+              wtKg = massPerM2 > 0 ? qty * sheetAreaM2 * massPerM2 : 0;
+            } else {
+              wtKg = qty * (lengthMm / 1000) * getMassKgPerM(size);
+            }
+            return {
+              element_id: segMap2[b.segment_id]?.name || "",
+              element_type: (segMap2[b.segment_id]?.type || "OTHER").toUpperCase(),
+              bar_mark: b.mark || "",
+              size,
+              shape_code: b.shape_code || "straight",
+              qty,
+              multiplier: 1,
+              length_mm: lengthMm,
+              weight_kg: wtKg,
+            };
+          });
           const sizeBreak: Record<string, number> = {};
           barList2.forEach((b: any) => { sizeBreak[b.size] = (sizeBreak[b.size] || 0) + b.weight_kg; });
           const html = buildShopDrawingHtml({
