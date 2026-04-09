@@ -73,16 +73,14 @@ function buildEstimateSummarySheet(wb: ExcelJS.Workbook, params: ExportParams) {
     }));
   const recon = quoteResult.quote.reconciliation || {};
 
-  // Compute weight-by-size
-  const hasSizeKg = Object.keys(sizeBreakdownKg).length > 0;
-  const allSizes = new Set([...Object.keys(sizeBreakdownKg), ...Object.keys(sizeBreakdown)]);
-  const sizeEntries: [string, number][] = [];
-  for (const size of allSizes) {
-    const kg = hasSizeKg
-      ? (sizeBreakdownKg[size] || (sizeBreakdown[size] || 0) * 0.453592)
-      : (sizeBreakdown[size] || 0) * 0.453592;
-    if (kg > 0) sizeEntries.push([size, kg]);
+  // Compute weight-by-size from bar_list (same source as element breakdown)
+  const sizeWeights: Record<string, number> = {};
+  for (const b of barList) {
+    const sz = b.size || "OTHER";
+    const wtKg = typeof b.weight_kg === "number" ? b.weight_kg : (typeof b.weight_lbs === "number" ? b.weight_lbs * 0.453592 : 0);
+    if (wtKg > 0) sizeWeights[sz] = (sizeWeights[sz] || 0) + wtKg;
   }
+  const sizeEntries: [string, number][] = Object.entries(sizeWeights);
   sizeEntries.sort((a, b) => parseInt(a[0].replace(/[^0-9]/g, "")) - parseInt(b[0].replace(/[^0-9]/g, "")));
 
   // Compute weight-by-element
