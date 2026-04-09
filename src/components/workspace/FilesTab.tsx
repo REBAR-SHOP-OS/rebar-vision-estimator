@@ -7,6 +7,7 @@ import { computeSHA256 } from "@/lib/file-hash";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
+import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 
 interface FileRow {
   id: string;
@@ -45,7 +46,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
     return null;
   };
 
-  const parseFile = async (fileId: string, fileName: string, filePath: string) => {
+  const parseFile = async (fileId: string, fileName: string, filePath: string, onProgress?: (msg: string) => void) => {
     try {
       // Ensure document_version exists
       const { data: existingDv } = await supabase
@@ -76,26 +77,89 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
         .createSignedUrl(filePath, 3600);
       if (!urlData?.signedUrl) return false;
 
+      // Try server-side extraction first
       const { data: extraction, error: extractErr } = await supabase.functions.invoke("extract-pdf-text", {
         body: { pdf_url: urlData.signedUrl, project_id: projectId },
       });
-      if (extractErr || !extraction) return false;
 
+      const hasText = extraction?.pages?.some((p: any) => p.raw_text && p.raw_text.trim().length > 20);
+
+      let pages = extraction?.pages || [];
+      let totalPages = extraction?.total_pages || 0;
+      let sha256 = extraction?.sha256 || `file_${fileId}`;
+
+      // If extraction failed or returned no text (large/scanned file), use client-side OCR
+      if (extractErr || !hasText) {
+        console.log(`[FilesTab] Server extraction empty for ${fileName}, falling back to client-side OCR`);
+        onProgress?.(`Rendering pages…`);
+
+        try {
+          const pageImages = await renderPdfPagesToImages(urlData.signedUrl, projectId, {
+            maxPages: 50,
+            scale: 1.5,
+            onProgress: (current, total) => onProgress?.(`Rendering page ${current}/${total}`),
+          });
+
+          if (pageImages.length === 0) {
+            console.warn(`[FilesTab] No page images rendered for ${fileName}`);
+            return false;
+          }
+
+          totalPages = pageImages.length;
+          pages = [];
+
+          // OCR in batches of 4
+          for (let i = 0; i < pageImages.length; i += 4) {
+            const batch = pageImages.slice(i, i + 4);
+            const batchResults = await Promise.allSettled(
+              batch.map(async (img) => {
+                onProgress?.(`OCR page ${img.pageNumber}/${totalPages}`);
+                const { data: ocrData, error: ocrErr } = await supabase.functions.invoke("ocr-image", {
+                  body: { image_url: img.signedUrl },
+                });
+                if (ocrErr || !ocrData?.ocr_results) return { pageNumber: img.pageNumber, raw_text: "" };
+                // Merge text from all OCR passes
+                const fullText = ocrData.ocr_results
+                  .map((r: any) => r.fullText || "")
+                  .filter((t: string) => t.length > 0)
+                  .sort((a: string, b: string) => b.length - a.length)[0] || "";
+                return { pageNumber: img.pageNumber, raw_text: fullText };
+              })
+            );
+
+            for (const result of batchResults) {
+              if (result.status === "fulfilled") {
+                pages.push({
+                  page_number: result.value.pageNumber,
+                  raw_text: result.value.raw_text,
+                });
+              }
+            }
+          }
+
+          console.log(`[FilesTab] OCR completed: ${pages.filter((p: any) => p.raw_text?.length > 0).length}/${totalPages} pages with text`);
+        } catch (ocrErr) {
+          console.error(`[FilesTab] Client-side OCR failed for ${fileName}:`, ocrErr);
+          return false;
+        }
+      }
+
+      onProgress?.(`Indexing…`);
       const { error: indexErr } = await supabase.functions.invoke("populate-search-index", {
         body: {
           project_id: projectId,
           document_version_id: dvId,
-          pages: extraction.pages || [],
+          pages: pages,
           file_name: fileName,
-          sha256: extraction.sha256 || `file_${fileId}`,
+          sha256: sha256,
         },
       });
 
       if (dvId) {
         await supabase.from("document_versions").update({
-          sha256: extraction.sha256 || `file_${fileId}`,
-          page_count: extraction.total_pages || 0,
-          is_scanned: !extraction.has_text_layer,
+          sha256: sha256,
+          page_count: totalPages || pages.length,
+          is_scanned: !hasText,
         }).eq("id", dvId);
       }
 
@@ -155,7 +219,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
     for (let i = 0; i < uploadedFiles.length; i++) {
       setUploadProgress(`Parsing ${i + 1}/${uploadedFiles.length}`);
       const uf = uploadedFiles[i];
-      const ok = await parseFile(uf.id, uf.name, uf.path);
+      const ok = await parseFile(uf.id, uf.name, uf.path, (msg) => setUploadProgress(`File ${i + 1}/${uploadedFiles.length}: ${msg}`));
       if (ok) parsedCount++;
     }
     if (parsedCount > 0) {
@@ -184,8 +248,9 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
     let successCount = 0;
 
     try {
-      for (const f of pendingFiles) {
-        const ok = await parseFile(f.id, f.file_name, f.file_path);
+      for (let i = 0; i < pendingFiles.length; i++) {
+        const f = pendingFiles[i];
+        const ok = await parseFile(f.id, f.file_name, f.file_path, (msg) => toast.info(`File ${i + 1}/${pendingFiles.length}: ${msg}`, { id: "parse-progress" }));
         if (ok) successCount++;
       }
 
