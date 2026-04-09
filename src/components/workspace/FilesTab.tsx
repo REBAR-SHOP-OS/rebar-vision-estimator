@@ -248,8 +248,9 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
     let successCount = 0;
 
     try {
-      for (const f of pendingFiles) {
-        const ok = await parseFile(f.id, f.file_name, f.file_path);
+      for (let i = 0; i < pendingFiles.length; i++) {
+        const f = pendingFiles[i];
+        const ok = await parseFile(f.id, f.file_name, f.file_path, (msg) => toast.info(`File ${i + 1}/${pendingFiles.length}: ${msg}`, { id: "parse-progress" }));
         if (ok) successCount++;
       }
 
