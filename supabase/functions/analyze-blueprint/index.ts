@@ -1,135 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
-import { decode as decodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
-
-// ── Google Vision API Integration ──
-
-function base64url(data: Uint8Array): string {
-  return encodeBase64(data as unknown as string).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-async function importPrivateKey(pem: string): Promise<CryptoKey> {
-  const pemContents = pem
-    .replace(/-----BEGIN PRIVATE KEY-----/, '')
-    .replace(/-----END PRIVATE KEY-----/, '')
-    .replace(/\n/g, '');
-  const binaryDer = decodeBase64(pemContents);
-  return await crypto.subtle.importKey(
-    'pkcs8',
-    (binaryDer as unknown as BufferSource),
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-}
-
-async function getGoogleAccessToken(): Promise<string> {
-  const saKeyRaw = Deno.env.get("GOOGLE_VISION_SA_KEY_V2") || Deno.env.get("GOOGLE_VISION_SA_KEY");
-  if (!saKeyRaw) throw new Error("GOOGLE_VISION_SA_KEY not configured");
-  
-  // Resilient parsing: try multiple decode strategies
-  let sa: any;
-  const cleanJson = saKeyRaw.replace(/^\uFEFF/, '').trim();
-  console.log("SA key first 20 chars:", JSON.stringify(cleanJson.substring(0, 20)));
-  
-  // Strategy 1: Direct JSON parse
-  try { sa = JSON.parse(cleanJson); } catch {}
-  
-  // Strategy 2: URL-decoded
-  if (!sa) {
-    try { sa = JSON.parse(decodeURIComponent(cleanJson)); } catch {}
-  }
-  
-  // Strategy 3: Base64-decoded
-  if (!sa) {
-    try {
-      const decoded = new TextDecoder().decode(decodeBase64(cleanJson));
-      sa = JSON.parse(decoded);
-    } catch {}
-  }
-  
-  // Strategy 4: Double-escaped JSON (extra backslashes)
-  if (!sa) {
-    try { sa = JSON.parse(cleanJson.replace(/\\n/g, '\n').replace(/\\"/g, '"')); } catch {}
-  }
-  
-  if (!sa || !sa.client_email || !sa.private_key) {
-    throw new Error("GOOGLE_VISION_SA_KEY could not be parsed. Ensure it is valid JSON with client_email and private_key fields.");
-  }
-  const now = Math.floor(Date.now() / 1000);
-  
-  const header = { alg: "RS256", typ: "JWT" };
-  const payload = {
-    iss: sa.client_email,
-    scope: "https://www.googleapis.com/auth/cloud-vision",
-    aud: "https://oauth2.googleapis.com/token",
-    iat: now,
-    exp: now + 3600,
-  };
-
-  const encoder = new TextEncoder();
-  const headerB64 = base64url(encoder.encode(JSON.stringify(header)));
-  const payloadB64 = base64url(encoder.encode(JSON.stringify(payload)));
-  const signingInput = `${headerB64}.${payloadB64}`;
-
-  const key = await importPrivateKey(sa.private_key);
-  const signature = await crypto.subtle.sign(
-    'RSASSA-PKCS1-v1_5',
-    key,
-    encoder.encode(signingInput)
-  );
-  const signatureB64 = base64url(new Uint8Array(signature));
-  const jwt = `${signingInput}.${signatureB64}`;
-
-  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
-  });
-
-  if (!tokenRes.ok) {
-    const errText = await tokenRes.text();
-    throw new Error(`Google OAuth2 token exchange failed: ${tokenRes.status} ${errText}`);
-  }
-
-  const tokenData = await tokenRes.json();
-  return tokenData.access_token;
-}
-
-async function callVisionAPI(
-  accessToken: string,
-  imageBase64: string,
-  features: { type: string; maxResults?: number }[],
-  imageContext?: Record<string, unknown>
-): Promise<any> {
-  const request: any = {
-    image: { content: imageBase64 },
-    features,
-  };
-  if (imageContext) request.imageContext = imageContext;
-
-  const res = await fetch("https://vision.googleapis.com/v1/images:annotate", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ requests: [request] }),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Vision API error: ${res.status} ${errText}`);
-  }
-
-  const data = await res.json();
-  return data.responses?.[0] || {};
-}
+import { corsHeaders } from "../_shared/cors.ts";
+import { getGoogleAccessToken, callVisionAPI, callVisionAPIByUrl } from "../_shared/google-vision.ts";
 
 interface OcrPassResult {
   pass: number;
@@ -1066,7 +937,7 @@ Totals and weight summaries MUST be computed per estimation_group separately.`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: corsHeaders(req) });
   }
 
   try {
@@ -1079,7 +950,7 @@ serve(async (req) => {
       console.error(`Payload too large: ${bodySizeKB.toFixed(1)} KB — rejecting to prevent OOM`);
       return new Response(JSON.stringify({ error: `Payload too large (${bodySizeKB.toFixed(0)} KB). Pre-extract PDF text client-side before calling analyze-blueprint.` }), {
         status: 413,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
     
@@ -1454,31 +1325,31 @@ ${learnedBlock}\n\n---\n\n${systemPrompt}`;
       if (response.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }), {
           status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...corsHeaders(req), "Content-Type": "application/json" },
         });
       }
       if (response.status === 402) {
         return new Response(JSON.stringify({ error: "AI credits exhausted. Please add credits to continue." }), {
           status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...corsHeaders(req), "Content-Type": "application/json" },
         });
       }
       const t = await response.text();
       console.error("AI gateway error:", response.status, t);
       return new Response(JSON.stringify({ error: "AI analysis failed" }), {
         status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
     return new Response(response.body, {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+      headers: { ...corsHeaders(req), "Content-Type": "text/event-stream" },
     });
   } catch (e) {
     console.error("analyze-blueprint error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
     });
   }
 });

@@ -1,66 +1,15 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
-import { decode as decodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
-
-// ── Google Vision helpers ──
-
-function base64url(data: Uint8Array): string {
-  return encodeBase64(data as unknown as string).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-async function importPrivateKey(pem: string): Promise<CryptoKey> {
-  const pemContents = pem.replace(/-----BEGIN PRIVATE KEY-----/, '').replace(/-----END PRIVATE KEY-----/, '').replace(/\n/g, '');
-  const binaryDer = decodeBase64(pemContents);
-  return await crypto.subtle.importKey('pkcs8', (binaryDer as unknown as BufferSource), { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
-}
-
-async function getGoogleAccessToken(): Promise<string> {
-  const saKeyRaw = Deno.env.get("GOOGLE_VISION_SA_KEY_V2") || Deno.env.get("GOOGLE_VISION_SA_KEY");
-  if (!saKeyRaw) throw new Error("GOOGLE_VISION_SA_KEY not configured");
-  
-  let sa: any;
-  const cleanJson = saKeyRaw.replace(/^\uFEFF/, '').trim();
-  try { sa = JSON.parse(cleanJson); } catch {}
-  if (!sa) { try { sa = JSON.parse(decodeURIComponent(cleanJson)); } catch {} }
-  if (!sa) { try { sa = JSON.parse(new TextDecoder().decode(decodeBase64(cleanJson))); } catch {} }
-  if (!sa) { try { sa = JSON.parse(cleanJson.replace(/\\n/g, '\n').replace(/\\"/g, '"')); } catch {} }
-  if (!sa || !sa.client_email || !sa.private_key) throw new Error("GOOGLE_VISION_SA_KEY parse failed");
-
-  const now = Math.floor(Date.now() / 1000);
-  const header = { alg: "RS256", typ: "JWT" };
-  const payload = { iss: sa.client_email, scope: "https://www.googleapis.com/auth/cloud-vision", aud: "https://oauth2.googleapis.com/token", iat: now, exp: now + 3600 };
-  const encoder = new TextEncoder();
-  const headerB64 = base64url(encoder.encode(JSON.stringify(header)));
-  const payloadB64 = base64url(encoder.encode(JSON.stringify(payload)));
-  const key = await importPrivateKey(sa.private_key);
-  const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, encoder.encode(`${headerB64}.${payloadB64}`));
-  const jwt = `${headerB64}.${payloadB64}.${base64url(new Uint8Array(signature))}`;
-
-  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
-  });
-  if (!tokenRes.ok) throw new Error(`Google OAuth2 failed: ${tokenRes.status}`);
-  return (await tokenRes.json()).access_token;
-}
+import { corsHeaders } from "../_shared/cors.ts";
+import { getGoogleAccessToken, callVisionAPIByUrl } from "../_shared/google-vision.ts";
 
 async function quickOCR(accessToken: string, imageBase64: string): Promise<string> {
-  const res = await fetch("https://vision.googleapis.com/v1/images:annotate", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      requests: [{ image: { content: imageBase64 }, features: [{ type: "DOCUMENT_TEXT_DETECTION" }] }],
-    }),
-  });
-  if (!res.ok) throw new Error(`Vision API error: ${res.status}`);
-  const data = await res.json();
-  return data.responses?.[0]?.fullTextAnnotation?.text || data.responses?.[0]?.textAnnotations?.[0]?.description || "";
+  const result = await callVisionAPIByUrl(accessToken, imageBase64, [
+    { type: "DOCUMENT_TEXT_DETECTION" },
+  ]);
+  const r = result as Record<string, unknown>;
+  const fta = r.fullTextAnnotation as Record<string, unknown> | undefined;
+  const ta = r.textAnnotations as Array<Record<string, unknown>> | undefined;
+  return (fta?.text as string) || (ta?.[0]?.description as string) || "";
 }
 
 // ── Building signal keywords (veto cage_only) ──
@@ -75,13 +24,13 @@ const BUILDING_VETO_SIGNALS = [
 // ── Main Handler ──
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders(req) });
 
   try {
     const { fileUrls } = await req.json();
     if (!fileUrls || fileUrls.length === 0) {
       return new Response(JSON.stringify({ error: "No file URLs provided" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 400, headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -342,7 +291,7 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
       const errText = await response.text();
       console.error("AI gateway error:", response.status, errText);
       return new Response(JSON.stringify(buildFallbackResult()), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -410,18 +359,18 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
       }));
 
       return new Response(JSON.stringify(result), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
     return new Response(JSON.stringify(buildFallbackResult()), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
     });
 
   } catch (e) {
     console.error("detect-project-type error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" },
     });
   }
 });

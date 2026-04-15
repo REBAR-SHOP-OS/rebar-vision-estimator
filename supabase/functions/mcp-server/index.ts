@@ -1,4 +1,5 @@
 import { Hono } from "https://deno.land/x/hono@v4.3.11/mod.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 import { McpServer, StreamableHttpTransport } from "https://esm.sh/mcp-lite@0.10.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
@@ -249,8 +250,7 @@ app.all("/*", async (c) => {
   if (c.req.method === "OPTIONS") {
     return new Response(null, {
       headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "authorization, x-api-key, content-type, accept, x-client-info, apikey",
+        ...corsHeaders(c.req.raw),
         "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
       },
     });

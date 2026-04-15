@@ -1,9 +1,4 @@
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
-
+import { corsHeaders } from "../_shared/cors.ts";
 const ALLOWED_HOSTS = [
   "rebarshop-24-rebar-shop.odoo.com",
   "ylfvyurpqplbijjfuuns.supabase.co",
@@ -95,7 +90,7 @@ async function fetchOdooAttachment(odooId: string) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: corsHeaders(req) });
   }
 
   try {
@@ -107,7 +102,7 @@ Deno.serve(async (req) => {
       const result = await fetchOdooAttachment(String(odoo_id));
       return new Response(result.bytes, {
         headers: {
-          ...corsHeaders,
+          ...corsHeaders(req),
           "Content-Type": result.mimeType,
           "Content-Disposition": `attachment; filename="${result.fileName}"`,
           "Content-Length": String(result.bytes.byteLength),
@@ -119,7 +114,7 @@ Deno.serve(async (req) => {
     if (!url || typeof url !== "string") {
       return new Response(JSON.stringify({ error: "Missing url or odoo_id" }), {
         status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -127,7 +122,7 @@ Deno.serve(async (req) => {
     if (!ALLOWED_HOSTS.includes(parsed.hostname)) {
       return new Response(JSON.stringify({ error: "Host not allowed" }), {
         status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -135,7 +130,7 @@ Deno.serve(async (req) => {
     if (!upstream.ok) {
       return new Response(
         JSON.stringify({ error: `Upstream ${upstream.status}` }),
-        { status: upstream.status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        { status: upstream.status, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
       );
     }
 
@@ -144,7 +139,7 @@ Deno.serve(async (req) => {
 
     return new Response(respBody, {
       headers: {
-        ...corsHeaders,
+        ...corsHeaders(req),
         "Content-Type": contentType,
         "Content-Length": String(respBody.byteLength),
       },
@@ -153,7 +148,7 @@ Deno.serve(async (req) => {
     console.error("proxy-crm-file error:", err);
     return new Response(JSON.stringify({ error: String(err) }), {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
     });
   }
 });

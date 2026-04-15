@@ -1,17 +1,13 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders(req) });
 
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders(req) });
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -21,7 +17,7 @@ Deno.serve(async (req) => {
 
     const { quote_id, crm_deal_id } = await req.json();
     if (!quote_id || !crm_deal_id) {
-      return new Response(JSON.stringify({ error: "quote_id and crm_deal_id required" }), { status: 400, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: "quote_id and crm_deal_id required" }), { status: 400, headers: corsHeaders(req) });
     }
 
     // Fetch quote
@@ -32,7 +28,7 @@ Deno.serve(async (req) => {
       .single();
 
     if (qErr || !quote) {
-      return new Response(JSON.stringify({ error: "Quote not found" }), { status: 404, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: "Quote not found" }), { status: 404, headers: corsHeaders(req) });
     }
 
     // Push to Odoo via JSON-RPC
@@ -57,7 +53,7 @@ Deno.serve(async (req) => {
         success: true,
         method: "local_only",
         message: "Updated local CRM deal (no Odoo configured)",
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }), { headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
     }
 
     // Authenticate with Odoo
@@ -73,7 +69,7 @@ Deno.serve(async (req) => {
     const uid = authData.result;
 
     if (!uid) {
-      return new Response(JSON.stringify({ error: "Odoo auth failed" }), { status: 502, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: "Odoo auth failed" }), { status: 502, headers: corsHeaders(req) });
     }
 
     // Update lead expected_revenue in Odoo
@@ -104,9 +100,9 @@ Deno.serve(async (req) => {
       success: true,
       method: "odoo",
       odoo_result: writeData.result,
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }), { headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
 
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders });
+    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders(req) });
   }
 });

@@ -1,9 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 // djb2 hash for system prompt versioning
 function djb2Hash(str: string): string {
@@ -541,7 +537,7 @@ async function probeVision(_integration: typeof integrations[0]) {
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: corsHeaders(req) });
   }
 
   const url = new URL(req.url);
@@ -553,7 +549,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({
       error: verify ? "PRODUCTION_STABILITY_CHECK_FAILED" : "STATIC_PLACEHOLDER_DETECTED",
       details: failures,
-    }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }), { status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
   }
 
   const manifest = buildManifest();
@@ -565,7 +561,7 @@ serve(async (req) => {
       summary,
       validated: true,
       timestamp: new Date().toISOString(),
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }), { headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
   }
 
   // Run probes in parallel
@@ -591,5 +587,5 @@ serve(async (req) => {
     summary,
     validated: true,
     timestamp: new Date().toISOString(),
-  }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }), { headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
 });

@@ -1,20 +1,15 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders(req) });
 
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 401, headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -25,14 +20,14 @@ serve(async (req) => {
     const { data: { user }, error: authErr } = await anonClient.auth.getUser(token);
     if (authErr || !user) {
       return new Response(JSON.stringify({ error: "Invalid token" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 401, headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
     const { segment_id, project_id } = await req.json();
     if (!segment_id || !project_id) {
       return new Response(JSON.stringify({ error: "segment_id and project_id required" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 400, headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -48,7 +43,7 @@ serve(async (req) => {
     const segment = segRes.data;
     if (!segment) {
       return new Response(JSON.stringify({ error: "Segment not found" }), {
-        status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 404, headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -61,7 +56,7 @@ serve(async (req) => {
 
     if (estimateItems.length === 0) {
       return new Response(JSON.stringify({ error: "No estimate items found. Run Auto Estimate first." }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 400, headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -115,7 +110,7 @@ Generate bar schedule items for these estimate items. Use ACTUAL bar marks from 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       return new Response(JSON.stringify({ error: "AI not configured" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -137,10 +132,10 @@ Generate bar schedule items for these estimate items. Use ACTUAL bar marks from 
 
     if (!aiResponse.ok) {
       const status = aiResponse.status;
-      if (status === 429) return new Response(JSON.stringify({ error: "Rate limit exceeded. Try again shortly." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      if (status === 402) return new Response(JSON.stringify({ error: "AI credits exhausted." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      if (status === 429) return new Response(JSON.stringify({ error: "Rate limit exceeded. Try again shortly." }), { status: 429, headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
+      if (status === 402) return new Response(JSON.stringify({ error: "AI credits exhausted." }), { status: 402, headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
       console.error("AI error:", status, await aiResponse.text());
-      return new Response(JSON.stringify({ error: "AI generation failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "AI generation failed" }), { status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
     }
 
     const aiData = await aiResponse.json();
@@ -154,7 +149,7 @@ Generate bar schedule items for these estimate items. Use ACTUAL bar marks from 
     } catch {
       console.error("Failed to parse AI response:", rawContent);
       return new Response(JSON.stringify({ error: "AI returned invalid format. Please try again." }), {
-        status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 422, headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -186,7 +181,7 @@ Generate bar schedule items for these estimate items. Use ACTUAL bar marks from 
     if (insertErr) {
       console.error("Insert error:", insertErr);
       return new Response(JSON.stringify({ error: "Failed to save bar items" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -203,11 +198,11 @@ Generate bar schedule items for these estimate items. Use ACTUAL bar marks from 
     return new Response(JSON.stringify({
       success: true,
       bars_created: inserted?.length || 0,
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }), { headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("auto-bar-schedule error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" },
     });
   }
 });
