@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
-import { getGoogleAccessToken, callVisionAPI, callVisionAPIByUrl } from "../_shared/google-vision.ts";
+import { getGoogleAccessToken, callVisionAPI } from "../_shared/google-vision.ts";
 
 interface OcrPassResult {
   pass: number;
@@ -117,7 +117,7 @@ Each element you identify MUST be output as a JSON object following this schema:
       "ties": { "size": "#3", "spacing_mm": 300 },
       "bar_lines": [
         {
-          "mark": "20M @ 12\" OC",
+          "mark": "20M @ 12" OC",
           "size": "20M",
           "multiplier": 2,
           "qty": 87,
@@ -547,7 +547,7 @@ You MUST process every blueprint image through these 5 layers in order. Do NOT s
 ### LAYER 2: Geometric & Linework Classification (The "Where")
 - Examine the image for line types and classify them into a visual hierarchy:
   • **Solid Heavy Lines** = primary concrete boundaries (edges of pits, slabs, walls, footings)
-  • **Solid Thin Lines with Ticks/Arrows** = dimension strings (the line showing "2692" or "8'-10\"")
+  • **Solid Thin Lines with Ticks/Arrows** = dimension strings (the line showing "2692" or "8'-10"")
   • **Dashed / Hidden Lines** = existing structures, rebar hidden behind a face, or below-grade elements
   • **Polylines with Dots/Hooks** = rebar representations (straight bars with 90° hooks, U-bars, dots = bars perpendicular to page plane)
   • **Hatching / Cross-hatching** = concrete section fills, earth fills, gravel
@@ -968,7 +968,7 @@ serve(async (req) => {
         const token = authHeader.replace("Bearer ", "");
         const { data: { user } } = await anonClient.auth.getUser(token);
         autoIndexUserId = user?.id || null;
-      } catch {}
+      } catch { /* user token is optional for auto-index; proceed without userId */ }
     }
     
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");

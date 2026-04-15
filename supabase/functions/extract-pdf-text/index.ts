@@ -46,7 +46,7 @@ function extractTitleBlock(text: string): TitleBlockMetadata {
   const revMatch = text.match(/\bREV(?:ISION)?\.?\s*([A-Z0-9]{1,3})\b/i);
   if (revMatch) tb.revision_code = revMatch[1];
 
-  const dateMatch = text.match(/\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b/);
+  const dateMatch = text.match(/\b(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\b/);
   if (dateMatch) tb.revision_date = dateMatch[1];
 
   const textUpper = text.toUpperCase();

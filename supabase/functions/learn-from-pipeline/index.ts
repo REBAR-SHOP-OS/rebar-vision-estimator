@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
       try {
         const parsed = JSON.parse(row.content || "{}");
         if (parsed.lead_id) existingLeadIds.add(String(parsed.lead_id));
-      } catch {}
+      } catch { /* malformed JSON row — skip */ }
     }
 
     // Fetch files for all leads
