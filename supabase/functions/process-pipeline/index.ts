@@ -1,17 +1,13 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders(req) });
 
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders(req) });
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -22,13 +18,13 @@ Deno.serve(async (req) => {
     const token = authHeader.replace("Bearer ", "");
     const { data: claims, error: claimsErr } = await supabase.auth.getClaims(token);
     if (claimsErr || !claims?.claims) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders(req) });
     }
     const userId = claims.claims.sub as string;
 
     const { project_id, reprocess } = await req.json();
     if (!project_id) {
-      return new Response(JSON.stringify({ error: "project_id required" }), { status: 400, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: "project_id required" }), { status: 400, headers: corsHeaders(req) });
     }
 
     const log = async (action: string, details: Record<string, unknown> = {}) => {
@@ -69,7 +65,7 @@ Deno.serve(async (req) => {
           linkage_score: "L0",
           workflow_status: "intake",
           message: "No files found. Upload drawings to start processing.",
-        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }), { headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
       }
 
       // Update to L1 — files exist
@@ -177,7 +173,7 @@ Deno.serve(async (req) => {
         estimate_count: estimateCount || 0,
         has_scope: hasScope,
         job_id: jobId,
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }), { headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
 
     } catch (pipelineErr) {
       await updateJob("failed", 0, undefined, String(pipelineErr));
@@ -185,6 +181,7 @@ Deno.serve(async (req) => {
       throw pipelineErr;
     }
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders });
+    console.error("[process-pipeline] unhandled error:", err);
+    return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500, headers: corsHeaders(req) });
   }
 });

@@ -1,9 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 interface TitleBlockMetadata {
   sheet_number: string | null;
@@ -50,7 +46,7 @@ function extractTitleBlock(text: string): TitleBlockMetadata {
   const revMatch = text.match(/\bREV(?:ISION)?\.?\s*([A-Z0-9]{1,3})\b/i);
   if (revMatch) tb.revision_code = revMatch[1];
 
-  const dateMatch = text.match(/\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b/);
+  const dateMatch = text.match(/\b(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\b/);
   if (dateMatch) tb.revision_date = dateMatch[1];
 
   const textUpper = text.toUpperCase();
@@ -76,7 +72,7 @@ function extractTitleBlock(text: string): TitleBlockMetadata {
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: corsHeaders(req) });
   }
 
   try {
@@ -112,7 +108,7 @@ serve(async (req) => {
           pages, total_pages: estimatedPages, sha256: "size_skipped_" + fileSize,
           has_text_layer: false, scanned_pages: pages.map(p => p.page_number),
           skipped_reason: "file_too_large",
-        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }), { headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
       }
     }
 
@@ -142,7 +138,7 @@ serve(async (req) => {
           pages, total_pages: estPages, sha256,
           has_text_layer: false, scanned_pages: pages.map(p => p.page_number),
           skipped_reason: "file_too_large",
-        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }), { headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
       }
     } else if (pdf_base64) {
       const binary = atob(pdf_base64);
@@ -181,7 +177,7 @@ serve(async (req) => {
         pages, total_pages: estPages, sha256,
         has_text_layer: false, scanned_pages: pages.map(p => p.page_number),
         skipped_reason: "pdfjs_failed",
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }), { headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
     }
     const totalPages = doc.numPages;
 
@@ -260,13 +256,13 @@ serve(async (req) => {
       has_text_layer: pages.some(p => !p.is_scanned),
       scanned_pages: pages.filter(p => p.is_scanned).map(p => p.page_number),
     }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("extract-pdf-text error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
     });
   }
 });

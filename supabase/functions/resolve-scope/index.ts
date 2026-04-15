@@ -1,17 +1,13 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders(req) });
 
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders(req) });
     }
 
     const supabase = createClient(
@@ -23,13 +19,13 @@ Deno.serve(async (req) => {
     const token = authHeader.replace("Bearer ", "");
     const { data: claims, error: claimsErr } = await supabase.auth.getClaims(token);
     if (claimsErr || !claims?.claims) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders(req) });
     }
     const userId = claims.claims.sub as string;
 
     const { project_id } = await req.json();
     if (!project_id) {
-      return new Response(JSON.stringify({ error: "project_id required" }), { status: 400, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: "project_id required" }), { status: 400, headers: corsHeaders(req) });
     }
 
     // Load project
@@ -61,7 +57,7 @@ Deno.serve(async (req) => {
         scope_items: project.scope_items,
         project_type: project.project_type,
         confidence: 0.9,
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }), { headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
     }
 
     // No real scope detected — no fallback
@@ -82,8 +78,9 @@ Deno.serve(async (req) => {
       project_type: null,
       confidence: 0,
       warning: "No scope detected. Upload drawings for scope extraction.",
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }), { headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders });
+    console.error("[resolve-scope] unhandled error:", err);
+    return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500, headers: corsHeaders(req) });
   }
 });

@@ -1,9 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 function normalizeName(name: string): string {
   return name
@@ -23,12 +19,12 @@ function tokenSimilarity(a: string, b: string): number {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders(req) });
 
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders(req) });
     }
 
     const supabase = createClient(
@@ -39,13 +35,13 @@ Deno.serve(async (req) => {
 
     const { data: claims, error: claimsErr } = await supabase.auth.getClaims(authHeader.replace("Bearer ", ""));
     if (claimsErr || !claims?.claims) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders(req) });
     }
     const userId = claims.claims.sub as string;
 
     const { project_name, client_name, address } = await req.json();
     if (!project_name) {
-      return new Response(JSON.stringify({ error: "project_name required" }), { status: 400, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: "project_name required" }), { status: 400, headers: corsHeaders(req) });
     }
 
     const normalized = normalizeName(project_name);
@@ -76,8 +72,9 @@ Deno.serve(async (req) => {
       is_duplicate: matches.length > 0,
       normalized_name: normalized,
       matches: matches.slice(0, 5),
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }), { headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders });
+    console.error("[check-duplicate] unhandled error:", err);
+    return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500, headers: corsHeaders(req) });
   }
 });

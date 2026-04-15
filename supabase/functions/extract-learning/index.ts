@@ -1,14 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: corsHeaders(req) });
   }
 
   try {
@@ -19,7 +15,7 @@ serve(async (req) => {
 
     if (!userId || (!hasManual && (!messages || messages.length < 3))) {
       return new Response(JSON.stringify({ skipped: true, reason: "Not enough data" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -90,7 +86,7 @@ ${messages.map((m: any) => `${m.role}: ${m.content?.substring(0, 500)}`).join("\
         console.error("AI extraction failed:", aiResponse.status);
         return new Response(JSON.stringify({ error: "AI extraction failed" }), {
           status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...corsHeaders(req), "Content-Type": "application/json" },
         });
       }
 
@@ -99,7 +95,7 @@ ${messages.map((m: any) => `${m.role}: ${m.content?.substring(0, 500)}`).join("\
 
       if (!learningText || learningText === "NONE") {
         return new Response(JSON.stringify({ skipped: true, reason: "No useful learning" }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...corsHeaders(req), "Content-Type": "application/json" },
         });
       }
     }
@@ -164,7 +160,7 @@ Rules:
         type: "learned",
       });
       return new Response(JSON.stringify({ success: true, fallback: true }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -186,7 +182,7 @@ Rules:
         type: "learned",
       });
       return new Response(JSON.stringify({ success: true, fallback: true }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -232,13 +228,13 @@ Rules:
     console.log(JSON.stringify({ route: "extract-learning", inserted, merged, skipped }));
 
     return new Response(JSON.stringify({ success: true, inserted, merged, skipped }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("extract-learning error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
     });
   }
 });
