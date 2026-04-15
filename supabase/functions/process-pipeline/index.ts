@@ -181,6 +181,7 @@ Deno.serve(async (req) => {
       throw pipelineErr;
     }
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders(req) });
+    console.error("[process-pipeline] unhandled error:", err);
+    return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500, headers: corsHeaders(req) });
   }
 });

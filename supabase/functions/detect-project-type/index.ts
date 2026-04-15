@@ -1,9 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { corsHeaders } from "../_shared/cors.ts";
-import { getGoogleAccessToken, callVisionAPIByUrl } from "../_shared/google-vision.ts";
+import { getGoogleAccessToken, callVisionAPI } from "../_shared/google-vision.ts";
 
 async function quickOCR(accessToken: string, imageBase64: string): Promise<string> {
-  const result = await callVisionAPIByUrl(accessToken, imageBase64, [
+  const result = await callVisionAPI(accessToken, imageBase64, [
     { type: "DOCUMENT_TEXT_DETECTION" },
   ]);
   const r = result as Record<string, unknown>;

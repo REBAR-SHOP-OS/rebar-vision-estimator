@@ -33,12 +33,12 @@ const ALLOW_HEADERS =
  * an empty string (the browser will block the response).
  * When `ALLOWED_ORIGIN` is not set it falls back to `*`.
  */
-export function corsHeaders(req?: Request): Record<string, string> {
+export function corsHeaders(req: Request): Record<string, string> {
   const allowedOrigin = Deno.env.get("ALLOWED_ORIGIN");
 
   let origin: string;
   if (allowedOrigin) {
-    const requestOrigin = req?.headers.get("Origin") ?? "";
+    const requestOrigin = req.headers.get("Origin") ?? "";
     origin = requestOrigin === allowedOrigin ? requestOrigin : "";
   } else {
     origin = "*";

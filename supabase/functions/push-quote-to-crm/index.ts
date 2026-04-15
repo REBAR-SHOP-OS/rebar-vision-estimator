@@ -103,6 +103,7 @@ Deno.serve(async (req) => {
     }), { headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
 
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders(req) });
+    console.error("[push-quote-to-crm] unhandled error:", err);
+    return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500, headers: corsHeaders(req) });
   }
 });

@@ -80,6 +80,7 @@ Deno.serve(async (req) => {
       warning: "No scope detected. Upload drawings for scope extraction.",
     }), { headers: { ...corsHeaders(req), "Content-Type": "application/json" } });
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders(req) });
+    console.error("[resolve-scope] unhandled error:", err);
+    return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500, headers: corsHeaders(req) });
   }
 });
