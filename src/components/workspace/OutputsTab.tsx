@@ -19,6 +19,8 @@ import {
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 import { exportExcelFile } from "@/lib/excel-export";
+// @ts-ignore - no types
+import html2pdf from "html2pdf.js";
 import {
   getCurrentVerifiedEstimate,
   refreshVerifiedEstimateFromWorkspace,
