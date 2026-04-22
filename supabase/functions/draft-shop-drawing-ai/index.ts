@@ -9,7 +9,7 @@ const corsHeaders = {
 
 const MODEL = "google/gemini-3.1-flash-image-preview";
 const OPENAI_MODEL = "gpt-image-1";
-const MAX_SEGMENTS = 6;
+const MAX_SEGMENTS = 3;
 
 interface BarItem {
   mark: string | null;
