@@ -258,6 +258,115 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
   const isBlocked = openIssues > 0;
   const isApproved = approvalStatus === "approved";
 
+  const handleAiVisualDraft = async () => {
+    if (!user) return;
+    setAiDrafting(true);
+    const toastId = toast.loading("Drafting visual sheets with AI…");
+    try {
+      let ver = await getCurrentVerifiedEstimate(supabase, projectId);
+      if (!ver) {
+        await refreshVerifiedEstimateFromWorkspace(supabase, projectId, user.id);
+        ver = await getCurrentVerifiedEstimate(supabase, projectId);
+      }
+      if (!ver || ver.status === "blocked") {
+        const br = Array.isArray(ver?.blocked_reasons)
+          ? (ver!.blocked_reasons as string[]).join(" ")
+          : "Refresh canonical estimate or fix validation issues.";
+        toast.error(br || "Export blocked — canonical estimate not verified.", { id: toastId });
+        return;
+      }
+
+      const { data, error } = await supabase.functions.invoke("draft-shop-drawing-ai", {
+        body: { projectId },
+      });
+      if (error) {
+        toast.error(error.message || "AI draft failed", { id: toastId });
+        return;
+      }
+      const payload = data as {
+        project_name: string;
+        client_name: string;
+        results: Array<{ segment_id: string; segment_name: string; image_data_uri: string | null; caption: string; error?: string }>;
+      };
+      const usable = (payload.results || []).filter((r) => r.image_data_uri);
+      if (usable.length === 0) {
+        toast.error("AI returned no images. Try again or check segments/bar items.", { id: toastId });
+        return;
+      }
+
+      const esc = (s: string) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
+      const sheets = usable.map((r, i) => `
+        <section class="sheet">
+          <header class="title">
+            <div>
+              <div class="proj">${esc(payload.project_name)}</div>
+              <div class="client">${esc(payload.client_name)}</div>
+            </div>
+            <div class="sheet-no">SD-AI-${String(i + 1).padStart(2, "0")}</div>
+          </header>
+          <h2>${esc(r.segment_name)}</h2>
+          <img src="${r.image_data_uri}" alt="${esc(r.caption)}" />
+          <p class="caption">${esc(r.caption)}</p>
+          <footer>AI visual draft — not for fabrication. Verify against deterministic shop drawing &amp; bar list.</footer>
+        </section>`).join("\n");
+
+      const html = `<!doctype html><html><head><meta charset="utf-8" />
+        <title>AI Visual Draft — ${esc(payload.project_name)}</title>
+        <style>
+          @page { size: letter landscape; margin: 12mm; }
+          body { font-family: Arial, sans-serif; margin: 0; color: #111; }
+          .sheet { page-break-after: always; padding: 16px; border: 1px solid #222; margin: 12px; }
+          .sheet:last-child { page-break-after: auto; }
+          .title { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #222; padding-bottom: 8px; }
+          .proj { font-weight: 700; font-size: 16px; }
+          .client { font-size: 12px; color: #555; }
+          .sheet-no { font-weight: 700; font-size: 14px; }
+          h2 { font-size: 14px; margin: 10px 0 8px; }
+          img { max-width: 100%; max-height: 70vh; border: 1px solid #ccc; display: block; margin: 0 auto; }
+          .caption { font-size: 11px; color: #444; margin-top: 6px; text-align: center; }
+          footer { margin-top: 8px; font-size: 10px; color: #888; border-top: 1px dashed #aaa; padding-top: 6px; }
+        </style></head><body>${sheets}</body></html>`;
+
+      const blob = new Blob([html], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ai-visual-draft-${projectId.slice(0, 8)}.html`;
+      a.click();
+      window.open(url, "_blank");
+
+      try {
+        await supabase.from("shop_drawings").insert({
+          project_id: projectId,
+          user_id: user.id,
+          html_content: html,
+          options: { kind: "ai_visual", segment_count: usable.length, model: "google/gemini-3.1-flash-image-preview" },
+        });
+      } catch { /* non-fatal */ }
+
+      try {
+        await (supabase as any).from("export_jobs").insert({
+          project_id: projectId,
+          user_id: user.id,
+          verified_estimate_result_id: ver.id,
+          export_type: "shop_drawing_ai_visual",
+          status: "completed",
+          metadata: { segment_count: usable.length },
+        });
+      } catch { /* optional */ }
+
+      await logAuditEvent(user.id, "exported", "export", undefined, projectId, undefined, {
+        export_type: "shop_drawing_ai_visual",
+        segment_count: usable.length,
+      });
+      toast.success(`AI visual draft generated (${usable.length} sheet${usable.length === 1 ? "" : "s"})`, { id: toastId });
+    } catch (e: any) {
+      toast.error(e?.message || "AI draft failed", { id: toastId });
+    } finally {
+      setAiDrafting(false);
+    }
+  };
+
   const verifiedBlocked = verifiedRow?.status === "blocked";
   const blockedList = Array.isArray(verifiedRow?.blocked_reasons)
     ? (verifiedRow!.blocked_reasons as string[])
