@@ -1,67 +1,64 @@
 
 
-# Add AI Image Drafting to Shop Drawings
+# Fix "verified_estimate_results table not found" error
 
-## What This Does
+## Root cause
 
-Adds an **"AI Visual Draft"** option to the Draft Shop Drawings export. Instead of (or in addition to) the deterministic 6-zone HTML template, the system will use **Nano Banana 2** (`google/gemini-3.1-flash-image-preview`) — Lovable AI's fastest pro-quality image model — to generate a visual sketch of each segment's rebar layout (plan view, elevation, sections) based on the real bar list and segment data.
+The `OutputsTab` export flow (and the verified-estimate store) reads/writes a `verified_estimate_results` table that was never created in the database. Every Export / AI Visual click hits PostgREST, which returns:
 
-> Note: Lovable AI does **not** currently offer a GPT image model (OpenAI's image API isn't on the gateway). The closest equivalent — and arguably better for engineering sketches — is **Nano Banana 2** (Gemini 3.1 Flash Image Preview). If you specifically want an OpenAI model, we'd need to add a custom OpenAI API key. Default plan uses Nano Banana 2.
+> Could not find the table 'public.verified_estimate_results' in the schema cache
 
-## How It Works
+Other referenced tables (`export_jobs`, `reference_answer_lines`, `estimation_validation_rules`, `document_sheets`) are already wrapped in `try/catch` or treated as optional, so they don't break exports — only `verified_estimate_results` does.
 
-```text
-[Outputs tab] → "Draft Shop Drawings" → Export menu:
-   ├─ HTML Sheet (current deterministic template)   ← unchanged
-   └─ AI Visual Draft (NEW)
-         ↓
-   For each segment with bar items:
-      1. Build prompt from bar list (marks, sizes, qty, shape codes)
-      2. Call edge function → Lovable AI Gateway (Nano Banana 2)
-      3. Receive base64 PNG sketch (plan + bar callouts)
-      4. Embed all images into a single printable HTML sheet
-      5. Save to `shop_drawings` table with `options.kind = "ai_visual"`
+## Fix (single migration, no code changes)
+
+Create the missing table with the exact columns the store reads/writes:
+
+```sql
+create table public.verified_estimate_results (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references public.projects(id) on delete cascade,
+  user_id uuid not null,
+  version_number int not null default 1,
+  status text not null check (status in ('draft','verified','blocked')),
+  result_json jsonb not null,
+  content_hash text not null,
+  inputs_hash text,
+  blocked_reasons jsonb default '[]'::jsonb,
+  is_current boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create index on public.verified_estimate_results (project_id, is_current);
+create index on public.verified_estimate_results (project_id, created_at desc);
+
+alter table public.verified_estimate_results enable row level security;
+
+-- Owner-scoped policies (same model as other project-owned tables)
+create policy "owners read" on public.verified_estimate_results
+  for select to authenticated
+  using (auth.uid() = user_id);
+
+create policy "owners insert" on public.verified_estimate_results
+  for insert to authenticated
+  with check (auth.uid() = user_id);
+
+create policy "owners update" on public.verified_estimate_results
+  for update to authenticated
+  using (auth.uid() = user_id);
 ```
 
-## Plan
+## What this unblocks
 
-### 1. New edge function: `draft-shop-drawing-ai`
-**File**: `supabase/functions/draft-shop-drawing-ai/index.ts`
-- Accepts `{ projectId, segmentId? }`
-- Loads segments + bar_items + project metadata
-- For each segment, builds a structured prompt:
-  > "Generate a clean engineering plan-view sketch of [segment name]. Show rebar layout with bar marks [B1001, BS31, ...], sizes [10M, 15M, 20M], spacings, and a bar list table. Black & white, top-down orthographic, dimensioned, technical drawing style, no shading."
-- Calls `google/gemini-3.1-flash-image-preview` via Lovable AI Gateway with `modalities: ["image", "text"]`
-- Returns array of `{ segment_id, segment_name, image_data_uri, caption }`
-- Handles 429 / 402 errors with clear toast messages
+- `Export` for Estimate Summary, Shop Drawings, AI Visual Draft will stop throwing the schema-cache error.
+- `Refresh canonical estimate` will successfully persist a snapshot.
+- `getCurrentVerifiedEstimate()` will return a row instead of failing.
 
-### 2. Extend `OutputsTab.tsx` — add second export button
-**File**: `src/components/workspace/OutputsTab.tsx` (~30 lines added)
-- Split the existing Shop Drawing card into two actions:
-  - **"Export HTML Sheet"** (existing flow, unchanged)
-  - **"Generate AI Visual Draft"** (NEW)
-- New flow:
-  1. Show progress toast ("Drafting visual sheets with AI…")
-  2. Invoke `draft-shop-drawing-ai` edge function
-  3. Wrap returned images in a printable HTML page (one image per segment, with title block + bar list table beside each)
-  4. Save to `shop_drawings` table with `options.kind = "ai_visual"`, increment version
-  5. Trigger download + open in new tab for Ctrl+P
-- Reuses existing `verified-estimate` gate (export blocked if not verified)
-- Reuses existing `logAuditEvent` and `export_jobs` insert
+## Files touched
 
-### 3. Optional small UI flag
-The `shop_drawings.options` JSONB already supports arbitrary keys — no migration needed. History entries in `ShopDrawingModal.tsx` will show `kind: ai_visual` if you later open them.
+- New migration only. **No TypeScript changes.** The store already uses `(supabase as any).from("verified_estimate_results")` so generated types don't need to know about the table.
 
-## Technical Details
+## Out of scope (intentionally)
 
-- **Model**: `google/gemini-3.1-flash-image-preview` (Nano Banana 2 — pro-quality, fast)
-- **Gateway**: `https://ai.gateway.lovable.dev/v1/chat/completions` with `modalities: ["image", "text"]`
-- **Auth**: `LOVABLE_API_KEY` (already in secrets)
-- **Image size**: base64 PNGs returned by gateway, embedded inline (no storage upload needed for v1)
-- **Cost guard**: cap at first 6 segments per call to control AI credit usage
-- **Determinism**: AI sketches are visual drafts only — the deterministic HTML template remains the source of truth for fabrication numbers
-
-## Files Modified
-- `supabase/functions/draft-shop-drawing-ai/index.ts` — NEW (~120 lines)
-- `src/components/workspace/OutputsTab.tsx` — add AI Visual button + handler (~50 lines)
+- `export_jobs`, `reference_answer_lines`, `estimation_validation_rules`, `document_sheets` — already optional in code; leave for a future task if you want them tracked.
 
