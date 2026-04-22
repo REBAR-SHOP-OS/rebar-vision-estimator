@@ -9,7 +9,7 @@ const corsHeaders = {
 
 const MODEL = "google/gemini-3.1-flash-image-preview";
 const OPENAI_MODEL = "gpt-image-1";
-const MAX_SEGMENTS = 6;
+const MAX_SEGMENTS = 3;
 
 interface BarItem {
   mark: string | null;
@@ -171,41 +171,46 @@ serve(async (req) => {
     const targets = segsWithBars.length > 0 ? segsWithBars : segs.slice(0, MAX_SEGMENTS);
 
     const projectName = project?.name || "Rebar Project";
-    const results: Array<{ segment_id: string; segment_name: string; image_data_uri: string | null; caption: string; error?: string }> = [];
+    type ResultRow = { segment_id: string; segment_name: string; image_data_uri: string | null; caption: string; error?: string };
+    let rateLimitStatus: number | null = null;
 
-    for (const seg of targets) {
+    const settled = await Promise.all(targets.map(async (seg): Promise<ResultRow> => {
       const segBars = barsBySeg.get(seg.id) || [];
       const prompt = buildPrompt(seg, segBars, projectName);
       try {
         const url = useOpenAI
           ? await generateImageOpenAI(prompt, openaiKey!)
           : await generateImage(prompt, lovableKey!);
-        results.push({
+        return {
           segment_id: seg.id,
           segment_name: seg.name,
           image_data_uri: url,
           caption: `${seg.name} — ${segBars.length} bar item(s)`,
-        });
+        };
       } catch (e: any) {
-        if (e.status === 429 || e.status === 402) {
-          return new Response(
-            JSON.stringify({
-              error: e.status === 429
-                ? "AI rate limit reached, please wait a moment and try again."
-                : "AI credits exhausted. Add funds in Settings → Workspace → Usage.",
-            }),
-            { status: e.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
-        results.push({
+        if (e?.status === 429 || e?.status === 402) rateLimitStatus = e.status;
+        return {
           segment_id: seg.id,
           segment_name: seg.name,
           image_data_uri: null,
           caption: seg.name,
           error: e?.message || "generation failed",
-        });
+        };
       }
+    }));
+
+    if (rateLimitStatus === 429 || rateLimitStatus === 402) {
+      return new Response(
+        JSON.stringify({
+          error: rateLimitStatus === 429
+            ? "AI rate limit reached, please wait a moment and try again."
+            : "AI credits exhausted. Add funds in Settings → Workspace → Usage.",
+        }),
+        { status: rateLimitStatus, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
+
+    const results = settled;
 
     console.log(JSON.stringify({
       route: "draft-shop-drawing-ai",
