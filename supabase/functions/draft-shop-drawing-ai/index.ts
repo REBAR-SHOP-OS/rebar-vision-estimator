@@ -8,7 +8,11 @@ const corsHeaders = {
 };
 
 const MODEL = "google/gemini-3.1-flash-image-preview";
+// Latest OpenAI image model. `gpt-image-1` is the GA name for the new GPT image
+// generator with native engineering/CAD-style line rendering.
 const OPENAI_MODEL = "gpt-image-1";
+const OPENAI_IMAGE_SIZE = "1536x1024"; // landscape sheet aspect, matches shop-drawing layouts
+const OPENAI_IMAGE_QUALITY = "high";    // high-fidelity line work for CAD-style output
 const MAX_SEGMENTS = 3;
 
 interface BarItem {
@@ -42,17 +46,40 @@ function buildPrompt(seg: Segment, bars: BarItem[], projectName: string): string
 
   const sizes = Array.from(new Set(bars.map((b) => b.size).filter(Boolean))).join(", ");
   const marks = Array.from(new Set(bars.map((b) => b.mark).filter(Boolean))).slice(0, 12).join(", ");
+  const segType = (seg.segment_type || "").toLowerCase();
+  const isWall = /wall|shear|sw/.test(segType) || /wall|sw/i.test(seg.name);
+  const isColumn = /col|column|pier|cage/.test(segType);
+  const view = isWall
+    ? "an orthographic ELEVATION view (vertical) with floor-level datum tags on the left (T/SLAB, T/2nd FLR, T/ROOF) and gridlines (A1, A2 …) bubbled at the top"
+    : isColumn
+      ? "an orthographic ELEVATION view of the column/pier with stirrup spacing, plus a small PLAN cross-section to the right"
+      : "a top-down orthographic PLAN view with gridlines (A1, A2 …) bubbled along the top and (AA, AB …) bubbled on the right";
 
   return [
-    `Generate a clean engineering shop-drawing sketch for project "${projectName}".`,
-    `Segment: ${seg.name}${seg.level_label ? ` (level ${seg.level_label})` : ""}${seg.zone_label ? ` zone ${seg.zone_label}` : ""}.`,
-    `Type: ${seg.segment_type || "structural element"}.`,
-    `Show a top-down orthographic plan view of the rebar layout with bar callouts.`,
-    `Include bar marks: ${marks || "as listed"}.`,
-    `Bar sizes used: ${sizes || "metric"}.`,
-    `Bar list (subset):\n${summary || "(no bar items)"}`,
-    `Style: black & white technical line drawing on white background, dimensioned, with a small bar list/legend table on the right side.`,
-    `No shading, no perspective, no color fills. Crisp clean lines like a CAD shop drawing.`,
+    `Produce a professional reinforced-concrete SHOP DRAWING sheet — fabrication-ready, in the style of a Rebar.Shop / Mavericks Detailing CAD plot.`,
+    `Project: "${projectName}". Segment: ${seg.name}${seg.level_label ? ` (level ${seg.level_label})` : ""}${seg.zone_label ? `, zone ${seg.zone_label}` : ""}.`,
+    `Element type: ${seg.segment_type || "structural element"}.`,
+    ``,
+    `LAYOUT — fill the full sheet, white background, landscape orientation:`,
+    `• Main drawing area (left ~80% of sheet): ${view}.`,
+    `• Right ~20%: title-block stack (logo placeholder "REBAR.SHOP", project name, "PART OF STRUCTURE", scale 1:50 or 1:150, drawing no. ${seg.name.toUpperCase().replace(/\s+/g, "")}, revision triangle, detailer/checker rows) and a small LEGEND box (hatched embed plate, hatched bearing-plate pocket, OWSJ bearing plate).`,
+    ``,
+    `DRAWING CONTENT (must be visible and crisp):`,
+    `• Continuous dimension chains along top and bottom edges with numeric values in mm (e.g. 540, 2602, 7575, 3470 …).`,
+    `• Grid bubbles: circles with letters/numbers (A1, A1.a, A2 … on top; AA, AA.1, AB … on right) connected by thin dashed grid lines.`,
+    `• Rebar shown as solid black lines with size callouts in oval bubbles (e.g. "2x2 15M T&B ADD'L", "20M @ 200 EW").`,
+    `• Bar marks to feature: ${marks || "use the supplied list"}.`,
+    `• Bar sizes used (metric Canadian): ${sizes || "10M, 15M, 20M"}.`,
+    `• Hatched rectangles for embed plates (red diagonal hatch) and bearing-plate pockets (blue diagonal hatch). Dashed CMU walls. No other colour.`,
+    `• A floating "REVISION CLOUD" with a triangle "1" near any clouded note.`,
+    ``,
+    `BAR LIST (subset for context, render the major marks visually):`,
+    summary || "(no bar items provided)",
+    ``,
+    `STYLE — non-negotiable:`,
+    `• Looks like a 1:50 / 1:150 AutoCAD plot. Crisp 0.13–0.5 mm linework, monospaced/Arial Narrow text, all caps for labels.`,
+    `• Pure white background, primarily black ink, with the two accent hatches above. NO 3-D, NO perspective, NO shading, NO colour fills, NO photorealism, NO hand-sketch look.`,
+    `• High-resolution vector-clean lines, anti-aliased text, fully readable callouts and dimensions.`,
   ].join("\n");
 }
 
@@ -66,7 +93,9 @@ async function generateImageOpenAI(prompt: string, apiKey: string): Promise<stri
     body: JSON.stringify({
       model: OPENAI_MODEL,
       prompt,
-      size: "1024x1024",
+      size: OPENAI_IMAGE_SIZE,
+      quality: OPENAI_IMAGE_QUALITY,
+      background: "opaque",
       n: 1,
     }),
   });
