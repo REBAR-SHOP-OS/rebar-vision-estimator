@@ -5,13 +5,24 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FileText, Download, Loader2, ShieldAlert, CheckCircle2, Clock, Sparkles } from "lucide-react";
+import { FileText, Download, Loader2, ShieldAlert, CheckCircle2, Clock, Sparkles, ShieldCheck } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 import { exportExcelFile } from "@/lib/excel-export";
 import {
   getCurrentVerifiedEstimate,
   refreshVerifiedEstimateFromWorkspace,
+  commitAllLinesForExport,
 } from "@/lib/verified-estimate/verified-estimate-store";
 
 interface OutputItem {
