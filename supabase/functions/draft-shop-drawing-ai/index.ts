@@ -86,15 +86,44 @@ function buildPrompt(seg: Segment, bars: BarItem[], projectName: string): string
   ].join("\n");
 }
 
-async function generateImageOpenAI(prompt: string, apiKey: string): Promise<string | null> {
-  const resp = await fetch("https://api.openai.com/v1/images/generations", {
+async function refinePromptOpenAI(rawPrompt: string, apiKey: string): Promise<string> {
+  try {
+    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: OPENAI_PLANNER_MODEL,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a CAD detailer. Tighten this shop-drawing prompt for an image model. Preserve all bar marks, dimensions, gridlines, hatches, and title-block content. Output only the refined prompt, no preamble.",
+          },
+          { role: "user", content: rawPrompt },
+        ],
+      }),
+    });
+    if (!resp.ok) return rawPrompt;
+    const data = await resp.json();
+    const refined = data?.choices?.[0]?.message?.content;
+    return typeof refined === "string" && refined.trim().length > 50 ? refined : rawPrompt;
+  } catch (_e) {
+    return rawPrompt;
+  }
+}
+
+async function callOpenAIImage(prompt: string, apiKey: string, model: string): Promise<Response> {
+  return await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: OPENAI_MODEL,
+      model,
       prompt,
       size: OPENAI_IMAGE_SIZE,
       quality: OPENAI_IMAGE_QUALITY,
@@ -102,6 +131,28 @@ async function generateImageOpenAI(prompt: string, apiKey: string): Promise<stri
       n: 1,
     }),
   });
+}
+
+async function generateImageOpenAI(
+  prompt: string,
+  apiKey: string,
+): Promise<{ url: string | null; modelUsed: string }> {
+  const refined = await refinePromptOpenAI(prompt, apiKey);
+  let modelUsed = OPENAI_MODEL;
+  let resp = await callOpenAIImage(refined, apiKey, OPENAI_MODEL);
+
+  // Fallback if the new model isn't available on this account
+  if (resp.status === 404 || resp.status === 400) {
+    const text = await resp.text();
+    if (/model/i.test(text)) {
+      modelUsed = OPENAI_FALLBACK_MODEL;
+      resp = await callOpenAIImage(refined, apiKey, OPENAI_FALLBACK_MODEL);
+    } else {
+      const err: any = new Error(`OpenAI image error ${resp.status}: ${text}`);
+      err.status = resp.status;
+      throw err;
+    }
+  }
 
   if (!resp.ok) {
     const text = await resp.text();
@@ -112,9 +163,9 @@ async function generateImageOpenAI(prompt: string, apiKey: string): Promise<stri
 
   const data = await resp.json();
   const b64 = data?.data?.[0]?.b64_json;
-  if (b64) return `data:image/png;base64,${b64}`;
+  if (b64) return { url: `data:image/png;base64,${b64}`, modelUsed };
   const url = data?.data?.[0]?.url;
-  return typeof url === "string" ? url : null;
+  return { url: typeof url === "string" ? url : null, modelUsed };
 }
 
 async function generateImage(prompt: string, apiKey: string): Promise<string | null> {
