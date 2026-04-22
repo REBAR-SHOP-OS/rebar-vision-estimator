@@ -254,21 +254,30 @@ serve(async (req) => {
     const targets = segsWithBars.length > 0 ? segsWithBars : segs.slice(0, MAX_SEGMENTS);
 
     const projectName = project?.name || "Rebar Project";
-    type ResultRow = { segment_id: string; segment_name: string; image_data_uri: string | null; caption: string; error?: string };
+    type ResultRow = { segment_id: string; segment_name: string; image_data_uri: string | null; caption: string; error?: string; model_used?: string };
     let rateLimitStatus: number | null = null;
+    let lastImageModelUsed: string | null = null;
 
     const settled = await Promise.all(targets.map(async (seg): Promise<ResultRow> => {
       const segBars = barsBySeg.get(seg.id) || [];
       const prompt = buildPrompt(seg, segBars, projectName);
       try {
-        const url = useOpenAI
-          ? await generateImageOpenAI(prompt, openaiKey!)
-          : await generateImage(prompt, lovableKey!);
+        let url: string | null;
+        let modelUsed: string | undefined;
+        if (useOpenAI) {
+          const r = await generateImageOpenAI(prompt, openaiKey!);
+          url = r.url;
+          modelUsed = r.modelUsed;
+          lastImageModelUsed = r.modelUsed;
+        } else {
+          url = await generateImage(prompt, lovableKey!);
+        }
         return {
           segment_id: seg.id,
           segment_name: seg.name,
           image_data_uri: url,
           caption: `${seg.name} — ${segBars.length} bar item(s)`,
+          model_used: modelUsed,
         };
       } catch (e: any) {
         if (e?.status === 429 || e?.status === 402) rateLimitStatus = e.status;
@@ -299,6 +308,8 @@ serve(async (req) => {
       route: "draft-shop-drawing-ai",
       project_id: projectId,
       pinned_model: useOpenAI ? OPENAI_MODEL : MODEL,
+      planner_model: useOpenAI ? OPENAI_PLANNER_MODEL : null,
+      image_model_used: useOpenAI ? (lastImageModelUsed || OPENAI_MODEL) : MODEL,
       provider: useOpenAI ? "openai" : "lovable",
       segments_requested: targets.length,
       images_generated: results.filter((r) => r.image_data_uri).length,
