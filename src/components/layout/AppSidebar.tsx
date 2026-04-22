@@ -27,7 +27,8 @@ import {
   FolderOpen,
   Layers,
   AlertTriangle,
-  FileOutput,
+  Calculator,
+  Pencil,
   Settings,
   Ruler,
   LogOut,
@@ -56,7 +57,8 @@ const projectNav = [
   { title: "Files", suffix: "/files", icon: FolderOpen },
   { title: "Segments", suffix: "/segments", icon: Layers },
   { title: "QA / Issues", suffix: "/qa", icon: AlertTriangle },
-  { title: "Outputs", suffix: "/outputs", icon: FileOutput },
+  { title: "Estimate", suffix: "/estimate", icon: Calculator },
+  { title: "Shop Drawings", suffix: "/shop-drawings", icon: Pencil },
   { title: "Settings", suffix: "/settings", icon: Settings },
 ];
 
