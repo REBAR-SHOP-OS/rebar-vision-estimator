@@ -63,15 +63,18 @@ function resolveSheetLabel(
   sourceFileId: string | null,
   docVersionToFile: DocVersionToFileMap,
   sheets: SheetIndexRow[],
+  fileName?: string | null,
 ): string | null {
   if (!sourceFileId) return null;
   const dvs = [...docVersionToFile.entries()].filter(([, fid]) => fid === sourceFileId).map(([dv]) => dv);
-  if (dvs.length === 0) return null;
-  const forDv = sheets.filter((s) => dvs.includes(s.document_version_id));
-  if (forDv.length === 0) return null;
-  forDv.sort((a, b) => a.page_number - b.page_number);
-  const first = forDv[0];
-  return first.sheet_number || `p${first.page_number}`;
+  const forDv = dvs.length > 0 ? sheets.filter((s) => dvs.includes(s.document_version_id)) : [];
+  if (forDv.length > 0) {
+    forDv.sort((a, b) => a.page_number - b.page_number);
+    const first = forDv[0];
+    return first.sheet_number || `p${first.page_number}`;
+  }
+  // Fallback: file-level reference so provenance is non-null
+  return fileName ? `${fileName} (p1)` : "p1";
 }
 
 /**
