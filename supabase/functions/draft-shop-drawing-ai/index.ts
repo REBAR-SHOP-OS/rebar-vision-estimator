@@ -8,9 +8,12 @@ const corsHeaders = {
 };
 
 const MODEL = "google/gemini-3.1-flash-image-preview";
-// Latest OpenAI image model. `gpt-image-1` is the GA name for the new GPT image
-// generator with native engineering/CAD-style line rendering.
-const OPENAI_MODEL = "gpt-image-1";
+// Latest OpenAI image model. `gpt-image-1.5` is the newest GPT image
+// generator with the strongest prompt adherence for structured CAD-style sheets.
+const OPENAI_MODEL = "gpt-image-1.5";
+const OPENAI_FALLBACK_MODEL = "gpt-image-1";
+// Planner model used to tighten the shop-drawing prompt before image render.
+const OPENAI_PLANNER_MODEL = "gpt-4.1";
 const OPENAI_IMAGE_SIZE = "1536x1024"; // landscape sheet aspect, matches shop-drawing layouts
 const OPENAI_IMAGE_QUALITY = "high";    // high-fidelity line work for CAD-style output
 const MAX_SEGMENTS = 3;
