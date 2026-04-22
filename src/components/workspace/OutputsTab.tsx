@@ -21,6 +21,7 @@ import { logAuditEvent } from "@/lib/audit-logger";
 import { exportExcelFile } from "@/lib/excel-export";
 // @ts-ignore - no types
 import html2pdf from "html2pdf.js";
+import { getLogoDataUri } from "@/lib/logo-base64";
 import {
   getCurrentVerifiedEstimate,
   refreshVerifiedEstimateFromWorkspace,
