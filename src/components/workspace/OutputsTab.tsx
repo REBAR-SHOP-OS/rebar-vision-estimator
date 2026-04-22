@@ -352,45 +352,75 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
       }
 
       const esc = (s: string) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
+      const logoDataUri = await getLogoDataUri().catch(() => "");
       const sheets = usable.map((r, i) => `
         <section class="sheet">
+          <div class="sheet-frame">
           <header class="title">
-            <div>
+            <div class="title-left">
+              ${logoDataUri ? `<img class="brand" src="${logoDataUri}" alt="REBAR.SHOP" />` : ""}
+              <div>
               <div class="proj">${esc(payload.project_name)}</div>
               <div class="client">${esc(payload.client_name)}</div>
+              </div>
             </div>
-            <div class="sheet-no">SD-AI-${String(i + 1).padStart(2, "0")}</div>
+            <div class="sheet-no">
+              <div class="lbl">DRAWING NO.</div>
+              <div class="val">SD-AI-${String(i + 1).padStart(2, "0")}</div>
+            </div>
           </header>
           <h2>${esc(r.segment_name)}</h2>
           <img src="${r.image_data_uri}" alt="${esc(r.caption)}" />
           <p class="caption">${esc(r.caption)}</p>
           <footer>AI visual draft — not for fabrication. Verify against deterministic shop drawing &amp; bar list.</footer>
+          </div>
         </section>`).join("\n");
 
       const html = `<!doctype html><html><head><meta charset="utf-8" />
         <title>AI Visual Draft — ${esc(payload.project_name)}</title>
         <style>
-          @page { size: letter landscape; margin: 12mm; }
+          @page { size: letter landscape; margin: 0.4in; }
           body { font-family: Arial, sans-serif; margin: 0; color: #111; }
-          .sheet { page-break-after: always; padding: 16px; border: 1px solid #222; margin: 12px; }
+          .sheet { page-break-after: always; margin: 0; padding: 6px; }
           .sheet:last-child { page-break-after: auto; }
-          .title { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #222; padding-bottom: 8px; }
-          .proj { font-weight: 700; font-size: 16px; }
+          .sheet-frame { border: 2px solid #111; outline: 0.5px solid #111; outline-offset: 4px; padding: 14px 16px; }
+          .title { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #111; padding-bottom: 8px; gap: 16px; }
+          .title-left { display: flex; align-items: center; gap: 12px; }
+          .brand { max-height: 44px; max-width: 130px; object-fit: contain; display: block; }
+          .proj { font-weight: 700; font-size: 15px; letter-spacing: 0.2px; }
           .client { font-size: 12px; color: #555; }
-          .sheet-no { font-weight: 700; font-size: 14px; }
+          .sheet-no { border: 1px solid #111; padding: 4px 10px; text-align: center; min-width: 110px; }
+          .sheet-no .lbl { font-size: 9px; color: #555; letter-spacing: 0.5px; }
+          .sheet-no .val { font-weight: 700; font-size: 14px; font-family: ui-monospace, Menlo, monospace; }
           h2 { font-size: 14px; margin: 10px 0 8px; }
-          img { max-width: 100%; max-height: 70vh; border: 1px solid #ccc; display: block; margin: 0 auto; }
+          .sheet img:not(.brand) { max-width: 100%; max-height: 6.6in; border: 1px solid #111; display: block; margin: 0 auto; }
           .caption { font-size: 11px; color: #444; margin-top: 6px; text-align: center; }
-          footer { margin-top: 8px; font-size: 10px; color: #888; border-top: 1px dashed #aaa; padding-top: 6px; }
+          footer { margin-top: 8px; font-size: 10px; color: #555; border-top: 1px solid #111; padding-top: 6px; }
         </style></head><body>${sheets}</body></html>`;
 
-      const blob = new Blob([html], { type: "text/html" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `ai-visual-draft-${projectId.slice(0, 8)}.html`;
-      a.click();
-      window.open(url, "_blank");
+      // Render to a real PDF (landscape letter) instead of HTML download
+      const container = document.createElement("div");
+      container.style.position = "fixed";
+      container.style.left = "-10000px";
+      container.style.top = "0";
+      container.style.width = "11in";
+      container.innerHTML = html;
+      document.body.appendChild(container);
+      try {
+        await html2pdf()
+          .set({
+            margin: 0.4,
+            filename: `ai-visual-draft-${projectId.slice(0, 8)}.pdf`,
+            image: { type: "jpeg", quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
+            jsPDF: { unit: "in", format: "letter", orientation: "landscape" },
+            pagebreak: { mode: ["css", "legacy"] },
+          })
+          .from(container)
+          .save();
+      } finally {
+        document.body.removeChild(container);
+      }
 
       try {
         await supabase.from("shop_drawings").insert({
