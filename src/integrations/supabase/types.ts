@@ -1789,6 +1789,56 @@ export type Database = {
         }
         Relationships: []
       }
+      verified_estimate_results: {
+        Row: {
+          blocked_reasons: Json | null
+          content_hash: string
+          created_at: string
+          id: string
+          inputs_hash: string | null
+          is_current: boolean
+          project_id: string
+          result_json: Json
+          status: string
+          user_id: string
+          version_number: number
+        }
+        Insert: {
+          blocked_reasons?: Json | null
+          content_hash: string
+          created_at?: string
+          id?: string
+          inputs_hash?: string | null
+          is_current?: boolean
+          project_id: string
+          result_json: Json
+          status: string
+          user_id: string
+          version_number?: number
+        }
+        Update: {
+          blocked_reasons?: Json | null
+          content_hash?: string
+          created_at?: string
+          id?: string
+          inputs_hash?: string | null
+          is_current?: boolean
+          project_id?: string
+          result_json?: Json
+          status?: string
+          user_id?: string
+          version_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "verified_estimate_results_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
