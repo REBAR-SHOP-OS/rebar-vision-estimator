@@ -8,9 +8,12 @@ const corsHeaders = {
 };
 
 const MODEL = "google/gemini-3.1-flash-image-preview";
-// Latest OpenAI image model. `gpt-image-1` is the GA name for the new GPT image
-// generator with native engineering/CAD-style line rendering.
-const OPENAI_MODEL = "gpt-image-1";
+// Latest OpenAI image model. `gpt-image-1.5` is the newest GPT image
+// generator with the strongest prompt adherence for structured CAD-style sheets.
+const OPENAI_MODEL = "gpt-image-1.5";
+const OPENAI_FALLBACK_MODEL = "gpt-image-1";
+// Planner model used to tighten the shop-drawing prompt before image render.
+const OPENAI_PLANNER_MODEL = "gpt-4.1";
 const OPENAI_IMAGE_SIZE = "1536x1024"; // landscape sheet aspect, matches shop-drawing layouts
 const OPENAI_IMAGE_QUALITY = "high";    // high-fidelity line work for CAD-style output
 const MAX_SEGMENTS = 3;
@@ -83,15 +86,44 @@ function buildPrompt(seg: Segment, bars: BarItem[], projectName: string): string
   ].join("\n");
 }
 
-async function generateImageOpenAI(prompt: string, apiKey: string): Promise<string | null> {
-  const resp = await fetch("https://api.openai.com/v1/images/generations", {
+async function refinePromptOpenAI(rawPrompt: string, apiKey: string): Promise<string> {
+  try {
+    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: OPENAI_PLANNER_MODEL,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a CAD detailer. Tighten this shop-drawing prompt for an image model. Preserve all bar marks, dimensions, gridlines, hatches, and title-block content. Output only the refined prompt, no preamble.",
+          },
+          { role: "user", content: rawPrompt },
+        ],
+      }),
+    });
+    if (!resp.ok) return rawPrompt;
+    const data = await resp.json();
+    const refined = data?.choices?.[0]?.message?.content;
+    return typeof refined === "string" && refined.trim().length > 50 ? refined : rawPrompt;
+  } catch (_e) {
+    return rawPrompt;
+  }
+}
+
+async function callOpenAIImage(prompt: string, apiKey: string, model: string): Promise<Response> {
+  return await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: OPENAI_MODEL,
+      model,
       prompt,
       size: OPENAI_IMAGE_SIZE,
       quality: OPENAI_IMAGE_QUALITY,
@@ -99,6 +131,28 @@ async function generateImageOpenAI(prompt: string, apiKey: string): Promise<stri
       n: 1,
     }),
   });
+}
+
+async function generateImageOpenAI(
+  prompt: string,
+  apiKey: string,
+): Promise<{ url: string | null; modelUsed: string }> {
+  const refined = await refinePromptOpenAI(prompt, apiKey);
+  let modelUsed = OPENAI_MODEL;
+  let resp = await callOpenAIImage(refined, apiKey, OPENAI_MODEL);
+
+  // Fallback if the new model isn't available on this account
+  if (resp.status === 404 || resp.status === 400) {
+    const text = await resp.text();
+    if (/model/i.test(text)) {
+      modelUsed = OPENAI_FALLBACK_MODEL;
+      resp = await callOpenAIImage(refined, apiKey, OPENAI_FALLBACK_MODEL);
+    } else {
+      const err: any = new Error(`OpenAI image error ${resp.status}: ${text}`);
+      err.status = resp.status;
+      throw err;
+    }
+  }
 
   if (!resp.ok) {
     const text = await resp.text();
@@ -109,9 +163,9 @@ async function generateImageOpenAI(prompt: string, apiKey: string): Promise<stri
 
   const data = await resp.json();
   const b64 = data?.data?.[0]?.b64_json;
-  if (b64) return `data:image/png;base64,${b64}`;
+  if (b64) return { url: `data:image/png;base64,${b64}`, modelUsed };
   const url = data?.data?.[0]?.url;
-  return typeof url === "string" ? url : null;
+  return { url: typeof url === "string" ? url : null, modelUsed };
 }
 
 async function generateImage(prompt: string, apiKey: string): Promise<string | null> {
@@ -200,21 +254,30 @@ serve(async (req) => {
     const targets = segsWithBars.length > 0 ? segsWithBars : segs.slice(0, MAX_SEGMENTS);
 
     const projectName = project?.name || "Rebar Project";
-    type ResultRow = { segment_id: string; segment_name: string; image_data_uri: string | null; caption: string; error?: string };
+    type ResultRow = { segment_id: string; segment_name: string; image_data_uri: string | null; caption: string; error?: string; model_used?: string };
     let rateLimitStatus: number | null = null;
+    let lastImageModelUsed: string | null = null;
 
     const settled = await Promise.all(targets.map(async (seg): Promise<ResultRow> => {
       const segBars = barsBySeg.get(seg.id) || [];
       const prompt = buildPrompt(seg, segBars, projectName);
       try {
-        const url = useOpenAI
-          ? await generateImageOpenAI(prompt, openaiKey!)
-          : await generateImage(prompt, lovableKey!);
+        let url: string | null;
+        let modelUsed: string | undefined;
+        if (useOpenAI) {
+          const r = await generateImageOpenAI(prompt, openaiKey!);
+          url = r.url;
+          modelUsed = r.modelUsed;
+          lastImageModelUsed = r.modelUsed;
+        } else {
+          url = await generateImage(prompt, lovableKey!);
+        }
         return {
           segment_id: seg.id,
           segment_name: seg.name,
           image_data_uri: url,
           caption: `${seg.name} — ${segBars.length} bar item(s)`,
+          model_used: modelUsed,
         };
       } catch (e: any) {
         if (e?.status === 429 || e?.status === 402) rateLimitStatus = e.status;
@@ -245,6 +308,8 @@ serve(async (req) => {
       route: "draft-shop-drawing-ai",
       project_id: projectId,
       pinned_model: useOpenAI ? OPENAI_MODEL : MODEL,
+      planner_model: useOpenAI ? OPENAI_PLANNER_MODEL : null,
+      image_model_used: useOpenAI ? (lastImageModelUsed || OPENAI_MODEL) : MODEL,
       provider: useOpenAI ? "openai" : "lovable",
       segments_requested: targets.length,
       images_generated: results.filter((r) => r.image_data_uri).length,
