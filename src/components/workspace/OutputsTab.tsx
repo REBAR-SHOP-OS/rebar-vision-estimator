@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FileText, Download, Loader2, ShieldAlert, CheckCircle2, Clock } from "lucide-react";
+import { FileText, Download, Loader2, ShieldAlert, CheckCircle2, Clock, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 import { exportExcelFile } from "@/lib/excel-export";
@@ -28,6 +28,7 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
   const [openIssues, setOpenIssues] = useState(0);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [aiDrafting, setAiDrafting] = useState(false);
   const [verifiedRow, setVerifiedRow] = useState<{
     id: string;
     status: string;
