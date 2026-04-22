@@ -193,29 +193,7 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
           toast.error("No shop drawing data in canonical snapshot — add bar items or run chat estimate first.");
           return;
         }
-        // Render HTML offscreen and convert to a real PDF
-        const container = document.createElement("div");
-        container.style.position = "fixed";
-        container.style.left = "-10000px";
-        container.style.top = "0";
-        container.style.width = "11in";
-        container.innerHTML = html;
-        document.body.appendChild(container);
-        try {
-          await html2pdf()
-            .set({
-              margin: 0.4,
-              filename: `shop-drawing-${projectId.slice(0, 8)}.pdf`,
-              image: { type: "jpeg", quality: 0.98 },
-              html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-              jsPDF: { unit: "in", format: "letter", orientation: "landscape" },
-              pagebreak: { mode: ["css", "legacy"] },
-            })
-            .from(container)
-            .save();
-        } finally {
-          document.body.removeChild(container);
-        }
+        await renderHtmlToPdf(html, `shop-drawing-${projectId.slice(0, 8)}.pdf`);
         try {
           await (supabase as any).from("export_jobs").insert({
             project_id: projectId,
