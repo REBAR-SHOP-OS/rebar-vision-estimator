@@ -1,63 +1,67 @@
 
 
-# Fix: Use Real Shop Drawing Data to Fine-Tune Estimation
+# Add AI Image Drafting to Shop Drawings
 
-## Problem Summary
-The current project has 3 generic segments ("Foundation Plan", "Parking Structure Concrete", "Suspended Slabs/Beams") with 19 fabricated bar_items (marks like A1, B1, C1) that don't match the real shop drawings at all.
+## What This Does
 
-The real SD06-SD12 drawings contain:
-- **SD06**: Foundation Plan — SOG mesh (152X152XMW18.7/18.7, 510 sheets), plus 10M corner/continuous bars (B1001, BS31, BS38, BS48)
-- **SD07**: Isolated Footings F1-F8 schedule (F1=1000x1000, F2=1500x1500 ×8, F3=1600x1600 ×4, F4=1700x1700 ×4, F5=1800x1800 ×4, F6=2000x2000 ×2, F7=2100x2100 ×1, F8=2200x2200 ×4), plus 10M/15M tie wire bars
-- **SD08**: W1 Wall Elevation — 10M verticals, 15M/20M continuous, dowels, ties, pier D/V bars
-- **SD09**: W1/W2 Wall Elevations continued — pier dowels, corner bars, slab dowels
-- **SD10**: W3/W4 Wall Elevations — wall bars, 20M continuous, 10M verticals
-- **SD11**: Pier/Grade Beam details — 15M ties, 20M mains, 10M stirrups
-- **SD12**: W5/W6 Wall Elevations — wall rebar
+Adds an **"AI Visual Draft"** option to the Draft Shop Drawings export. Instead of (or in addition to) the deterministic 6-zone HTML template, the system will use **Nano Banana 2** (`google/gemini-3.1-flash-image-preview`) — Lovable AI's fastest pro-quality image model — to generate a visual sketch of each segment's rebar layout (plan view, elevation, sections) based on the real bar list and segment data.
+
+> Note: Lovable AI does **not** currently offer a GPT image model (OpenAI's image API isn't on the gateway). The closest equivalent — and arguably better for engineering sketches — is **Nano Banana 2** (Gemini 3.1 Flash Image Preview). If you specifically want an OpenAI model, we'd need to add a custom OpenAI API key. Default plan uses Nano Banana 2.
+
+## How It Works
+
+```text
+[Outputs tab] → "Draft Shop Drawings" → Export menu:
+   ├─ HTML Sheet (current deterministic template)   ← unchanged
+   └─ AI Visual Draft (NEW)
+         ↓
+   For each segment with bar items:
+      1. Build prompt from bar list (marks, sizes, qty, shape codes)
+      2. Call edge function → Lovable AI Gateway (Nano Banana 2)
+      3. Receive base64 PNG sketch (plan + bar callouts)
+      4. Embed all images into a single printable HTML sheet
+      5. Save to `shop_drawings` table with `options.kind = "ai_visual"`
+```
 
 ## Plan
 
-### 1. Fine-tune `auto-segments` prompt to recognize real drawing elements
+### 1. New edge function: `draft-shop-drawing-ai`
+**File**: `supabase/functions/draft-shop-drawing-ai/index.ts`
+- Accepts `{ projectId, segmentId? }`
+- Loads segments + bar_items + project metadata
+- For each segment, builds a structured prompt:
+  > "Generate a clean engineering plan-view sketch of [segment name]. Show rebar layout with bar marks [B1001, BS31, ...], sizes [10M, 15M, 20M], spacings, and a bar list table. Black & white, top-down orthographic, dimensioned, technical drawing style, no shading."
+- Calls `google/gemini-3.1-flash-image-preview` via Lovable AI Gateway with `modalities: ["image", "text"]`
+- Returns array of `{ segment_id, segment_name, image_data_uri, caption }`
+- Handles 429 / 402 errors with clear toast messages
 
-**File: `supabase/functions/auto-segments/index.ts`**
+### 2. Extend `OutputsTab.tsx` — add second export button
+**File**: `src/components/workspace/OutputsTab.tsx` (~30 lines added)
+- Split the existing Shop Drawing card into two actions:
+  - **"Export HTML Sheet"** (existing flow, unchanged)
+  - **"Generate AI Visual Draft"** (NEW)
+- New flow:
+  1. Show progress toast ("Drafting visual sheets with AI…")
+  2. Invoke `draft-shop-drawing-ai` edge function
+  3. Wrap returned images in a printable HTML page (one image per segment, with title block + bar list table beside each)
+  4. Save to `shop_drawings` table with `options.kind = "ai_visual"`, increment version
+  5. Trigger download + open in new tab for Ctrl+P
+- Reuses existing `verified-estimate` gate (export blocked if not verified)
+- Reuses existing `logAuditEvent` and `export_jobs` insert
 
-Update the AI prompt (lines 121-157) to include:
-- Explicit instruction to parse bar list tables for bar marks and extract element references (F-1 through F-8, W1-W8, P1-P8, SOG, etc.)
-- Add reference to RSIC standards already stored in `agent_knowledge` — query the knowledge table and include key rules in the prompt context
-- Increase `max_tokens` from 3000 to 4000 to allow more detailed segment descriptions
-- Add instruction: "If bar lists are found, extract ACTUAL element names from bar marks (e.g., B1001 = SOG slab bar, BS03 = Footing F-1 bar, B2001 = Wall corner bar). Map bar marks to structural elements."
-
-### 2. Fine-tune `auto-estimate` prompt with RSIC weight standards
-
-**File: `supabase/functions/auto-estimate/index.ts`**
-
-Update the prompt (lines 106-141) to:
-- Fetch `agent_knowledge` entries for RSIC standards and include mass table + estimating rules in system prompt
-- Add instruction to parse the drawing_search_index text directly (not just pdf_metadata which may be empty for large files)
-- Query `drawing_search_index` for the specific segment's drawing pages and pass that text to the AI
-- Add explicit rule: "Parse bar list tables from the drawing text. Each row typically has: Bar Mark, Qty, Size, Total Length, Type, and shape dimensions. Use these EXACT values."
-
-### 3. Fine-tune `auto-bar-schedule` prompt to use real bar marks
-
-**File: `supabase/functions/auto-bar-schedule/index.ts`**
-
-Update the prompt (lines 67-94) to:
-- Also fetch `drawing_search_index` text for the segment's related pages
-- Add instruction: "Use the ACTUAL bar marks from the drawings (e.g., BS03, B1001, B2001) instead of generic sequential marks (A1, A2, B1)."
-- Include bar shape dimension columns from the drawing text so cut_length and shape_code are accurate
-
-### 4. Delete incorrect data and re-run
-
-**Database migration**: Delete the 3 wrong segments and their 19 fabricated bar_items for project `2fbf1ab0-a319-4f66-bbca-2571b0573ee6` so the user can re-run auto-segments with the improved prompts.
+### 3. Optional small UI flag
+The `shop_drawings.options` JSONB already supports arbitrary keys — no migration needed. History entries in `ShopDrawingModal.tsx` will show `kind: ai_visual` if you later open them.
 
 ## Technical Details
 
-All three edge functions currently only read drawing text from `document_versions.pdf_metadata`, which is empty for large PDFs. The fix adds a fallback to query `drawing_search_index` (which was populated by the OCR pipeline we built earlier) and passes that text to the AI prompts.
-
-The RSIC standards data is already stored in `agent_knowledge` — we just need to query it and inject it into the prompts.
+- **Model**: `google/gemini-3.1-flash-image-preview` (Nano Banana 2 — pro-quality, fast)
+- **Gateway**: `https://ai.gateway.lovable.dev/v1/chat/completions` with `modalities: ["image", "text"]`
+- **Auth**: `LOVABLE_API_KEY` (already in secrets)
+- **Image size**: base64 PNGs returned by gateway, embedded inline (no storage upload needed for v1)
+- **Cost guard**: cap at first 6 segments per call to control AI credit usage
+- **Determinism**: AI sketches are visual drafts only — the deterministic HTML template remains the source of truth for fabrication numbers
 
 ## Files Modified
-- `supabase/functions/auto-segments/index.ts` — enhanced prompt with bar list parsing instructions + knowledge query
-- `supabase/functions/auto-estimate/index.ts` — add drawing_search_index query + RSIC standards injection
-- `supabase/functions/auto-bar-schedule/index.ts` — add drawing_search_index context + real bar mark instructions
-- Database migration to clean wrong segments/bar_items for this project
+- `supabase/functions/draft-shop-drawing-ai/index.ts` — NEW (~120 lines)
+- `src/components/workspace/OutputsTab.tsx` — add AI Visual button + handler (~50 lines)
 
