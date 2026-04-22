@@ -170,21 +170,15 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
         }
         const canon = ver.result_json as { quote?: { bar_list?: any[]; size_breakdown_kg?: Record<string, number> } };
         const projRes2 = await supabase.from("projects").select("name, client_name").eq("id", projectId).single();
-        let opened = false;
+        let html: string | null = null;
         if (canon?.quote?.bar_list && canon.quote.bar_list.length > 0) {
           const sizeBreak = canon.quote.size_breakdown_kg || {};
-          const html = buildShopDrawingHtml({
+          html = buildShopDrawingHtml({
             projectName: projRes2.data?.name || "Rebar Takeoff",
             clientName: projRes2.data?.client_name || "",
             barList: canon.quote.bar_list as any[],
             sizeBreakdown: sizeBreak,
           });
-          const blob = new Blob([html], { type: "text/html" });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url; a.download = `shop-drawing-${projectId.slice(0, 8)}.html`; a.click();
-          window.open(url, "_blank");
-          opened = true;
         } else {
           const { data } = await supabase.from("shop_drawings")
             .select("html_content")
@@ -192,31 +186,47 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle();
-          if (data?.html_content) {
-            const blob = new Blob([data.html_content], { type: "text/html" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url; a.download = `shop-drawing-${projectId.slice(0, 8)}.html`; a.click();
-            window.open(url, "_blank");
-            opened = true;
-          }
+          if (data?.html_content) html = data.html_content;
         }
-        if (!opened) {
+        if (!html) {
           toast.error("No shop drawing data in canonical snapshot — add bar items or run chat estimate first.");
           return;
+        }
+        // Render HTML offscreen and convert to a real PDF
+        const container = document.createElement("div");
+        container.style.position = "fixed";
+        container.style.left = "-10000px";
+        container.style.top = "0";
+        container.style.width = "11in";
+        container.innerHTML = html;
+        document.body.appendChild(container);
+        try {
+          await html2pdf()
+            .set({
+              margin: 0.4,
+              filename: `shop-drawing-${projectId.slice(0, 8)}.pdf`,
+              image: { type: "jpeg", quality: 0.98 },
+              html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
+              jsPDF: { unit: "in", format: "letter", orientation: "landscape" },
+              pagebreak: { mode: ["css", "legacy"] },
+            })
+            .from(container)
+            .save();
+        } finally {
+          document.body.removeChild(container);
         }
         try {
           await (supabase as any).from("export_jobs").insert({
             project_id: projectId,
             user_id: user.id,
             verified_estimate_result_id: ver.id,
-            export_type: "shop_drawing_html",
+            export_type: "shop_drawing_pdf",
             status: "completed",
             metadata: {},
           });
         } catch { /* export_jobs optional */ }
-        await logAuditEvent(user.id, "exported", "export", undefined, projectId, undefined, { export_type: "shop_drawing_html" });
-        toast.success("Shop drawing downloaded — use Ctrl+P / Cmd+P to save as PDF");
+        await logAuditEvent(user.id, "exported", "export", undefined, projectId, undefined, { export_type: "shop_drawing_pdf" });
+        toast.success("Shop drawing PDF downloaded");
       } else if (type === "estimate") {
         let ver = await getCurrentVerifiedEstimate(supabase, projectId);
         if (!ver) {
