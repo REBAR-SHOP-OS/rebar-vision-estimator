@@ -1,89 +1,54 @@
 
 
-# Modularize: Split Estimate and Shop Drawing into Separate Modules
+# Fine-tune Shop Drawing Frame + Refresh Logo
 
-Restructure the workspace so **Estimation** and **Shop Drawings** are two clearly separated modules with their own sidebar entries, routes, and tabs — instead of being mixed together inside the single project workspace's "Outputs" tab.
+Two minimal patches: replace the brand logo asset with the uploaded REBAR.SHOP coin image so it appears everywhere it's already wired (PDF exports, shop drawings, quote PDFs, sidebar), and tighten the shop-drawing **sheet frame + title block** so the printed sheet looks like a proper CAD plot.
 
-## Current state
+## Part 1 — Logo refresh (zero code change)
 
-- One workspace at `/app/project/:id` with tabs: Overview, Files, Segments, QA, Outputs, Settings.
-- "Outputs" tab mixes: Estimate Summary, Draft Shop Drawings, Issue Report, Quote Packages.
-- Shop drawing UI lives in `OutputsTab.tsx` + `ShopDrawingModal.tsx` + `DrawingViewsPanel.tsx` (per-segment).
-- Sidebar (`AppSidebar.tsx`) has only top-level entries (Dashboard, Standards, Orders).
+- Copy `user-uploads://ChatGPT-Image-Nov-7-2025-03_09_08-PM-220x71.png.bv.webp` → `src/assets/logo.png` (overwrite).
+- All 18 files already import via `@/assets/logo.png` or `getLogoDataUri()` — no code edits needed.
+- The base64 cache in `logo-base64.ts` rebuilds on next page load.
 
-## Target state
+Affected automatically: shop drawing title block, quote PDF header, Excel exports, sidebar, auth page, AI Visual Draft watermark.
 
-Two distinct modules accessible from the project workspace:
+## Part 2 — Shop drawing frame fine-tune
 
-```text
-Project Workspace
-├── Overview
-├── Files
-├── Segments
-├── QA / Issues
-├── Estimate        ← NEW (was part of Outputs)
-│   ├── Summary
-│   ├── Bar List
-│   ├── Quote Packages
-│   └── Issue Report
-├── Shop Drawings   ← NEW (was part of Outputs + per-segment)
-│   ├── Generate (per segment / project)
-│   ├── History
-│   └── AI Visual Drafts
-└── Settings
-```
+Single file: **`supabase/functions/generate-shop-drawing/shop-drawing-template.ts`** (CSS + 1 small HTML block, ~25 lines touched).
 
-"Outputs" tab is retired; each module owns its own outputs.
+### Frame upgrades (title block + sheet border)
 
-## Minimal-patch implementation
+1. **Outer sheet border** — change `.sheet-frame` from a single 2px line to a proper CAD-style **double border** (2px outer + 0.5px inner with 4px gutter). Adds professional "drawing sheet" feel.
 
-### 1. New tab components (extract, don't rewrite)
-- **`src/components/workspace/EstimateTab.tsx`** — move estimate cards (Estimate Summary, Quote Packages, Issue Report, exports) out of `OutputsTab.tsx`. Reuse `EstimateGrid`, `EstimateSummaryCards`, `ExportButtons`, `quote-pdf-export.ts` as-is.
-- **`src/components/workspace/ShopDrawingsTab.tsx`** — move shop-drawing cards out of `OutputsTab.tsx`. Reuse `ShopDrawingModal`, `DrawingViewsPanel`, `draft-shop-drawing-ai` edge function as-is. Add a History list (already exists inside the modal — surface it as the tab's main view).
+2. **Title block layout** — current block stacks logo over a 2-column table. Refine to a 3-zone layout matching ANSI/ISO title blocks:
+   - **Top zone**: larger logo (48px) left, company name + tagline right, separated by a 1px rule.
+   - **Middle zone**: project / customer / address as a clean 2-row table, monospace values.
+   - **Bottom zone**: drawing-no, scale, sheet x/y, revision triangle, date — laid out in a 4-cell grid (not the current footer row).
 
-### 2. Router additions (`src/App.tsx`)
-Add two routes alongside existing ones:
-```text
-/app/project/:id/estimate
-/app/project/:id/shop-drawings
-```
-Both render `ProjectWorkspace` (same shell), which already routes by URL suffix.
+3. **Logo rendering** — the new logo is a wide rectangle (220×71). Switch from circular `border-radius:50%` crop to a clean rectangular embed with `object-fit: contain`, max-height 44px, preserves the gold coin + dark bar without distortion.
 
-### 3. Tab wiring (`src/pages/ProjectWorkspace.tsx`)
-- Add to `TAB_SUFFIXES`: `"/estimate": "estimate"`, `"/shop-drawings": "shop-drawings"`.
-- Add to `suffixMap` in `handleTabChange`.
-- Replace the single `Outputs` `TabsTrigger` with two: `Estimate` and `Shop Drawings`.
-- Add two `TabsContent` blocks rendering the new components.
-- **Remove** the old `outputs` tab + route (or keep `/outputs` as a redirect to `/estimate` for back-compat — one line).
+4. **Border color + weight consistency** — unify all internal panel borders to `#111` at 1px (some are 2px today, looks uneven on print). Title block keeps 2px to anchor it.
 
-### 4. Sidebar (optional, `AppSidebar.tsx`)
-When a project is active, show two sub-links under the project: "Estimate" and "Shop Drawings". Keep this minimal — only if a project is currently open.
+5. **Print margins** — bump `@page` margin from current setting to `0.4in` so the doubled border doesn't touch sheet edge in browser print-to-PDF.
 
-### 5. Files NOT touched
-- `OutputsTab.tsx` — kept for one release as a thin re-export, or deleted if you confirm.
-- `ShopDrawingModal.tsx`, `DrawingViewsPanel.tsx`, `EstimateGrid.tsx`, `ExportButtons.tsx`, all edge functions, all DB tables, RLS policies — **zero changes**.
-- No DB migration needed.
+6. **Revision triangle** — replace current text "△ 1" with a proper SVG triangle so it renders crisp at any zoom.
+
+### Out of scope
+
+- AI Visual Draft (`draft-shop-drawing-ai`) prompt — already uses `REBAR.SHOP` placeholder; the generated raster image will reflect the new brand naturally on next render. No prompt change.
+- DB / RLS / edge function contracts — untouched.
+- All other components, exports, Excel templates — untouched.
 
 ## Files changed
 
 | File | Change |
 |---|---|
-| `src/components/workspace/EstimateTab.tsx` | NEW — extracted estimate cards |
-| `src/components/workspace/ShopDrawingsTab.tsx` | NEW — extracted shop drawing cards + history |
-| `src/pages/ProjectWorkspace.tsx` | +2 tabs, +2 suffix mappings, −1 (outputs) |
-| `src/App.tsx` | +2 routes |
-| `src/components/workspace/OutputsTab.tsx` | Deleted (or kept as redirect) |
-| `src/components/layout/AppSidebar.tsx` | Optional: project sub-nav |
+| `src/assets/logo.png` | Overwrite with uploaded REBAR.SHOP image |
+| `supabase/functions/generate-shop-drawing/shop-drawing-template.ts` | Title block HTML + frame CSS refinements (~25 lines) |
 
-Net: 2 new files, 2–3 edits, 0 backend changes.
+Net: 1 asset replace + 1 file edit. No DB, no new deps, no behavioral changes.
 
 ## Risk
 
-Very low. Pure UI reorganization; all data flows, edge functions, modals, and exports stay intact. Old `/outputs` URLs can redirect to `/estimate` to avoid broken bookmarks.
-
-## Confirm before I implement
-
-1. **Retire "Outputs" tab entirely**, or keep it as a redirect to `/estimate`?
-2. **Sidebar sub-nav** under the active project — yes or skip for now?
-3. **Issue Report** — belongs under Estimate, or keep it solely in the existing QA tab?
+Very low. Logo is a drop-in same-format swap. Template changes are CSS + one HTML block reflow inside an isolated `<iframe srcDoc>` — cannot affect the rest of the app.
 
