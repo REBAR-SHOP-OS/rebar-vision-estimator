@@ -428,16 +428,33 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
                   </p>
                 </div>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!o.available || exporting === o.type}
-                className="text-xs h-8"
-                onClick={() => handleExport(o.type)}
-              >
-                {exporting === o.type ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Download className="h-3.5 w-3.5 mr-1" />}
-                Export
-              </Button>
+              <div className="flex items-center gap-2">
+                {o.type === "shop_drawing" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!o.available || aiDrafting}
+                    className="text-xs h-8"
+                    onClick={handleAiVisualDraft}
+                    title="Generate AI visual sketches with Nano Banana 2"
+                  >
+                    {aiDrafting
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                      : <Sparkles className="h-3.5 w-3.5 mr-1" />}
+                    AI Visual
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!o.available || exporting === o.type}
+                  className="text-xs h-8"
+                  onClick={() => handleExport(o.type)}
+                >
+                  {exporting === o.type ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Download className="h-3.5 w-3.5 mr-1" />}
+                  Export
+                </Button>
+              </div>
             </CardContent>
           </Card>
         ))}
