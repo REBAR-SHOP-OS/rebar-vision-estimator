@@ -1,38 +1,89 @@
 
 
-# Upgrade "Generate Draft" + "AI Visual" to GPT Image 1.5
+# Modularize: Split Estimate and Shop Drawing into Separate Modules
 
-Both buttons highlighted in your screenshots (`Drawings tab → Generate Draft` per-segment, and `Outputs tab → AI Visual` per-project) hit the same edge function: `draft-shop-drawing-ai`. This patch upgrades only the OpenAI path inside that function — no UI changes, no other files.
+Restructure the workspace so **Estimation** and **Shop Drawings** are two clearly separated modules with their own sidebar entries, routes, and tabs — instead of being mixed together inside the single project workspace's "Outputs" tab.
 
-## Single-file patch
+## Current state
 
-**`supabase/functions/draft-shop-drawing-ai/index.ts`** (~15 lines changed)
+- One workspace at `/app/project/:id` with tabs: Overview, Files, Segments, QA, Outputs, Settings.
+- "Outputs" tab mixes: Estimate Summary, Draft Shop Drawings, Issue Report, Quote Packages.
+- Shop drawing UI lives in `OutputsTab.tsx` + `ShopDrawingModal.tsx` + `DrawingViewsPanel.tsx` (per-segment).
+- Sidebar (`AppSidebar.tsx`) has only top-level entries (Dashboard, Standards, Orders).
 
-1. **Model bump**
-   - `OPENAI_MODEL = "gpt-image-1.5"` (was `gpt-image-1`)
-   - Add `OPENAI_PLANNER_MODEL = "gpt-4.1"` for one-shot prompt refinement
-   - Keep size `1536x1024` and quality `high`
+## Target state
 
-2. **New helper `refinePromptOpenAI(rawPrompt, apiKey)`**
-   - One call to `gpt-4.1` chat completions
-   - System: "You are a CAD detailer. Tighten this shop-drawing prompt for an image model. Preserve all bar marks, dimensions, gridlines, hatches, and title-block content. Output only the refined prompt."
-   - On any failure → return the original prompt (non-blocking fallback)
+Two distinct modules accessible from the project workspace:
 
-3. **Wire into the OpenAI branch only**
-   - Inside `generateImageOpenAI`, refine the prompt once per segment before calling `/v1/images/generations`
-   - Add 404-fallback: if `gpt-image-1.5` returns 404 (not yet enabled on the account), retry once with `gpt-image-1` so the button never hard-fails
+```text
+Project Workspace
+├── Overview
+├── Files
+├── Segments
+├── QA / Issues
+├── Estimate        ← NEW (was part of Outputs)
+│   ├── Summary
+│   ├── Bar List
+│   ├── Quote Packages
+│   └── Issue Report
+├── Shop Drawings   ← NEW (was part of Outputs + per-segment)
+│   ├── Generate (per segment / project)
+│   ├── History
+│   └── AI Visual Drafts
+└── Settings
+```
 
-4. **Logging**
-   - Add `planner_model` and `image_model_used` to the existing structured `console.log`
+"Outputs" tab is retired; each module owns its own outputs.
 
-## Untouched
+## Minimal-patch implementation
 
-- Lovable AI / Gemini Nano-Banana branch (used when `provider !== "openai"`)
-- Frontend (`DrawingViewsPanel.tsx`, `OutputsTab.tsx`) — already passes `provider`
-- Prompt template `buildPrompt(...)` — kept as-is; planner only refines its output
-- DB schema, RLS, config.toml
+### 1. New tab components (extract, don't rewrite)
+- **`src/components/workspace/EstimateTab.tsx`** — move estimate cards (Estimate Summary, Quote Packages, Issue Report, exports) out of `OutputsTab.tsx`. Reuse `EstimateGrid`, `EstimateSummaryCards`, `ExportButtons`, `quote-pdf-export.ts` as-is.
+- **`src/components/workspace/ShopDrawingsTab.tsx`** — move shop-drawing cards out of `OutputsTab.tsx`. Reuse `ShopDrawingModal`, `DrawingViewsPanel`, `draft-shop-drawing-ai` edge function as-is. Add a History list (already exists inside the modal — surface it as the tab's main view).
+
+### 2. Router additions (`src/App.tsx`)
+Add two routes alongside existing ones:
+```text
+/app/project/:id/estimate
+/app/project/:id/shop-drawings
+```
+Both render `ProjectWorkspace` (same shell), which already routes by URL suffix.
+
+### 3. Tab wiring (`src/pages/ProjectWorkspace.tsx`)
+- Add to `TAB_SUFFIXES`: `"/estimate": "estimate"`, `"/shop-drawings": "shop-drawings"`.
+- Add to `suffixMap` in `handleTabChange`.
+- Replace the single `Outputs` `TabsTrigger` with two: `Estimate` and `Shop Drawings`.
+- Add two `TabsContent` blocks rendering the new components.
+- **Remove** the old `outputs` tab + route (or keep `/outputs` as a redirect to `/estimate` for back-compat — one line).
+
+### 4. Sidebar (optional, `AppSidebar.tsx`)
+When a project is active, show two sub-links under the project: "Estimate" and "Shop Drawings". Keep this minimal — only if a project is currently open.
+
+### 5. Files NOT touched
+- `OutputsTab.tsx` — kept for one release as a thin re-export, or deleted if you confirm.
+- `ShopDrawingModal.tsx`, `DrawingViewsPanel.tsx`, `EstimateGrid.tsx`, `ExportButtons.tsx`, all edge functions, all DB tables, RLS policies — **zero changes**.
+- No DB migration needed.
+
+## Files changed
+
+| File | Change |
+|---|---|
+| `src/components/workspace/EstimateTab.tsx` | NEW — extracted estimate cards |
+| `src/components/workspace/ShopDrawingsTab.tsx` | NEW — extracted shop drawing cards + history |
+| `src/pages/ProjectWorkspace.tsx` | +2 tabs, +2 suffix mappings, −1 (outputs) |
+| `src/App.tsx` | +2 routes |
+| `src/components/workspace/OutputsTab.tsx` | Deleted (or kept as redirect) |
+| `src/components/layout/AppSidebar.tsx` | Optional: project sub-nav |
+
+Net: 2 new files, 2–3 edits, 0 backend changes.
 
 ## Risk
 
-Low. Worst case `gpt-image-1.5` is unavailable → automatic fallback to `gpt-image-1` (current behavior). Existing 429 / 402 handling preserved.
+Very low. Pure UI reorganization; all data flows, edge functions, modals, and exports stay intact. Old `/outputs` URLs can redirect to `/estimate` to avoid broken bookmarks.
+
+## Confirm before I implement
+
+1. **Retire "Outputs" tab entirely**, or keep it as a redirect to `/estimate`?
+2. **Sidebar sub-nav** under the active project — yes or skip for now?
+3. **Issue Report** — belongs under Estimate, or keep it solely in the existing QA tab?
 
