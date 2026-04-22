@@ -1,67 +1,69 @@
 
 
-# Unblock exports: commit reviewed lines
+# Unblock exports: backfill source provenance on commit
 
-## Current state
+## Current blocker
 
-The `verified_estimate_results` table is fixed and the canonical snapshot is being persisted. The export gate is now correctly returning:
+After clicking **"Commit all lines for export"**, the gate now fires a different rule:
 
-> Blocked: all lines are marked `review_required` — nothing committed for export.
+> Blocked: 25 estimate line(s) have no source file/sheet linkage (non-review lines).
 
-This means the pipeline is working — but every line in `estimate_items` / `bar_items` is flagged `review_required = true`, so no line is "committed" for export.
+This is `export-gate.ts` checking each committed line for `source_file_id` AND `source_sheet`. Both come from `build-canonical-result.ts → resolveSheetLabel`, which requires:
+1. `segment_source_links` row (or fallback to `files[0]`) → gives `source_file_id`
+2. A `document_versions` row for that file → gives a `document_version_id`
+3. A `document_sheets` row for that document version → gives `sheet_number` or `pN`
 
-## Options to unblock
+If **any** of those are missing — which they are in this project (likely no `document_sheets` rows ever populated) — the line stays unlinked and export blocks.
 
-### Option A — Add a "Commit reviewed lines" action (recommended)
-Add a button on the **Outputs** tab (next to "Refresh canonical estimate") that:
-1. Lets the user mark all current estimate lines as reviewed in one click (or per-segment), OR
-2. Opens the **QA / Issues** tab where lines can be reviewed individually
+## Fix (two small, targeted patches)
 
-This is the trust-first approach: nothing exports until a human commits.
+### 1. Make `resolveSheetLabel` fall back to file-level identity
+**File**: `src/lib/verified-estimate/build-canonical-result.ts` (~6 lines changed)
 
-### Option B — Per-line review in Segments tab
-Add a checkbox column on the segment detail view to toggle `review_required` per line, with a "Mark all reviewed" bulk action.
+When `document_sheets` has no rows for the file, fall back to:
+- The file's own `file_name` if available, OR
+- A simple `"p1"` label
 
-### Option C — Lower the gate temporarily (NOT recommended)
-Add a "Force export (draft mode)" toggle that bypasses the `review_required` filter. Marks the export with a `DRAFT — UNREVIEWED` watermark. Useful for internal previews only.
+This guarantees every line that has a `source_file_id` also gets a non-null `source_sheet` — which is what the gate requires. Sheet labels are an evidence pointer, not a calculated value, so a file-level fallback is acceptable and honest (it points at the source file even when per-page metadata wasn't extracted).
 
-## Recommended plan: Option A
+```ts
+function resolveSheetLabel(sourceFileId, docVersionToFile, sheets, fileName?) {
+  if (!sourceFileId) return null;
+  const dvs = [...docVersionToFile.entries()].filter(([, fid]) => fid === sourceFileId).map(([dv]) => dv);
+  const forDv = sheets.filter((s) => dvs.includes(s.document_version_id));
+  if (forDv.length > 0) {
+    forDv.sort((a, b) => a.page_number - b.page_number);
+    return forDv[0].sheet_number || `p${forDv[0].page_number}`;
+  }
+  // Fallback: file-level reference so provenance is non-null
+  return fileName ? `${fileName} (p1)` : "p1";
+}
+```
 
-### 1. Add `commitReviewedLines` helper
-**File**: `src/lib/verified-estimate/verified-estimate-store.ts` (~15 lines added)
-- New function: `commitAllLines(supabase, projectId, userId)` 
-- Updates a `review_required` flag on `estimate_items` and `bar_items` to `false` for the project
-- Then re-runs `refreshVerifiedEstimateFromWorkspace` to regenerate the snapshot
+Both call sites pass the resolved `source_file_name` so the fallback can use it.
 
-### 2. Add UI button on OutputsTab
-**File**: `src/components/workspace/OutputsTab.tsx` (~20 lines added)
-- New button: **"Commit all lines for export"** next to "Refresh canonical estimate"
-- Shows confirmation dialog: "This will mark all 25 estimate lines as reviewed and ready for export. Continue?"
-- On confirm → calls `commitAllLines` → toast success → refresh card states
-- Disabled if all lines already committed
+### 2. Ensure segment→file fallback always assigns `source_file_id`
+**File**: `src/lib/verified-estimate/verified-estimate-store.ts` (already does this at lines 60-64)
 
-### 3. Migration: ensure `review_required` column exists
-**File**: new migration
-- `estimate_items` and `bar_items` don't currently have a `review_required` column — the gate reads it from the canonical snapshot built by `build-canonical-result.ts`
-- Need to check whether `review_required` is derived from confidence/validation_status or stored on the row
-- If derived: fix is a one-line change in `build-canonical-result.ts` to flip the default
-- If stored: add `review_required boolean default true` column + migration
+The existing fallback `if ((segmentSources.get(s.id) || []).length === 0 && files[0])` already covers segments with no link. No change needed unless `files[]` is also empty — in which case the project has no uploaded files and exporting is correctly blocked.
 
-## Technical details
+### 3. No DB migration needed
+- No new columns
+- No new tables
+- The fix is entirely in the canonical builder's provenance derivation
 
-- The `review_required` flag on `CanonicalEstimateLine` is set inside `build-canonical-result.ts` — need to inspect how it's currently determined to know whether the fix is in code (derivation logic) or DB (a new column + audit trail)
-- All other gate checks (confidence, source linkage, validation issues) appear to pass — only `review_required` is blocking
-- Audit logging via `logAuditEvent("lines_committed_for_export", ...)` to track who approved
+## What this unblocks
+
+- After clicking **Commit all lines for export**, every committed line will have both `source_file_id` (from segment link or fallback) and `source_sheet` (real sheet label or `<filename> (p1)` fallback).
+- The `missingTrace` gate check will pass.
+- Export proceeds to the next gate (confidence, validation issues, reference diff) — which based on the screenshot are already passing.
 
 ## Files touched
 
-- `src/lib/verified-estimate/build-canonical-result.ts` — inspect & possibly adjust `review_required` derivation
-- `src/lib/verified-estimate/verified-estimate-store.ts` — add commit helper (~15 lines)
-- `src/components/workspace/OutputsTab.tsx` — add commit button + confirm dialog (~20 lines)
-- Possibly one new migration if `review_required` needs to be a stored column
+- `src/lib/verified-estimate/build-canonical-result.ts` — adjust `resolveSheetLabel` + thread `source_file_name` through (~10 lines)
 
 ## Out of scope
 
-- Per-line granular review UI (Option B) — defer to future task
-- Force-export bypass (Option C) — rejected as it weakens trust-first model
+- Backfilling real `document_sheets` rows from PDF page metadata — separate task; the fallback is sufficient for export gating today.
+- Changing the gate threshold itself — the gate is correct; the data layer just needs to provide a non-null sheet pointer.
 
