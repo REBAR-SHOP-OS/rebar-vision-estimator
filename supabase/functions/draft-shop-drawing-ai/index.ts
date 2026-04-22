@@ -8,6 +8,7 @@ const corsHeaders = {
 };
 
 const MODEL = "google/gemini-3.1-flash-image-preview";
+const OPENAI_MODEL = "gpt-image-1";
 const MAX_SEGMENTS = 6;
 
 interface BarItem {
@@ -55,6 +56,35 @@ function buildPrompt(seg: Segment, bars: BarItem[], projectName: string): string
   ].join("\n");
 }
 
+async function generateImageOpenAI(prompt: string, apiKey: string): Promise<string | null> {
+  const resp = await fetch("https://api.openai.com/v1/images/generations", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      prompt,
+      size: "1024x1024",
+      n: 1,
+    }),
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    const err: any = new Error(`OpenAI image error ${resp.status}: ${text}`);
+    err.status = resp.status;
+    throw err;
+  }
+
+  const data = await resp.json();
+  const b64 = data?.data?.[0]?.b64_json;
+  if (b64) return `data:image/png;base64,${b64}`;
+  const url = data?.data?.[0]?.url;
+  return typeof url === "string" ? url : null;
+}
+
 async function generateImage(prompt: string, apiKey: string): Promise<string | null> {
   const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
@@ -85,14 +115,17 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const apiKey = Deno.env.get("LOVABLE_API_KEY");
-    if (!apiKey) throw new Error("LOVABLE_API_KEY not configured");
+    const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+    const openaiKey = Deno.env.get("OPENAI_API_KEY");
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-    const { projectId, segmentId } = await req.json();
+    const { projectId, segmentId, provider } = await req.json();
+    const useOpenAI = provider === "openai";
+    if (useOpenAI && !openaiKey) throw new Error("OPENAI_API_KEY not configured");
+    if (!useOpenAI && !lovableKey) throw new Error("LOVABLE_API_KEY not configured");
     if (!projectId) {
       return new Response(JSON.stringify({ error: "projectId required" }), {
         status: 400,
@@ -144,7 +177,9 @@ serve(async (req) => {
       const segBars = barsBySeg.get(seg.id) || [];
       const prompt = buildPrompt(seg, segBars, projectName);
       try {
-        const url = await generateImage(prompt, apiKey);
+        const url = useOpenAI
+          ? await generateImageOpenAI(prompt, openaiKey!)
+          : await generateImage(prompt, lovableKey!);
         results.push({
           segment_id: seg.id,
           segment_name: seg.name,
@@ -175,7 +210,8 @@ serve(async (req) => {
     console.log(JSON.stringify({
       route: "draft-shop-drawing-ai",
       project_id: projectId,
-      pinned_model: MODEL,
+      pinned_model: useOpenAI ? OPENAI_MODEL : MODEL,
+      provider: useOpenAI ? "openai" : "lovable",
       segments_requested: targets.length,
       images_generated: results.filter((r) => r.image_data_uri).length,
     }));
