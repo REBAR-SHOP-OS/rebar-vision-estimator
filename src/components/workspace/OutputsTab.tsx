@@ -32,7 +32,7 @@ interface OutputItem {
   count?: number;
 }
 
-export default function OutputsTab({ projectId }: { projectId: string }) {
+export default function OutputsTab({ projectId, filter }: { projectId: string; filter?: "estimate" | "shop_drawings" }) {
   const { user } = useAuth();
   const [outputs, setOutputs] = useState<OutputItem[]>([]);
   const [approvalStatus, setApprovalStatus] = useState<string>("none");
@@ -499,7 +499,11 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {outputs.map((o) => (
+        {outputs.filter((o) => {
+          if (filter === "estimate") return o.type === "estimate" || o.type === "issues" || o.type === "quote";
+          if (filter === "shop_drawings") return o.type === "shop_drawing";
+          return true;
+        }).map((o) => (
           <Card key={o.type} className={!o.available ? "opacity-50" : ""}>
             <CardContent className="flex items-center justify-between p-4">
               <div className="flex items-center gap-3">

@@ -8,6 +8,8 @@ import FilesTab from "@/components/workspace/FilesTab";
 import SegmentsTab from "@/components/workspace/SegmentsTab";
 import QATab from "@/components/workspace/QATab";
 import OutputsTab from "@/components/workspace/OutputsTab";
+import EstimateTab from "@/components/workspace/EstimateTab";
+import ShopDrawingsTab from "@/components/workspace/ShopDrawingsTab";
 import ProjectSettingsTab from "@/components/workspace/ProjectSettingsTab";
 
 const TAB_SUFFIXES: Record<string, string> = {
@@ -15,7 +17,9 @@ const TAB_SUFFIXES: Record<string, string> = {
   "/files": "files",
   "/segments": "segments",
   "/qa": "qa",
-  "/outputs": "outputs",
+  "/estimate": "estimate",
+  "/shop-drawings": "shop-drawings",
+  "/outputs": "estimate",
   "/settings": "settings",
 };
 
@@ -66,7 +70,8 @@ export default function ProjectWorkspace() {
       files: "/files",
       segments: "/segments",
       qa: "/qa",
-      outputs: "/outputs",
+      estimate: "/estimate",
+      "shop-drawings": "/shop-drawings",
       settings: "/settings",
     };
     navigate(`${basePath}${suffixMap[tab] || ""}`);
@@ -81,7 +86,8 @@ export default function ProjectWorkspace() {
             <TabsTrigger value="files" className="text-xs data-[state=active]:bg-background">Files</TabsTrigger>
             <TabsTrigger value="segments" className="text-xs data-[state=active]:bg-background">Segments</TabsTrigger>
             <TabsTrigger value="qa" className="text-xs data-[state=active]:bg-background">QA / Issues</TabsTrigger>
-            <TabsTrigger value="outputs" className="text-xs data-[state=active]:bg-background">Outputs</TabsTrigger>
+            <TabsTrigger value="estimate" className="text-xs data-[state=active]:bg-background">Estimate</TabsTrigger>
+            <TabsTrigger value="shop-drawings" className="text-xs data-[state=active]:bg-background">Shop Drawings</TabsTrigger>
             <TabsTrigger value="settings" className="text-xs data-[state=active]:bg-background">Settings</TabsTrigger>
           </TabsList>
         </div>
@@ -98,8 +104,11 @@ export default function ProjectWorkspace() {
         <TabsContent value="qa" className="flex-1 overflow-auto m-0">
           <QATab projectId={project.id} />
         </TabsContent>
-        <TabsContent value="outputs" className="flex-1 overflow-auto m-0">
-          <OutputsTab projectId={project.id} />
+        <TabsContent value="estimate" className="flex-1 overflow-auto m-0">
+          <EstimateTab projectId={project.id} />
+        </TabsContent>
+        <TabsContent value="shop-drawings" className="flex-1 overflow-auto m-0">
+          <ShopDrawingsTab projectId={project.id} />
         </TabsContent>
         <TabsContent value="settings" className="flex-1 overflow-auto m-0">
           <ProjectSettingsTab project={project} onUpdate={setProject} />
