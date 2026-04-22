@@ -66,6 +66,8 @@ const App = () => (
                   <Route path="project/:id/segments" element={<ProjectWorkspace />} />
                   <Route path="project/:id/segments/:segId" element={<SegmentDetail />} />
                   <Route path="project/:id/qa" element={<ProjectWorkspace />} />
+                  <Route path="project/:id/estimate" element={<ProjectWorkspace />} />
+                  <Route path="project/:id/shop-drawings" element={<ProjectWorkspace />} />
                   <Route path="project/:id/outputs" element={<ProjectWorkspace />} />
                   <Route path="project/:id/settings" element={<ProjectWorkspace />} />
                   <Route path="standards" element={<StandardsPage />} />
