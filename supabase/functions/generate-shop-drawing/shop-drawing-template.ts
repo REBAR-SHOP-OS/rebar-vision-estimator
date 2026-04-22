@@ -1339,9 +1339,9 @@ function buildSheetHtml(
             <div class="mini-title">Revision and issue record</div>
             <table class="mini-table">
               <tr><th>Issue</th><th>Remarks</th><th>Date</th><th>By</th></tr>
-              <tr><td>△ A</td><td>FOR APPROVAL</td><td>${escapeHtml(params.dateStr)}</td><td>${escapeHtml(revisionInitials)}</td></tr>
-              <tr><td>△ B</td><td>AS PER A/E COMMENTS</td><td>${escapeHtml(params.dateStr)}</td><td>RS</td></tr>
-              <tr><td>△ C</td><td>AS PER NEW DRAWING</td><td>${escapeHtml(params.dateStr)}</td><td>RS</td></tr>
+              <tr><td><span class="rev-mark"><svg viewBox="0 0 10 10" aria-hidden="true"><polygon points="5,1 9,9 1,9"/></svg>A</span></td><td>FOR APPROVAL</td><td>${escapeHtml(params.dateStr)}</td><td>${escapeHtml(revisionInitials)}</td></tr>
+              <tr><td><span class="rev-mark"><svg viewBox="0 0 10 10" aria-hidden="true"><polygon points="5,1 9,9 1,9"/></svg>B</span></td><td>AS PER A/E COMMENTS</td><td>${escapeHtml(params.dateStr)}</td><td>RS</td></tr>
+              <tr><td><span class="rev-mark"><svg viewBox="0 0 10 10" aria-hidden="true"><polygon points="5,1 9,9 1,9"/></svg>C</span></td><td>AS PER NEW DRAWING</td><td>${escapeHtml(params.dateStr)}</td><td>RS</td></tr>
             </table>
           </aside>
 
@@ -1475,7 +1475,7 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
         <style>
           @page {
             size: letter landscape;
-            margin: 0.3in;
+            margin: 0.4in;
           }
 
           * {
@@ -1512,6 +1512,8 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
           .sheet-frame {
             height: 7.9in;
             border: 2px solid #111;
+            outline: 0.5px solid #111;
+            outline-offset: 4px;
             padding: 6px;
           }
 
@@ -2016,9 +2018,26 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
           }
 
           .logo-row img {
-            width: 44px;
-            height: 44px;
+            max-width: 110px;
+            max-height: 44px;
+            width: auto;
+            height: auto;
             object-fit: contain;
+          }
+
+          .rev-mark {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            font-weight: 700;
+          }
+
+          .rev-mark svg {
+            width: 8px;
+            height: 8px;
+            fill: none;
+            stroke: #111;
+            stroke-width: 1.2;
           }
 
           .company-name {
