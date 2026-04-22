@@ -113,7 +113,7 @@ export function buildCanonicalResultFromWorkspace(input: {
     const srcList = input.segmentSources.get(b.segment_id) || [];
     const source_file_id = srcList[0] || null;
     const source_file_name = source_file_id ? filesById.get(source_file_id)?.file_name || null : null;
-    const source_sheet = resolveSheetLabel(source_file_id, input.docVersionToFile, input.documentSheets);
+    const source_sheet = resolveSheetLabel(source_file_id, input.docVersionToFile, input.documentSheets, source_file_name);
     const extraction_method = "workspace_bar_item";
     const confidence = b.confidence != null ? Number(b.confidence) : 0.75;
     const review_required = !source_file_id || !source_sheet;
@@ -166,7 +166,7 @@ export function buildCanonicalResultFromWorkspace(input: {
       const wt = Number(ei.total_weight) || 0;
       const source_file_id = ei.source_file_id;
       const source_file_name = source_file_id ? filesById.get(source_file_id)?.file_name || null : null;
-      const source_sheet = resolveSheetLabel(source_file_id, input.docVersionToFile, input.documentSheets);
+      const source_sheet = resolveSheetLabel(source_file_id, input.docVersionToFile, input.documentSheets, source_file_name);
       const review_required = !source_file_id || !source_sheet;
       const line_key = `${ei.segment_id}|ei|${ei.id || ei.description || "row"}|${idx++}`;
       lines.push({
