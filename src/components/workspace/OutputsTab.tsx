@@ -5,13 +5,24 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FileText, Download, Loader2, ShieldAlert, CheckCircle2, Clock, Sparkles } from "lucide-react";
+import { FileText, Download, Loader2, ShieldAlert, CheckCircle2, Clock, Sparkles, ShieldCheck } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 import { exportExcelFile } from "@/lib/excel-export";
 import {
   getCurrentVerifiedEstimate,
   refreshVerifiedEstimateFromWorkspace,
+  commitAllLinesForExport,
 } from "@/lib/verified-estimate/verified-estimate-store";
 
 interface OutputItem {
@@ -36,6 +47,8 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
     result_json: unknown;
   } | null>(null);
   const [refreshingCanonical, setRefreshingCanonical] = useState(false);
+  const [committing, setCommitting] = useState(false);
+  const [confirmCommitOpen, setConfirmCommitOpen] = useState(false);
 
   useEffect(() => {
     // Fetch segment IDs first, then bar_items count
@@ -85,6 +98,37 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
       toast.error("Could not refresh canonical estimate");
     } finally {
       setRefreshingCanonical(false);
+    }
+  };
+
+  const lineCount = Array.isArray((verifiedRow?.result_json as any)?.lines)
+    ? ((verifiedRow!.result_json as any).lines as any[]).length
+    : 0;
+  const uncommittedCount = Array.isArray((verifiedRow?.result_json as any)?.lines)
+    ? ((verifiedRow!.result_json as any).lines as any[]).filter((l) => l.review_required).length
+    : 0;
+
+  const handleCommitAll = async () => {
+    if (!user) return;
+    setCommitting(true);
+    try {
+      const { committed, gate } = await commitAllLinesForExport(supabase, projectId, user.id);
+      const row = await getCurrentVerifiedEstimate(supabase, projectId);
+      setVerifiedRow(row);
+      await logAuditEvent(user.id, "lines_committed_for_export", "verified_estimate", row?.id, projectId, undefined, {
+        committed_count: committed,
+        can_export: gate.canExport,
+      });
+      if (gate.canExport) {
+        toast.success(`Committed ${committed} line(s) — exports unlocked.`);
+      } else {
+        toast.warning(`Committed ${committed} line(s), but other gates still block export.`);
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "Could not commit lines.");
+    } finally {
+      setCommitting(false);
+      setConfirmCommitOpen(false);
     }
   };
 
@@ -376,11 +420,51 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
     <div className="p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <h3 className="text-sm font-semibold text-foreground">Outputs & Exports</h3>
-        <Button variant="outline" size="sm" className="text-xs h-8" disabled={refreshingCanonical} onClick={refreshCanonical}>
-          {refreshingCanonical ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
-          Refresh canonical estimate
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="text-xs h-8" disabled={refreshingCanonical} onClick={refreshCanonical}>
+            {refreshingCanonical ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
+            Refresh canonical estimate
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            className="text-xs h-8"
+            disabled={committing || lineCount === 0 || uncommittedCount === 0}
+            onClick={() => setConfirmCommitOpen(true)}
+            title={
+              lineCount === 0
+                ? "Refresh canonical estimate first"
+                : uncommittedCount === 0
+                  ? "All lines already committed"
+                  : `Mark all ${lineCount} line(s) as reviewed and ready for export`
+            }
+          >
+            {committing ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <ShieldCheck className="h-3.5 w-3.5 mr-1" />}
+            Commit all lines for export
+            {uncommittedCount > 0 && ` (${uncommittedCount})`}
+          </Button>
+        </div>
       </div>
+
+      <AlertDialog open={confirmCommitOpen} onOpenChange={setConfirmCommitOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Commit all lines for export?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will mark all {lineCount} estimate line(s) in the current canonical snapshot as reviewed and
+              ready for export. This action is audit-logged. You can re-run "Refresh canonical estimate" at any
+              time to rebuild from workspace data.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={committing}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleCommitAll} disabled={committing}>
+              {committing ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
+              Commit {lineCount} line(s)
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {verifiedBlocked && blockedList.length > 0 && (
         <div className="mb-4 p-3 rounded-lg bg-destructive/10 border border-destructive/25 text-destructive text-xs space-y-1">
