@@ -277,7 +277,7 @@ export default function OutputsTab({ projectId }: { projectId: string }) {
       }
 
       const { data, error } = await supabase.functions.invoke("draft-shop-drawing-ai", {
-        body: { projectId },
+        body: { projectId, provider: "openai" },
       });
       if (error) {
         toast.error(error.message || "AI draft failed", { id: toastId });
