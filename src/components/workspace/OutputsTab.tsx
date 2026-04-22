@@ -35,6 +35,51 @@ interface OutputItem {
   count?: number;
 }
 
+async function renderHtmlToPdf(html: string, filename: string): Promise<void> {
+  // Mount the HTML on-screen but visually hidden so html2canvas can measure it.
+  // Offscreen positioning (left:-10000px) breaks layout for paginated content.
+  const container = document.createElement("div");
+  container.style.position = "fixed";
+  container.style.top = "0";
+  container.style.left = "0";
+  container.style.width = "11in";
+  container.style.opacity = "0";
+  container.style.pointerEvents = "none";
+  container.style.zIndex = "-1";
+  container.style.background = "#ffffff";
+  container.innerHTML = html;
+  document.body.appendChild(container);
+
+  // Wait for any <img> inside to load so they appear in the canvas.
+  const imgs = Array.from(container.querySelectorAll("img"));
+  await Promise.all(
+    imgs.map((img) =>
+      img.complete && img.naturalWidth > 0
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            img.addEventListener("load", () => resolve(), { once: true });
+            img.addEventListener("error", () => resolve(), { once: true });
+          })
+    )
+  );
+
+  try {
+    await html2pdf()
+      .set({
+        margin: 0.4,
+        filename,
+        image: { type: "jpeg", quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
+        jsPDF: { unit: "in", format: "letter", orientation: "landscape" },
+        pagebreak: { mode: ["css", "legacy"], before: ".sheet" },
+      })
+      .from(container)
+      .save();
+  } finally {
+    document.body.removeChild(container);
+  }
+}
+
 export default function OutputsTab({ projectId, filter }: { projectId: string; filter?: "estimate" | "shop_drawings" }) {
   const { user } = useAuth();
   const [outputs, setOutputs] = useState<OutputItem[]>([]);
