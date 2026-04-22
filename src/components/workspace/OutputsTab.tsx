@@ -376,29 +376,7 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
           footer { margin-top: 8px; font-size: 10px; color: #555; border-top: 1px solid #111; padding-top: 6px; }
         </style></head><body>${sheets}</body></html>`;
 
-      // Render to a real PDF (landscape letter) instead of HTML download
-      const container = document.createElement("div");
-      container.style.position = "fixed";
-      container.style.left = "-10000px";
-      container.style.top = "0";
-      container.style.width = "11in";
-      container.innerHTML = html;
-      document.body.appendChild(container);
-      try {
-        await html2pdf()
-          .set({
-            margin: 0.4,
-            filename: `ai-visual-draft-${projectId.slice(0, 8)}.pdf`,
-            image: { type: "jpeg", quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-            jsPDF: { unit: "in", format: "letter", orientation: "landscape" },
-            pagebreak: { mode: ["css", "legacy"] },
-          })
-          .from(container)
-          .save();
-      } finally {
-        document.body.removeChild(container);
-      }
+      await renderHtmlToPdf(html, `ai-visual-draft-${projectId.slice(0, 8)}.pdf`);
 
       try {
         await supabase.from("shop_drawings").insert({
