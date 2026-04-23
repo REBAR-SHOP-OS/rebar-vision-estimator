@@ -423,6 +423,7 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
       const sheets = usable.map((r, i) => `
         <section class="sheet">
           <div class="sheet-frame">
+          <div class="watermark">AI VISUAL DRAFT — NOT FOR FABRICATION</div>
           <header class="title">
             <div class="title-left">
               ${logoDataUri ? `<img class="brand" src="${logoDataUri}" alt="REBAR.SHOP" />` : ""}
@@ -434,6 +435,7 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
             <div class="sheet-no">
               <div class="lbl">DRAWING NO.</div>
               <div class="val">SD-AI-${String(i + 1).padStart(2, "0")}</div>
+              <div class="ai-chip">AI CHANGE CANDIDATE</div>
             </div>
           </header>
           <h2>${esc(r.segment_name)}</h2>
@@ -450,19 +452,21 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
           body { font-family: Arial, sans-serif; margin: 0; color: #111; }
           .sheet { page-break-after: always; margin: 0; padding: 6px; }
           .sheet:last-child { page-break-after: auto; }
-          .sheet-frame { border: 2px solid #111; outline: 0.5px solid #111; outline-offset: 4px; padding: 14px 16px; }
-          .title { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #111; padding-bottom: 8px; gap: 16px; }
+          .sheet-frame { position: relative; border: 3px solid #d97706; outline: 1px solid #d97706; outline-offset: 4px; padding: 14px 16px; overflow: hidden; }
+          .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: 72px; font-weight: 900; color: #d97706; opacity: 0.10; pointer-events: none; white-space: nowrap; letter-spacing: 4px; z-index: 0; }
+          .title { position: relative; z-index: 1; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #d97706; padding-bottom: 8px; gap: 16px; }
           .title-left { display: flex; align-items: center; gap: 12px; }
           .brand { max-height: 44px; max-width: 130px; object-fit: contain; display: block; }
           .proj { font-weight: 700; font-size: 15px; letter-spacing: 0.2px; }
           .client { font-size: 12px; color: #555; }
-          .sheet-no { border: 1px solid #111; padding: 4px 10px; text-align: center; min-width: 110px; }
-          .sheet-no .lbl { font-size: 9px; color: #555; letter-spacing: 0.5px; }
+          .sheet-no { border: 1px solid #d97706; padding: 4px 10px; text-align: center; min-width: 130px; background: #fff7ed; }
+          .sheet-no .lbl { font-size: 9px; color: #92400e; letter-spacing: 0.5px; }
           .sheet-no .val { font-weight: 700; font-size: 14px; font-family: ui-monospace, Menlo, monospace; }
-          h2 { font-size: 14px; margin: 10px 0 8px; }
-          .sheet img:not(.brand) { max-width: 100%; max-height: 6.6in; border: 1px solid #111; display: block; margin: 0 auto; }
-          .caption { font-size: 11px; color: #444; margin-top: 6px; text-align: center; }
-          footer { margin-top: 8px; font-size: 10px; color: #555; border-top: 1px solid #111; padding-top: 6px; }
+          .ai-chip { margin-top: 4px; font-size: 8px; font-weight: 700; color: #92400e; background: #fde68a; padding: 2px 4px; border-radius: 2px; letter-spacing: 0.4px; }
+          h2 { position: relative; z-index: 1; font-size: 14px; margin: 10px 0 8px; }
+          .sheet img:not(.brand) { position: relative; z-index: 1; max-width: 100%; max-height: 6.4in; border: 1px solid #d97706; display: block; margin: 0 auto; }
+          .caption { position: relative; z-index: 1; font-size: 11px; color: #444; margin-top: 6px; text-align: center; }
+          footer { position: relative; z-index: 1; margin-top: 8px; font-size: 10px; color: #92400e; font-weight: 600; border-top: 2px solid #d97706; padding-top: 6px; background: #fffbeb; padding: 6px 8px; }
         </style></head><body>${sheets}</body></html>`;
 
       await renderHtmlToPdf(html, `ai-visual-draft-${projectId.slice(0, 8)}.pdf`);
