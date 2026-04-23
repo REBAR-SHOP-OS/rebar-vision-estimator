@@ -614,19 +614,64 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
               </div>
               <div className="flex items-center gap-2">
                 {o.type === "shop_drawing" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!o.available || aiDrafting}
-                    className="text-xs h-8"
-                    onClick={handleAiVisualDraft}
-                    title="Generate AI visual sketches with Nano Banana 2"
-                  >
-                    {aiDrafting
-                      ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
-                      : <Sparkles className="h-3.5 w-3.5 mr-1" />}
-                    AI Visual
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!o.available || aiDrafting}
+                        className="text-xs h-8"
+                        title="Choose drawing render mode"
+                      >
+                        {aiDrafting
+                          ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                          : <Sparkles className="h-3.5 w-3.5 mr-1" />}
+                        Render…
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-64">
+                      <DropdownMenuLabel className="text-[10px]">Trust-first export modes</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={handleAiVisualDraft} className="text-xs">
+                        <Sparkles className="h-3.5 w-3.5 mr-2 text-amber-600" />
+                        <div className="flex flex-col">
+                          <span className="font-medium">AI Preview PDF</span>
+                          <span className="text-[10px] text-muted-foreground">Watermarked draft, not for fabrication</span>
+                        </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled
+                        className="text-xs opacity-60"
+                        title="Phase 2 — requires deterministic model + reviewer assignment"
+                      >
+                        <Clock className="h-3.5 w-3.5 mr-2 text-blue-600" />
+                        <div className="flex flex-col">
+                          <span className="font-medium">Review Draft PDF</span>
+                          <span className="text-[10px] text-muted-foreground">Coming in Phase 2</span>
+                        </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={openIssues > 0 || !isApproved}
+                        className="text-xs"
+                        onClick={() => handleExport("shop_drawing")}
+                        title={
+                          openIssues > 0
+                            ? `Blocked: ${openIssues} open issue(s)`
+                            : !isApproved
+                              ? "Blocked: requires approval"
+                              : "Issue deterministic fabrication PDF"
+                        }
+                      >
+                        <ShieldCheck className="h-3.5 w-3.5 mr-2 text-green-600" />
+                        <div className="flex flex-col">
+                          <span className="font-medium">Fabrication PDF</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {openIssues > 0 || !isApproved ? "Resolve issues + approval first" : "Issued — ready for shop floor"}
+                          </span>
+                        </div>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 )}
                 <Button
                   variant="outline"
