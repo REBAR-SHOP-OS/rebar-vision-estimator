@@ -1016,14 +1016,15 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
                         </div>
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        disabled
-                        className="text-xs opacity-60"
-                        title="Phase 2 — requires deterministic model + reviewer assignment"
+                        onClick={handleReviewDraft}
+                        disabled={aiDrafting}
+                        className="text-xs"
+                        title="Reviewer workflow — adds deterministic match %, reviewer name, open-issue count"
                       >
                         <Clock className="h-3.5 w-3.5 mr-2 text-primary" />
                         <div className="flex flex-col">
                           <span className="font-medium">Review Draft PDF</span>
-                          <span className="text-[10px] text-muted-foreground">Coming in Phase 2</span>
+                          <span className="text-[10px] text-muted-foreground">Reviewer workflow · deterministic match %</span>
                         </div>
                       </DropdownMenuItem>
                       <DropdownMenuItem
