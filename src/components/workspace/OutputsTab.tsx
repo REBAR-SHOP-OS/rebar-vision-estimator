@@ -46,18 +46,23 @@ interface OutputItem {
 
 async function renderHtmlToPdf(html: string, filename: string): Promise<void> {
   // Mount the HTML on-screen but visually hidden so html2canvas can measure it.
-  // Offscreen positioning (left:-10000px) breaks layout for paginated content.
+  // Do not use opacity:0 here — html2canvas will capture a blank page.
   const container = document.createElement("div");
   container.style.position = "fixed";
   container.style.top = "0";
   container.style.left = "0";
   container.style.width = "11in";
-  container.style.opacity = "0";
+  container.style.opacity = "1";
   container.style.pointerEvents = "none";
-  container.style.zIndex = "-1";
+  container.style.zIndex = "2147483647";
   container.style.background = "#ffffff";
+  container.style.overflow = "visible";
   container.innerHTML = html;
   document.body.appendChild(container);
+
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
 
   // Wait for any <img> inside to load so they appear in the canvas.
   const imgs = Array.from(container.querySelectorAll("img"));
