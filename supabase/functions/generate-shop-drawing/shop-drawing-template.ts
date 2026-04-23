@@ -1472,8 +1472,8 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
         <title>${escapeHtml(projectName)} - Shop Drawing Draft</title>
         <style>
           @page {
-            size: letter landscape;
-            margin: 0.4in;
+            size: 17in 11in;
+            margin: 0;
           }
 
           * {
@@ -1483,8 +1483,8 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
           html, body {
             margin: 0;
             padding: 0;
-            font-family: Arial, Helvetica, sans-serif;
-            color: #111;
+            font-family: "RomanS", Consolas, "Courier New", monospace;
+            color: #000;
             background: #d1d5db;
           }
 
@@ -1493,13 +1493,14 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
           }
 
           .sheet {
-            width: 10.4in;
-            min-height: 7.9in;
+            width: 17in;
+            min-height: 11in;
             margin: 0 auto 18px;
             background: #fff;
             box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
             page-break-after: always;
             break-after: page;
+            padding: 0.4in;
           }
 
           .sheet:last-child {
@@ -1508,27 +1509,44 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
           }
 
           .sheet-frame {
-            height: 7.9in;
-            border: 2px solid #111;
-            outline: 0.5px solid #111;
+            height: 10.2in;
+            border: 2pt solid #000;
+            outline: 1pt solid #000;
             outline-offset: 4px;
             padding: 6px;
           }
 
           .sheet-grid {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) 280px;
-            grid-template-rows: minmax(0, 1fr) 194px;
-            gap: 8px;
+            grid-template-columns: minmax(0, 1fr) 2.2in;
+            grid-template-rows: minmax(0, 1fr) 2.0in;
+            grid-template-areas:
+              "main  title"
+              "ref   title"
+              "rev   title";
+            gap: 6px;
             height: 100%;
           }
+
+          .main-area  { grid-area: main; }
+          .reference-area { grid-area: ref; }
+          .revision-area  { grid-area: rev; }
+          .title-block    { grid-area: title; }
 
           .main-area,
           .revision-area,
           .reference-area,
           .title-block {
-            border: 1px solid #111;
+            border: 1pt solid #000;
             overflow: hidden;
+          }
+
+          .main-area {
+            background-color: #fff;
+            background-image:
+              radial-gradient(circle, #d8d8d8 0.5px, transparent 0.5px);
+            background-size: 0.5in 0.5in;
+            background-position: 0 0;
           }
 
           .main-area {
