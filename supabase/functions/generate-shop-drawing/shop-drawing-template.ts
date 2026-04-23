@@ -1946,6 +1946,10 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
             line-height: 1.35;
           }
 
+          .bbs-table {
+            font-family: Consolas, "Courier New", monospace;
+          }
+
           .bbs-table th,
           .bbs-table td {
             font-size: 8px;
@@ -1953,6 +1957,13 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            border: 0.5pt solid #000;
+          }
+
+          .bbs-table th {
+            background: #f0f0f0;
+            font-weight: 700;
+            letter-spacing: 0.04em;
           }
 
           .bbs-table td:last-child,
