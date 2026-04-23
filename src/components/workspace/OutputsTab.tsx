@@ -477,6 +477,10 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
           user_id: user.id,
           html_content: html,
           options: { kind: "ai_visual", segment_count: usable.length, model: "google/gemini-3.1-flash-image-preview" },
+          drawing_mode: "ai_draft",
+          export_class: "ai_preview_pdf",
+          watermark_mode: "ai_draft",
+          validation_state: { ok: true, issues: [] },
         });
       } catch { /* non-fatal */ }
 
