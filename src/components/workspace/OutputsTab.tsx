@@ -19,8 +19,8 @@ import {
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 import { exportExcelFile } from "@/lib/excel-export";
-// @ts-ignore - no types
-import html2pdf from "html2pdf.js";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 import { getLogoDataUri } from "@/lib/logo-base64";
 import { validateDrawingMetadata, type DrawingMode } from "@/lib/shop-drawing/validate-metadata";
 import {
@@ -53,18 +53,19 @@ async function renderHtmlToPdf(html: string, filename: string): Promise<void> {
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
   const bodyHtml = bodyMatch ? bodyMatch[1] : html;
 
-  // Mount on-screen (off-canvas left) so html2canvas can actually capture it.
-  // Using left: -10000px keeps it out of the user's view but in the layout tree.
+  // Keep the render tree live but move it far off-canvas.
   const container = document.createElement("div");
   container.style.position = "absolute";
   container.style.top = "0";
-  container.style.left = "-10000px";
+  container.style.left = "0";
+  container.style.transform = "translateX(-200vw)";
   container.style.width = "10.2in";
   container.style.background = "#ffffff";
   container.style.color = "#111";
   container.style.padding = "0";
   container.style.margin = "0";
-  container.style.zIndex = "0";
+  container.style.zIndex = "-1";
+  container.style.overflow = "visible";
   if (styleMatches) {
     const styleEl = document.createElement("style");
     styleEl.textContent = styleMatches;
@@ -78,6 +79,10 @@ async function renderHtmlToPdf(html: string, filename: string): Promise<void> {
   await new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   });
+
+  if (document.fonts?.ready) {
+    await document.fonts.ready.catch(() => undefined);
+  }
 
   // Wait for any <img> inside to load so they appear in the canvas.
   const imgs = Array.from(container.querySelectorAll("img"));
@@ -93,24 +98,46 @@ async function renderHtmlToPdf(html: string, filename: string): Promise<void> {
   );
 
   try {
-    await html2pdf()
-      .set({
-        margin: 0.4,
-        filename,
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          allowTaint: true,
-          backgroundColor: "#ffffff",
-          windowWidth: container.scrollWidth,
-          windowHeight: container.scrollHeight,
-        },
-        jsPDF: { unit: "in", format: "letter", orientation: "landscape" },
-        pagebreak: { mode: ["css", "legacy"], avoid: [".sheet"] },
-      })
-      .from(container)
-      .save();
+    const pages = Array.from(container.querySelectorAll<HTMLElement>(".sheet"));
+    const targets = pages.length > 0 ? pages : [bodyWrap];
+    const pdf = new jsPDF({ unit: "in", format: "letter", orientation: "landscape" });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 0.4;
+    const usableWidth = pageWidth - margin * 2;
+    const usableHeight = pageHeight - margin * 2;
+
+    for (let index = 0; index < targets.length; index += 1) {
+      const target = targets[index];
+      const canvas = await html2canvas(target, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+        width: Math.max(target.scrollWidth, target.offsetWidth),
+        height: Math.max(target.scrollHeight, target.offsetHeight),
+        windowWidth: Math.max(target.scrollWidth, target.offsetWidth),
+        windowHeight: Math.max(target.scrollHeight, target.offsetHeight),
+      });
+
+      const imgData = canvas.toDataURL("image/jpeg", 0.98);
+      let imgWidth = usableWidth;
+      let imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+      if (imgHeight > usableHeight) {
+        imgHeight = usableHeight;
+        imgWidth = (canvas.width * imgHeight) / canvas.height;
+      }
+
+      const x = (pageWidth - imgWidth) / 2;
+      const y = (pageHeight - imgHeight) / 2;
+
+      if (index > 0) pdf.addPage();
+      pdf.addImage(imgData, "JPEG", x, y, imgWidth, imgHeight);
+    }
+
+    pdf.save(filename);
   } finally {
     document.body.removeChild(container);
   }
