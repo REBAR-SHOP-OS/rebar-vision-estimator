@@ -663,6 +663,226 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
     }
   };
 
+  // ──────────────────────────────────────────────────────────────────
+  // Phase 2 — Review Draft PDF
+  // Same AI image source, but reframed for the reviewer workflow:
+  //   • reviewer name + review date in the title strip
+  //   • per-candidate Accept / Reject / Pending column with provenance
+  //   • deterministic-match % computed from bar_items.deterministic_match
+  //   • unresolved-issues count surfaced on every sheet
+  //   • blue review banner (not amber draft) so it is visually distinct
+  // No formal revision history — that stays gated behind Issued mode.
+  // ──────────────────────────────────────────────────────────────────
+  const handleReviewDraft = async () => {
+    if (!user) return;
+    const reviewerName = window.prompt("Reviewer name (required for Review Draft):", "")?.trim();
+    if (!reviewerName) {
+      toast.error("Reviewer name is required for Review Draft mode.");
+      return;
+    }
+    const projGate = await supabase
+      .from("projects")
+      .select("name, client_name")
+      .eq("id", projectId)
+      .maybeSingle();
+    const safeProjectName = normalizeProjectName(projGate.data?.name).normalized;
+    const safeClientName = normalizeProjectName(projGate.data?.client_name).normalized;
+    const gate = validateDrawingMetadata(
+      {
+        projectName: safeProjectName,
+        clientName: safeClientName,
+        sheetNumber: "REVIEW-01",
+        scale: "N/A (review draft)",
+        reviewerName,
+      },
+      "review_draft" as DrawingMode,
+    );
+    if (!gate.ok) {
+      const first = gate.issues.filter((i) => i.severity === "error").slice(0, 3);
+      toast.error(`Cannot generate: ${first.map((i) => i.message).join(" ")}`);
+      return;
+    }
+    setAiDrafting(true);
+    const toastId = toast.loading("Building Review Draft…");
+    try {
+      let ver = await getCurrentVerifiedEstimate(supabase, projectId);
+      if (!ver) {
+        await refreshVerifiedEstimateFromWorkspace(supabase, projectId, user.id);
+        ver = await getCurrentVerifiedEstimate(supabase, projectId);
+      }
+      if (!ver || ver.status === "blocked") {
+        toast.error("Export blocked — canonical estimate not verified.", { id: toastId });
+        return;
+      }
+
+      // Pull deterministic-match telemetry from bar_items (provenance per row).
+      const segRes = await supabase.from("segments").select("id").eq("project_id", projectId);
+      const segIds = (segRes.data || []).map((s: any) => s.id);
+      let matchPct = 0;
+      let totalBars = 0;
+      let matchedBars = 0;
+      if (segIds.length > 0) {
+        const barRes = await supabase
+          .from("bar_items")
+          .select("deterministic_match")
+          .in("segment_id", segIds);
+        const rows = (barRes.data || []) as Array<{ deterministic_match: boolean }>;
+        totalBars = rows.length;
+        matchedBars = rows.filter((r) => r.deterministic_match).length;
+        matchPct = totalBars > 0 ? Math.round((matchedBars / totalBars) * 100) : 0;
+      }
+
+      const issuesRes = await supabase
+        .from("validation_issues")
+        .select("id", { count: "exact" })
+        .eq("project_id", projectId)
+        .eq("status", "open");
+      const openIssueCount = issuesRes.count || 0;
+
+      const { data, error } = await supabase.functions.invoke("draft-shop-drawing-ai", {
+        body: { projectId, provider: "openai" },
+      });
+      if (error) {
+        toast.error(error.message || "Review draft failed", { id: toastId });
+        return;
+      }
+      const payload = data as {
+        project_name: string;
+        client_name: string;
+        results: Array<{ segment_id: string; segment_name: string; image_data_uri: string | null; caption: string }>;
+      };
+      const usable = (payload.results || []).filter((r) => r.image_data_uri);
+      if (usable.length === 0) {
+        toast.error("AI returned no images. Try again.", { id: toastId });
+        return;
+      }
+
+      const esc = (s: string) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
+      const logoDataUri = await getLogoDataUri().catch(() => "");
+      const reviewDate = new Date().toISOString().slice(0, 10);
+      const sourceLabel = `Verified Estimate v${ver.version_number ?? "?"}`;
+      const SHEET_W_IN = 24;
+      const SHEET_H_IN = 18;
+
+      const sheets = usable.map((r, i) => `
+        <section class="sheet">
+          <div class="watermark">REVIEW DRAFT — NOT FOR FABRICATION</div>
+          <div class="frame">
+            <header class="zone-header">
+              <div class="title-left">
+                ${logoDataUri ? `<img class="brand" src="${logoDataUri}" alt="REBAR.SHOP" />` : ""}
+                <div>
+                  <div class="proj">${esc(safeProjectName || payload.project_name)}</div>
+                  <div class="client">${esc(safeClientName || payload.client_name)}</div>
+                  <div class="seg">SEGMENT: ${esc(r.segment_name)}</div>
+                </div>
+              </div>
+              <div class="ai-pill-wrap"><div class="rev-pill">REVIEW DRAFT — REVIEWER WORKFLOW</div></div>
+            </header>
+            <main class="zone-drawable">
+              <img class="sheet-image" src="${r.image_data_uri}" alt="${esc(r.caption)}" />
+              <div class="review-band">
+                Reviewer: <strong>${esc(reviewerName)}</strong> · Date: <strong>${reviewDate}</strong> ·
+                Compared against: <strong>${esc(sourceLabel)}</strong> · Deterministic match:
+                <strong>${matchPct}%</strong> (${matchedBars}/${totalBars} bars) · Open issues:
+                <strong>${openIssueCount}</strong>
+              </div>
+            </main>
+            <aside class="zone-legend">
+              <div class="legend-title">CANDIDATE NOTE STATUS</div>
+              <div class="legend-row"><span class="sw sw-pend"></span>Pending — needs reviewer decision</div>
+              <div class="legend-row"><span class="sw sw-acc"></span>Accepted — promote to issued</div>
+              <div class="legend-row"><span class="sw sw-rej"></span>Rejected — discard candidate</div>
+              <div class="legend-row"><span class="sw sw-det"></span>Deterministic match available</div>
+              <div class="legend-note">Formal revision history is only assigned in Issued mode.</div>
+            </aside>
+            <footer class="zone-footer">
+              Reviewer must mark every Candidate # note as Accepted, Rejected, or Deferred before this segment can advance to Issued.
+            </footer>
+            <div class="title-strip">
+              <div class="rev-pill ts-pill-rev">REVIEW DRAFT</div>
+              <div class="ts-cell"><div class="ts-lbl">SHEET</div><div class="ts-val">REVIEW-${String(i + 1).padStart(2, "0")}</div></div>
+              <div class="ts-cell"><div class="ts-lbl">SHEET SIZE</div><div class="ts-val">ARCH C · 24×18</div></div>
+              <div class="ts-cell"><div class="ts-lbl">REVIEWED BY</div><div class="ts-val">${esc(reviewerName)}</div></div>
+              <div class="ts-cell"><div class="ts-lbl">REVIEW DATE</div><div class="ts-val">${reviewDate}</div></div>
+              <div class="ts-cell"><div class="ts-lbl">SOURCE</div><div class="ts-val">${esc(sourceLabel)}</div></div>
+              <div class="ts-cell"><div class="ts-lbl">DETERMINISTIC MATCH</div><div class="ts-val ${matchPct >= 80 ? "ts-ok" : "ts-warn"}">${matchPct}% (${matchedBars}/${totalBars})</div></div>
+              <div class="ts-cell"><div class="ts-lbl">OPEN ISSUES</div><div class="ts-val ${openIssueCount === 0 ? "ts-ok" : "ts-warn"}">${openIssueCount}</div></div>
+              <div class="ts-cell ts-cap"><div class="ts-lbl">CAPTION</div><div class="ts-val ts-cap-val">${esc(r.caption)}</div></div>
+            </div>
+          </div>
+        </section>`).join("\n");
+
+      const html = `<!doctype html><html><head><meta charset="utf-8" />
+        <title>Review Draft — ${esc(safeProjectName || payload.project_name)}</title>
+        <style>
+          @page { size: ${SHEET_W_IN}in ${SHEET_H_IN}in; margin: 0; }
+          html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: "Helvetica Neue", Arial, sans-serif; }
+          .sheet { position: relative; width: ${SHEET_W_IN}in; height: ${SHEET_H_IN}in; background: #fff; page-break-after: always; overflow: hidden; box-sizing: border-box; }
+          .sheet:last-child { page-break-after: auto; }
+          .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: 100px; font-weight: 900; color: #1d4ed8; opacity: 0.08; pointer-events: none; white-space: nowrap; letter-spacing: 8px; z-index: 0; }
+          .frame { position: absolute; inset: 0.4in; box-sizing: border-box; border: 4px solid #1d4ed8; display: grid; grid-template-columns: 1fr 2.5in; grid-template-rows: 1.0in 1fr 1.4in 0.5in; grid-template-areas: "header title" "drawable title" "legend title" "footer title"; background: #fff; }
+          .zone-header { grid-area: header; border-bottom: 2px solid #1d4ed8; padding: 0.15in 0.25in; display: flex; justify-content: space-between; align-items: center; gap: 0.3in; background: #eff6ff; position: relative; z-index: 1; }
+          .title-left { display: flex; align-items: center; gap: 0.2in; }
+          .brand { max-height: 0.7in; max-width: 1.6in; object-fit: contain; display: block; }
+          .proj { font-weight: 700; font-size: 22px; }
+          .client { font-size: 14px; color: #555; }
+          .seg { font-size: 13px; color: #1e3a8a; font-weight: 700; margin-top: 2px; letter-spacing: 0.5px; }
+          .rev-pill { background: #1d4ed8; color: #fff; font-weight: 800; font-size: 14px; letter-spacing: 1.5px; padding: 8px 18px; border-radius: 4px; }
+          .zone-drawable { grid-area: drawable; position: relative; padding: 0.2in; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; z-index: 1; background: #fff; }
+          .sheet-image { display: block; max-width: 100%; max-height: calc(100% - 0.8in); object-fit: contain; border: 1px solid #1d4ed8; background: #fff; }
+          .review-band { width: 100%; margin-top: 0.15in; padding: 0.1in 0.2in; background: #dbeafe; border: 1.5px solid #1d4ed8; color: #1e3a8a; font-size: 12px; text-align: center; box-sizing: border-box; }
+          .zone-legend { grid-area: legend; border-top: 1.5px solid #1d4ed8; padding: 0.12in 0.25in; background: #eff6ff; font-size: 11px; color: #111; display: grid; grid-template-columns: repeat(2, 1fr); column-gap: 0.4in; row-gap: 4px; align-content: start; z-index: 1; }
+          .legend-title { grid-column: 1 / -1; font-weight: 800; font-size: 12px; letter-spacing: 1px; color: #1e3a8a; margin-bottom: 4px; }
+          .legend-row { display: flex; align-items: center; gap: 8px; }
+          .sw { display: inline-block; width: 14px; height: 10px; border: 1px solid #111; }
+          .sw-pend { background: #fde68a; border-color: #d97706; }
+          .sw-acc { background: #bbf7d0; border-color: #15803d; }
+          .sw-rej { background: #fecaca; border-color: #b91c1c; }
+          .sw-det { background: #dbeafe; border-color: #1d4ed8; }
+          .legend-note { grid-column: 1 / -1; margin-top: 4px; font-size: 10px; color: #1e3a8a; font-style: italic; }
+          .zone-footer { grid-area: footer; border-top: 2px solid #1d4ed8; padding: 0.1in 0.25in; background: #eff6ff; font-size: 11px; color: #1e3a8a; font-weight: 600; display: flex; align-items: center; z-index: 1; }
+          .title-strip { grid-area: title; border-left: 2px solid #1d4ed8; background: #fff; display: flex; flex-direction: column; padding: 0.15in; gap: 0.08in; z-index: 1; }
+          .ts-pill-rev { font-size: 11px; padding: 6px 8px; text-align: center; margin-bottom: 0.1in; }
+          .ts-cell { border: 1px solid #1d4ed8; padding: 5px 8px; background: #eff6ff; }
+          .ts-cell.ts-cap { flex: 1; display: flex; flex-direction: column; }
+          .ts-lbl { font-size: 8px; color: #1e3a8a; letter-spacing: 0.6px; font-weight: 800; }
+          .ts-val { font-size: 12px; font-weight: 700; font-family: ui-monospace, "Consolas", monospace; color: #111; margin-top: 2px; }
+          .ts-warn { color: #b91c1c; }
+          .ts-ok { color: #15803d; }
+          .ts-cap-val { font-size: 10px; font-family: "Helvetica Neue", Arial, sans-serif; font-weight: 500; color: #444; line-height: 1.3; flex: 1; overflow: hidden; }
+        </style></head><body data-sheet-w="${SHEET_W_IN}" data-sheet-h="${SHEET_H_IN}" data-sheet-orient="landscape">${sheets}</body></html>`;
+
+      await renderHtmlToPdf(html, `review-draft-${projectId.slice(0, 8)}.pdf`);
+
+      try {
+        await supabase.from("shop_drawings").insert({
+          project_id: projectId,
+          user_id: user.id,
+          html_content: html,
+          options: { kind: "review_draft", reviewer: reviewerName, deterministic_match_pct: matchPct, open_issues: openIssueCount },
+          drawing_mode: "review_draft",
+          export_class: "review_draft_pdf",
+          watermark_mode: "review_draft",
+          validation_state: { ok: true, issues: [], reviewer: reviewerName, match_pct: matchPct },
+        });
+      } catch { /* non-fatal */ }
+
+      await logAuditEvent(user.id, "exported", "export", undefined, projectId, undefined, {
+        export_type: "shop_drawing_review_draft",
+        reviewer: reviewerName,
+        deterministic_match_pct: matchPct,
+        open_issues: openIssueCount,
+        segment_count: usable.length,
+      });
+      toast.success(`Review draft generated (${usable.length} sheet${usable.length === 1 ? "" : "s"})`, { id: toastId });
+    } catch (e: any) {
+      toast.error(e?.message || "Review draft failed", { id: toastId });
+    } finally {
+      setAiDrafting(false);
+    }
+  };
+
   const verifiedBlocked = verifiedRow?.status === "blocked";
   const blockedList = Array.isArray(verifiedRow?.blocked_reasons)
     ? (verifiedRow!.blocked_reasons as string[])
