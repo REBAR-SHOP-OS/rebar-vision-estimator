@@ -1,114 +1,85 @@
 
 
-# Trust-First Shop Drawing System — Honest Modes, Deterministic Truth, Gated Export
+# Fine-tune AI Draft to look like a real SD sheet (SD48–SD53 style)
 
-Restructure the shop-drawing pipeline so AI-drafted sheets, reviewed drafts, and issued fabrication PDFs are **visually, structurally, and operationally distinct**. Stop the current behavior where AI previews look like issued drawings.
+Reference: your `SD48_TO_SD53_R1` set is a landscape 11×17 CAD-style sheet — heavy outer border, formal right-edge title strip, layer/legend column, dense plan view in the middle, and a bar bending schedule docked on one side. Today's AI draft is a portrait styled HTML report. We close the visual gap with surgical edits to **one file**: `supabase/functions/generate-shop-drawing/shop-drawing-template.ts`. No new files, no pipeline changes.
 
-This plan implements **Phase 1 (Stop the bleeding)** in full and lays the data foundation for Phases 2–4. We do not boil the ocean — we ship the safety-critical separation first, then layer provenance + diff engines on top.
+## What changes
 
-## End state
+### 1. Sheet geometry — match real SD format
+- Switch page to **landscape 17"×11" (ANSI B / Tabloid)** via `@page { size: 17in 11in landscape; margin: 0 }`.
+- Sheet element becomes a true full-bleed CAD frame: 0.4" outer border, 0.15" inner border (double-line), tick marks at quarter points (A/B/C zone marks like real CAD sheets).
+- Keep amber border + watermark **only** in `ai_draft` mode (already wired). In review/issued, switch to black double-line frame.
 
-Three render modes. Three title blocks. Three export classes. One deterministic source of truth.
+### 2. Right-edge title strip (vertical) — replace top title block
+Real SD sheets put the title block as a tall vertical strip on the right edge, not across the top. Restructure the sheet into a CSS grid:
 
 ```text
-┌──────────────────────────────────────────────────────────────┐
-│  INGEST → AI EXTRACT → DETERMINISTIC MODEL → VALIDATE → ISSUE │
-└──────────────────────────────────────────────────────────────┘
-        │            │              │              │       │
-   project_files  AI draft     bar_items +    validation  shop_drawings
-                  (visual)     estimate_items   _issues   (mode-locked)
+┌──────────────────────────────────────────┬─────────┐
+│                                          │  LOGO   │
+│                                          │─────────│
+│           DRAWING AREA                   │ PROJECT │
+│       (plan / elevation / section)       │ CLIENT  │
+│                                          │ ADDRESS │
+│                                          │─────────│
+│                                          │ SHEET # │
+│                                          │ SCALE   │
+│                                          │ DATE    │
+│                                          │ REV     │
+├──────────────────────────────────────────┤─────────│
+│  LAYER LEGEND  │  BAR BENDING SCHEDULE   │ DRAWN   │
+│                │                         │ CHECKED │
+│                │                         │ APPRVD  │
+└──────────────────────────────────────────┴─────────┘
 ```
 
-| Mode | Visual cues | Title block | Export label | Allowed if… |
-|---|---|---|---|---|
-| **AI Draft** | Diagonal `AI VISUAL DRAFT` watermark, amber frame, muted schedules, "inferred" tags | Schema A — generated_at, source count, AI confidence, **no** drawn-by/checked-by/approved-by | `AI Preview PDF` | always |
-| **Review Draft** | Blue frame, "REVIEW DRAFT" banner, unresolved-issue count, diff highlights | Schema B — reviewer, last review, unresolved issues, deterministic coverage % | `Review Draft PDF` | deterministic model exists |
-| **Issued** | Clean CAD frame, formal revision triangles, no watermark | Schema C — drawn/checked/approved by, revision, issue date, issue purpose | `Fabrication PDF` | validation passes + human approval |
+- Right strip: 2.2" wide, full height, stacked cells with bold labels above values.
+- Drawing area: ~13" wide × ~8" tall, white background, light dot-grid at 0.5" intervals (mimics CAD paper).
 
-## Phase 1 — Stop the bleeding (this implementation)
+### 3. Layer legend column (new)
+Bottom-left strip lists the layers present, mirroring the real SD's OCG layers (APRON SLAB, PIER, CMU WALLS, CONCRETE STEM WALLS, STEEL, CONT. GRID, HIDDEN). Each row: colored swatch + name + line style sample. Layers are derived from `barList` element_types (FOOTING → "FOOTING / FDN", WALL → "WALL", etc.) so it stays honest about what data exists.
 
-### 1. Mode field on shop drawings
+### 4. Bar Bending Schedule — real SD column set
+Replace the current schedule columns with the canonical ACI/CRSI placing-drawing column order seen in SD48-style sheets:
 
-Add `drawing_mode` enum to `shop_drawings` table: `ai_draft | review_draft | issued`. Default `ai_draft`. Every renderer reads this and picks the matching template.
+`MARK | SIZE | TYPE | NO. | LENGTH | A | B | C | D | E | R | WEIGHT | REMARKS`
 
-### 2. Three title-block templates
+- Monospace numerals, 8pt, dense rows.
+- Section header bands (e.g., "FOOTINGS — F1") in light gray fill.
+- Empty bend dimensions render as `—` instead of blank to match drafting convention.
 
-Refactor `supabase/functions/generate-shop-drawing/shop-drawing-template.ts`:
-- Split `renderTitleBlock(mode, data)` into three functions.
-- **AI mode**: removes "Drawn / Checked / Approved by" rows entirely; replaces with "Generated / Sources / AI Confidence / Validation".
-- **Review mode**: shows reviewer + unresolved issue count.
-- **Issued mode**: full formal block, only mountable when status is approved.
+### 5. Drawing area content — honest placeholder
+Instead of the current "diagram-ish HTML", render a **labeled placeholder block per element group** inside the drawing area:
+- A bordered rectangle per element_type, sized proportionally to bar count.
+- Inside: element_id, count, dominant size, and a small bend-shape SVG icon (straight, L-bend, U-bend, stirrup) inferred from `shape_code`.
+- Stamped diagonally across the drawing area in `ai_draft` mode: `SCHEMATIC — NOT TO SCALE` (small, 14pt, 12% opacity) so it never reads as a measured drawing.
 
-### 3. AI watermark + frame color by mode
+### 6. Title strip metadata — fix the bugs you saw earlier
+- Date field uses validator's ISO output (`YYYY-MM-DD`); fall back to today if invalid.
+- Discipline label normalized via existing `validateDrawingMetadata` canonical list (no more "Architectral").
+- Sheet number format: `{prefix}{NN}` (e.g., `SD-01`) zero-padded, one per page.
+- Revision cell shows `AI-D` chip in ai_draft mode (not a triangle), `R0/R1/...` only in issued mode.
 
-In `OutputsTab.tsx` HTML wrapper for AI Visual Draft:
-- Add `<div class="watermark">AI VISUAL DRAFT — NOT FOR FABRICATION</div>` rotated -30°, 96pt, 8% opacity, repeated diagonally across every page.
-- Sheet frame border color: amber `#d97706` for AI, blue `#1d4ed8` for review, black `#111` for issued.
-- Replace any "REV 1" triangle in AI mode with `AI CHANGE CANDIDATE` chip. Formal revision triangles only render in `issued` mode.
-
-### 4. Metadata validator + export gate
-
-New file: `src/lib/shop-drawing/validate-metadata.ts`. Pure function, returns `{ ok: boolean; issues: Issue[] }`. Checks:
-- Date format (`YYYY-MM-DD`, valid month/day) — catches the `2022-15` bug seen in the sample.
-- Discipline label spelling against canonical list (`Architectural`, `Structural`, …) — catches `Architectral` typo.
-- Required fields per mode (Schema A/B/C).
-- Project name, sheet number, scale present.
-
-Wired into the PDF export button in `OutputsTab.tsx`. If `!ok`, button shows toast with first 3 issues and refuses to export. Issues are also written to `validation_issues` so they appear in QA tab.
-
-### 5. Schedule row provenance flag
-
-Bar schedule rendering in the template: every row checks `row.deterministic_match === true`. If false (AI-inferred only), row gets:
-- Muted gray text
-- `[unverified]` suffix on the mark
-- Italic font
-- A `?` chip in the source column
-
-This is non-blocking visual honesty — does NOT prevent the AI draft from rendering.
-
-### 6. Export class selector
-
-Replace single "Export PDF" button with a dropdown:
-- **AI Preview PDF** — always enabled
-- **Review Draft PDF** — enabled when `bar_items` exist for the project
-- **Fabrication PDF** — enabled only when `drawing_mode='issued'` AND `validation_issues` has zero open critical/error rows
-
-Each writes a different `drawing_mode` to the saved `shop_drawings` row and uses the matching template.
-
-## Phase 2 foundation (data only, no UI yet)
-
-Add columns now so Phase 2 work doesn't require another migration:
-- `shop_drawings.drawing_mode` (text, default `ai_draft`)
-- `shop_drawings.validation_state` (jsonb, default `{}`) — last validator output
-- `shop_drawings.export_class` (text) — which class was rendered
-- `shop_drawings.watermark_mode` (text) — `ai_draft | review | none`
-- `bar_items.provenance_state` (text, default `ai_inferred`) — values: `source_detected | ai_inferred | deterministically_computed | human_confirmed`
-- `bar_items.deterministic_match` (boolean, default false)
+### 7. Typography & ink
+- Switch body font to a CAD-style stack: `"RomanS", "Consolas", "Courier New", monospace` for all labels and schedule cells; `"Helvetica Neue", Arial, sans-serif` only for the title strip headings.
+- Line weights: 2pt outer frame, 1pt inner frame, 0.5pt schedule grid, 0.25pt drawing-area grid.
+- Pure black ink (`#000`) on pure white (`#fff`); amber only in ai_draft accents.
 
 ## Files changed
 
-| File | Change | Lines |
+| File | Change | Approx LOC |
 |---|---|---|
-| `supabase/migrations/...` | Add columns above | new |
-| `supabase/functions/generate-shop-drawing/shop-drawing-template.ts` | 3 title-block schemas, mode-aware frame color, watermark CSS, schedule row provenance styling | ~120 |
-| `src/lib/shop-drawing/validate-metadata.ts` | New pure validator | new (~80) |
-| `src/components/workspace/OutputsTab.tsx` | Export-class dropdown, validator gate, AI watermark in HTML wrapper, mode-aware frame | ~60 |
-| `src/components/workspace/QATab.tsx` | (no change — issues table already shows validation_issues) | 0 |
+| `supabase/functions/generate-shop-drawing/shop-drawing-template.ts` | Page CSS to landscape 17×11, new grid layout, vertical right title strip, layer legend, redesigned BBS columns, schematic placeholder blocks, mode-aware frame & stamps | ~180 lines edited / added in one file |
 
-Net: 1 migration + 1 new file + 2 edits. No backend pipeline changes, no rebuild of estimation logic.
+No DB migration. No new modules. No changes to OutputsTab capture pipeline (already fixed for blank PDF). Existing tests in `src/test/shop-drawing-template.test.ts` will need their string assertions updated to match new headers — same file, same test, just new expected substrings.
 
-## Out of scope (later phases)
+## Out of scope (would need a real renderer)
 
-- **Phase 3**: Split into two completely separate renderer engines (AI vs deterministic SVG). Today's template handles both via mode flag.
-- **Phase 4**: Revision diff engine comparing approved versions. Today we only suppress fake revision marks in AI mode.
-- **Phase 5**: Role-based approval chain, audit log per export, version rollback.
-- Provenance click-through panel on each bar mark — data captured now, UI later.
+- True vector linework of plans/elevations/sections (would require an SVG draft engine fed by deterministic geometry — Phase 3 of the trust-first plan).
+- Scale-accurate dimensioning. AI draft will keep the `SCHEMATIC — NOT TO SCALE` stamp until the deterministic geometry layer ships.
+- Layer toggle interactivity (real SDs' OCGs). HTML/PDF can show the legend but not toggle.
 
-## Risk
+## Why this is the right minimal patch
 
-Low for Phase 1. All changes are additive: new enum column with safe default, new validator that gates one button, template changes scoped to one file rendered inside an isolated iframe. Existing AI Visual Draft flow continues to work — it just now looks honestly like a draft.
-
-## Why this order
-
-The user's analysis is correct that the root problem is **mode confusion**, not visual polish. Making the AI draft prettier without separating modes makes the trust problem worse. Phase 1 ships the safety wall (watermark + title-block separation + export gate); Phases 2–4 build the trust scaffolding (provenance, diff, approval) on top of a foundation that already refuses to lie about what it's showing.
+You asked for "fine tune like SD" — i.e., make the AI draft *look* like SD48. The honest gap is layout + framing + schedule format + typography, not pixel-perfect CAD geometry. All of those are CSS/HTML in one template file. Doing more (vector geometry) would violate the minimum-patch policy and double back on the earlier roadmap.
 
