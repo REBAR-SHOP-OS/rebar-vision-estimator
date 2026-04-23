@@ -1,75 +1,104 @@
 
 
-# Make AI Visual Draft Look Like a Candidate, Not an Issued Drawing
+# Redesign AI Candidate Sheet — Drawing-First Layout
 
-The recent PDF still looks too much like a real shop drawing because two things bleed issued-drawing semantics into AI mode:
+The current export uses ~28% of the sheet height for header/legend/footer chrome and renders the AI image with `object-fit: contain` inside a wide drawable cell, which leaves huge empty bands on either side when the image is portrait or square. Result: a tiny sketch floating in a big amber card.
 
-1. The **HTML wrapper** in `OutputsTab.tsx` still uses fields like `DRAWING NO.`, formal sheet numbers, and a thin "AI CHANGE CANDIDATE" chip.
-2. The **AI image prompt** in `draft-shop-drawing-ai` lets the model draw REV triangles, revision clouds, "REV. 1", "DETAILER / CHECKER" title blocks, and confident bar lists like `C1 32 - 20M x 4500`.
+The fix is one file, one inline `<style>` block, one HTML structure tweak. No new files, no schema changes.
 
-We fix both layers, plus tighten the pre-export validator. No new tables. No new pages. Three files touched.
+## File touched
 
-## What changes
+`src/components/workspace/OutputsTab.tsx` — only the inline HTML/CSS inside `handleAiVisualDraft` (~lines 510–626). Nothing else changes.
 
-### 1. Reframe the AI wrapper HTML — `src/components/workspace/OutputsTab.tsx`
+## Layout changes
 
-Inside `handleAiVisualDraft`, replace the title block + chrome around each AI image:
+### 1. Sheet zone re-budget (sheet-first composition)
 
-- **Sheet ID**: `SD-AI-01` → `AI-CANDIDATE-01` (kills the "real drawing number" association).
-- **Title block**: replace single `DRAWING NO.` cell with a 4-cell **AI candidate header**:
-  - `STATUS: UNVERIFIED — AI CANDIDATE` (red pill)
-  - `GENERATED: <ISO date>`
-  - `SOURCE: Verified Estimate v<n>`
-  - `CONFIDENCE: <%>` (from canonical estimate)
-- **Status pill**: bold red `UNVERIFIED` chip in title-block position where issued sheets show "ISSUED FOR CONSTRUCTION".
-- **Watermark**: keep diagonal `AI VISUAL DRAFT — NOT FOR FABRICATION`, but add a second smaller diagonal stamp `CANDIDATE — NO FORMAL REVISION`.
-- **Sheet frame**: switch from solid amber border to **dashed amber** + diagonal hatch in the corner — visually unmistakable as draft.
-- **Footer**: add explicit line: *"Marks, quantities, and changes shown are AI suggestions. None are tied to a controlled revision. Use the Review Draft export for reviewer workflow, the Issued export for fabrication."*
-- **Per-image disclaimer band**: directly below each AI image, render an **amber strip** that says: *"All callouts, bar marks, and dimensions in this image are AI-generated and unverified. Treat as sketch, not as fact."* This addresses the "exact-looking bar list" trust gap without requiring deterministic match data we don't have yet.
+Switch the `.frame` CSS grid from four rows to three, merging legend into the footer band, and slimming the header. Target zones on a 24×18 sheet:
 
-### 2. Constrain the AI image prompt — `supabase/functions/draft-shop-drawing-ai/index.ts`
+| Zone | Old | New | % of 18in |
+|---|---|---|---|
+| Header band | 1.0in | **1.1in** | ~6% |
+| Drawable viewport | ~13.0in | **15.1in** | ~84% (was ~73%) |
+| Footer + legend (merged) | 1.9in | **1.8in** | ~10% |
+| Right metadata rail | 2.5in (12% of 24) | **2.9in** (12%) | unchanged ratio |
 
-Update the system/user prompt sent to the image model so it stops drawing issued-drawing semantics:
+New grid:
+```text
+grid-template-columns: 1fr 2.9in;
+grid-template-rows: 1.1in 1fr 1.8in;
+grid-template-areas:
+  "header   title"
+  "drawable title"
+  "footer   title";
+```
+The legend moves *inside* `.zone-footer` as a horizontal compact strip on the left, with the safety warning on the right — one band, one row, ~1.8in tall instead of 1.9in stacked.
 
-- **Forbid**: revision triangles (`△ 1`), revision clouds, the literal string `REV`, `REV.`, `R0`/`R1`, `DETAILER`, `CHECKER`, `CHECKED`, `APPROVED`, `ISSUED`, formal title blocks.
-- **Forbid**: rendering exact bar quantity tables (e.g., `C1 32 - 20M x 4500`). Allowed: schematic shape, generic mark labels (`C1`, `T1`) without quantity-length triplets.
-- **Replace** "revision cloud" instruction with: *draw a dashed orange "Suggested change" balloon labeled `Candidate #N` for any change callout*.
-- **Replace** "REV" badge instruction with: *label as `AI Note` only*.
-- **Add**: every change callout must include the word `CANDIDATE` and a number, never a revision letter.
+### 2. Drawable viewport — fill, don't float
 
-This is the only place that stops the model from generating the offending pixels. Wrapper HTML alone can't hide what the image itself shows.
+Replace the constrained image rule:
+- Drop `max-height: calc(100% - 0.6in)` and `max-width: 100%`.
+- Use `width: 100%; height: 100%; object-fit: contain;` on `.sheet-image` so it scales up to whichever sheet axis runs out first while preserving aspect ratio.
+- Move the unverified band out of the drawable flex column and into an **absolute-positioned overlay** at the bottom of `.zone-drawable` (15px tall, semi-opaque amber bar) so it never steals image space.
+- Keep the 0.5in dot grid background (CAD paper feel) and the dashed amber image border.
 
-### 3. Harden the pre-export validator — `src/lib/shop-drawing/validate-metadata.ts`
+### 3. Right metadata rail — denser
 
-Extend `validateDrawingMetadata`:
+Same field set you listed (Sheet, Sheet Size, Scale, Generated, Source, Confidence, Deterministic Match, Review Status, Pending, Caption) but:
+- Cell padding `5px 8px` → `4px 7px`.
+- `gap: 0.08in` → `0.05in`.
+- Add new `SCALE` cell with value `Schematic — N.T.S.` and a `PENDING` cell that shows whatever placeholder the rail currently lacks (issue count).
+- Default placeholders rendered visibly:
+  - `Confidence: Pending` when null (was `—`)
+  - `Deterministic Match: Pending` (was `NOT VERIFIED`, kept red)
+  - `Review Status: Unreviewed` (was `PENDING`, kept red)
+- Caption cell uses remaining vertical space (`flex: 1`), 3-line clamp.
 
-- **Spelling normalizer**: add a `normalizeProjectName` helper that auto-corrects common drafting typos (`Architectral` → `Architectural`, `Stuctural` → `Structural`, `Mechnical` → `Mechanical`). Returns the corrected string + a `warning` issue noting the auto-fix. Called from `OutputsTab.handleAiVisualDraft` before the AI prompt is built, so the corrected name flows into the image prompt and the wrapper HTML.
-- **Required-field check for `ai_draft`**: also require `confidenceSource` (i.e., must have a current verified estimate). If missing, block export with a clear message — this is already partly enforced but currently allows export when `ver` is non-blocked regardless of confidence presence.
-- **Discipline whitelist already exists** — extend warning to a hard error when the value is a known typo (`Architectral`, `Stuctural`, etc.).
+### 4. Footer/legend band — single horizontal strip
 
-### 4. Title-block field schema is mode-aware (already half-done)
+```text
+┌────────────────────────────────────┬──────────────────────────────┐
+│ LEGEND  ▣ Candidate  ▣ AI Note      │ Marks, quantities, and       │
+│         ▣ Unverified ▣ Source ref    │ changes shown are AI         │
+│                                     │ suggestions. Not for fab.    │
+└────────────────────────────────────┴──────────────────────────────┘
+```
+- 1.8in tall, two columns (`1fr 1.4fr`), 11px text, all four legend swatches inline on one row.
+- Removes the duplicated "no formal revisions" note (already in title-strip pill).
 
-The wrapper in `OutputsTab` is the only place rendering the AI title block, so the change in step 1 is sufficient — no shared template to refactor. The deterministic `shop-drawing-template.ts` (used by the other Render menu items) already keeps the `DETAILER / CHECKER / DATE / REV` fields, which is correct for review/issued exports. We do **not** touch that template.
+### 5. Header band — tighter
 
-## Files changed
+- Reduce vertical padding `0.15in 0.25in` → `0.1in 0.25in`.
+- Brand logo `max-height: 0.7in` → `0.85in` (uses the slightly taller header).
+- Project / segment text unchanged.
+- Red `UNVERIFIED — AI CANDIDATE` pill stays right-aligned.
 
-| File | Change | LOC |
-|---|---|---|
-| `src/components/workspace/OutputsTab.tsx` | Rewrite the title-block, watermark, footer, and per-image disclaimer in `handleAiVisualDraft`'s inline HTML; call `normalizeProjectName` before building the prompt; switch sheet ID from `SD-AI-NN` to `AI-CANDIDATE-NN` | ~80 lines edited |
-| `supabase/functions/draft-shop-drawing-ai/index.ts` | Update prompt to forbid REV/title-block/exact-quantity rendering and require `Candidate #N` language | ~30 lines edited |
-| `src/lib/shop-drawing/validate-metadata.ts` | Add `normalizeProjectName` exporter, hard-error on known typos, require verified estimate confidence | ~40 lines added |
+### 6. Watermarks — keep, reposition
 
-No DB migration. No changes to the deterministic template. No changes to OutputsTab capture pipeline (already fixed for blank PDF).
+Diagonal `AI VISUAL DRAFT — NOT FOR FABRICATION` and sub-stamp `CANDIDATE — NO FORMAL REVISION` stay full-sheet, centered. Corner amber hatch stays. Opacity unchanged.
 
-## What this delivers against the user's P0 list
+### 7. Multi-sheet split (already in place)
 
-- **P0.1 Kill formal revision behavior in AI mode** → prompt forbids REV/△/clouds; wrapper drops `DRAWING NO.` and replaces with `STATUS: UNVERIFIED`.
-- **P0.2 Mark bar lists as unverified** → prompt forbids exact `mark — qty — size — length` triplets in the image; per-image amber strip in the wrapper labels everything as unverified.
-- **P0.3 Replace issued-style title block fields** → wrapper switches to Status / Generated / Source / Confidence.
-- **P0.4 Fix naming/metadata validation** → `normalizeProjectName` auto-corrects "Architectral" before the prompt sees it; validator hard-errors on the typo so it can never reach an export again.
+Each AI image is already its own `<section class="sheet">` with `page-break-after: always`. The layout-engine "split, never shrink" rule is preserved — no change needed. If the new larger viewport still can't render an image at readable size for an exotic aspect ratio, the existing split-per-segment behavior already produces a fresh sheet.
 
-## Out of scope (P1/P2 — flagged for follow-up)
+## What we deliberately do NOT change
 
-- Provenance + deterministic-match badge per AI callout (P1) — needs a new `ai_callout_provenance` table; will scope as a separate plan.
-- Full split into AI Preview / Review Draft / Issued export pipelines (P2) — already partially modeled by `shop_drawings.drawing_mode` + `export_class`; needs UI mode-switcher and a real diff engine, also a separate plan.
+- AI prompt in `draft-shop-drawing-ai/index.ts` (Phase 2 already constrained it).
+- `validate-metadata.ts` (Phase 1 already hardened it).
+- `renderHtmlToPdf` and the ARCH C 24×18 sheet size (already real drawing-sheet sizing).
+- `shop_drawings` insert / `export_jobs` insert (audit trail intact).
+- Review Draft and Issued exports — out of scope for this patch.
+
+## Acceptance check (visual QA after build)
+
+1. Render AI Visual Draft on this project.
+2. Open the resulting PDF — image should now occupy the full center band of each sheet, edge-to-edge horizontally inside the dashed amber image border.
+3. Right rail visibly shorter / denser, no large empty padding.
+4. Footer is a single horizontal strip, no stacked legend block above it.
+5. Red `UNVERIFIED — AI CANDIDATE` pill, dashed amber border, watermarks, corner hatch all still present and unmistakable.
+6. Sheet still prints at exactly 24×18 inches (verified via `pdfinfo` — should report `1728 x 1296 pts`).
+
+## LOC estimate
+
+~70 lines edited inside one `<style>` block + ~15 lines of HTML restructure inside the `sheets.map()` template literal. No other files. No DB. No edge function changes.
 
