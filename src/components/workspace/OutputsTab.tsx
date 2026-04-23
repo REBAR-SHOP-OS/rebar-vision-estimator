@@ -577,55 +577,55 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
             border: 4px dashed #d97706;
             display: grid;
             /* columns: main drawing area | right title strip */
-            grid-template-columns: 1fr 2.5in;
-            /* rows: header | drawable | legend | footer */
-            grid-template-rows: 1.0in 1fr 1.4in 0.5in;
+            grid-template-columns: 1fr 2.9in;
+            /* rows: header | drawable | merged legend+footer */
+            grid-template-rows: 1.1in 1fr 1.8in;
             grid-template-areas:
               "header   title"
               "drawable title"
-              "legend   title"
               "footer   title";
             background: #fff;
           }
 
-          .zone-header { grid-area: header; border-bottom: 2px solid #d97706; padding: 0.15in 0.25in; display: flex; justify-content: space-between; align-items: center; gap: 0.3in; background: #fffbeb; position: relative; z-index: 1; }
+          .zone-header { grid-area: header; border-bottom: 2px solid #d97706; padding: 0.1in 0.25in; display: flex; justify-content: space-between; align-items: center; gap: 0.3in; background: #fffbeb; position: relative; z-index: 1; }
           .title-left { display: flex; align-items: center; gap: 0.2in; }
-          .brand { max-height: 0.7in; max-width: 1.6in; object-fit: contain; display: block; }
+          .brand { max-height: 0.85in; max-width: 1.8in; object-fit: contain; display: block; }
           .proj { font-weight: 700; font-size: 22px; letter-spacing: 0.3px; }
           .client { font-size: 14px; color: #555; }
           .seg { font-size: 13px; color: #92400e; font-weight: 700; margin-top: 2px; letter-spacing: 0.5px; }
           .ai-pill { background: #b91c1c; color: #fff; font-weight: 800; font-size: 16px; letter-spacing: 1.5px; padding: 8px 18px; border-radius: 4px; box-shadow: 0 0 0 3px #fff, 0 0 0 5px #b91c1c; }
 
-          .zone-drawable { grid-area: drawable; position: relative; padding: 0.2in; background:
+          .zone-drawable { grid-area: drawable; position: relative; padding: 0.15in; background:
             radial-gradient(circle, #ddd 0.5px, transparent 0.5px) 0 0 / 0.5in 0.5in,
             #fff;
-            display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; z-index: 1;
+            overflow: hidden; z-index: 1;
           }
-          /* Image fits the drawable viewport at intrinsic readable size — no shrink past the unverified band. */
-          .sheet-image { display: block; max-width: 100%; max-height: calc(100% - 0.6in); object-fit: contain; border: 1px dashed #d97706; background: #fff; }
-          .unverified-band { width: 100%; margin-top: 0.15in; padding: 0.08in 0.15in; background: #fef3c7; border: 1.5px solid #d97706; color: #7c2d12; font-size: 12px; font-weight: 700; text-align: center; letter-spacing: 0.4px; box-sizing: border-box; }
+          /* Image fills the drawable viewport edge-to-edge, contained to aspect ratio. */
+          .sheet-image { display: block; width: 100%; height: 100%; object-fit: contain; border: 1px dashed #d97706; background: #fff; box-sizing: border-box; }
+          .unverified-band { position: absolute; left: 0.15in; right: 0.15in; bottom: 0.05in; padding: 4px 10px; background: rgba(254, 243, 199, 0.92); border: 1px solid #d97706; color: #7c2d12; font-size: 10px; font-weight: 700; text-align: center; letter-spacing: 0.3px; box-sizing: border-box; z-index: 2; }
 
-          .zone-legend { grid-area: legend; border-top: 1.5px solid #d97706; padding: 0.12in 0.25in; background: #fffbeb; font-size: 11px; color: #111; display: grid; grid-template-columns: repeat(2, 1fr); column-gap: 0.4in; row-gap: 4px; align-content: start; position: relative; z-index: 1; }
-          .legend-title { grid-column: 1 / -1; font-weight: 800; font-size: 12px; letter-spacing: 1px; color: #92400e; margin-bottom: 4px; }
+          .legend-title { font-weight: 800; font-size: 11px; letter-spacing: 1px; color: #92400e; margin-bottom: 4px; }
           .legend-row { display: flex; align-items: center; gap: 8px; }
           .sw { display: inline-block; width: 14px; height: 10px; border: 1px solid #111; }
           .sw-cand { background: #fde68a; border-color: #d97706; }
           .sw-ai { background: #fff; border: 1.5px dashed #b91c1c; }
           .sw-unv { background: repeating-linear-gradient(45deg, #fff 0 3px, #fca5a5 3px 6px); border-color: #b91c1c; }
           .sw-src { background: #dbeafe; border-color: #1e40af; }
-          .legend-note { grid-column: 1 / -1; margin-top: 4px; font-size: 10px; color: #92400e; font-style: italic; }
 
-          .zone-footer { grid-area: footer; border-top: 2px solid #d97706; padding: 0.1in 0.25in; background: #fffbeb; font-size: 11px; color: #7c2d12; font-weight: 600; display: flex; align-items: center; position: relative; z-index: 1; }
+          .zone-footer { grid-area: footer; border-top: 2px solid #d97706; padding: 0.12in 0.25in; background: #fffbeb; font-size: 11px; color: #7c2d12; display: grid; grid-template-columns: 1fr 1.4fr; column-gap: 0.3in; align-items: center; position: relative; z-index: 1; }
+          .footer-legend { display: flex; flex-direction: column; gap: 4px; }
+          .footer-legend .legend-grid { display: grid; grid-template-columns: repeat(4, 1fr); column-gap: 10px; row-gap: 2px; font-size: 10px; }
+          .footer-warn { font-weight: 600; line-height: 1.4; font-size: 11px; }
 
           /* Right-edge vertical title strip — ARCH-style */
-          .title-strip { grid-area: title; border-left: 2px solid #d97706; background: #fff; display: flex; flex-direction: column; padding: 0.15in; gap: 0.08in; position: relative; z-index: 1; }
-          .ts-pill { background: #b91c1c; color: #fff; font-weight: 800; font-size: 11px; letter-spacing: 1px; padding: 6px 8px; text-align: center; border-radius: 3px; margin-bottom: 0.1in; }
-          .ts-cell { border: 1px solid #d97706; padding: 5px 8px; background: #fff7ed; }
+          .title-strip { grid-area: title; border-left: 2px solid #d97706; background: #fff; display: flex; flex-direction: column; padding: 0.12in; gap: 0.05in; position: relative; z-index: 1; }
+          .ts-pill { background: #b91c1c; color: #fff; font-weight: 800; font-size: 11px; letter-spacing: 1px; padding: 5px 8px; text-align: center; border-radius: 3px; margin-bottom: 0.06in; }
+          .ts-cell { border: 1px solid #d97706; padding: 4px 7px; background: #fff7ed; }
           .ts-cell.ts-cap { flex: 1; display: flex; flex-direction: column; }
           .ts-lbl { font-size: 8px; color: #92400e; letter-spacing: 0.6px; font-weight: 800; }
-          .ts-val { font-size: 12px; font-weight: 700; font-family: ui-monospace, "Consolas", monospace; color: #111; margin-top: 2px; }
+          .ts-val { font-size: 11px; font-weight: 700; font-family: ui-monospace, "Consolas", monospace; color: #111; margin-top: 1px; }
           .ts-warn { color: #b91c1c; }
-          .ts-cap-val { font-size: 10px; font-family: "Helvetica Neue", Arial, sans-serif; font-weight: 500; color: #444; line-height: 1.3; flex: 1; overflow: hidden; }
+          .ts-cap-val { font-size: 10px; font-family: "Helvetica Neue", Arial, sans-serif; font-weight: 500; color: #444; line-height: 1.3; flex: 1; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
         </style></head><body data-sheet-w="${SHEET_W_IN}" data-sheet-h="${SHEET_H_IN}" data-sheet-orient="landscape">${sheets}</body></html>`;
 
       await renderHtmlToPdf(html, `ai-visual-draft-${projectId.slice(0, 8)}.pdf`);
