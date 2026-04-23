@@ -528,26 +528,29 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
               <img class="sheet-image" src="${r.image_data_uri}" alt="${esc(r.caption)}" />
               <div class="unverified-band">All callouts, bar marks, and dimensions in this image are AI-generated and unverified. Sketch only — not measured, not to scale.</div>
             </main>
-            <aside class="zone-legend">
-              <div class="legend-title">LEGEND</div>
-              <div class="legend-row"><span class="sw sw-cand"></span>Candidate #n note (AI suggestion)</div>
-              <div class="legend-row"><span class="sw sw-ai"></span>AI Note callout</div>
-              <div class="legend-row"><span class="sw sw-unv"></span>Unverified bar mark / dimension</div>
-              <div class="legend-row"><span class="sw sw-src"></span>Source ref (drawing package)</div>
-              <div class="legend-note">No formal revisions. No fabrication-grade dimensions.</div>
-            </aside>
             <footer class="zone-footer">
-              Marks, quantities, and changes shown are AI suggestions. None are tied to a controlled revision. Use Review Draft for reviewer workflow, Issued for fabrication.
+              <div class="footer-legend">
+                <div class="legend-title">LEGEND</div>
+                <div class="legend-grid">
+                  <div class="legend-row"><span class="sw sw-cand"></span>Candidate #n</div>
+                  <div class="legend-row"><span class="sw sw-ai"></span>AI Note</div>
+                  <div class="legend-row"><span class="sw sw-unv"></span>Unverified mark</div>
+                  <div class="legend-row"><span class="sw sw-src"></span>Source ref</div>
+                </div>
+              </div>
+              <div class="footer-warn">Marks, quantities, and changes shown are AI suggestions. None are tied to a controlled revision. Use Review Draft for reviewer workflow, Issued for fabrication.</div>
             </footer>
             <div class="title-strip">
               <div class="ts-pill">UNVERIFIED · AI CANDIDATE</div>
               <div class="ts-cell"><div class="ts-lbl">SHEET</div><div class="ts-val">AI-CANDIDATE-${String(i + 1).padStart(2, "0")}</div></div>
               <div class="ts-cell"><div class="ts-lbl">SHEET SIZE</div><div class="ts-val">ARCH C · 24×18</div></div>
+              <div class="ts-cell"><div class="ts-lbl">SCALE</div><div class="ts-val">Schematic — N.T.S.</div></div>
               <div class="ts-cell"><div class="ts-lbl">GENERATED</div><div class="ts-val">${esc(generatedAt)}</div></div>
               <div class="ts-cell"><div class="ts-lbl">SOURCE</div><div class="ts-val">${esc(sourceLabel)}</div></div>
-              <div class="ts-cell"><div class="ts-lbl">CONFIDENCE</div><div class="ts-val">${confidencePct !== null ? confidencePct + "%" : "—"}</div></div>
-              <div class="ts-cell"><div class="ts-lbl">DETERMINISTIC MATCH</div><div class="ts-val ts-warn">NOT VERIFIED</div></div>
-              <div class="ts-cell"><div class="ts-lbl">REVIEW STATUS</div><div class="ts-val ts-warn">PENDING</div></div>
+              <div class="ts-cell"><div class="ts-lbl">CONFIDENCE</div><div class="ts-val">${confidencePct !== null ? confidencePct + "%" : "Pending"}</div></div>
+              <div class="ts-cell"><div class="ts-lbl">DETERMINISTIC MATCH</div><div class="ts-val ts-warn">Pending</div></div>
+              <div class="ts-cell"><div class="ts-lbl">REVIEW STATUS</div><div class="ts-val ts-warn">Unreviewed</div></div>
+              <div class="ts-cell"><div class="ts-lbl">PENDING</div><div class="ts-val">Awaiting reviewer</div></div>
               <div class="ts-cell ts-cap"><div class="ts-lbl">CAPTION</div><div class="ts-val ts-cap-val">${esc(r.caption)}</div></div>
             </div>
           </div>
