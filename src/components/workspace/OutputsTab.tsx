@@ -80,7 +80,7 @@ async function renderHtmlToPdf(html: string, filename: string): Promise<void> {
         image: { type: "jpeg", quality: 0.98 },
         html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
         jsPDF: { unit: "in", format: "letter", orientation: "landscape" },
-        pagebreak: { mode: ["css", "legacy"], before: ".sheet" },
+        pagebreak: { mode: ["css", "legacy"], avoid: [".sheet"] },
       })
       .from(container)
       .save();
