@@ -633,7 +633,7 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
                       <DropdownMenuLabel className="text-[10px]">Trust-first export modes</DropdownMenuLabel>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={handleAiVisualDraft} className="text-xs">
-                        <Sparkles className="h-3.5 w-3.5 mr-2 text-amber-600" />
+                        <Sparkles className="h-3.5 w-3.5 mr-2 text-[hsl(var(--status-review))]" />
                         <div className="flex flex-col">
                           <span className="font-medium">AI Preview PDF</span>
                           <span className="text-[10px] text-muted-foreground">Watermarked draft, not for fabrication</span>
@@ -644,7 +644,7 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
                         className="text-xs opacity-60"
                         title="Phase 2 — requires deterministic model + reviewer assignment"
                       >
-                        <Clock className="h-3.5 w-3.5 mr-2 text-blue-600" />
+                        <Clock className="h-3.5 w-3.5 mr-2 text-primary" />
                         <div className="flex flex-col">
                           <span className="font-medium">Review Draft PDF</span>
                           <span className="text-[10px] text-muted-foreground">Coming in Phase 2</span>
@@ -662,7 +662,7 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
                               : "Issue deterministic fabrication PDF"
                         }
                       >
-                        <ShieldCheck className="h-3.5 w-3.5 mr-2 text-green-600" />
+                        <ShieldCheck className="h-3.5 w-3.5 mr-2 text-[hsl(var(--status-approved))]" />
                         <div className="flex flex-col">
                           <span className="font-medium">Fabrication PDF</span>
                           <span className="text-[10px] text-muted-foreground">
