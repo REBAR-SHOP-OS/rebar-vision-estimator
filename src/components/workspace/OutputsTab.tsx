@@ -22,7 +22,7 @@ import { exportExcelFile } from "@/lib/excel-export";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { getLogoDataUri } from "@/lib/logo-base64";
-import { validateDrawingMetadata, type DrawingMode } from "@/lib/shop-drawing/validate-metadata";
+import { validateDrawingMetadata, normalizeProjectName, type DrawingMode } from "@/lib/shop-drawing/validate-metadata";
 import {
   DropdownMenu,
   DropdownMenuContent,
