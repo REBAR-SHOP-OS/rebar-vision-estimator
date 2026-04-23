@@ -1106,7 +1106,7 @@ function buildScheduleSheets(
   return entriesPerPage.map((entries, pageIndex) => {
     const rows = entries.map((entry) => {
       if (entry.kind === "section") {
-        return `<tr class="section-row"><td colspan="14">${escapeHtml(entry.title)}</td></tr>`;
+        return `<tr class="section-row"><td colspan="13">${escapeHtml(entry.title)}</td></tr>`;
       }
 
       const bar = entry.bar!;
@@ -1115,16 +1115,15 @@ function buildScheduleSheets(
           <td>${escapeHtml(options.barMarks ? bar.barMark : bar.elementId)}</td>
           <td>${escapeHtml(bar.size)}</td>
           <td>${escapeHtml(bar.shapeCode)}</td>
-          <td class="num">${formatNumber(bar.qty)}</td>
-          <td class="num">${formatNumber(bar.multiplier)}</td>
           <td class="num">${formatNumber(bar.pieces)}</td>
           <td class="num">${bar.lengthMm > 0 ? formatNumber(bar.lengthMm) : "—"}</td>
-          <td class="num">${bar.totalLengthM > 0 ? formatNumber(bar.totalLengthM, 2) : "—"}</td>
-          <td class="num">${bar.weightKg > 0 ? formatNumber(bar.weightKg, 1) : "—"}</td>
           <td class="num">${options.includeDims && bar.legA ? formatNumber(bar.legA) : "—"}</td>
           <td class="num">${options.includeDims && bar.legB ? formatNumber(bar.legB) : "—"}</td>
           <td class="num">${options.includeDims && bar.legC ? formatNumber(bar.legC) : "—"}</td>
           <td class="num">${options.includeDims && bar.legD ? formatNumber(bar.legD) : "—"}</td>
+          <td class="num">—</td>
+          <td class="num">—</td>
+          <td class="num">${bar.weightKg > 0 ? formatNumber(bar.weightKg, 1) : "—"}</td>
           <td>${escapeHtml(bar.note || "—")}</td>
         </tr>
       `;
