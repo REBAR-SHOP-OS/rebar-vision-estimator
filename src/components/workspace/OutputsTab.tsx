@@ -22,6 +22,15 @@ import { exportExcelFile } from "@/lib/excel-export";
 // @ts-ignore - no types
 import html2pdf from "html2pdf.js";
 import { getLogoDataUri } from "@/lib/logo-base64";
+import { validateDrawingMetadata, type DrawingMode } from "@/lib/shop-drawing/validate-metadata";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import {
   getCurrentVerifiedEstimate,
   refreshVerifiedEstimateFromWorkspace,
@@ -340,6 +349,41 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
 
   const handleAiVisualDraft = async () => {
     if (!user) return;
+    // Phase 1: trust-first metadata gate. AI Draft is the most permissive mode
+    // but we still refuse to render if project name / sheet number / scale missing.
+    const projGate = await supabase
+      .from("projects")
+      .select("name, client_name")
+      .eq("id", projectId)
+      .maybeSingle();
+    const gate = validateDrawingMetadata(
+      {
+        projectName: projGate.data?.name,
+        clientName: projGate.data?.client_name,
+        sheetNumber: "SD-AI-01",
+        scale: "N/A (visual draft)",
+      },
+      "ai_draft" as DrawingMode,
+    );
+    if (!gate.ok) {
+      const first = gate.issues.filter((i) => i.severity === "error").slice(0, 3);
+      toast.error(`Cannot generate: ${first.map((i) => i.message).join(" ")}`);
+      // Persist for QA tab visibility
+      try {
+        await supabase.from("validation_issues").insert(
+          first.map((i) => ({
+            project_id: projectId,
+            user_id: user.id,
+            issue_type: "metadata_invalid",
+            severity: "error",
+            title: `Shop drawing metadata: ${i.field}`,
+            description: i.message,
+            status: "open",
+          })),
+        );
+      } catch { /* non-fatal */ }
+      return;
+    }
     setAiDrafting(true);
     const toastId = toast.loading("Drafting visual sheets with AI…");
     try {
@@ -379,6 +423,7 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
       const sheets = usable.map((r, i) => `
         <section class="sheet">
           <div class="sheet-frame">
+          <div class="watermark">AI VISUAL DRAFT — NOT FOR FABRICATION</div>
           <header class="title">
             <div class="title-left">
               ${logoDataUri ? `<img class="brand" src="${logoDataUri}" alt="REBAR.SHOP" />` : ""}
@@ -390,6 +435,7 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
             <div class="sheet-no">
               <div class="lbl">DRAWING NO.</div>
               <div class="val">SD-AI-${String(i + 1).padStart(2, "0")}</div>
+              <div class="ai-chip">AI CHANGE CANDIDATE</div>
             </div>
           </header>
           <h2>${esc(r.segment_name)}</h2>
@@ -406,19 +452,21 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
           body { font-family: Arial, sans-serif; margin: 0; color: #111; }
           .sheet { page-break-after: always; margin: 0; padding: 6px; }
           .sheet:last-child { page-break-after: auto; }
-          .sheet-frame { border: 2px solid #111; outline: 0.5px solid #111; outline-offset: 4px; padding: 14px 16px; }
-          .title { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #111; padding-bottom: 8px; gap: 16px; }
+          .sheet-frame { position: relative; border: 3px solid #d97706; outline: 1px solid #d97706; outline-offset: 4px; padding: 14px 16px; overflow: hidden; }
+          .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: 72px; font-weight: 900; color: #d97706; opacity: 0.10; pointer-events: none; white-space: nowrap; letter-spacing: 4px; z-index: 0; }
+          .title { position: relative; z-index: 1; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #d97706; padding-bottom: 8px; gap: 16px; }
           .title-left { display: flex; align-items: center; gap: 12px; }
           .brand { max-height: 44px; max-width: 130px; object-fit: contain; display: block; }
           .proj { font-weight: 700; font-size: 15px; letter-spacing: 0.2px; }
           .client { font-size: 12px; color: #555; }
-          .sheet-no { border: 1px solid #111; padding: 4px 10px; text-align: center; min-width: 110px; }
-          .sheet-no .lbl { font-size: 9px; color: #555; letter-spacing: 0.5px; }
+          .sheet-no { border: 1px solid #d97706; padding: 4px 10px; text-align: center; min-width: 130px; background: #fff7ed; }
+          .sheet-no .lbl { font-size: 9px; color: #92400e; letter-spacing: 0.5px; }
           .sheet-no .val { font-weight: 700; font-size: 14px; font-family: ui-monospace, Menlo, monospace; }
-          h2 { font-size: 14px; margin: 10px 0 8px; }
-          .sheet img:not(.brand) { max-width: 100%; max-height: 6.6in; border: 1px solid #111; display: block; margin: 0 auto; }
-          .caption { font-size: 11px; color: #444; margin-top: 6px; text-align: center; }
-          footer { margin-top: 8px; font-size: 10px; color: #555; border-top: 1px solid #111; padding-top: 6px; }
+          .ai-chip { margin-top: 4px; font-size: 8px; font-weight: 700; color: #92400e; background: #fde68a; padding: 2px 4px; border-radius: 2px; letter-spacing: 0.4px; }
+          h2 { position: relative; z-index: 1; font-size: 14px; margin: 10px 0 8px; }
+          .sheet img:not(.brand) { position: relative; z-index: 1; max-width: 100%; max-height: 6.4in; border: 1px solid #d97706; display: block; margin: 0 auto; }
+          .caption { position: relative; z-index: 1; font-size: 11px; color: #444; margin-top: 6px; text-align: center; }
+          footer { position: relative; z-index: 1; margin-top: 8px; font-size: 10px; color: #92400e; font-weight: 600; border-top: 2px solid #d97706; padding-top: 6px; background: #fffbeb; padding: 6px 8px; }
         </style></head><body>${sheets}</body></html>`;
 
       await renderHtmlToPdf(html, `ai-visual-draft-${projectId.slice(0, 8)}.pdf`);
@@ -429,6 +477,10 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
           user_id: user.id,
           html_content: html,
           options: { kind: "ai_visual", segment_count: usable.length, model: "google/gemini-3.1-flash-image-preview" },
+          drawing_mode: "ai_draft",
+          export_class: "ai_preview_pdf",
+          watermark_mode: "ai_draft",
+          validation_state: { ok: true, issues: [] },
         });
       } catch { /* non-fatal */ }
 
@@ -562,19 +614,64 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
               </div>
               <div className="flex items-center gap-2">
                 {o.type === "shop_drawing" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!o.available || aiDrafting}
-                    className="text-xs h-8"
-                    onClick={handleAiVisualDraft}
-                    title="Generate AI visual sketches with Nano Banana 2"
-                  >
-                    {aiDrafting
-                      ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
-                      : <Sparkles className="h-3.5 w-3.5 mr-1" />}
-                    AI Visual
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!o.available || aiDrafting}
+                        className="text-xs h-8"
+                        title="Choose drawing render mode"
+                      >
+                        {aiDrafting
+                          ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                          : <Sparkles className="h-3.5 w-3.5 mr-1" />}
+                        Render…
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-64">
+                      <DropdownMenuLabel className="text-[10px]">Trust-first export modes</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={handleAiVisualDraft} className="text-xs">
+                        <Sparkles className="h-3.5 w-3.5 mr-2 text-[hsl(var(--status-review))]" />
+                        <div className="flex flex-col">
+                          <span className="font-medium">AI Preview PDF</span>
+                          <span className="text-[10px] text-muted-foreground">Watermarked draft, not for fabrication</span>
+                        </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled
+                        className="text-xs opacity-60"
+                        title="Phase 2 — requires deterministic model + reviewer assignment"
+                      >
+                        <Clock className="h-3.5 w-3.5 mr-2 text-primary" />
+                        <div className="flex flex-col">
+                          <span className="font-medium">Review Draft PDF</span>
+                          <span className="text-[10px] text-muted-foreground">Coming in Phase 2</span>
+                        </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={openIssues > 0 || !isApproved}
+                        className="text-xs"
+                        onClick={() => handleExport("shop_drawing")}
+                        title={
+                          openIssues > 0
+                            ? `Blocked: ${openIssues} open issue(s)`
+                            : !isApproved
+                              ? "Blocked: requires approval"
+                              : "Issue deterministic fabrication PDF"
+                        }
+                      >
+                        <ShieldCheck className="h-3.5 w-3.5 mr-2 text-[hsl(var(--status-approved))]" />
+                        <div className="flex flex-col">
+                          <span className="font-medium">Fabrication PDF</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {openIssues > 0 || !isApproved ? "Resolve issues + approval first" : "Issued — ready for shop floor"}
+                          </span>
+                        </div>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 )}
                 <Button
                   variant="outline"
