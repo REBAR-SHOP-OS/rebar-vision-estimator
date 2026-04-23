@@ -349,6 +349,41 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
 
   const handleAiVisualDraft = async () => {
     if (!user) return;
+    // Phase 1: trust-first metadata gate. AI Draft is the most permissive mode
+    // but we still refuse to render if project name / sheet number / scale missing.
+    const projGate = await supabase
+      .from("projects")
+      .select("name, client_name")
+      .eq("id", projectId)
+      .maybeSingle();
+    const gate = validateDrawingMetadata(
+      {
+        projectName: projGate.data?.name,
+        clientName: projGate.data?.client_name,
+        sheetNumber: "SD-AI-01",
+        scale: "N/A (visual draft)",
+      },
+      "ai_draft" as DrawingMode,
+    );
+    if (!gate.ok) {
+      const first = gate.issues.filter((i) => i.severity === "error").slice(0, 3);
+      toast.error(`Cannot generate: ${first.map((i) => i.message).join(" ")}`);
+      // Persist for QA tab visibility
+      try {
+        await supabase.from("validation_issues").insert(
+          first.map((i) => ({
+            project_id: projectId,
+            user_id: user.id,
+            issue_type: "metadata_invalid",
+            severity: "error",
+            title: `Shop drawing metadata: ${i.field}`,
+            description: i.message,
+            status: "open",
+          })),
+        );
+      } catch { /* non-fatal */ }
+      return;
+    }
     setAiDrafting(true);
     const toastId = toast.loading("Drafting visual sheets with AI…");
     try {
