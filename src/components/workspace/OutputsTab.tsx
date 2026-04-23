@@ -499,63 +499,131 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
         ? Math.round(Number((ver.result_json as any).confidence ?? 0) * 100)
         : null;
       const sourceLabel = `Verified Estimate v${ver.version_number ?? "?"}`;
+      // ──────────────────────────────────────────────────────────────────
+      // Real drawing-sheet sizing — ARCH C 24"x18" landscape.
+      // Reserved zones (in inches): header 1.0  |  drawable 14.6  |  legend 1.4  |  footer 0.5  (right title strip 2.5)
+      // No shrink-to-fit. One AI image per sheet. Layout engine splits to a
+      // new sheet automatically because each result is its own <section.sheet>.
+      // ──────────────────────────────────────────────────────────────────
+      const SHEET_W_IN = 24;
+      const SHEET_H_IN = 18;
       const sheets = usable.map((r, i) => `
         <section class="sheet">
           <div class="watermark">AI VISUAL DRAFT — NOT FOR FABRICATION</div>
           <div class="watermark watermark-sub">CANDIDATE — NO FORMAL REVISION</div>
           <div class="corner-hatch"></div>
-          <header class="title">
-            <div class="title-left">
-              ${logoDataUri ? `<img class="brand" src="${logoDataUri}" alt="REBAR.SHOP" />` : ""}
-              <div>
-                <div class="proj">${esc(safeProjectName || payload.project_name)}</div>
-                <div class="client">${esc(safeClientName || payload.client_name)}</div>
+          <div class="frame">
+            <header class="zone-header">
+              <div class="title-left">
+                ${logoDataUri ? `<img class="brand" src="${logoDataUri}" alt="REBAR.SHOP" />` : ""}
+                <div>
+                  <div class="proj">${esc(safeProjectName || payload.project_name)}</div>
+                  <div class="client">${esc(safeClientName || payload.client_name)}</div>
+                  <div class="seg">SEGMENT: ${esc(r.segment_name)}</div>
+                </div>
               </div>
+              <div class="ai-pill-wrap"><div class="ai-pill">UNVERIFIED — AI CANDIDATE</div></div>
+            </header>
+            <main class="zone-drawable">
+              <img class="sheet-image" src="${r.image_data_uri}" alt="${esc(r.caption)}" />
+              <div class="unverified-band">All callouts, bar marks, and dimensions in this image are AI-generated and unverified. Sketch only — not measured, not to scale.</div>
+            </main>
+            <aside class="zone-legend">
+              <div class="legend-title">LEGEND</div>
+              <div class="legend-row"><span class="sw sw-cand"></span>Candidate #n note (AI suggestion)</div>
+              <div class="legend-row"><span class="sw sw-ai"></span>AI Note callout</div>
+              <div class="legend-row"><span class="sw sw-unv"></span>Unverified bar mark / dimension</div>
+              <div class="legend-row"><span class="sw sw-src"></span>Source ref (drawing package)</div>
+              <div class="legend-note">No formal revisions. No fabrication-grade dimensions.</div>
+            </aside>
+            <footer class="zone-footer">
+              Marks, quantities, and changes shown are AI suggestions. None are tied to a controlled revision. Use Review Draft for reviewer workflow, Issued for fabrication.
+            </footer>
+            <div class="title-strip">
+              <div class="ts-pill">UNVERIFIED · AI CANDIDATE</div>
+              <div class="ts-cell"><div class="ts-lbl">SHEET</div><div class="ts-val">AI-CANDIDATE-${String(i + 1).padStart(2, "0")}</div></div>
+              <div class="ts-cell"><div class="ts-lbl">SHEET SIZE</div><div class="ts-val">ARCH C · 24×18</div></div>
+              <div class="ts-cell"><div class="ts-lbl">GENERATED</div><div class="ts-val">${esc(generatedAt)}</div></div>
+              <div class="ts-cell"><div class="ts-lbl">SOURCE</div><div class="ts-val">${esc(sourceLabel)}</div></div>
+              <div class="ts-cell"><div class="ts-lbl">CONFIDENCE</div><div class="ts-val">${confidencePct !== null ? confidencePct + "%" : "—"}</div></div>
+              <div class="ts-cell"><div class="ts-lbl">DETERMINISTIC MATCH</div><div class="ts-val ts-warn">NOT VERIFIED</div></div>
+              <div class="ts-cell"><div class="ts-lbl">REVIEW STATUS</div><div class="ts-val ts-warn">PENDING</div></div>
+              <div class="ts-cell ts-cap"><div class="ts-lbl">CAPTION</div><div class="ts-val ts-cap-val">${esc(r.caption)}</div></div>
             </div>
-            <div class="ai-header">
-              <div class="ai-pill">UNVERIFIED — AI CANDIDATE</div>
-              <div class="ai-grid">
-                <div class="cell"><div class="lbl">SHEET</div><div class="val">AI-CANDIDATE-${String(i + 1).padStart(2, "0")}</div></div>
-                <div class="cell"><div class="lbl">GENERATED</div><div class="val">${esc(generatedAt)}</div></div>
-                <div class="cell"><div class="lbl">SOURCE</div><div class="val">${esc(sourceLabel)}</div></div>
-                <div class="cell"><div class="lbl">CONFIDENCE</div><div class="val">${confidencePct !== null ? confidencePct + "%" : "—"}</div></div>
-              </div>
-            </div>
-          </header>
-          <h2>${esc(r.segment_name)}</h2>
-          <img src="${r.image_data_uri}" alt="${esc(r.caption)}" />
-          <div class="unverified-band">All callouts, bar marks, and dimensions in this image are AI-generated and unverified. Treat as sketch, not as fact.</div>
-          <p class="caption">${esc(r.caption)}</p>
-          <footer>Marks, quantities, and changes shown are AI suggestions. None are tied to a controlled revision. Use the Review Draft export for reviewer workflow, the Issued export for fabrication.</footer>
+          </div>
         </section>`).join("\n");
 
       const html = `<!doctype html><html><head><meta charset="utf-8" />
         <title>AI Visual Draft — ${esc(safeProjectName || payload.project_name)}</title>
         <style>
-          @page { size: letter landscape; margin: 0.4in; }
-          body { font-family: Arial, sans-serif; margin: 0; color: #111; background: #fff; }
-          .sheet { position: relative; margin: 0 0 12px; padding: 14px 16px; border: 3px dashed #d97706; background: #fff; page-break-inside: avoid; overflow: hidden; }
-          .sheet:last-child { margin-bottom: 0; }
-          .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: 64px; font-weight: 900; color: #d97706; opacity: 0.12; pointer-events: none; white-space: nowrap; letter-spacing: 4px; z-index: 0; }
-          .watermark-sub { font-size: 28px; opacity: 0.10; transform: translate(-50%, calc(-50% + 80px)) rotate(-30deg); letter-spacing: 6px; }
-          .corner-hatch { position: absolute; top: 0; right: 0; width: 90px; height: 90px; background: repeating-linear-gradient(135deg, #d97706 0 6px, transparent 6px 12px); opacity: 0.35; pointer-events: none; z-index: 0; }
-          .title { position: relative; z-index: 1; display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px dashed #d97706; padding-bottom: 8px; gap: 16px; }
-          .title-left { display: flex; align-items: center; gap: 12px; }
-          .brand { max-height: 44px; max-width: 130px; object-fit: contain; display: block; }
-          .proj { font-weight: 700; font-size: 15px; letter-spacing: 0.2px; }
-          .client { font-size: 12px; color: #555; }
-          .ai-header { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-          .ai-pill { background: #b91c1c; color: #fff; font-weight: 800; font-size: 11px; letter-spacing: 1px; padding: 4px 10px; border-radius: 3px; }
-          .ai-grid { display: grid; grid-template-columns: repeat(2, minmax(110px, auto)); gap: 4px; }
-          .ai-grid .cell { border: 1px solid #d97706; padding: 3px 8px; background: #fff7ed; min-width: 110px; }
-          .ai-grid .lbl { font-size: 8px; color: #92400e; letter-spacing: 0.5px; font-weight: 700; }
-          .ai-grid .val { font-size: 11px; font-weight: 700; font-family: ui-monospace, Menlo, monospace; color: #111; }
-          h2 { position: relative; z-index: 1; font-size: 14px; margin: 10px 0 8px; }
-          .sheet img:not(.brand) { position: relative; z-index: 1; max-width: 100%; max-height: 6.0in; border: 1px dashed #d97706; display: block; margin: 0 auto; }
-          .unverified-band { position: relative; z-index: 1; margin-top: 6px; padding: 6px 10px; background: #fef3c7; border: 1px solid #d97706; color: #7c2d12; font-size: 10px; font-weight: 700; text-align: center; letter-spacing: 0.3px; }
-          .caption { position: relative; z-index: 1; font-size: 11px; color: #444; margin-top: 6px; text-align: center; }
-          footer { position: relative; z-index: 1; margin-top: 8px; font-size: 10px; color: #92400e; font-weight: 600; border-top: 2px dashed #d97706; padding: 6px 8px 0; background: #fffbeb; }
-        </style></head><body>${sheets}</body></html>`;
+          /* Real drawing sheet: ARCH C 24x18 landscape, no shrink-to-fit. */
+          @page { size: ${SHEET_W_IN}in ${SHEET_H_IN}in; margin: 0; }
+          html, body { margin: 0; padding: 0; background: #fff; color: #111; }
+          body { font-family: "Helvetica Neue", Arial, sans-serif; }
+          .sheet { position: relative; width: ${SHEET_W_IN}in; height: ${SHEET_H_IN}in; background: #fff; page-break-after: always; overflow: hidden; box-sizing: border-box; }
+          .sheet:last-child { page-break-after: auto; }
+
+          /* Watermarks — full-sheet, behind content */
+          .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: 110px; font-weight: 900; color: #d97706; opacity: 0.10; pointer-events: none; white-space: nowrap; letter-spacing: 8px; z-index: 0; }
+          .watermark-sub { font-size: 46px; opacity: 0.09; transform: translate(-50%, calc(-50% + 130px)) rotate(-30deg); letter-spacing: 12px; }
+          .corner-hatch { position: absolute; top: 0; right: 0; width: 1.4in; height: 1.4in; background: repeating-linear-gradient(135deg, #d97706 0 8px, transparent 8px 16px); opacity: 0.30; pointer-events: none; z-index: 0; }
+
+          /* Drawing frame: 0.4in margin from sheet edge, dashed amber outer + solid amber inner */
+          .frame {
+            position: absolute; inset: 0.4in; box-sizing: border-box;
+            border: 4px dashed #d97706;
+            display: grid;
+            /* columns: main drawing area | right title strip */
+            grid-template-columns: 1fr 2.5in;
+            /* rows: header | drawable | legend | footer */
+            grid-template-rows: 1.0in 1fr 1.4in 0.5in;
+            grid-template-areas:
+              "header   title"
+              "drawable title"
+              "legend   title"
+              "footer   title";
+            background: #fff;
+          }
+
+          .zone-header { grid-area: header; border-bottom: 2px solid #d97706; padding: 0.15in 0.25in; display: flex; justify-content: space-between; align-items: center; gap: 0.3in; background: #fffbeb; position: relative; z-index: 1; }
+          .title-left { display: flex; align-items: center; gap: 0.2in; }
+          .brand { max-height: 0.7in; max-width: 1.6in; object-fit: contain; display: block; }
+          .proj { font-weight: 700; font-size: 22px; letter-spacing: 0.3px; }
+          .client { font-size: 14px; color: #555; }
+          .seg { font-size: 13px; color: #92400e; font-weight: 700; margin-top: 2px; letter-spacing: 0.5px; }
+          .ai-pill { background: #b91c1c; color: #fff; font-weight: 800; font-size: 16px; letter-spacing: 1.5px; padding: 8px 18px; border-radius: 4px; box-shadow: 0 0 0 3px #fff, 0 0 0 5px #b91c1c; }
+
+          .zone-drawable { grid-area: drawable; position: relative; padding: 0.2in; background:
+            radial-gradient(circle, #ddd 0.5px, transparent 0.5px) 0 0 / 0.5in 0.5in,
+            #fff;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; z-index: 1;
+          }
+          /* Image fits the drawable viewport at intrinsic readable size — no shrink past the unverified band. */
+          .sheet-image { display: block; max-width: 100%; max-height: calc(100% - 0.6in); object-fit: contain; border: 1px dashed #d97706; background: #fff; }
+          .unverified-band { width: 100%; margin-top: 0.15in; padding: 0.08in 0.15in; background: #fef3c7; border: 1.5px solid #d97706; color: #7c2d12; font-size: 12px; font-weight: 700; text-align: center; letter-spacing: 0.4px; box-sizing: border-box; }
+
+          .zone-legend { grid-area: legend; border-top: 1.5px solid #d97706; padding: 0.12in 0.25in; background: #fffbeb; font-size: 11px; color: #111; display: grid; grid-template-columns: repeat(2, 1fr); column-gap: 0.4in; row-gap: 4px; align-content: start; position: relative; z-index: 1; }
+          .legend-title { grid-column: 1 / -1; font-weight: 800; font-size: 12px; letter-spacing: 1px; color: #92400e; margin-bottom: 4px; }
+          .legend-row { display: flex; align-items: center; gap: 8px; }
+          .sw { display: inline-block; width: 14px; height: 10px; border: 1px solid #111; }
+          .sw-cand { background: #fde68a; border-color: #d97706; }
+          .sw-ai { background: #fff; border: 1.5px dashed #b91c1c; }
+          .sw-unv { background: repeating-linear-gradient(45deg, #fff 0 3px, #fca5a5 3px 6px); border-color: #b91c1c; }
+          .sw-src { background: #dbeafe; border-color: #1e40af; }
+          .legend-note { grid-column: 1 / -1; margin-top: 4px; font-size: 10px; color: #92400e; font-style: italic; }
+
+          .zone-footer { grid-area: footer; border-top: 2px solid #d97706; padding: 0.1in 0.25in; background: #fffbeb; font-size: 11px; color: #7c2d12; font-weight: 600; display: flex; align-items: center; position: relative; z-index: 1; }
+
+          /* Right-edge vertical title strip — ARCH-style */
+          .title-strip { grid-area: title; border-left: 2px solid #d97706; background: #fff; display: flex; flex-direction: column; padding: 0.15in; gap: 0.08in; position: relative; z-index: 1; }
+          .ts-pill { background: #b91c1c; color: #fff; font-weight: 800; font-size: 11px; letter-spacing: 1px; padding: 6px 8px; text-align: center; border-radius: 3px; margin-bottom: 0.1in; }
+          .ts-cell { border: 1px solid #d97706; padding: 5px 8px; background: #fff7ed; }
+          .ts-cell.ts-cap { flex: 1; display: flex; flex-direction: column; }
+          .ts-lbl { font-size: 8px; color: #92400e; letter-spacing: 0.6px; font-weight: 800; }
+          .ts-val { font-size: 12px; font-weight: 700; font-family: ui-monospace, "Consolas", monospace; color: #111; margin-top: 2px; }
+          .ts-warn { color: #b91c1c; }
+          .ts-cap-val { font-size: 10px; font-family: "Helvetica Neue", Arial, sans-serif; font-weight: 500; color: #444; line-height: 1.3; flex: 1; overflow: hidden; }
+        </style></head><body data-sheet-w="${SHEET_W_IN}" data-sheet-h="${SHEET_H_IN}" data-sheet-orient="landscape">${sheets}</body></html>`;
 
       await renderHtmlToPdf(html, `ai-visual-draft-${projectId.slice(0, 8)}.pdf`);
 
