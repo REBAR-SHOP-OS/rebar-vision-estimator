@@ -45,19 +45,34 @@ interface OutputItem {
 }
 
 async function renderHtmlToPdf(html: string, filename: string): Promise<void> {
-  // Mount the HTML on-screen but visually hidden so html2canvas can measure it.
-  // Do not use opacity:0 here — html2canvas will capture a blank page.
+  // Extract <style> blocks and body contents from the full HTML string so they
+  // survive being mounted into a <div> (innerHTML drops <html>/<head>/<body>).
+  const styleMatches = Array.from(html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi))
+    .map((m) => m[1])
+    .join("\n");
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  const bodyHtml = bodyMatch ? bodyMatch[1] : html;
+
+  // Mount on-screen (off-canvas left) so html2canvas can actually capture it.
+  // Using left: -10000px keeps it out of the user's view but in the layout tree.
   const container = document.createElement("div");
-  container.style.position = "fixed";
+  container.style.position = "absolute";
   container.style.top = "0";
-  container.style.left = "0";
-  container.style.width = "11in";
-  container.style.opacity = "1";
-  container.style.pointerEvents = "none";
-  container.style.zIndex = "2147483647";
+  container.style.left = "-10000px";
+  container.style.width = "10.2in";
   container.style.background = "#ffffff";
-  container.style.overflow = "visible";
-  container.innerHTML = html;
+  container.style.color = "#111";
+  container.style.padding = "0";
+  container.style.margin = "0";
+  container.style.zIndex = "0";
+  if (styleMatches) {
+    const styleEl = document.createElement("style");
+    styleEl.textContent = styleMatches;
+    container.appendChild(styleEl);
+  }
+  const bodyWrap = document.createElement("div");
+  bodyWrap.innerHTML = bodyHtml;
+  container.appendChild(bodyWrap);
   document.body.appendChild(container);
 
   await new Promise<void>((resolve) => {
@@ -83,7 +98,14 @@ async function renderHtmlToPdf(html: string, filename: string): Promise<void> {
         margin: 0.4,
         filename,
         image: { type: "jpeg", quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          backgroundColor: "#ffffff",
+          windowWidth: container.scrollWidth,
+          windowHeight: container.scrollHeight,
+        },
         jsPDF: { unit: "in", format: "letter", orientation: "landscape" },
         pagebreak: { mode: ["css", "legacy"], avoid: [".sheet"] },
       })
