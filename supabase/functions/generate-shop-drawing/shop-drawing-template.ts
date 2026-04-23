@@ -1187,24 +1187,23 @@ function buildScheduleSheets(
         <table class="bbs-table">
           <thead>
             <tr>
-              <th>BM</th>
-              <th>Size</th>
-              <th>Shape</th>
-              <th class="num">Qty</th>
-              <th class="num">Mult</th>
-              <th class="num">Pieces</th>
-              <th class="num">Cut mm</th>
-              <th class="num">Total m</th>
-              <th class="num">Wt kg</th>
+              <th>MARK</th>
+              <th>SIZE</th>
+              <th>TYPE</th>
+              <th class="num">NO.</th>
+              <th class="num">LENGTH</th>
               <th class="num">A</th>
               <th class="num">B</th>
               <th class="num">C</th>
               <th class="num">D</th>
-              <th>Notes</th>
+              <th class="num">E</th>
+              <th class="num">R</th>
+              <th class="num">WEIGHT</th>
+              <th>REMARKS</th>
             </tr>
           </thead>
           <tbody>
-            ${rows || `<tr><td colspan="14">No bar list data available.</td></tr>`}
+            ${rows || `<tr><td colspan="13">No bar list data available.</td></tr>`}
           </tbody>
         </table>
       `,
