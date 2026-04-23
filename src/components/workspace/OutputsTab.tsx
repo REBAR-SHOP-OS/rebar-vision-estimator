@@ -80,7 +80,7 @@ async function renderHtmlToPdf(html: string, filename: string): Promise<void> {
         image: { type: "jpeg", quality: 0.98 },
         html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
         jsPDF: { unit: "in", format: "letter", orientation: "landscape" },
-        pagebreak: { mode: ["css", "legacy"], before: ".sheet" },
+        pagebreak: { mode: ["css", "legacy"], avoid: [".sheet"] },
       })
       .from(container)
       .save();
@@ -422,7 +422,6 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
       const logoDataUri = await getLogoDataUri().catch(() => "");
       const sheets = usable.map((r, i) => `
         <section class="sheet">
-          <div class="sheet-frame">
           <div class="watermark">AI VISUAL DRAFT — NOT FOR FABRICATION</div>
           <header class="title">
             <div class="title-left">
@@ -442,18 +441,16 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
           <img src="${r.image_data_uri}" alt="${esc(r.caption)}" />
           <p class="caption">${esc(r.caption)}</p>
           <footer>AI visual draft — not for fabrication. Verify against deterministic shop drawing &amp; bar list.</footer>
-          </div>
         </section>`).join("\n");
 
       const html = `<!doctype html><html><head><meta charset="utf-8" />
         <title>AI Visual Draft — ${esc(payload.project_name)}</title>
         <style>
           @page { size: letter landscape; margin: 0.4in; }
-          body { font-family: Arial, sans-serif; margin: 0; color: #111; }
-          .sheet { page-break-after: always; margin: 0; padding: 6px; }
-          .sheet:last-child { page-break-after: auto; }
-          .sheet-frame { position: relative; border: 3px solid #d97706; outline: 1px solid #d97706; outline-offset: 4px; padding: 14px 16px; overflow: hidden; }
-          .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: 72px; font-weight: 900; color: #d97706; opacity: 0.10; pointer-events: none; white-space: nowrap; letter-spacing: 4px; z-index: 0; }
+          body { font-family: Arial, sans-serif; margin: 0; color: #111; background: #fff; }
+          .sheet { position: relative; margin: 0 0 12px; padding: 14px 16px; border: 3px solid #d97706; background: #fff; page-break-inside: avoid; }
+          .sheet:last-child { margin-bottom: 0; }
+          .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: 64px; font-weight: 900; color: #d97706; opacity: 0.10; pointer-events: none; white-space: nowrap; letter-spacing: 4px; z-index: 0; }
           .title { position: relative; z-index: 1; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #d97706; padding-bottom: 8px; gap: 16px; }
           .title-left { display: flex; align-items: center; gap: 12px; }
           .brand { max-height: 44px; max-width: 130px; object-fit: contain; display: block; }
