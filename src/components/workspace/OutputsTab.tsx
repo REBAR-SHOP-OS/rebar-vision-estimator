@@ -410,11 +410,17 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
       .select("name, client_name")
       .eq("id", projectId)
       .maybeSingle();
+    // Auto-correct known drafting typos in project / client name BEFORE we
+    // hand the strings to the AI prompt or render them in the wrapper HTML.
+    const projFix = normalizeProjectName(projGate.data?.name);
+    const clientFix = normalizeProjectName(projGate.data?.client_name);
+    const safeProjectName = projFix.normalized;
+    const safeClientName = clientFix.normalized;
     const gate = validateDrawingMetadata(
       {
-        projectName: projGate.data?.name,
-        clientName: projGate.data?.client_name,
-        sheetNumber: "SD-AI-01",
+        projectName: safeProjectName,
+        clientName: safeClientName,
+        sheetNumber: "AI-CANDIDATE-01",
         scale: "N/A (visual draft)",
       },
       "ai_draft" as DrawingMode,
