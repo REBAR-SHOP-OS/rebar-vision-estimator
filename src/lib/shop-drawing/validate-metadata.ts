@@ -44,6 +44,40 @@ const CANONICAL_DISCIPLINES = [
   "Landscape",
 ];
 
+/** Common drafting typos we auto-correct before they reach an export. */
+const TYPO_FIXES: Array<[RegExp, string]> = [
+  [/\bArchitectral\b/gi, "Architectural"],
+  [/\bStuctural\b/gi, "Structural"],
+  [/\bStructual\b/gi, "Structural"],
+  [/\bMechnical\b/gi, "Mechanical"],
+  [/\bElectical\b/gi, "Electrical"],
+  [/\bPlumming\b/gi, "Plumbing"],
+];
+
+const KNOWN_TYPOS = new Set(["architectral", "stuctural", "structual", "mechnical", "electical", "plumming"]);
+
+/**
+ * Normalize a free-text label (project name, discipline, etc.) by auto-fixing
+ * known drafting typos. Returns the corrected text and the list of fixes applied
+ * so callers can surface them as warnings.
+ */
+export function normalizeProjectName(input: string | null | undefined): {
+  normalized: string;
+  fixes: Array<{ from: string; to: string }>;
+} {
+  const raw = (input ?? "").toString();
+  if (!raw.trim()) return { normalized: raw, fixes: [] };
+  let out = raw;
+  const fixes: Array<{ from: string; to: string }> = [];
+  for (const [re, replacement] of TYPO_FIXES) {
+    out = out.replace(re, (match) => {
+      fixes.push({ from: match, to: replacement });
+      return replacement;
+    });
+  }
+  return { normalized: out, fixes };
+}
+
 function isValidIsoDate(value: string): boolean {
   // Strict YYYY-MM-DD with valid month/day.
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
@@ -83,12 +117,35 @@ export function validateDrawingMetadata(
   // Discipline spelling check (warning if present-but-typo, ignored if blank).
   if (meta.discipline && meta.discipline.trim()) {
     const d = meta.discipline.trim();
-    if (!CANONICAL_DISCIPLINES.some((c) => c.toLowerCase() === d.toLowerCase())) {
+    if (KNOWN_TYPOS.has(d.toLowerCase())) {
+      issues.push({
+        field: "discipline",
+        severity: "error",
+        message: `Discipline "${d}" is a known typo. Fix the project metadata before exporting.`,
+      });
+    } else if (!CANONICAL_DISCIPLINES.some((c) => c.toLowerCase() === d.toLowerCase())) {
       issues.push({
         field: "discipline",
         severity: "warning",
         message: `Discipline "${d}" is not a recognized label. Expected one of: ${CANONICAL_DISCIPLINES.join(", ")}.`,
       });
+    }
+  }
+
+  // Project / client name typo check (hard error so it never reaches an export).
+  for (const [field, label, val] of [
+    ["projectName", "Project name", meta.projectName],
+    ["clientName", "Client name", meta.clientName],
+  ] as const) {
+    if (val && String(val).trim()) {
+      const fix = normalizeProjectName(String(val));
+      if (fix.fixes.length > 0) {
+        issues.push({
+          field,
+          severity: "error",
+          message: `${label} contains a typo: ${fix.fixes.map((f) => `"${f.from}" → "${f.to}"`).join(", ")}. Fix it before exporting.`,
+        });
+      }
     }
   }
 

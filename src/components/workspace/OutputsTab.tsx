@@ -22,7 +22,7 @@ import { exportExcelFile } from "@/lib/excel-export";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { getLogoDataUri } from "@/lib/logo-base64";
-import { validateDrawingMetadata, type DrawingMode } from "@/lib/shop-drawing/validate-metadata";
+import { validateDrawingMetadata, normalizeProjectName, type DrawingMode } from "@/lib/shop-drawing/validate-metadata";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -410,11 +410,17 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
       .select("name, client_name")
       .eq("id", projectId)
       .maybeSingle();
+    // Auto-correct known drafting typos in project / client name BEFORE we
+    // hand the strings to the AI prompt or render them in the wrapper HTML.
+    const projFix = normalizeProjectName(projGate.data?.name);
+    const clientFix = normalizeProjectName(projGate.data?.client_name);
+    const safeProjectName = projFix.normalized;
+    const safeClientName = clientFix.normalized;
     const gate = validateDrawingMetadata(
       {
-        projectName: projGate.data?.name,
-        clientName: projGate.data?.client_name,
-        sheetNumber: "SD-AI-01",
+        projectName: safeProjectName,
+        clientName: safeClientName,
+        sheetNumber: "AI-CANDIDATE-01",
         scale: "N/A (visual draft)",
       },
       "ai_draft" as DrawingMode,
@@ -474,50 +480,67 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
 
       const esc = (s: string) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
       const logoDataUri = await getLogoDataUri().catch(() => "");
+      const generatedAt = new Date().toISOString().slice(0, 10);
+      const confidencePct = typeof ver.result_json === "object" && ver.result_json && "confidence" in (ver.result_json as any)
+        ? Math.round(Number((ver.result_json as any).confidence ?? 0) * 100)
+        : null;
+      const sourceLabel = `Verified Estimate v${ver.version_number ?? "?"}`;
       const sheets = usable.map((r, i) => `
         <section class="sheet">
           <div class="watermark">AI VISUAL DRAFT — NOT FOR FABRICATION</div>
+          <div class="watermark watermark-sub">CANDIDATE — NO FORMAL REVISION</div>
+          <div class="corner-hatch"></div>
           <header class="title">
             <div class="title-left">
               ${logoDataUri ? `<img class="brand" src="${logoDataUri}" alt="REBAR.SHOP" />` : ""}
               <div>
-              <div class="proj">${esc(payload.project_name)}</div>
-              <div class="client">${esc(payload.client_name)}</div>
+                <div class="proj">${esc(safeProjectName || payload.project_name)}</div>
+                <div class="client">${esc(safeClientName || payload.client_name)}</div>
               </div>
             </div>
-            <div class="sheet-no">
-              <div class="lbl">DRAWING NO.</div>
-              <div class="val">SD-AI-${String(i + 1).padStart(2, "0")}</div>
-              <div class="ai-chip">AI CHANGE CANDIDATE</div>
+            <div class="ai-header">
+              <div class="ai-pill">UNVERIFIED — AI CANDIDATE</div>
+              <div class="ai-grid">
+                <div class="cell"><div class="lbl">SHEET</div><div class="val">AI-CANDIDATE-${String(i + 1).padStart(2, "0")}</div></div>
+                <div class="cell"><div class="lbl">GENERATED</div><div class="val">${esc(generatedAt)}</div></div>
+                <div class="cell"><div class="lbl">SOURCE</div><div class="val">${esc(sourceLabel)}</div></div>
+                <div class="cell"><div class="lbl">CONFIDENCE</div><div class="val">${confidencePct !== null ? confidencePct + "%" : "—"}</div></div>
+              </div>
             </div>
           </header>
           <h2>${esc(r.segment_name)}</h2>
           <img src="${r.image_data_uri}" alt="${esc(r.caption)}" />
+          <div class="unverified-band">All callouts, bar marks, and dimensions in this image are AI-generated and unverified. Treat as sketch, not as fact.</div>
           <p class="caption">${esc(r.caption)}</p>
-          <footer>AI visual draft — not for fabrication. Verify against deterministic shop drawing &amp; bar list.</footer>
+          <footer>Marks, quantities, and changes shown are AI suggestions. None are tied to a controlled revision. Use the Review Draft export for reviewer workflow, the Issued export for fabrication.</footer>
         </section>`).join("\n");
 
       const html = `<!doctype html><html><head><meta charset="utf-8" />
-        <title>AI Visual Draft — ${esc(payload.project_name)}</title>
+        <title>AI Visual Draft — ${esc(safeProjectName || payload.project_name)}</title>
         <style>
           @page { size: letter landscape; margin: 0.4in; }
           body { font-family: Arial, sans-serif; margin: 0; color: #111; background: #fff; }
-          .sheet { position: relative; margin: 0 0 12px; padding: 14px 16px; border: 3px solid #d97706; background: #fff; page-break-inside: avoid; }
+          .sheet { position: relative; margin: 0 0 12px; padding: 14px 16px; border: 3px dashed #d97706; background: #fff; page-break-inside: avoid; overflow: hidden; }
           .sheet:last-child { margin-bottom: 0; }
-          .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: 64px; font-weight: 900; color: #d97706; opacity: 0.10; pointer-events: none; white-space: nowrap; letter-spacing: 4px; z-index: 0; }
-          .title { position: relative; z-index: 1; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #d97706; padding-bottom: 8px; gap: 16px; }
+          .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: 64px; font-weight: 900; color: #d97706; opacity: 0.12; pointer-events: none; white-space: nowrap; letter-spacing: 4px; z-index: 0; }
+          .watermark-sub { font-size: 28px; opacity: 0.10; transform: translate(-50%, calc(-50% + 80px)) rotate(-30deg); letter-spacing: 6px; }
+          .corner-hatch { position: absolute; top: 0; right: 0; width: 90px; height: 90px; background: repeating-linear-gradient(135deg, #d97706 0 6px, transparent 6px 12px); opacity: 0.35; pointer-events: none; z-index: 0; }
+          .title { position: relative; z-index: 1; display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px dashed #d97706; padding-bottom: 8px; gap: 16px; }
           .title-left { display: flex; align-items: center; gap: 12px; }
           .brand { max-height: 44px; max-width: 130px; object-fit: contain; display: block; }
           .proj { font-weight: 700; font-size: 15px; letter-spacing: 0.2px; }
           .client { font-size: 12px; color: #555; }
-          .sheet-no { border: 1px solid #d97706; padding: 4px 10px; text-align: center; min-width: 130px; background: #fff7ed; }
-          .sheet-no .lbl { font-size: 9px; color: #92400e; letter-spacing: 0.5px; }
-          .sheet-no .val { font-weight: 700; font-size: 14px; font-family: ui-monospace, Menlo, monospace; }
-          .ai-chip { margin-top: 4px; font-size: 8px; font-weight: 700; color: #92400e; background: #fde68a; padding: 2px 4px; border-radius: 2px; letter-spacing: 0.4px; }
+          .ai-header { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+          .ai-pill { background: #b91c1c; color: #fff; font-weight: 800; font-size: 11px; letter-spacing: 1px; padding: 4px 10px; border-radius: 3px; }
+          .ai-grid { display: grid; grid-template-columns: repeat(2, minmax(110px, auto)); gap: 4px; }
+          .ai-grid .cell { border: 1px solid #d97706; padding: 3px 8px; background: #fff7ed; min-width: 110px; }
+          .ai-grid .lbl { font-size: 8px; color: #92400e; letter-spacing: 0.5px; font-weight: 700; }
+          .ai-grid .val { font-size: 11px; font-weight: 700; font-family: ui-monospace, Menlo, monospace; color: #111; }
           h2 { position: relative; z-index: 1; font-size: 14px; margin: 10px 0 8px; }
-          .sheet img:not(.brand) { position: relative; z-index: 1; max-width: 100%; max-height: 6.4in; border: 1px solid #d97706; display: block; margin: 0 auto; }
+          .sheet img:not(.brand) { position: relative; z-index: 1; max-width: 100%; max-height: 6.0in; border: 1px dashed #d97706; display: block; margin: 0 auto; }
+          .unverified-band { position: relative; z-index: 1; margin-top: 6px; padding: 6px 10px; background: #fef3c7; border: 1px solid #d97706; color: #7c2d12; font-size: 10px; font-weight: 700; text-align: center; letter-spacing: 0.3px; }
           .caption { position: relative; z-index: 1; font-size: 11px; color: #444; margin-top: 6px; text-align: center; }
-          footer { position: relative; z-index: 1; margin-top: 8px; font-size: 10px; color: #92400e; font-weight: 600; border-top: 2px solid #d97706; padding-top: 6px; background: #fffbeb; padding: 6px 8px; }
+          footer { position: relative; z-index: 1; margin-top: 8px; font-size: 10px; color: #92400e; font-weight: 600; border-top: 2px dashed #d97706; padding: 6px 8px 0; background: #fffbeb; }
         </style></head><body>${sheets}</body></html>`;
 
       await renderHtmlToPdf(html, `ai-visual-draft-${projectId.slice(0, 8)}.pdf`);
