@@ -53,13 +53,25 @@ async function renderHtmlToPdf(html: string, filename: string): Promise<void> {
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
   const bodyHtml = bodyMatch ? bodyMatch[1] : html;
 
+  // Read the sheet size encoded by the caller via data-* attrs on the body wrapper
+  // (e.g. <body data-sheet-w="18" data-sheet-h="24" data-sheet-orient="landscape">).
+  // Falls back to ARCH C landscape (24x18) for AI Candidate / Review Draft.
+  const sheetMatch = html.match(/<body([^>]*)>/i);
+  const sheetAttrs = sheetMatch ? sheetMatch[1] : "";
+  const sheetW = parseFloat((sheetAttrs.match(/data-sheet-w="([\d.]+)"/) || [])[1] || "24");
+  const sheetH = parseFloat((sheetAttrs.match(/data-sheet-h="([\d.]+)"/) || [])[1] || "18");
+  const sheetOrient = ((sheetAttrs.match(/data-sheet-orient="([a-z]+)"/) || [])[1] || "landscape") as
+    | "landscape"
+    | "portrait";
+
   // Keep the render tree live but move it far off-canvas.
   const container = document.createElement("div");
   container.style.position = "absolute";
   container.style.top = "0";
   container.style.left = "0";
   container.style.transform = "translateX(-200vw)";
-  container.style.width = "10.2in";
+  // Match container width to the chosen sheet so html2canvas captures at true sheet aspect.
+  container.style.width = `${sheetW}in`;
   container.style.background = "#ffffff";
   container.style.color = "#111";
   container.style.padding = "0";
@@ -100,12 +112,17 @@ async function renderHtmlToPdf(html: string, filename: string): Promise<void> {
   try {
     const pages = Array.from(container.querySelectorAll<HTMLElement>(".sheet"));
     const targets = pages.length > 0 ? pages : [bodyWrap];
-    const pdf = new jsPDF({ unit: "in", format: "letter", orientation: "landscape" });
+    // Build PDF at the real drawing-sheet size, NOT letter. No shrink-to-page.
+    const pdf = new jsPDF({
+      unit: "in",
+      format: [sheetW, sheetH],
+      orientation: sheetOrient,
+    });
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = 0.4;
-    const usableWidth = pageWidth - margin * 2;
-    const usableHeight = pageHeight - margin * 2;
+    // Zero PDF margin: the HTML sheet already reserves its own header / footer / legend zones.
+    const usableWidth = pageWidth;
+    const usableHeight = pageHeight;
 
     for (let index = 0; index < targets.length; index += 1) {
       const target = targets[index];
@@ -122,16 +139,13 @@ async function renderHtmlToPdf(html: string, filename: string): Promise<void> {
       });
 
       const imgData = canvas.toDataURL("image/jpeg", 0.98);
-      let imgWidth = usableWidth;
-      let imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-      if (imgHeight > usableHeight) {
-        imgHeight = usableHeight;
-        imgWidth = (canvas.width * imgHeight) / canvas.height;
-      }
-
-      const x = (pageWidth - imgWidth) / 2;
-      const y = (pageHeight - imgHeight) / 2;
+      // Render the captured sheet at FULL sheet size — never shrink. The HTML
+      // template is responsible for splitting content across .sheet sections
+      // when it would otherwise overflow the readable viewport.
+      const imgWidth = usableWidth;
+      const imgHeight = usableHeight;
+      const x = 0;
+      const y = 0;
 
       if (index > 0) pdf.addPage();
       pdf.addImage(imgData, "JPEG", x, y, imgWidth, imgHeight);
