@@ -2126,10 +2126,11 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
               min-height: auto;
               margin: 0;
               box-shadow: none;
+              padding: 0.4in;
             }
 
             .sheet-frame {
-              height: calc(7.9in - 2px);
+              height: calc(10.2in - 2px);
             }
           }
         </style>
