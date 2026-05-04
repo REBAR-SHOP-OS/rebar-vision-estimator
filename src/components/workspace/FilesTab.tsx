@@ -8,6 +8,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
+import {
+  detectDiscipline,
+  ensureCurrentProjectRebarBridge,
+  ensureRebarProjectFileBridge,
+  inferRebarFileKind,
+} from "@/lib/rebar-intake";
 
 interface FileRow {
   id: string;
@@ -48,18 +54,6 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       return "unknown";
     }
     return "unknown";
-  };
-
-  const detectDiscipline = (name: string): string | null => {
-    const n = name.toUpperCase();
-    if (/\bS[-_]?\d|STRUCTURAL|STR[-_]/i.test(n)) return "Structural";
-    if (/\bA[-_]?\d|ARCHITECTURAL|ARCH[-_]/i.test(n)) return "Architectural";
-    if (/\bC[-_]?\d|CIVIL/i.test(n)) return "Civil";
-    if (/\bM[-_]?\d|MECHANICAL/i.test(n)) return "Mechanical";
-    if (/\bE[-_]?\d|ELECTRICAL/i.test(n)) return "Electrical";
-    if (/\bP[-_]?\d|PLUMBING/i.test(n)) return "Plumbing";
-    if (/\bL[-_]?\d|LANDSCAPE/i.test(n)) return "Landscape";
-    return null;
   };
 
   const parseFile = async (fileId: string, fileName: string, filePath: string, onProgress?: (msg: string) => void) => {
@@ -168,6 +162,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
           pages: pages,
           file_name: fileName,
           sha256: sha256,
+          legacy_file_id: fileId,
         },
       });
 
@@ -177,6 +172,20 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
           page_count: totalPages || pages.length,
           is_scanned: !hasText,
         }).eq("id", dvId);
+      }
+
+      try {
+        await ensureRebarProjectFileBridge(supabase, {
+          legacyFileId: fileId,
+          legacyProjectId: projectId,
+          storagePath: filePath,
+          originalFilename: fileName,
+          fileKind: inferRebarFileKind(fileName, null),
+          checksumSha256: sha256,
+          pageCount: totalPages || pages.length,
+        });
+      } catch (bridgeErr) {
+        console.warn(`Failed to sync parsed file ${fileName} into rebar schema:`, bridgeErr);
       }
 
       if (!indexErr) {
@@ -203,7 +212,14 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
     const files = Array.from(fileList);
     setUploading(true);
 
-    const uploadedFiles: { id: string; name: string; path: string }[] = [];
+    try {
+      await ensureCurrentProjectRebarBridge(supabase, projectId);
+    } catch (bridgeErr) {
+      console.warn("Failed to ensure rebar project bridge before upload:", bridgeErr);
+      toast.warning("Legacy upload will continue, but rebar-schema sync needs attention.");
+    }
+
+    const uploadedFiles: { id: string; name: string; path: string; type: string | null }[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -235,7 +251,32 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
           source_system: "upload",
           pdf_metadata: discipline ? { discipline } : {},
         });
-      } catch (_) { /* hash/version insert is best-effort */ }
+
+        try {
+          await ensureRebarProjectFileBridge(supabase, {
+            legacyFileId: data.id,
+            legacyProjectId: projectId,
+            storagePath: path,
+            originalFilename: file.name,
+            fileKind: inferRebarFileKind(file.name, file.type || null),
+            checksumSha256: hash,
+          });
+        } catch (bridgeErr) {
+          console.warn(`Failed to mirror file ${file.name} into rebar schema:`, bridgeErr);
+        }
+      } catch (_) {
+        try {
+          await ensureRebarProjectFileBridge(supabase, {
+            legacyFileId: data.id,
+            legacyProjectId: projectId,
+            storagePath: path,
+            originalFilename: file.name,
+            fileKind: inferRebarFileKind(file.name, file.type || null),
+          });
+        } catch (bridgeErr) {
+          console.warn(`Failed to mirror file ${file.name} into rebar schema:`, bridgeErr);
+        }
+      }
 
       await logAuditEvent(user.id, "uploaded", "project_file", data.id, projectId);
       try {
@@ -255,7 +296,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       } catch {
         /* document_registry may not exist until migration applied */
       }
-      uploadedFiles.push({ id: data.id, name: file.name, path });
+      uploadedFiles.push({ id: data.id, name: file.name, path, type: file.type || null });
     }
     toast.success(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
 
