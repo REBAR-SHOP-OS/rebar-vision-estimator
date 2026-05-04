@@ -10,6 +10,11 @@ import DrawingSearchPanel from "@/components/search/DrawingSearchPanel";
 import ProjectHealthDashboard from "@/components/dashboard/ProjectHealthDashboard";
 import AdminDiagnosticsPanel from "@/components/dashboard/AdminDiagnosticsPanel";
 import { toast } from "sonner";
+import {
+  ensureRebarProjectBridge,
+  ensureRebarProjectFileBridge,
+  inferRebarFileKind,
+} from "@/lib/rebar-intake";
 
 interface Project {
   id: string;
@@ -102,6 +107,13 @@ const Dashboard: React.FC = () => {
       return;
     }
 
+    try {
+      await ensureRebarProjectBridge(supabase, data.id, projectName, null);
+    } catch (bridgeErr) {
+      console.warn("Failed to mirror project into rebar schema:", bridgeErr);
+      toast.warning("Project created, but rebar-schema sync needs attention.");
+    }
+
     // Upload all selected files to the new project
     let uploadedCount = 0;
     for (const file of files) {
@@ -112,14 +124,31 @@ const Dashboard: React.FC = () => {
         toast.error(`Upload failed: ${file.name} — ${storageErr.message}`);
         continue;
       }
-      await supabase.from("project_files").insert({
+      const { data: fileRow, error: fileInsertErr } = await supabase.from("project_files").insert({
         project_id: data.id,
         user_id: user.id,
         file_name: file.name,
         file_path: path,
         file_type: file.type || null,
         file_size: file.size,
-      });
+      }).select("id").single();
+      if (fileInsertErr) {
+        toast.error(`Failed to save: ${file.name}`);
+        continue;
+      }
+
+      try {
+        await ensureRebarProjectFileBridge(supabase, {
+          legacyFileId: fileRow.id,
+          legacyProjectId: data.id,
+          storagePath: path,
+          originalFilename: file.name,
+          fileKind: inferRebarFileKind(file.name, file.type || null),
+        });
+      } catch (bridgeErr) {
+        console.warn(`Failed to mirror file ${file.name} into rebar schema:`, bridgeErr);
+      }
+
       uploadedCount++;
     }
     if (uploadedCount > 0) {
