@@ -11,6 +11,7 @@ import {
 } from "./build-canonical-result";
 import { diffReferenceVsCanonical } from "./reference-diff";
 import { evaluateExportGate, type ExportGateResult } from "./export-gate";
+import { persistRebarTakeoffFromCanonical } from "@/lib/rebar-takeoff-persistence";
 
 // Helper to bypass type checking for tables not yet in generated types
 const fromAny = (supabase: SupabaseClient<Database>, table: string) =>
@@ -301,6 +302,17 @@ export async function persistVerifiedEstimateFromChat(
     });
   } catch (e) {
     console.warn("[persistVerifiedEstimateFromChat] verified_estimate_results unavailable:", e);
+  }
+
+  try {
+    await persistRebarTakeoffFromCanonical(supabase, {
+      legacyProjectId: params.projectId,
+      userId: params.userId,
+      result,
+      parserProvider: params.usedFallbackJson ? "gpt_fallback_json" : "gpt_structured",
+    });
+  } catch (e) {
+    console.warn("[persistVerifiedEstimateFromChat] rebar takeoff persistence unavailable:", e);
   }
 
   return gate;
