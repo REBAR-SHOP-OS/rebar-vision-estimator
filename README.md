@@ -2,6 +2,11 @@
 
 AI-assisted rebar takeoff, estimation, review, quoting, and CRM handoff built with React and Supabase.
 
+## Documentation
+
+- [System workflow](docs/system-workflow.md)
+- [Agent Brain knowledge base guide](docs/agent-brain-knowledge-base.md)
+
 ## System workflow diagram
 
 The main system workflow is documented in [`docs/system-workflow.md`](docs/system-workflow.md).
