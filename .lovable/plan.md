@@ -1,104 +1,127 @@
+# Skills Pack — Portable Foundation to Rebuild This App
 
+You want to clone the *capability* of this app (Trust-First estimation + shop-drawing pipeline + AI orchestration) into a new Lovable project. We'll package everything reusable into a single drop-in folder + docs bundle, so a new project can boot from it instead of starting from scratch.
 
-# Redesign AI Candidate Sheet — Drawing-First Layout
+This is a **packaging task**, not a feature change to the live app. Nothing in the running product moves.
 
-The current export uses ~28% of the sheet height for header/legend/footer chrome and renders the AI image with `object-fit: contain` inside a wide drawable cell, which leaves huge empty bands on either side when the image is portrait or square. Result: a tiny sketch floating in a big amber card.
+## Deliverable
 
-The fix is one file, one inline `<style>` block, one HTML structure tweak. No new files, no schema changes.
-
-## File touched
-
-`src/components/workspace/OutputsTab.tsx` — only the inline HTML/CSS inside `handleAiVisualDraft` (~lines 510–626). Nothing else changes.
-
-## Layout changes
-
-### 1. Sheet zone re-budget (sheet-first composition)
-
-Switch the `.frame` CSS grid from four rows to three, merging legend into the footer band, and slimming the header. Target zones on a 24×18 sheet:
-
-| Zone | Old | New | % of 18in |
-|---|---|---|---|
-| Header band | 1.0in | **1.1in** | ~6% |
-| Drawable viewport | ~13.0in | **15.1in** | ~84% (was ~73%) |
-| Footer + legend (merged) | 1.9in | **1.8in** | ~10% |
-| Right metadata rail | 2.5in (12% of 24) | **2.9in** (12%) | unchanged ratio |
-
-New grid:
-```text
-grid-template-columns: 1fr 2.9in;
-grid-template-rows: 1.1in 1fr 1.8in;
-grid-template-areas:
-  "header   title"
-  "drawable title"
-  "footer   title";
-```
-The legend moves *inside* `.zone-footer` as a horizontal compact strip on the left, with the safety warning on the right — one band, one row, ~1.8in tall instead of 1.9in stacked.
-
-### 2. Drawable viewport — fill, don't float
-
-Replace the constrained image rule:
-- Drop `max-height: calc(100% - 0.6in)` and `max-width: 100%`.
-- Use `width: 100%; height: 100%; object-fit: contain;` on `.sheet-image` so it scales up to whichever sheet axis runs out first while preserving aspect ratio.
-- Move the unverified band out of the drawable flex column and into an **absolute-positioned overlay** at the bottom of `.zone-drawable` (15px tall, semi-opaque amber bar) so it never steals image space.
-- Keep the 0.5in dot grid background (CAD paper feel) and the dashed amber image border.
-
-### 3. Right metadata rail — denser
-
-Same field set you listed (Sheet, Sheet Size, Scale, Generated, Source, Confidence, Deterministic Match, Review Status, Pending, Caption) but:
-- Cell padding `5px 8px` → `4px 7px`.
-- `gap: 0.08in` → `0.05in`.
-- Add new `SCALE` cell with value `Schematic — N.T.S.` and a `PENDING` cell that shows whatever placeholder the rail currently lacks (issue count).
-- Default placeholders rendered visibly:
-  - `Confidence: Pending` when null (was `—`)
-  - `Deterministic Match: Pending` (was `NOT VERIFIED`, kept red)
-  - `Review Status: Unreviewed` (was `PENDING`, kept red)
-- Caption cell uses remaining vertical space (`flex: 1`), 3-line clamp.
-
-### 4. Footer/legend band — single horizontal strip
+A new top-level folder `skills/` in this repo containing 10 self-contained skill modules, plus a `/mnt/documents/skills-pack.zip` artifact you can download and drop into a new Lovable project.
 
 ```text
-┌────────────────────────────────────┬──────────────────────────────┐
-│ LEGEND  ▣ Candidate  ▣ AI Note      │ Marks, quantities, and       │
-│         ▣ Unverified ▣ Source ref    │ changes shown are AI         │
-│                                     │ suggestions. Not for fab.    │
-└────────────────────────────────────┴──────────────────────────────┘
+skills/
+  README.md                          ← how to install into a new project
+  00-architecture/
+    product-vision.md
+    pipeline-overview.md
+    data-model.sql                   ← canonical tables + RLS
+  01-auth-and-rls/
+    auth-context.tsx
+    user-roles.sql
+    rls-patterns.md
+  02-cloud-storage-pathing/
+    storage-rls.sql
+    upload-helpers.ts
+  03-pdf-pipeline/
+    pdf-to-images.ts                 ← copied + generalized
+    client-side-render.md
+  04-ai-gateway/
+    call-ai.ts                       ← typed wrapper (text + JSON + vision)
+    prompts/
+      atomic-truth.md
+      shop-drawing-ai.md
+      validation-gates.md
+    model-config.md                  ← deterministic settings rules
+  05-trust-first-ux/
+    StatusBanner.tsx
+    EvidenceDrawer.tsx
+    EstimateGrid.tsx
+    workspace-layout.md
+  06-shop-drawing-engine/
+    validate-metadata.ts             ← copied
+    sheet-templates/
+      ai-candidate.html.ts
+      review-draft.html.ts
+      issued.html.ts
+    sheet-sizes.ts                   ← ARCH C/D/E sizing
+    render-html-to-pdf.md
+  07-edge-functions/
+    _template/
+      index.ts                       ← thin-router skeleton
+      cors.ts
+    draft-shop-drawing-ai.ts         ← reference impl
+    analyze-blueprint.ts             ← reference impl
+  08-export-utilities/
+    excel-export.ts
+    pdf-export.ts
+    quote-pdf-export.ts
+  09-i18n-and-theme/
+    LanguageContext.tsx
+    ThemeContext.tsx
+    languages.md                     ← 10-language matrix, RTL/LTR
+  10-conventions/
+    minimum-patch-policy.md
+    select-sentinel.md
+    session-expiry-handling.md
+    audit-logging.md
 ```
-- 1.8in tall, two columns (`1fr 1.4fr`), 11px text, all four legend swatches inline on one row.
-- Removes the duplicated "no formal revisions" note (already in title-strip pill).
 
-### 5. Header band — tighter
+Plus: `/mnt/documents/skills-pack.zip` (same tree, zipped) and `/mnt/documents/skills-pack-INSTALL.md` (step-by-step bootstrap for a fresh Lovable project).
 
-- Reduce vertical padding `0.15in 0.25in` → `0.1in 0.25in`.
-- Brand logo `max-height: 0.7in` → `0.85in` (uses the slightly taller header).
-- Project / segment text unchanged.
-- Red `UNVERIFIED — AI CANDIDATE` pill stays right-aligned.
+## How it gets built (default mode work)
 
-### 6. Watermarks — keep, reposition
+1. **Inventory** — read the canonical sources already in this repo:
+   - `src/lib/pdf-to-images.ts`, `src/lib/shop-drawing/validate-metadata.ts`
+   - `src/lib/excel-export.ts`, `src/lib/pdf-export.ts`, `src/lib/quote-pdf-export.ts`
+   - `src/contexts/{Auth,Language,Theme}Context.tsx`
+   - `src/components/workspace/{StatusBanner,EvidenceDrawer,EstimateGrid,WorkspaceLayout}.tsx`
+   - `supabase/functions/draft-shop-drawing-ai/index.ts`, `analyze-blueprint/index.ts`
+   - `supabase/config.toml`, `src/integrations/supabase/types.ts` (for schema reference)
+   - All `mem://` files for the architecture/logic/feature docs.
 
-Diagonal `AI VISUAL DRAFT — NOT FOR FABRICATION` and sub-stamp `CANDIDATE — NO FORMAL REVISION` stay full-sheet, centered. Corner amber hatch stays. Opacity unchanged.
+2. **Generalize** — for each copy, strip project-specific identifiers (rebar terms, RSIC references, Odoo CRM hooks) and replace with `// PROJECT-SPECIFIC: replace with your domain` comments. Keep the *patterns* (RLS shape, thin-router structure, validation pipeline, sheet sizing, AI prompt skeleton).
 
-### 7. Multi-sheet split (already in place)
+3. **Write docs** — each skill folder gets a short `README.md` explaining:
+   - what the skill does
+   - which files to drop in
+   - which env vars / secrets it needs
+   - which DB tables/RLS it requires
+   - copy-paste install snippet
 
-Each AI image is already its own `<section class="sheet">` with `page-break-after: always`. The layout-engine "split, never shrink" rule is preserved — no change needed. If the new larger viewport still can't render an image at readable size for an exotic aspect ratio, the existing split-per-segment behavior already produces a fresh sheet.
+4. **Generate canonical SQL** — extract the reusable schema (projects, project_files, user_roles, audit_events, shop_drawings, export_jobs, storage buckets + RLS) into `00-architecture/data-model.sql` as a single runnable migration.
 
-## What we deliberately do NOT change
+5. **Bundle** — zip `skills/` to `/mnt/documents/skills-pack.zip` and emit a `<lov-artifact>` so you can download it.
 
-- AI prompt in `draft-shop-drawing-ai/index.ts` (Phase 2 already constrained it).
-- `validate-metadata.ts` (Phase 1 already hardened it).
-- `renderHtmlToPdf` and the ARCH C 24×18 sheet size (already real drawing-sheet sizing).
-- `shop_drawings` insert / `export_jobs` insert (audit trail intact).
-- Review Draft and Issued exports — out of scope for this patch.
+6. **Bootstrap doc** — `skills-pack-INSTALL.md` walks through:
+   - Create new Lovable project → enable Lovable Cloud
+   - Unzip pack into repo root
+   - Run `data-model.sql` migration
+   - Wire `AuthContext`, `LanguageContext`, `ThemeContext` into `App.tsx`
+   - Deploy edge function template
+   - Smoke-test with the included sample prompt
 
-## Acceptance check (visual QA after build)
+## What's deliberately NOT in scope
 
-1. Render AI Visual Draft on this project.
-2. Open the resulting PDF — image should now occupy the full center band of each sheet, edge-to-edge horizontally inside the dashed amber image border.
-3. Right rail visibly shorter / denser, no large empty padding.
-4. Footer is a single horizontal strip, no stacked legend block above it.
-5. Red `UNVERIFIED — AI CANDIDATE` pill, dashed amber border, watermarks, corner hatch all still present and unmistakable.
-6. Sheet still prints at exactly 24×18 inches (verified via `pdfinfo` — should report `1728 x 1296 pts`).
+- No changes to the running app's code, DB, or edge functions.
+- Domain-specific business rules (rebar weights, RSIC standards, Odoo CRM, agent brain) stay in this project — they are *not* generic skills. The pack ships the *patterns* (validation gates, learning loop shape, audit logging) without the domain payload.
+- No new Lovable project is created automatically — the pack is portable; you create the new project and drop it in.
 
-## LOC estimate
+## Acceptance check
 
-~70 lines edited inside one `<style>` block + ~15 lines of HTML restructure inside the `sheets.map()` template literal. No other files. No DB. No edge function changes.
+- `skills/` exists with all 10 subfolders and a top-level README.
+- Every skill folder has at least one code file + a README.
+- `data-model.sql` runs cleanly on a fresh Lovable Cloud project (syntax-validated, not executed against this DB).
+- `/mnt/documents/skills-pack.zip` downloads and unzips to the same tree.
+- `skills-pack-INSTALL.md` lists every step needed to boot a new app.
 
+## Estimated size / effort
+
+- ~25 new files in `skills/`, no edits to existing code.
+- One zip artifact.
+- ~30 min of generation, no DB migrations, no edge function deploys.
+
+## Out of scope (follow-up if you want it)
+
+- Auto-creating the second Lovable project from this pack (needs you to click "New Project" first).
+- A CLI installer that runs the SQL + wires contexts automatically.
+- Domain-specialized skill packs (e.g. a "Concrete Estimation" pack vs a generic one).
