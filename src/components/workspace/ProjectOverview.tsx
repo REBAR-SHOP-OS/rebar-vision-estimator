@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { FolderOpen, Layers, AlertTriangle, CheckCircle, FileText, ShieldAlert } from "lucide-react";
+import { FolderOpen, Layers, AlertTriangle, CheckCircle, FileText, ShieldAlert, Database } from "lucide-react";
 import ApprovalPanel from "@/components/workspace/ApprovalPanel";
+import { fetchRebarTakeoffOverview, type RebarTakeoffOverview } from "@/lib/rebar-review-read";
 
 interface ProjectOverviewProps {
   project: {
@@ -38,6 +39,7 @@ const WORKFLOW_STEP_MAP: Record<string, string> = {
 
 export default function ProjectOverview({ project }: ProjectOverviewProps) {
   const [counts, setCounts] = useState({ files: 0, segments: 0, issues: 0, approvals: 0, estimates: 0, blockers: 0 });
+  const [rebarOverview, setRebarOverview] = useState<RebarTakeoffOverview | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -47,7 +49,8 @@ export default function ProjectOverview({ project }: ProjectOverviewProps) {
       supabase.from("approvals").select("id", { count: "exact" }).eq("project_id", project.id).eq("status", "pending"),
       supabase.from("estimate_versions").select("id", { count: "exact" }).eq("project_id", project.id),
       supabase.from("validation_issues").select("id", { count: "exact" }).eq("project_id", project.id).eq("status", "open").in("severity", ["error", "critical"]),
-    ]).then(([f, s, i, a, e, b]) => {
+      fetchRebarTakeoffOverview(supabase, project.id),
+    ]).then(([f, s, i, a, e, b, rebar]) => {
       setCounts({
         files: f.count || 0,
         segments: s.count || 0,
@@ -56,6 +59,7 @@ export default function ProjectOverview({ project }: ProjectOverviewProps) {
         estimates: e.count || 0,
         blockers: b.count || 0,
       });
+      setRebarOverview(rebar);
     });
   }, [project.id]);
 
@@ -63,7 +67,6 @@ export default function ProjectOverview({ project }: ProjectOverviewProps) {
 
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-5xl">
-      {/* Blocker Banner */}
       {counts.blockers > 0 && (
         <div className="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
           <ShieldAlert className="h-4 w-4 text-destructive flex-shrink-0" />
@@ -71,7 +74,6 @@ export default function ProjectOverview({ project }: ProjectOverviewProps) {
         </div>
       )}
 
-      {/* Project Header */}
       <div className="space-y-1">
         <div className="flex items-center gap-3">
           <h2 className="text-xl font-bold text-foreground">{project.name}</h2>
@@ -85,7 +87,6 @@ export default function ProjectOverview({ project }: ProjectOverviewProps) {
         {project.description && <p className="text-xs text-muted-foreground mt-1">{project.description}</p>}
       </div>
 
-      {/* Workflow Stepper */}
       <div className="flex items-center gap-1 overflow-x-auto pb-2">
         {WORKFLOW_STEPS.map((step, idx) => (
           <div key={step} className="flex items-center gap-1">
@@ -101,7 +102,6 @@ export default function ProjectOverview({ project }: ProjectOverviewProps) {
         ))}
       </div>
 
-      {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <SummaryCard icon={FolderOpen} label="Files" value={counts.files} />
         <SummaryCard icon={Layers} label="Segments" value={counts.segments} />
@@ -110,7 +110,24 @@ export default function ProjectOverview({ project }: ProjectOverviewProps) {
         <SummaryCard icon={FileText} label="Estimate Versions" value={counts.estimates} />
       </div>
 
-      {/* Metadata */}
+      <Card>
+        <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Database className="h-4 w-4" />Rebar Takeoff Pipeline</CardTitle></CardHeader>
+        <CardContent>
+          {rebarOverview && rebarOverview.runCount > 0 ? (
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-xs">
+              <Detail label="Runs" value={String(rebarOverview.runCount)} />
+              <Detail label="Latest Status" value={rebarOverview.latestStatus?.replace(/_/g, " ") || "—"} />
+              <Detail label="Items" value={String(rebarOverview.itemCount)} />
+              <Detail label="Warnings" value={String(rebarOverview.warningCount)} />
+              <Detail label="Latest Rebar Estimate" value={rebarOverview.latestEstimateVersion != null ? `v${rebarOverview.latestEstimateVersion}` : "—"} />
+              <Detail label="Confidence" value={rebarOverview.latestConfidence != null ? `${Math.round(rebarOverview.latestConfidence * 100)}%` : "—"} />
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">No persisted rebar takeoff run yet. Run an estimate from chat to populate the new MVP pipeline.</p>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader className="pb-2"><CardTitle className="text-sm">Project Details</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-2 md:grid-cols-3 gap-4 text-xs">
@@ -123,7 +140,6 @@ export default function ProjectOverview({ project }: ProjectOverviewProps) {
         </CardContent>
       </Card>
 
-      {/* Scope Items */}
       {project.scope_items && project.scope_items.length > 0 && (
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm">Scope Items</CardTitle></CardHeader>
@@ -135,7 +151,6 @@ export default function ProjectOverview({ project }: ProjectOverviewProps) {
         </Card>
       )}
 
-      {/* Approval Panel */}
       <Card>
         <CardHeader className="pb-2"><CardTitle className="text-sm">Approval Status</CardTitle></CardHeader>
         <CardContent>
