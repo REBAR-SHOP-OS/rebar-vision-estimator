@@ -87,3 +87,125 @@ export async function ensureRebarProjectFileBridge(
   if (error) throw error;
   return data as string;
 }
+
+type CreateProjectWithCanonicalBridgeParams = {
+  customerName?: string | null;
+  normalizedName: string;
+  projectName: string;
+  userId: string;
+};
+
+type CreateProjectFileWithCanonicalBridgeParams = {
+  checksumSha256?: string | null;
+  fileKind: string;
+  fileName: string;
+  filePath: string;
+  fileSize?: number | null;
+  fileType?: string | null;
+  pageCount?: number | null;
+  projectId: string;
+  revisionLabel?: string | null;
+  userId: string;
+};
+
+export async function cleanupLegacyProjectUpload(
+  supabase: any,
+  params: {
+    legacyFileId?: string | null;
+    legacyProjectId?: string | null;
+    storagePath?: string | null;
+  },
+) {
+  const cleanupTasks: Promise<unknown>[] = [];
+
+  if (params.legacyFileId) {
+    cleanupTasks.push(supabase.from("project_files").delete().eq("id", params.legacyFileId));
+  }
+
+  if (params.storagePath) {
+    cleanupTasks.push(supabase.storage.from("blueprints").remove([params.storagePath]));
+  }
+
+  if (params.legacyProjectId) {
+    cleanupTasks.push(supabase.from("projects").delete().eq("id", params.legacyProjectId));
+  }
+
+  await Promise.allSettled(cleanupTasks);
+}
+
+export async function createProjectWithCanonicalBridge(
+  supabase: any,
+  params: CreateProjectWithCanonicalBridgeParams,
+) {
+  const { data, error } = await supabase
+    .from("projects")
+    .insert({
+      user_id: params.userId,
+      name: params.projectName,
+      normalized_name: params.normalizedName,
+      workflow_status: "intake",
+    })
+    .select()
+    .single();
+
+  if (error || !data) throw error || new Error("Failed to create project");
+
+  try {
+    await ensureRebarProjectBridge(
+      supabase,
+      data.id,
+      params.projectName,
+      params.customerName ?? null,
+    );
+  } catch (bridgeError) {
+    await cleanupLegacyProjectUpload(supabase, { legacyProjectId: data.id });
+    throw bridgeError;
+  }
+
+  return data;
+}
+
+export async function createProjectFileWithCanonicalBridge(
+  supabase: any,
+  params: CreateProjectFileWithCanonicalBridgeParams,
+) {
+  let legacyFileId: string | null = null;
+
+  try {
+    const { data, error } = await supabase
+      .from("project_files")
+      .insert({
+        project_id: params.projectId,
+        user_id: params.userId,
+        file_name: params.fileName,
+        file_path: params.filePath,
+        file_type: params.fileType ?? null,
+        file_size: params.fileSize ?? null,
+      })
+      .select("id")
+      .single();
+
+    if (error || !data) throw error || new Error("Failed to save project file");
+
+    legacyFileId = data.id;
+
+    await ensureRebarProjectFileBridge(supabase, {
+      legacyFileId: data.id,
+      legacyProjectId: params.projectId,
+      storagePath: params.filePath,
+      originalFilename: params.fileName,
+      fileKind: params.fileKind,
+      revisionLabel: params.revisionLabel ?? null,
+      checksumSha256: params.checksumSha256 ?? null,
+      pageCount: params.pageCount ?? null,
+    });
+
+    return data;
+  } catch (error) {
+    await cleanupLegacyProjectUpload(supabase, {
+      legacyFileId,
+      storagePath: params.filePath,
+    });
+    throw error;
+  }
+}
