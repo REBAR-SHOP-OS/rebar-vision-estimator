@@ -1033,7 +1033,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       const elemIdx = content.indexOf('"elements"');
       if (elemIdx !== -1) {
         // Walk backward to find the opening {
-        let startIdx = content.lastIndexOf('{', elemIdx);
+        const startIdx = content.lastIndexOf('{', elemIdx);
         if (startIdx !== -1) {
           let depth = 0;
           let endIdx = startIdx;
@@ -1140,7 +1140,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
       if (isFocusedProject) {
         // Focused projects: single call (already scoped tightly)
-        let initialInstruction = primaryCat === "cage_only"
+        const initialInstruction = primaryCat === "cage_only"
           ? "Begin cage assembly estimation — focus on verticals, ties, and spirals. This is a cage-only project."
           : "Parse the bar schedule table and calculate weights. This is a bar list project.";
         const chatHistory = [{ role: "user", content: initialInstruction }];

@@ -95,7 +95,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
 
       let pages = extraction?.pages || [];
       let totalPages = extraction?.total_pages || 0;
-      let sha256 = extraction?.sha256 || `file_${fileId}`;
+      const sha256 = extraction?.sha256 || `file_${fileId}`;
 
       if (extractErr || !hasText) {
         console.log(`[FilesTab] Server extraction empty for ${fileName}, falling back to client-side OCR`);
