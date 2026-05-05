@@ -1,127 +1,60 @@
-# Skills Pack — Portable Foundation to Rebuild This App
+## Goal
 
-You want to clone the *capability* of this app (Trust-First estimation + shop-drawing pipeline + AI orchestration) into a new Lovable project. We'll package everything reusable into a single drop-in folder + docs bundle, so a new project can boot from it instead of starting from scratch.
+Apply the **Industrial Precision** visual language (uploaded `stitch_precision_rebar_estimating_system_6.zip`) to the new estimator workflow (`src/features/workflow-v2/*`). Mix and match the strongest layouts from the mockups into our existing 6 stages — without rebuilding logic, routes, or data plumbing.
 
-This is a **packaging task**, not a feature change to the live app. Nothing in the running product moves.
+## Visual Language (locked)
 
-## Deliverable
+- **Sharp 0px corners**, 1px hairline dividers, no shadows/gradients
+- **Inter** everywhere; ALL CAPS 11px labels; tabular numeric font for data
+- **Color tokens** (added to `src/index.css` dark theme):
+  - `--surface 220 14% 8%`, `--surface-container 220 13% 12%`, `--surface-container-high 220 12% 16%`
+  - `--primary 220 100% 84%` (Industrial blue `#adc6ff`)
+  - `--status-direct` blue, `--status-inferred` amber, `--status-supported` green, `--status-blocked` red
+- 32px table row height, 24px input height, 4px base unit
+- Status pills: 2px radius only; everything else sharp
 
-A new top-level folder `skills/` in this repo containing 10 self-contained skill modules, plus a `/mnt/documents/skills-pack.zip` artifact you can download and drop into a new Lovable project.
+## Stage-by-Stage Mix
 
-```text
-skills/
-  README.md                          ← how to install into a new project
-  00-architecture/
-    product-vision.md
-    pipeline-overview.md
-    data-model.sql                   ← canonical tables + RLS
-  01-auth-and-rls/
-    auth-context.tsx
-    user-roles.sql
-    rls-patterns.md
-  02-cloud-storage-pathing/
-    storage-rls.sql
-    upload-helpers.ts
-  03-pdf-pipeline/
-    pdf-to-images.ts                 ← copied + generalized
-    client-side-render.md
-  04-ai-gateway/
-    call-ai.ts                       ← typed wrapper (text + JSON + vision)
-    prompts/
-      atomic-truth.md
-      shop-drawing-ai.md
-      validation-gates.md
-    model-config.md                  ← deterministic settings rules
-  05-trust-first-ux/
-    StatusBanner.tsx
-    EvidenceDrawer.tsx
-    EstimateGrid.tsx
-    workspace-layout.md
-  06-shop-drawing-engine/
-    validate-metadata.ts             ← copied
-    sheet-templates/
-      ai-candidate.html.ts
-      review-draft.html.ts
-      issued.html.ts
-    sheet-sizes.ts                   ← ARCH C/D/E sizing
-    render-html-to-pdf.md
-  07-edge-functions/
-    _template/
-      index.ts                       ← thin-router skeleton
-      cors.ts
-    draft-shop-drawing-ai.ts         ← reference impl
-    analyze-blueprint.ts             ← reference impl
-  08-export-utilities/
-    excel-export.ts
-    pdf-export.ts
-    quote-pdf-export.ts
-  09-i18n-and-theme/
-    LanguageContext.tsx
-    ThemeContext.tsx
-    languages.md                     ← 10-language matrix, RTL/LTR
-  10-conventions/
-    minimum-patch-policy.md
-    select-sentinel.md
-    session-expiry-handling.md
-    audit-logging.md
-```
+| Stage | Source mockup | What we adopt |
+|---|---|---|
+| **Files** | `files_revisions` | Document Register table (file/discipline/rev/status/parse/sheets/upload), right-side Preview + Metadata + Revisions History panel, sheet-completeness warning bar |
+| **Scope** | `scope_review` | Two-column Candidate Scope Items (left) → vertical Approve/Reject/Merge/Split rail (center) → Approved Scope buckets grid (right) with totals header |
+| **Takeoff** | `takeoff_workspace_traceability_pro` + `takeoff_control_room_final_production_state` | Three-pane: left Estimator Copilot + Issue Queue, center Sheet viewer + Production Takeoff Data table, right Quantity Inspector tabs (Proof / History / Warnings / RFI) with sticky "Confirm Takeoff Data" CTA |
+| **QA** | `qa_issue_management` | Red "Approval Gate Blocked" banner with Resolve/Override CTAs, grouped issue table (Critical Blockers / Review Warnings / Revision Conflicts), right Linked Source Review panel with isometric drawing + Recommended Fix |
+| **Confirm** (Estimator Confirmation) | `revision_compare_production_audit_desk` action panel | Single-column signoff sheet: precondition checklist, signature block, "Confirm Takeoff Data" primary CTA, secondary "Mark for Review" / "Request Override" |
+| **Outputs** | `project_deliverables_export_control` | Export Blocked banner (when applicable), 4 deliverable cards (Estimate Workbook / Quote Package / Review Draft / Fabrication Output) each with status pill + Generate/Download, Output Generation History table |
 
-Plus: `/mnt/documents/skills-pack.zip` (same tree, zipped) and `/mnt/documents/skills-pack-INSTALL.md` (step-by-step bootstrap for a fresh Lovable project).
+## Shell (`WorkflowShell.tsx`)
 
-## How it gets built (default mode work)
+Mix `project_operations_dashboard` chrome:
+- Left rail keeps stage list but switches to **icon + caps label** style with active state = filled primary bar on the left edge
+- Top header gets the **6 KPI cards** strip (Files / Scope Approved / Takeoff Rows / QA Critical / QA Open / Outputs Ready) using Industrial cards
+- Footer status bar reformatted as monospaced telemetry strip (already close — just retype + colors)
+- Stage rail gets the "Stage 0X" kicker + sharp square step indicators (already close, just restyle)
 
-1. **Inventory** — read the canonical sources already in this repo:
-   - `src/lib/pdf-to-images.ts`, `src/lib/shop-drawing/validate-metadata.ts`
-   - `src/lib/excel-export.ts`, `src/lib/pdf-export.ts`, `src/lib/quote-pdf-export.ts`
-   - `src/contexts/{Auth,Language,Theme}Context.tsx`
-   - `src/components/workspace/{StatusBanner,EvidenceDrawer,EstimateGrid,WorkspaceLayout}.tsx`
-   - `supabase/functions/draft-shop-drawing-ai/index.ts`, `analyze-blueprint/index.ts`
-   - `supabase/config.toml`, `src/integrations/supabase/types.ts` (for schema reference)
-   - All `mem://` files for the architecture/logic/feature docs.
+## Files Touched (minimum patch)
 
-2. **Generalize** — for each copy, strip project-specific identifiers (rebar terms, RSIC references, Odoo CRM hooks) and replace with `// PROJECT-SPECIFIC: replace with your domain` comments. Keep the *patterns* (RLS shape, thin-router structure, validation pipeline, sheet sizing, AI prompt skeleton).
+1. `src/index.css` — append Industrial Precision tokens to `.dark` block + add `.font-tabular` and `.hairline` utilities (no removals)
+2. `src/features/workflow-v2/WorkflowShell.tsx` — restyle header/rail/footer; KPI strip insert
+3. `src/features/workflow-v2/stages/_shared.tsx` — extend `Pill` tones (direct/inferred/supported/blocked), add `<DataTable>`, `<KpiCell>`, `<SectionHeader>` primitives
+4. `src/features/workflow-v2/stages/FilesStage.tsx` — relayout to Document Register + Preview/Metadata
+5. `src/features/workflow-v2/stages/ScopeStage.tsx` — three-zone candidate/rail/approved layout
+6. `src/features/workflow-v2/stages/TakeoffStage.tsx` — three-pane Copilot/Viewer+Table/Inspector
+7. `src/features/workflow-v2/stages/QAStage.tsx` — gate banner + grouped table + Linked Source Review panel
+8. `src/features/workflow-v2/stages/ConfirmStage.tsx` — signoff sheet
+9. `src/features/workflow-v2/stages/OutputsStage.tsx` — deliverable cards + history table
 
-3. **Write docs** — each skill folder gets a short `README.md` explaining:
-   - what the skill does
-   - which files to drop in
-   - which env vars / secrets it needs
-   - which DB tables/RLS it requires
-   - copy-paste install snippet
+## Out of Scope
 
-4. **Generate canonical SQL** — extract the reusable schema (projects, project_files, user_roles, audit_events, shop_drawings, export_jobs, storage buckets + RLS) into `00-architecture/data-model.sql` as a single runnable migration.
+- No data model / Supabase changes
+- No router changes (workflow-v2 already primary)
+- No new dependencies
+- Legacy workspace under `src/pages/legacy/` untouched
+- No copy edits to existing audit/persistence logic
 
-5. **Bundle** — zip `skills/` to `/mnt/documents/skills-pack.zip` and emit a `<lov-artifact>` so you can download it.
+## Acceptance
 
-6. **Bootstrap doc** — `skills-pack-INSTALL.md` walks through:
-   - Create new Lovable project → enable Lovable Cloud
-   - Unzip pack into repo root
-   - Run `data-model.sql` migration
-   - Wire `AuthContext`, `LanguageContext`, `ThemeContext` into `App.tsx`
-   - Deploy edge function template
-   - Smoke-test with the included sample prompt
-
-## What's deliberately NOT in scope
-
-- No changes to the running app's code, DB, or edge functions.
-- Domain-specific business rules (rebar weights, RSIC standards, Odoo CRM, agent brain) stay in this project — they are *not* generic skills. The pack ships the *patterns* (validation gates, learning loop shape, audit logging) without the domain payload.
-- No new Lovable project is created automatically — the pack is portable; you create the new project and drop it in.
-
-## Acceptance check
-
-- `skills/` exists with all 10 subfolders and a top-level README.
-- Every skill folder has at least one code file + a README.
-- `data-model.sql` runs cleanly on a fresh Lovable Cloud project (syntax-validated, not executed against this DB).
-- `/mnt/documents/skills-pack.zip` downloads and unzips to the same tree.
-- `skills-pack-INSTALL.md` lists every step needed to boot a new app.
-
-## Estimated size / effort
-
-- ~25 new files in `skills/`, no edits to existing code.
-- One zip artifact.
-- ~30 min of generation, no DB migrations, no edge function deploys.
-
-## Out of scope (follow-up if you want it)
-
-- Auto-creating the second Lovable project from this pack (needs you to click "New Project" first).
-- A CLI installer that runs the SQL + wires contexts automatically.
-- Domain-specialized skill packs (e.g. a "Concrete Estimation" pack vs a generic one).
+- All 6 stages render with the Industrial Precision look & feel
+- Existing state hook (`useWorkflowState`) and persistence untouched
+- No regressions in build / typecheck / tests
+- Stage gating (locked / blocked / active) still functions exactly as today

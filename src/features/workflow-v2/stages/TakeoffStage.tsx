@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { StageHeader, Pill, EmptyState, type StageProps } from "./_shared";
+import { Sparkles, FileText, CheckCircle2 } from "lucide-react";
 
 interface Row {
   id: string;
@@ -30,7 +31,7 @@ export default function TakeoffStage({ projectId, state }: StageProps) {
         id: d.id,
         mark: `M${String(i + 1).padStart(3, "0")}`,
         size: d.bar_size || "—",
-        shape: (d.description || "Straight").slice(0, 18),
+        shape: (d.description || "Straight").slice(0, 24),
         count: d.quantity_count || 0,
         length: Number(d.total_length || 0),
         weight: Number(d.total_weight || 0),
@@ -52,90 +53,141 @@ export default function TakeoffStage({ projectId, state }: StageProps) {
   }), [rows]);
 
   return (
-    <div className="grid grid-cols-12 h-full">
-      <div className="col-span-8 border-r border-border flex flex-col min-h-0">
+    <div className="grid h-full" style={{ gridTemplateColumns: "260px 1fr 340px" }}>
+      {/* Estimator Copilot */}
+      <aside className="border-r border-border flex flex-col min-h-0" style={{ background: "hsl(var(--card))" }}>
+        <div className="px-3 h-10 flex items-center border-b border-border">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em]">
+            <Sparkles className="w-3.5 h-3.5 text-primary" /> Estimator Copilot
+          </div>
+        </div>
+        <div className="flex-1 overflow-auto p-3 space-y-3 text-[12px]">
+          <div className="ip-card p-3">
+            <div className="ip-kicker mb-1">Pending Changes</div>
+            <div className="text-[11px] text-muted-foreground font-mono">No pending revisions</div>
+          </div>
+          <div className="ip-card p-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="ip-kicker">Issue Queue</div>
+              {totals.blocked > 0 && <Pill tone="blocked" solid>{totals.blocked}</Pill>}
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              {totals.blocked === 0 ? "No blocking issues detected." : `${totals.blocked} row(s) below confidence threshold.`}
+            </div>
+          </div>
+          <div className="ip-card p-3">
+            <div className="ip-kicker mb-1.5">Copilot Notes</div>
+            <div className="text-[11px] italic text-muted-foreground leading-relaxed">
+              Click any row to inspect linked evidence and proof in the right panel.
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* Center table */}
+      <div className="border-r border-border flex flex-col min-h-0">
         <StageHeader
-          kicker="Stage 03"
+          kicker="Stage 03 · Production Takeoff Data"
           title="Takeoff Workspace"
-          subtitle="Traceable quantity rows. Edit and verify here. Every row links to drawing evidence."
           right={<div className="flex gap-2">
-            <Pill tone="info">{totals.rows} rows</Pill>
-            <Pill tone="ok">{totals.weight.toFixed(0)} kg</Pill>
-            {totals.blocked > 0 && <Pill tone="bad">{totals.blocked} blocked</Pill>}
+            <Pill tone="direct">{totals.rows} ROWS</Pill>
+            <Pill tone="supported">{totals.weight.toFixed(0)} KG</Pill>
+            {totals.blocked > 0 && <Pill tone="blocked" solid>{totals.blocked} BLOCKED</Pill>}
           </div>}
         />
         <div className="flex-1 overflow-auto">
-          {loading ? <EmptyState title="Loading takeoff..." /> :
+          {loading ? <EmptyState title="Loading takeoff…" /> :
             rows.length === 0 ? <EmptyState title="No takeoff rows" hint="Accept scope candidates and run extraction to populate." /> : (
-            <table className="w-full text-xs font-mono">
-              <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground sticky top-0">
-                <tr>
-                  <th className="text-left px-2 py-2 w-16">Mark</th>
-                  <th className="text-left px-2 py-2 w-14">Size</th>
-                  <th className="text-left px-2 py-2">Shape</th>
-                  <th className="text-right px-2 py-2 w-14">Qty</th>
-                  <th className="text-right px-2 py-2 w-20">Length (m)</th>
-                  <th className="text-right px-2 py-2 w-20">Wt (kg)</th>
-                  <th className="text-left px-2 py-2 w-20">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id} onClick={() => setSelectedId(r.id)}
-                    className={`border-t border-border cursor-pointer ${selectedId === r.id ? "bg-primary/5" : "hover:bg-muted/30"}`}>
-                    <td className="px-2 py-1.5">{r.mark}</td>
-                    <td className="px-2 py-1.5">{r.size}</td>
-                    <td className="px-2 py-1.5 truncate max-w-0">{r.shape}</td>
-                    <td className="px-2 py-1.5 text-right">{r.count}</td>
-                    <td className="px-2 py-1.5 text-right">{r.length.toFixed(2)}</td>
-                    <td className="px-2 py-1.5 text-right">{r.weight.toFixed(1)}</td>
-                    <td className="px-2 py-1.5">
-                      {r.status === "ready" && <Pill tone="ok">Ready</Pill>}
-                      {r.status === "review" && <Pill tone="warn">Review</Pill>}
-                      {r.status === "blocked" && <Pill tone="bad">Blocked</Pill>}
-                    </td>
+              <table className="w-full text-[12px] tabular-nums">
+                <thead className="bg-muted/40 text-[10px] uppercase tracking-[0.14em] text-muted-foreground sticky top-0">
+                  <tr>
+                    <th className="text-left px-3 h-8 w-16">Item</th>
+                    <th className="text-left px-3 h-8 w-14">Size</th>
+                    <th className="text-left px-3 h-8">Shape</th>
+                    <th className="text-right px-3 h-8 w-14">Qty</th>
+                    <th className="text-right px-3 h-8 w-20">Length</th>
+                    <th className="text-right px-3 h-8 w-20">Weight</th>
+                    <th className="text-left px-3 h-8 w-24">Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => (
+                    <tr key={r.id} onClick={() => setSelectedId(r.id)}
+                      style={{ height: 32 }}
+                      className={`border-t border-border cursor-pointer ${selectedId === r.id ? "bg-primary/10" : i % 2 ? "bg-card/30 hover:bg-accent/40" : "hover:bg-accent/40"}`}>
+                      <td className="px-3 font-mono text-[hsl(var(--status-direct))]">{r.mark}</td>
+                      <td className="px-3">{r.size}</td>
+                      <td className="px-3 truncate max-w-0">{r.shape}</td>
+                      <td className="px-3 text-right">{r.count}</td>
+                      <td className="px-3 text-right">{r.length.toFixed(2)}</td>
+                      <td className="px-3 text-right font-semibold">{r.weight.toFixed(1)}</td>
+                      <td className="px-3">
+                        {r.status === "ready" && <Pill tone="direct" solid>Direct</Pill>}
+                        {r.status === "review" && <Pill tone="inferred" solid>Inferred</Pill>}
+                        {r.status === "blocked" && <Pill tone="blocked" solid>Blocked</Pill>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
         </div>
       </div>
 
-      <div className="col-span-4 flex flex-col min-h-0 bg-muted/20">
-        <StageHeader kicker="Inspector" title={sel ? `Row ${sel.mark}` : "Select a row"} />
+      {/* Quantity Inspector */}
+      <aside className="flex flex-col min-h-0" style={{ background: "hsl(var(--card))" }}>
+        <div className="border-b border-border">
+          <StageHeader kicker="Quantity Inspector" title={sel ? `Item ${sel.mark}` : "Select a row"} />
+          <div className="flex border-t border-border text-[10px] uppercase tracking-[0.14em] font-semibold">
+            {["Proof", "History", "Warnings", "RFI"].map((t, i) => (
+              <button key={t} className={`flex-1 h-8 border-r border-border last:border-r-0 ${i === 0 ? "text-primary border-b-2 border-b-primary -mb-px" : "text-muted-foreground hover:text-foreground"}`}>{t}</button>
+            ))}
+          </div>
+        </div>
         <div className="flex-1 overflow-auto p-4 space-y-3">
           {!sel ? <EmptyState title="No row selected" /> : (
             <>
-              <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                <Field label="Mark" value={sel.mark} />
-                <Field label="Size" value={sel.size} />
-                <Field label="Shape" value={sel.shape} />
-                <Field label="Count" value={String(sel.count)} />
-                <Field label="Length (m)" value={sel.length.toFixed(2)} />
-                <Field label="Weight (kg)" value={sel.weight.toFixed(1)} />
+              <div>
+                <div className="ip-kicker mb-2">1 · What This Is</div>
+                <div className="ip-card p-3">
+                  <div className="text-[13px] font-semibold">{sel.shape}</div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5 font-mono">Item {sel.mark} · Bar {sel.size}</div>
+                </div>
               </div>
-              <div className="border border-border bg-card p-3">
-                <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Drawing Evidence</div>
-                <div className="text-xs font-mono truncate">{sel.source}</div>
+              <div>
+                <div className="ip-kicker mb-2">2 · Where It Came From</div>
+                <div className="ip-card p-3 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-primary" />
+                  <div className="flex-1 text-[12px] font-mono truncate">{sel.source}</div>
+                </div>
               </div>
-              <div className="border border-border bg-card p-3">
-                <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Pending Changes</div>
-                <div className="text-xs text-muted-foreground">No pending changes</div>
+              <div>
+                <div className="ip-kicker mb-2">3 · Calculated Total</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Quantity" value={String(sel.count)} />
+                  <Field label="Length (m)" value={sel.length.toFixed(2)} />
+                  <Field label="Weight (kg)" value={sel.weight.toFixed(1)} />
+                  <Field label="Source" value="Drawing" />
+                </div>
               </div>
             </>
           )}
         </div>
-      </div>
+        <div className="border-t border-border p-3">
+          <button className="w-full h-10 inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground text-[12px] font-semibold uppercase tracking-[0.14em] hover:opacity-90">
+            <CheckCircle2 className="w-4 h-4" /> Confirm Takeoff Data
+          </button>
+        </div>
+      </aside>
     </div>
   );
 }
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <div className="border border-border bg-card px-2 py-1.5">
-      <div className="text-[9px] uppercase tracking-widest text-muted-foreground">{label}</div>
-      <div className="truncate">{value}</div>
+    <div className="border border-border bg-background px-2 py-1.5">
+      <div className="ip-kicker">{label}</div>
+      <div className="truncate text-[12px] tabular-nums mt-0.5">{value}</div>
     </div>
   );
 }
