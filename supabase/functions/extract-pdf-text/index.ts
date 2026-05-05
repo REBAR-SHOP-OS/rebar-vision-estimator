@@ -50,7 +50,7 @@ function extractTitleBlock(text: string): TitleBlockMetadata {
   const revMatch = text.match(/\bREV(?:ISION)?\.?\s*([A-Z0-9]{1,3})\b/i);
   if (revMatch) tb.revision_code = revMatch[1];
 
-  const dateMatch = text.match(/\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b/);
+  const dateMatch = text.match(/\b(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\b/);
   if (dateMatch) tb.revision_date = dateMatch[1];
 
   const textUpper = text.toUpperCase();
@@ -156,8 +156,12 @@ serve(async (req) => {
     const sha256 = await hashSHA256(pdfBytes);
     const pages: PdfPageExtraction[] = [];
 
+    type PdfJsTextItem = { str?: string; transform?: number[] };
+    type PdfJsPage = { getTextContent: () => Promise<{ items: PdfJsTextItem[] }> };
+    type PdfJsDoc = { numPages: number; getPage: (n: number) => Promise<PdfJsPage> };
+
     // Use dynamic import for pdfjs-serverless
-    let doc: any;
+    let doc: PdfJsDoc;
     try {
       const pdfjs = await import("https://esm.sh/pdfjs-serverless");
       const getDocument = pdfjs.getDocument || pdfjs.default?.getDocument || pdfjs.default;
@@ -192,7 +196,7 @@ serve(async (req) => {
       try {
         const page = await doc.getPage(pageNum);
         const textContent = await page.getTextContent();
-        const items = textContent.items.filter((item: any) => item.str && item.str.trim());
+        const items = textContent.items.filter((item: PdfJsTextItem) => item.str && item.str.trim());
 
         if (items.length < 3) {
           pages.push({ page_number: pageNum, raw_text: "", tables: [], text_blocks: [], is_scanned: true, title_block: { sheet_number: null, sheet_title: null, revision_code: null, revision_date: null, scale_raw: null, scale_ratio: null, discipline: null, drawing_type: null } });
@@ -202,14 +206,14 @@ serve(async (req) => {
         // Group by Y-coordinate into rows (3pt threshold)
         const rowMap = new Map<number, { x: number; text: string }[]>();
         for (const item of items) {
-          const y = Math.round((item as any).transform?.[5] ?? 0);
-          const x = (item as any).transform?.[4] ?? 0;
+          const y = Math.round(item.transform?.[5] ?? 0);
+          const x = item.transform?.[4] ?? 0;
           let matchedY = y;
           for (const existingY of rowMap.keys()) {
             if (Math.abs(existingY - y) <= 3) { matchedY = existingY; break; }
           }
           if (!rowMap.has(matchedY)) rowMap.set(matchedY, []);
-          rowMap.get(matchedY)!.push({ x, text: (item as any).str });
+          rowMap.get(matchedY)!.push({ x, text: item.str! });
         }
 
         const sortedYs = [...rowMap.keys()].sort((a, b) => b - a);
