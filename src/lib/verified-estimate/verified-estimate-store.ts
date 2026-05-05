@@ -21,16 +21,27 @@ export async function fetchWorkspaceCanonicalInputs(
   supabase: SupabaseClient<Database>,
   projectId: string,
 ): Promise<Parameters<typeof buildCanonicalResultFromWorkspace>[0]> {
-  const [segRes, filesRes, dvRes, sheetsRes] = await Promise.all([
+  const [segRes, filesRes, dvRes, sheetsRes, registryRes] = await Promise.all([
     supabase.from("segments").select("id, name, segment_type").eq("project_id", projectId),
     supabase.from("project_files").select("id, file_name").eq("project_id", projectId),
     supabase.from("document_versions").select("id, file_id").eq("project_id", projectId),
     fromAny(supabase, "document_sheets").select("document_version_id, page_number, sheet_number").eq("project_id", projectId),
+    (supabase as any).from("document_registry").select("file_id, is_active").eq("project_id", projectId),
   ]);
 
   const segments = segRes.data || [];
   const segIds = segments.map((s: any) => s.id);
-  const files = filesRes.data || [];
+  const registryRows = (((registryRes as any)?.data) || []) as Array<{ file_id: string | null; is_active: boolean | null }>;
+  const activeRegistryFileIds = registryRows
+    .filter((row) => row.file_id && row.is_active !== false)
+    .map((row) => row.file_id as string);
+  const useActiveRegistryFiles = registryRows.length > 0 && activeRegistryFileIds.length > 0;
+  const activeRegistryFileIdSet = new Set(activeRegistryFileIds);
+
+  const files = (filesRes.data || []).filter((file) => {
+    if (!useActiveRegistryFiles) return true;
+    return activeRegistryFileIdSet.has(file.id);
+  });
 
   const linksRes =
     segIds.length > 0
@@ -48,17 +59,23 @@ export async function fetchWorkspaceCanonicalInputs(
         .eq("project_id", projectId),
     ]);
     barItems = bi.data || [];
-    estimateItems = ei.data || [];
+    estimateItems = (ei.data || []).filter((item: any) => {
+      if (!useActiveRegistryFiles || !item.source_file_id) return true;
+      return activeRegistryFileIdSet.has(item.source_file_id);
+    });
   }
 
   const docVersionToFile: DocVersionToFileMap = new Map();
   for (const dv of dvRes.data || []) {
-    if (dv.file_id) docVersionToFile.set(dv.id, dv.file_id);
+    if (!dv.file_id) continue;
+    if (useActiveRegistryFiles && !activeRegistryFileIdSet.has(dv.file_id)) continue;
+    docVersionToFile.set(dv.id, dv.file_id);
   }
 
   const segmentSources: SegmentSourceMap = new Map();
   for (const s of segments) segmentSources.set(s.id, []);
   for (const row of linksRes.data || []) {
+    if (useActiveRegistryFiles && !activeRegistryFileIdSet.has(row.file_id)) continue;
     const arr = segmentSources.get(row.segment_id) || [];
     if (!arr.includes(row.file_id)) arr.push(row.file_id);
     segmentSources.set(row.segment_id, arr);
@@ -69,11 +86,13 @@ export async function fetchWorkspaceCanonicalInputs(
     }
   }
 
-  const documentSheets: SheetIndexRow[] = ((sheetsRes as any).data || []).map((r: any) => ({
-    document_version_id: r.document_version_id,
-    page_number: r.page_number,
-    sheet_number: r.sheet_number,
-  }));
+  const documentSheets: SheetIndexRow[] = ((sheetsRes as any).data || [])
+    .filter((row: any) => docVersionToFile.has(row.document_version_id))
+    .map((r: any) => ({
+      document_version_id: r.document_version_id,
+      page_number: r.page_number,
+      sheet_number: r.sheet_number,
+    }));
 
   return {
     segments,
