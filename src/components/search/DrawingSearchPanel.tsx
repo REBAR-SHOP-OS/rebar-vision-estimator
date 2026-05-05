@@ -24,7 +24,7 @@ const DrawingSearchPanel: React.FC<Props> = ({ onClose, onSelectProject }) => {
     setLoading(true);
     setSearched(true);
     try {
-      const body: Record<string, any> = { limit: 50 };
+      const body: Record<string, unknown> = { limit: 50 };
       if (query.trim()) body.q = query.trim();
       if (filters.discipline) body.discipline = filters.discipline;
       if (filters.drawing_type) body.drawing_type = filters.drawing_type;

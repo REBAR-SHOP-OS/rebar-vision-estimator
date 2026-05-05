@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +22,7 @@ interface Approval {
   resolved_at: string | null;
 }
 
-const STATUS_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
+const STATUS_CONFIG: Record<string, { icon: React.ElementType; color: string; label: string }> = {
   pending: { icon: Clock, color: "text-[hsl(var(--status-review))]", label: "Pending" },
   approved: { icon: CheckCircle2, color: "text-[hsl(var(--status-approved))]", label: "Approved" },
   rejected: { icon: XCircle, color: "text-destructive", label: "Rejected" },
@@ -51,7 +51,7 @@ export default function ApprovalPanel({ projectId, segmentId }: { projectId: str
     const [appRes, issRes] = await Promise.all([q, issueQ]);
     setApprovals((appRes.data as Approval[]) || []);
     setOpenIssueCount(issRes.count || 0);
-    const blockers = (issRes.data || []).filter((i: any) => i.severity === "error" || i.severity === "critical").length;
+    const blockers = (issRes.data || []).filter((i) => i.severity === "error" || i.severity === "critical").length;
     setBlockerCount(blockers);
     setLoading(false);
   };

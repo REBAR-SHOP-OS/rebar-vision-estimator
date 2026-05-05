@@ -23,10 +23,18 @@ interface QuoteVersion {
   estimate_version_id: string;
 }
 
+interface EstimateOption {
+  id: string;
+  version_number: number;
+  total_estimated_cost: number | null;
+  status: string | null;
+  created_at: string;
+}
+
 const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ projectId, onClose }) => {
   const { user } = useAuth();
   const [quotes, setQuotes] = useState<QuoteVersion[]>([]);
-  const [estimates, setEstimates] = useState<any[]>([]);
+  const [estimates, setEstimates] = useState<EstimateOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
 

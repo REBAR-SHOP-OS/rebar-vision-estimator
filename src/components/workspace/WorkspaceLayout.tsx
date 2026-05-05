@@ -57,19 +57,21 @@ export default function WorkspaceLayout({
       // Parse line items from latest version
       if (versions.length > 0) {
         const latest = versions[0];
-        const raw = (latest.line_items as any[]) || [];
-        const mapped: EstimateLineItem[] = raw.map((li: any, idx: number) => ({
-          id: li.id || `li-${idx}`,
-          elementId: li.element_id || li.elementId || `E${idx + 1}`,
-          elementType: li.element_type || li.elementType || "Unknown",
-          status: mapStatus(li.status),
-          evidenceGrade: li.evidence_grade || li.evidenceGrade || "—",
-          weightKg: Number(li.weight_kg || li.weightKg || li.weight || 0),
-          costEstimate: Number(li.cost_estimate || li.costEstimate || li.cost || 0),
-          issuesCount: Number(li.issues_count || li.issuesCount || 0),
-          questionsCount: Number(li.questions_count || li.questionsCount || 0),
-          sourceSheets: li.source_sheets || li.sourceSheets || [],
-        }));
+        const raw = (latest.line_items as unknown[]) || [];
+        const mapped: EstimateLineItem[] = raw.map((li, idx: number) => {
+          const item = li as Record<string, unknown>;
+          return {
+          id: String(item.id || `li-${idx}`),
+          elementId: String(item.element_id || item.elementId || `E${idx + 1}`),
+          elementType: String(item.element_type || item.elementType || "Unknown"),
+          status: mapStatus(String(item.status || "")),
+          evidenceGrade: String(item.evidence_grade || item.evidenceGrade || "—"),
+          weightKg: Number(item.weight_kg || item.weightKg || item.weight || 0),
+          costEstimate: Number(item.cost_estimate || item.costEstimate || item.cost || 0),
+          issuesCount: Number(item.issues_count || item.issuesCount || 0),
+          questionsCount: Number(item.questions_count || item.questionsCount || 0),
+          sourceSheets: (item.source_sheets || item.sourceSheets || []) as string[],
+        }});
         setLineItems(mapped);
       }
     }

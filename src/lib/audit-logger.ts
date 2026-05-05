@@ -7,7 +7,7 @@ export async function logAuditEvent(
   entityId?: string,
   projectId?: string,
   segmentId?: string,
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
 ) {
   const { error } = await supabase.from("audit_events").insert({
     user_id: userId,

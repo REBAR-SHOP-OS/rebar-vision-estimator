@@ -14,7 +14,7 @@ interface ConfirmRow {
 export default function ConfirmStage({ projectId, state }: StageProps) {
   const [rows, setRows] = useState<ConfirmRow[]>([]);
   const [chat, setChat] = useState<Array<{ role: "estimator" | "system"; text: string; ts: string }>>(() =>
-    (state.local.confirmChat as any) || []
+    (state.local.confirmChat as Array<{ role: "estimator" | "system"; text: string; ts: string }>) || []
   );
   const [draft, setDraft] = useState("");
   const [selectedFileId, setSelectedFileId] = useState<string | null>(state.files[0]?.id || null);
@@ -25,11 +25,11 @@ export default function ConfirmStage({ projectId, state }: StageProps) {
       const { data } = await supabase.from("estimate_items")
         .select("id, description, bar_size, total_weight")
         .eq("project_id", projectId).limit(50);
-      const mapped: ConfirmRow[] = (data || []).map((d: any, i: number) => ({
+      const mapped: ConfirmRow[] = (data || []).map((d, i: number) => ({
         id: d.id,
         label: `${d.bar_size || "—"} · ${d.description || `Item ${i + 1}`}`.slice(0, 60),
         extracted: `${(Number(d.total_weight || 0)).toFixed(1)} kg`,
-        decision: (state.local.confirmRows?.[d.id] as any) || "pending",
+        decision: (state.local.confirmRows?.[d.id] as ConfirmRow["decision"]) || "pending",
       }));
       setRows(mapped);
     })();
