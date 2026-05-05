@@ -18,15 +18,53 @@ export function StageHeader({ kicker, title, subtitle, right }: { kicker: string
   );
 }
 
-export function Pill({ children, tone = "default" }: { children: React.ReactNode; tone?: "default" | "ok" | "warn" | "bad" | "info" }) {
-  const cls = {
-    default: "border-border text-muted-foreground",
-    ok: "border-primary/40 text-primary bg-primary/5",
-    warn: "border-yellow-500/40 text-yellow-600 dark:text-yellow-400 bg-yellow-500/5",
-    bad: "border-destructive/40 text-destructive bg-destructive/5",
-    info: "border-blue-500/40 text-blue-600 dark:text-blue-400 bg-blue-500/5",
-  }[tone];
-  return <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono border ${cls}`}>{children}</span>;
+export function Pill({ children, tone = "default", solid = false }: { children: React.ReactNode; tone?: "default" | "ok" | "warn" | "bad" | "info" | "direct" | "inferred" | "supported" | "blocked"; solid?: boolean }) {
+  const map: Record<string, string> = {
+    default: "border-border text-muted-foreground bg-transparent",
+    ok: "border-[hsl(var(--status-supported))]/50 text-[hsl(var(--status-supported))] bg-[hsl(var(--status-supported))]/5",
+    supported: "border-[hsl(var(--status-supported))]/50 text-[hsl(var(--status-supported))] bg-[hsl(var(--status-supported))]/5",
+    warn: "border-[hsl(var(--status-inferred))]/50 text-[hsl(var(--status-inferred))] bg-[hsl(var(--status-inferred))]/5",
+    inferred: "border-[hsl(var(--status-inferred))]/50 text-[hsl(var(--status-inferred))] bg-[hsl(var(--status-inferred))]/5",
+    bad: "border-[hsl(var(--status-blocked))]/50 text-[hsl(var(--status-blocked))] bg-[hsl(var(--status-blocked))]/8",
+    blocked: "border-[hsl(var(--status-blocked))]/50 text-[hsl(var(--status-blocked))] bg-[hsl(var(--status-blocked))]/8",
+    info: "border-[hsl(var(--status-direct))]/50 text-[hsl(var(--status-direct))] bg-[hsl(var(--status-direct))]/5",
+    direct: "border-[hsl(var(--status-direct))]/50 text-[hsl(var(--status-direct))] bg-[hsl(var(--status-direct))]/5",
+  };
+  const solidMap: Record<string, string> = {
+    direct: "bg-[hsl(var(--status-direct))] text-white border-[hsl(var(--status-direct))]",
+    inferred: "bg-[hsl(var(--status-inferred))] text-black border-[hsl(var(--status-inferred))]",
+    supported: "bg-[hsl(var(--status-supported))] text-black border-[hsl(var(--status-supported))]",
+    blocked: "bg-[hsl(var(--status-blocked))] text-white border-[hsl(var(--status-blocked))]",
+    ok: "bg-[hsl(var(--status-supported))] text-black border-[hsl(var(--status-supported))]",
+    warn: "bg-[hsl(var(--status-inferred))] text-black border-[hsl(var(--status-inferred))]",
+    bad: "bg-[hsl(var(--status-blocked))] text-white border-[hsl(var(--status-blocked))]",
+    info: "bg-[hsl(var(--status-direct))] text-white border-[hsl(var(--status-direct))]",
+    default: "bg-muted text-foreground border-border",
+  };
+  const cls = solid ? solidMap[tone] : map[tone];
+  return <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-semibold border ${cls}`} style={{ borderRadius: 2 }}>{children}</span>;
+}
+
+export function GateBanner({ tone = "blocked", title, message, actions }: { tone?: "blocked" | "warn"; title: string; message?: string; actions?: React.ReactNode }) {
+  const ring = tone === "blocked" ? "border-[hsl(var(--status-blocked))]/60 bg-[hsl(var(--status-blocked))]/10 text-[hsl(0_90%_88%)]" : "border-[hsl(var(--status-inferred))]/60 bg-[hsl(var(--status-inferred))]/10";
+  return (
+    <div className={`flex items-center gap-3 px-4 py-2.5 border ${ring}`}>
+      <AlertTriangleSm />
+      <div className="flex-1 min-w-0">
+        <div className="text-[12px] font-semibold tracking-wide">{title}</div>
+        {message && <div className="text-[11px] opacity-80 mt-0.5">{message}</div>}
+      </div>
+      {actions}
+    </div>
+  );
+}
+
+function AlertTriangleSm() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square" strokeLinejoin="miter">
+      <path d="M12 3 L22 21 L2 21 Z" /><line x1="12" y1="10" x2="12" y2="15" /><circle cx="12" cy="18" r="0.5" />
+    </svg>
+  );
 }
 
 export function EmptyState({ title, hint }: { title: string; hint?: string }) {
