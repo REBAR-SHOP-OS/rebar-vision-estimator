@@ -30,7 +30,7 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({ url, currentPage, onPageCount
         pdfDocRef.current = doc;
         onPageCount(doc.numPages);
         setLoading(false);
-      } catch (err: any) {
+      } catch (err) {
         if (cancelled) return;
         console.error("PDF load error:", err);
         setError("Failed to load PDF");

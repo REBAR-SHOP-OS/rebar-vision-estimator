@@ -78,21 +78,21 @@ const BrainKnowledgeDialog: React.FC = () => {
   const loadItems = async () => {
     setLoading(true);
     const { data, error } = await supabase
-      .from("agent_knowledge" as any)
+      .from("agent_knowledge")
       .select("*")
       .order("created_at", { ascending: false });
 
-    if (!error && data) setItems(data as any);
+    if (!error && data) setItems(data as KnowledgeItem[]);
     setLoading(false);
   };
 
   const loadTrainingExamples = async () => {
     const { data, error } = await supabase
-      .from("agent_training_examples" as any)
+      .from("agent_training_examples")
       .select("*")
       .order("created_at", { ascending: false });
 
-    if (!error && data) setTrainingExamples(data as any);
+    if (!error && data) setTrainingExamples(data as TrainingExample[]);
   };
 
   const addRule = async () => {
@@ -103,12 +103,12 @@ const BrainKnowledgeDialog: React.FC = () => {
       return;
     }
     setSaving(true);
-    const { error } = await supabase.from("agent_knowledge" as any).insert({
+    const { error } = await supabase.from("agent_knowledge").insert({
       user_id: user.id,
       title: ruleTitle.trim() || null,
       content: ruleContent.trim(),
       type: "rule",
-    } as any);
+    });
 
     if (error) {
       toast.error("Failed to save rule");
@@ -144,13 +144,13 @@ const BrainKnowledgeDialog: React.FC = () => {
         continue;
       }
 
-      const { error } = await supabase.from("agent_knowledge" as any).insert({
+      const { error } = await supabase.from("agent_knowledge").insert({
         user_id: user.id,
         title: file.name,
         file_path: filePath,
         file_name: file.name,
         type: "file",
-      } as any);
+      });
 
       if (error) toast.error(`Failed to save ${file.name}`);
     }
@@ -166,7 +166,7 @@ const BrainKnowledgeDialog: React.FC = () => {
       await supabase.storage.from("blueprints").remove([item.file_path]);
     }
     const { error } = await supabase
-      .from("agent_knowledge" as any)
+      .from("agent_knowledge")
       .delete()
       .eq("id", item.id);
 
@@ -179,8 +179,8 @@ const BrainKnowledgeDialog: React.FC = () => {
 
   const updateRule = async (id: string, title: string, content: string) => {
     const { error } = await supabase
-      .from("agent_knowledge" as any)
-      .update({ title: title.trim() || null, content: content.trim() } as any)
+      .from("agent_knowledge")
+      .update({ title: title.trim() || null, content: content.trim() })
       .eq("id", id);
 
     if (error) {
@@ -261,7 +261,7 @@ const BrainKnowledgeDialog: React.FC = () => {
         }
       }
 
-      const { error } = await supabase.from("agent_training_examples" as any).insert({
+      const { error } = await supabase.from("agent_training_examples").insert({
         user_id: user.id,
         title: trainingTitle.trim(),
         description: trainingDescription.trim() || null,
@@ -270,7 +270,7 @@ const BrainKnowledgeDialog: React.FC = () => {
         answer_file_path: answerFilePath,
         answer_file_name: answerFileName,
         answer_text: trainingAnswerText.trim() || null,
-      } as any);
+      });
 
       if (error) {
         toast.error("Failed to save training example");
@@ -299,7 +299,7 @@ const BrainKnowledgeDialog: React.FC = () => {
     }
 
     const { error } = await supabase
-      .from("agent_training_examples" as any)
+      .from("agent_training_examples")
       .delete()
       .eq("id", example.id);
 

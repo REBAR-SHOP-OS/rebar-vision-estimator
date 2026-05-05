@@ -11,9 +11,9 @@ import { toast } from "sonner";
 import type { ExportGateResult } from "@/lib/verified-estimate/export-gate";
 
 interface ExportButtonsProps {
-  quoteResult: any;
-  elements: any[];
-  scopeData?: any;
+  quoteResult: Record<string, unknown>;
+  elements: unknown[];
+  scopeData?: Record<string, unknown>;
   projectId?: string;
   exportGate?: ExportGateResult | null;
 }
@@ -24,7 +24,7 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
   const [jsonOpen, setJsonOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const quote = quoteResult?.quote || {};
-  const barList: any[] = quote.bar_list || [];
+  const barList: unknown[] = (quote as Record<string, unknown>).bar_list as unknown[] || [];
   const sizeBreakdown: Record<string, number> = quote.size_breakdown || {};
   const sizeBreakdownKg: Record<string, number> = quote.size_breakdown_kg || {};
   const totalLbs = quote.total_weight_lbs;

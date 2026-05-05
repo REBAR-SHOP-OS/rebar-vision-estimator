@@ -60,7 +60,7 @@ const WEIGHT_HEADERS = ["TOTAL WGT", "TOTAL WEIGHT", "WEIGHT KG", "WGT", "WEIGHT
 const REF_HEADERS = ["@", "SHEET", "REF", "REFERENCE"];
 const INFO_HEADERS = ["INFO", "PLACEMENT"];
 
-function findHeader(row: Record<string, any>, candidates: string[]): string | undefined {
+function findHeader(row: Record<string, unknown>, candidates: string[]): string | undefined {
   for (const c of candidates) {
     if (row[c] !== undefined) return c;
   }
@@ -72,7 +72,7 @@ function findHeader(row: Record<string, any>, candidates: string[]): string | un
   return undefined;
 }
 
-function parseNumericValue(val: any): number {
+function parseNumericValue(val: unknown): number {
   if (typeof val === "number") return val;
   if (typeof val === "string") {
     if (val.trim().startsWith("=")) return 0;
@@ -144,7 +144,7 @@ function matchHeader(cellVal: string, candidates: string[]): boolean {
   return candidates.some(c => v.includes(c.toLowerCase()));
 }
 
-function tryParseComplexXlsx(rows: any[][]): ParseResult | null {
+function tryParseComplexXlsx(rows: unknown[][]): ParseResult | null {
   if (rows.length < 5) return null;
 
   // Find header row: look for a row containing "Qty" AND ("Bar Dia" OR size-like header)
@@ -152,7 +152,7 @@ function tryParseComplexXlsx(rows: any[][]): ParseResult | null {
   for (let r = 0; r < Math.min(rows.length, 20); r++) {
     const row = rows[r];
     if (!row) continue;
-    const cells = row.map((c: any) => String(c ?? "").trim());
+    const cells = row.map((c) => String(c ?? "").trim());
     const hasQty = cells.some(c => /^qty$/i.test(c));
     const hasSize = cells.some(c => /bar\s*dia/i.test(c) || /^size$/i.test(c) || /^dia$/i.test(c));
     if (hasQty && hasSize) {
@@ -164,7 +164,7 @@ function tryParseComplexXlsx(rows: any[][]): ParseResult | null {
   if (headerRowIdx < 0) return null;
 
   // Merge with row above if it has partial labels (multi-row header)
-  const headerRow = rows[headerRowIdx].map((c: any) => String(c ?? "").trim());
+  const headerRow = rows[headerRowIdx].map((c) => String(c ?? "").trim());
   const mergedHeaders = [...headerRow];
   if (headerRowIdx > 0) {
     const above = rows[headerRowIdx - 1];
@@ -183,7 +183,7 @@ function tryParseComplexXlsx(rows: any[][]): ParseResult | null {
 
   // Also check row below header for sub-labels (like "feet inches", "millimeters", "kg")
   const subRow = rows[headerRowIdx + 1];
-  const subLabels = subRow ? subRow.map((c: any) => String(c ?? "").trim()) : [];
+  const subLabels = subRow ? subRow.map((c) => String(c ?? "").trim()) : [];
 
   // Build column map
   const colMap: ColMap = {
@@ -265,7 +265,7 @@ function tryParseComplexXlsx(rows: any[][]): ParseResult | null {
     if (!row || row.length === 0) continue;
 
     // Count non-empty cells (ignore SL.No. column)
-    const nonEmpty = row.filter((c: any, idx: number) => {
+    const nonEmpty = row.filter((c, idx) => {
       if (idx === colMap.slNo) return false;
       return c !== null && c !== undefined && String(c).trim() !== "";
     });
@@ -273,7 +273,7 @@ function tryParseComplexXlsx(rows: any[][]): ParseResult | null {
     if (nonEmpty.length === 0) continue;
 
     // Check if this is a "TOTAL WEIGHT" row at the end
-    const rowStr = row.map((c: any) => String(c ?? "")).join(" ").toLowerCase();
+    const rowStr = row.map((c) => String(c ?? "")).join(" ").toLowerCase();
     if (/total\s*weight/i.test(rowStr) && nonEmpty.length <= 3) continue;
 
     // Check if this is a section header (only 1-2 non-empty cells, text-only, in identification column or first few cols)
@@ -429,7 +429,7 @@ function tryParseComplexXlsx(rows: any[][]): ParseResult | null {
 
 // ── Legacy flat-header parser (fallback) ────────────────────────
 
-function parseFlatXlsx(data: any[], rows: unknown[][]): ParseResult {
+function parseFlatXlsx(data: Record<string, unknown>[], rows: unknown[][]): ParseResult {
   if (data.length === 0) return { items: [], diagnostics: { detectedUnit: "mm", unitAssumed: true, rowCount: 0, missingSizes: [], formulaFallbacks: 0, excelTotalWeight: null, computedTotalKg: 0, mismatchPct: null, assumptions: [], elementSummary: {}, weightMismatches: 0 } };
 
   const headers = Object.keys(data[0]);
@@ -620,7 +620,7 @@ const BarListTable: React.FC<BarListTableProps> = ({ barList: initialBarList, on
       }
 
       // Try complex parser first, fall back to flat-header parser.
-      let result = tryParseComplexXlsx(sheet.rows as any[][]);
+      let result = tryParseComplexXlsx(sheet.rows as unknown[][]);
       if (!result) {
         const raw = sheetRowsToObjects(sheet.rows);
         if (!raw.length) { toast.error("No data found in the file"); return; }

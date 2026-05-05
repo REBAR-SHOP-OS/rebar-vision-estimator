@@ -13,15 +13,15 @@ interface ValidationElement {
   element_type: string;
   status: "READY" | "FLAGGED" | "BLOCKED";
   validation: {
-    identity: { passed: boolean; details: any };
-    completeness: { passed: boolean; details: any };
-    consistency: { passed: boolean; details: any };
-    scope: { passed: boolean; details: any };
+    identity: { passed: boolean; details: unknown };
+    completeness: { passed: boolean; details: unknown };
+    consistency: { passed: boolean; details: unknown };
+    scope: { passed: boolean; details: unknown };
     errors: string[];
     warnings: string[];
   };
-  questions: any[];
-  extraction?: { truth?: any; confidence?: number };
+  questions: unknown[];
+  extraction?: { truth?: Record<string, unknown>; confidence?: number };
   regions?: { tag_region?: { bbox?: number[] } };
 }
 
@@ -32,13 +32,13 @@ interface QuoteResult {
     total_weight_kg?: number;
     total_weight_tons: number;
     total_weight_tonnes?: number;
-    elements: any[];
+    elements: Record<string, unknown>[];
     size_breakdown: Record<string, number>;
     size_breakdown_kg?: Record<string, number>;
   };
   included_count?: number;
   excluded_count?: number;
-  excluded?: any[];
+  excluded?: unknown[];
   status?: string;
 }
 
@@ -52,11 +52,11 @@ interface ValidationResultsProps {
     job_status: string;
     total_questions: number;
   };
-  questions: any[];
+  questions: unknown[];
   quoteResult?: QuoteResult | null;
   onAnswerQuestion?: (elementId: string, field: string, value: string) => void;
   onRequestQuote?: (mode: "ai_express" | "verified") => void;
-  scopeData?: any;
+  scopeData?: Record<string, unknown>;
   onShowOnDrawing?: (elementId: string) => void;
   onToggleViewer?: () => void;
   showViewer?: boolean;
@@ -103,7 +103,7 @@ const ELEMENT_DESCRIPTIONS: Record<string, string> = {
 
 interface ElementCardProps {
   el: ValidationElement;
-  weightInfo?: any;
+  weightInfo?: Record<string, unknown>;
   onShowOnDrawing?: (id: string) => void;
   isSelected?: boolean;
   hasBbox?: boolean;
@@ -196,7 +196,7 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
     () => Object.keys(grouped).reduce((acc, k) => ({ ...acc, [k]: true }), {} as Record<string, boolean>)
   );
 
-  const weightMap: Record<string, any> = {};
+  const weightMap: Record<string, Record<string, unknown>> = {};
   if (quoteResult?.quote?.elements) {
     for (const el of quoteResult.quote.elements) weightMap[el.element_id] = el;
   }

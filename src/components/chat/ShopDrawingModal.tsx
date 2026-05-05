@@ -36,9 +36,9 @@ interface HistoryEntry {
 interface ShopDrawingModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  quoteResult: any;
-  elements: any[];
-  scopeData?: any;
+  quoteResult: Record<string, unknown>;
+  elements: unknown[];
+  scopeData?: Record<string, unknown>;
   projectId?: string;
   exportBlocked?: boolean;
 }
@@ -72,7 +72,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const abortRef = useRef(false);
 
-  const barList: any[] = quoteResult?.quote?.bar_list || [];
+  const barList: unknown[] = (quoteResult?.quote as Record<string, unknown>)?.bar_list as unknown[] || [];
   const sizeBreakdown: Record<string, number> = quoteResult?.quote?.size_breakdown || {};
 
   const loadHistory = useCallback(async () => {
@@ -85,7 +85,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
         .eq("project_id", projectId)
         .order("version", { ascending: false });
       if (error) throw error;
-      setHistory((data as any[]) || []);
+      setHistory((data as HistoryEntry[]) || []);
     } catch {
       // silent
     }
@@ -164,7 +164,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
           await supabase.from("shop_drawings").insert({
             project_id: projectId,
             user_id: user.id,
-            options: options as any,
+            options: options as unknown,
             html_content: data.html,
             version: nextVersion,
           });
@@ -172,10 +172,10 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
       }
 
       setTimeout(() => setPhase("preview"), 400);
-    } catch (err: any) {
+    } catch (err) {
       timers.forEach(clearTimeout);
       abortRef.current = true;
-      toast.error(err.message || "Generation failed");
+      toast.error((err as Error).message || "Generation failed");
       setPhase("options");
     }
   };
@@ -311,7 +311,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
                         {new Date(entry.created_at).toLocaleDateString()}
                       </div>
                       <span className="text-xs text-muted-foreground">
-                        Scale: {(entry.options as any)?.scale || "—"}
+                        Scale: {(entry.options as { scale?: string })?.scale || "—"}
                       </span>
                     </div>
                     <div className="flex gap-1">
