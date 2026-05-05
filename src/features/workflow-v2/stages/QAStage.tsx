@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { StageHeader, Pill, EmptyState, GateBanner, type StageProps } from "./_shared";
-import { ArrowLeft, ArrowRight, Wand2, FileText, ExternalLink } from "lucide-react";
+import { ArrowLeft, ArrowRight, Wand2 } from "lucide-react";
 
 interface Issue {
   id: string;
