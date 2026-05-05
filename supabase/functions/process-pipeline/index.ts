@@ -26,7 +26,7 @@ Deno.serve(async (req) => {
     }
     const userId = claims.claims.sub as string;
 
-    const { project_id, reprocess } = await req.json();
+    const { project_id } = await req.json();
     if (!project_id) {
       return new Response(JSON.stringify({ error: "project_id required" }), { status: 400, headers: corsHeaders });
     }
@@ -35,7 +35,6 @@ Deno.serve(async (req) => {
       await supabase.from("audit_log").insert({ user_id: userId, project_id, action, details });
     };
 
-    // Create pipeline job
     const { data: job } = await supabase.from("processing_jobs").insert({
       project_id,
       user_id: userId,
@@ -55,50 +54,74 @@ Deno.serve(async (req) => {
     };
 
     try {
-      // Step 1: Check files exist
       const { data: files } = await supabase
         .from("project_files")
         .select("id, file_name, file_path, file_type")
         .eq("project_id", project_id);
 
-      if (!files || files.length === 0) {
+      const allFiles = files || [];
+
+      const { data: registryRows } = await (supabase as any)
+        .from("document_registry")
+        .select("file_id, is_active")
+        .eq("project_id", project_id);
+
+      const explicitActiveFileIds = ((registryRows || []) as Array<{ file_id: string | null; is_active: boolean | null }>)
+        .filter((row) => row.file_id && row.is_active !== false)
+        .map((row) => row.file_id as string);
+
+      const activeFileIds = explicitActiveFileIds.length > 0
+        ? explicitActiveFileIds
+        : allFiles.map((file) => file.id);
+
+      const activeFileIdSet = new Set(activeFileIds);
+      const activeFiles = allFiles.filter((file) => activeFileIdSet.has(file.id));
+
+      if (activeFiles.length === 0) {
         await supabase.from("projects").update({ linkage_score: "L0", workflow_status: "intake" }).eq("id", project_id);
-        await updateJob("completed", 100, { linkage_score: "L0", reason: "no_files" });
-        await log("pipeline_complete", { linkage_score: "L0", reason: "no_files" });
+        await updateJob("completed", 100, { linkage_score: "L0", reason: "no_active_files", total_file_count: allFiles.length });
+        await log("pipeline_complete", { linkage_score: "L0", reason: "no_active_files", total_file_count: allFiles.length });
         return new Response(JSON.stringify({
           linkage_score: "L0",
           workflow_status: "intake",
-          message: "No files found. Upload drawings to start processing.",
+          message: "No active files found. Upload drawings to start processing.",
         }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
-      // Update to L1 — files exist
       await supabase.from("projects").update({ linkage_score: "L1", workflow_status: "files_uploaded" }).eq("id", project_id);
       await updateJob("processing", 20);
-      await log("pipeline_files_found", { file_count: files.length });
+      await log("pipeline_files_found", {
+        active_file_count: activeFiles.length,
+        total_file_count: allFiles.length,
+      });
 
-      // Step 2: Check parsed document versions
-      const { count: parsedCount } = await supabase
+      const { data: documentVersions } = await supabase
         .from("document_versions")
-        .select("id", { count: "exact", head: true })
-        .eq("project_id", project_id)
-        .not("page_count", "is", null);
+        .select("id, file_id, page_count")
+        .eq("project_id", project_id);
 
-      const hasParsedFiles = (parsedCount || 0) > 0;
+      const activeDocumentVersions = (documentVersions || []).filter((version) => version.file_id && activeFileIdSet.has(version.file_id));
+      const parsedCount = activeDocumentVersions.filter((version) => version.page_count !== null).length;
+      const activeDocumentVersionIds = activeDocumentVersions.map((version) => version.id);
+      const hasParsedFiles = parsedCount > 0;
 
       if (hasParsedFiles) {
         await supabase.from("projects").update({ workflow_status: "parsing" }).eq("id", project_id);
         await updateJob("processing", 40);
-        await log("pipeline_parsing_complete", { parsed_count: parsedCount });
+        await log("pipeline_parsing_complete", { parsed_count: parsedCount, active_document_version_count: activeDocumentVersionIds.length });
       }
 
-      // Step 3: Check drawings indexed
-      const { count: drawingCount } = await supabase
-        .from("drawing_search_index")
-        .select("id", { count: "exact", head: true })
-        .eq("project_id", project_id);
+      let drawingCount = 0;
+      if (activeDocumentVersionIds.length > 0) {
+        const { data: drawingRows } = await supabase
+          .from("drawing_search_index")
+          .select("id, document_version_id")
+          .eq("project_id", project_id)
+          .in("document_version_id", activeDocumentVersionIds);
+        drawingCount = drawingRows?.length || 0;
+      }
 
-      const hasDrawings = (drawingCount || 0) > 0;
+      const hasDrawings = drawingCount > 0;
 
       if (hasDrawings) {
         await supabase.from("projects").update({ workflow_status: "drawings_indexed" }).eq("id", project_id);
@@ -106,7 +129,6 @@ Deno.serve(async (req) => {
         await log("pipeline_drawings_indexed", { drawing_count: drawingCount });
       }
 
-      // Step 4: Check scope
       const { data: project } = await supabase
         .from("projects")
         .select("scope_items, project_type")
@@ -115,15 +137,16 @@ Deno.serve(async (req) => {
 
       const hasScope = project?.scope_items && Array.isArray(project.scope_items) && project.scope_items.length > 0;
 
-      if (hasScope && hasDrawings) {
+      if (hasScope && hasParsedFiles) {
         await supabase.from("projects").update({ linkage_score: "L2", workflow_status: "scope_detected" }).eq("id", project_id);
         await updateJob("processing", 70);
         await log("pipeline_scope_detected", { scope_items: project.scope_items, project_type: project.project_type });
-      } else if (hasDrawings) {
+      } else if (hasParsedFiles && hasDrawings) {
         await supabase.from("projects").update({ linkage_score: "L1", workflow_status: "drawings_indexed" }).eq("id", project_id);
+      } else if (hasParsedFiles) {
+        await supabase.from("projects").update({ linkage_score: "L1", workflow_status: "parsing" }).eq("id", project_id);
       }
 
-      // Step 4: Check estimates
       const { count: estimateCount } = await supabase
         .from("estimate_versions")
         .select("id", { count: "exact", head: true })
@@ -131,16 +154,15 @@ Deno.serve(async (req) => {
 
       const hasEstimates = (estimateCount || 0) > 0;
 
-      if (hasEstimates && hasScope && hasDrawings) {
+      if (hasEstimates && hasScope && hasParsedFiles) {
         await supabase.from("projects").update({ linkage_score: "L3", workflow_status: "estimated" }).eq("id", project_id);
         await log("pipeline_complete", { linkage_score: "L3" });
       }
 
-      // Determine final state
-      const hasFiles = files.length > 0;
-      const finalScore = hasEstimates && hasScope && hasDrawings ? "L3"
-        : hasScope && hasDrawings ? "L2"
-        : hasDrawings ? "L1"
+      const hasFiles = activeFiles.length > 0;
+      const finalScore = hasEstimates && hasScope && hasParsedFiles ? "L3"
+        : hasScope && hasParsedFiles ? "L2"
+        : hasParsedFiles ? "L1"
         : hasFiles ? "L1"
         : "L0";
 
@@ -160,20 +182,27 @@ Deno.serve(async (req) => {
       await updateJob("completed", 100, {
         linkage_score: finalScore,
         workflow_status: finalStatus,
-        file_count: files.length,
-        parsed_count: parsedCount || 0,
-        drawing_count: drawingCount || 0,
+        file_count: activeFiles.length,
+        total_file_count: allFiles.length,
+        parsed_count: parsedCount,
+        drawing_count: drawingCount,
         estimate_count: estimateCount || 0,
         has_scope: hasScope,
       });
 
-      await log("pipeline_complete", { linkage_score: finalScore, workflow_status: finalStatus });
+      await log("pipeline_complete", {
+        linkage_score: finalScore,
+        workflow_status: finalStatus,
+        active_file_count: activeFiles.length,
+        total_file_count: allFiles.length,
+      });
 
       return new Response(JSON.stringify({
         linkage_score: finalScore,
         workflow_status: finalStatus,
-        file_count: files.length,
-        drawing_count: drawingCount || 0,
+        file_count: activeFiles.length,
+        total_file_count: allFiles.length,
+        drawing_count: drawingCount,
         estimate_count: estimateCount || 0,
         has_scope: hasScope,
         job_id: jobId,
