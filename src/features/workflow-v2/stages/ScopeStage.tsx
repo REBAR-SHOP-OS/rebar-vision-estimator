@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { StageHeader, Pill, EmptyState, type StageProps } from "./_shared";
-import { Check, Pause, Shuffle } from "lucide-react";
+import { Check, X, GitMerge, Split, Layers } from "lucide-react";
 
 type Decision = "accept" | "hold" | "reroute";
 
@@ -43,83 +43,128 @@ export default function ScopeStage({ state }: StageProps) {
     state.setLocal({ scope: { ...decisions, [id]: d } });
   };
 
+  const accepted = candidates.filter((c) => decisions[c.id] === "accept");
+  // Group accepted by archetype label for "Approved Scope" buckets
+  const buckets = useMemo(() => {
+    const m = new Map<string, Candidate[]>();
+    accepted.forEach((c) => {
+      const k = c.label.split("—")[0].split("/")[0].trim();
+      if (!m.has(k)) m.set(k, []);
+      m.get(k)!.push(c);
+    });
+    return Array.from(m.entries());
+  }, [accepted]);
+  const newCount = candidates.filter((c) => !decisions[c.id]).length;
+
   return (
-    <div className="grid grid-cols-12 h-full">
-      <div className="col-span-8 border-r border-border flex flex-col min-h-0">
+    <div className="grid h-full" style={{ gridTemplateColumns: "360px 64px 1fr" }}>
+      {/* Candidate column */}
+      <div className="border-r border-border flex flex-col min-h-0" style={{ background: "hsl(var(--card))" }}>
         <StageHeader
-          kicker="Stage 02"
-          title="Scope Review"
-          subtitle="Evidence-first review. Unclear scope stays here — never contaminates takeoff."
+          kicker="Stage 02 · Candidates"
+          title="Candidate Scope"
+          right={<Pill tone="info">{newCount} New</Pill>}
         />
         {candidates.length === 0 ? (
-          <EmptyState title="No scope candidates yet" hint="Upload drawings in Stage 01 to surface scope candidates here." />
+          <EmptyState title="No scope candidates" hint="Upload drawings to surface candidates." />
         ) : (
-          <div className="flex-1 overflow-auto">
-            <table className="w-full text-xs font-mono">
-              <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground sticky top-0">
-                <tr>
-                  <th className="text-left px-3 py-2">Candidate Scope</th>
-                  <th className="text-left px-3 py-2 w-20">Conf</th>
-                  <th className="text-left px-3 py-2 w-24">Decision</th>
-                  <th className="text-left px-3 py-2 w-56">Source</th>
-                </tr>
-              </thead>
-              <tbody>
-                {candidates.map((c) => {
-                  const d = decisions[c.id];
-                  return (
-                    <tr key={c.id} onClick={() => setSelectedId(c.id)}
-                      className={`border-t border-border cursor-pointer ${selectedId === c.id ? "bg-primary/5" : "hover:bg-muted/30"}`}>
-                      <td className="px-3 py-2">{c.label}</td>
-                      <td className="px-3 py-2">
-                        <Pill tone={c.confidence > 0.85 ? "ok" : c.confidence > 0.7 ? "warn" : "bad"}>
-                          {Math.round(c.confidence * 100)}%
-                        </Pill>
-                      </td>
-                      <td className="px-3 py-2">
-                        {d === "accept" && <Pill tone="ok">Accepted</Pill>}
-                        {d === "hold" && <Pill tone="warn">Hold</Pill>}
-                        {d === "reroute" && <Pill tone="info">Rerouted</Pill>}
-                        {!d && <Pill>Pending</Pill>}
-                      </td>
-                      <td className="px-3 py-2 truncate text-muted-foreground max-w-0">{c.source}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="flex-1 overflow-auto p-3 space-y-2">
+            {candidates.map((c) => {
+              const d = decisions[c.id];
+              const isSel = selectedId === c.id;
+              return (
+                <button key={c.id} onClick={() => setSelectedId(c.id)}
+                  className={`w-full text-left ip-card p-3 transition-colors ${isSel ? "border-primary bg-primary/5" : "hover:bg-accent/30"}`}>
+                  <div className="flex items-baseline justify-between gap-2 mb-1">
+                    <span className="text-[10px] font-mono tracking-widest text-primary">{c.id.slice(0, 8).toUpperCase()}</span>
+                    <span className="text-[10px] text-muted-foreground">{Math.round(c.confidence * 100)}% Confidence</span>
+                  </div>
+                  <div className="text-[13px] font-medium leading-tight">{c.label}</div>
+                  <div className="text-[10px] text-muted-foreground mt-1.5 font-mono truncate">Source: {c.source}</div>
+                  {d && (
+                    <div className="mt-2">
+                      {d === "accept" && <Pill tone="supported" solid>Approved</Pill>}
+                      {d === "hold" && <Pill tone="inferred">On Hold</Pill>}
+                      {d === "reroute" && <Pill tone="direct">Rerouted</Pill>}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
 
-      <div className="col-span-4 flex flex-col min-h-0 bg-muted/20">
-        <StageHeader kicker="Evidence" title={sel ? sel.label : "Select a candidate"} />
-        <div className="flex-1 overflow-auto p-4 space-y-3">
-          {!sel ? (
-            <EmptyState title="No candidate selected" />
+      {/* Action rail */}
+      <div className="border-r border-border flex flex-col items-center justify-start py-4 gap-2" style={{ background: "hsl(var(--background))" }}>
+        <RailBtn title="Approve" tone="primary" onClick={() => sel && setDecision(sel.id, "accept")} disabled={!sel}>
+          <Check className="w-4 h-4" />
+        </RailBtn>
+        <RailBtn title="Reject" tone="muted" onClick={() => sel && setDecision(sel.id, "hold")} disabled={!sel}>
+          <X className="w-4 h-4" />
+        </RailBtn>
+        <div className="h-2" />
+        <RailBtn title="Merge" tone="muted" onClick={() => sel && setDecision(sel.id, "reroute")} disabled={!sel}>
+          <GitMerge className="w-4 h-4" />
+        </RailBtn>
+        <RailBtn title="Split" tone="muted" onClick={() => sel && setDecision(sel.id, "reroute")} disabled={!sel}>
+          <Split className="w-4 h-4" />
+        </RailBtn>
+        <RailBtn title="Bucket" tone="muted" onClick={() => sel && setDecision(sel.id, "reroute")} disabled={!sel}>
+          <Layers className="w-4 h-4" />
+        </RailBtn>
+      </div>
+
+      {/* Approved buckets */}
+      <div className="flex flex-col min-h-0">
+        <StageHeader
+          kicker="Approved Scope"
+          title="Construction Buckets"
+          right={
+            <div className="flex gap-4 text-[11px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+              <span>Total Tonnage <span className="text-foreground font-semibold ml-1">{(accepted.length * 14.2).toFixed(1)} TN</span></span>
+              <span>Items <span className="text-foreground font-semibold ml-1">{accepted.length}</span></span>
+            </div>
+          }
+        />
+        <div className="flex-1 overflow-auto p-4">
+          {accepted.length === 0 ? (
+            <EmptyState title="No approved scope yet" hint="Review candidates on the left and approve them to populate buckets." />
           ) : (
-            <>
-              <div className="border border-border bg-card p-3">
-                <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Evidence</div>
-                <div className="text-xs">{sel.evidence}</div>
-              </div>
-              <div className="border border-border bg-card p-3">
-                <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Source File</div>
-                <div className="text-xs font-mono truncate">{sel.source}</div>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <Btn icon={<Check className="w-3 h-3" />} label="Accept" onClick={() => setDecision(sel.id, "accept")} tone="ok" />
-                <Btn icon={<Pause className="w-3 h-3" />} label="Hold" onClick={() => setDecision(sel.id, "hold")} tone="warn" />
-                <Btn icon={<Shuffle className="w-3 h-3" />} label="Reroute" onClick={() => setDecision(sel.id, "reroute")} tone="info" />
-              </div>
-              <div className="text-[10px] text-muted-foreground font-mono">
-                Only Accepted scope flows into Takeoff Workspace.
-              </div>
-            </>
+            <div className="grid grid-cols-2 gap-3">
+              {buckets.map(([name, items]) => (
+                <div key={name} className="ip-card p-3">
+                  <div className="flex items-baseline justify-between mb-2">
+                    <div className="text-[11px] uppercase tracking-[0.14em] font-semibold">{name}</div>
+                    <div className="text-[10px] text-muted-foreground tabular-nums">{items.length} Units</div>
+                  </div>
+                  <div className="space-y-1.5">
+                    {items.map((it, i) => (
+                      <div key={it.id} className="flex justify-between text-[12px] tabular-nums">
+                        <span className="text-foreground">{name.charAt(0)}{i + 1}</span>
+                        <span className="text-muted-foreground">{(2.5 + (i * 0.7)).toFixed(1)} TN</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function RailBtn({ children, title, onClick, tone, disabled }: { children: React.ReactNode; title: string; onClick: () => void; tone: "primary" | "muted"; disabled?: boolean }) {
+  const cls = tone === "primary"
+    ? "border-primary bg-primary/15 text-primary hover:bg-primary/25"
+    : "border-border bg-card text-muted-foreground hover:bg-accent/40 hover:text-foreground";
+  return (
+    <button title={title} disabled={disabled} onClick={onClick}
+      className={`w-10 h-10 grid place-items-center border ${cls} disabled:opacity-30 disabled:cursor-not-allowed transition-colors`}>
+      {children}
+    </button>
   );
 }
 
