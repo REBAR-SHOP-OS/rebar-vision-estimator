@@ -9,6 +9,7 @@ import SegmentsTab from "@/components/workspace/SegmentsTab";
 import QATab from "@/components/workspace/QATab";
 import OutputsTab from "@/components/workspace/OutputsTab";
 import ProjectSettingsTab from "@/components/workspace/ProjectSettingsTab";
+import { getCanonicalProjectByLegacyId } from "@/lib/rebar-read-model";
 
 const TAB_SUFFIXES: Record<string, string> = {
   "": "overview",
@@ -26,20 +27,42 @@ export default function ProjectWorkspace() {
   const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  const loadProject = (withLoading = false) => {
+  const loadProject = async (withLoading = false) => {
     if (!id) return;
     if (withLoading) setLoading(true);
-    supabase.from("projects").select("*").eq("id", id).single().then(({ data }) => {
-      if (data) setProject(data);
-      if (withLoading) setLoading(false);
-    });
+
+    const { data: legacyProject } = await supabase.from("projects").select("*").eq("id", id).single();
+
+    let canonicalProject = null;
+    try {
+      canonicalProject = await getCanonicalProjectByLegacyId(supabase, id);
+    } catch (error) {
+      console.warn("Failed to load canonical project:", error);
+    }
+
+    if (legacyProject) {
+      setProject({
+        ...legacyProject,
+        canonicalProject,
+        name: canonicalProject?.projectName || legacyProject.name,
+        client_name: canonicalProject?.customerName ?? legacyProject.client_name,
+        status: canonicalProject?.status || legacyProject.status,
+        project_name: canonicalProject?.projectName || legacyProject.name,
+        customer_name: canonicalProject?.customerName ?? legacyProject.client_name,
+        location: canonicalProject?.location ?? legacyProject.address ?? null,
+        rebar_project_id: canonicalProject?.rebarProjectId || null,
+      });
+    } else {
+      setProject(null);
+    }
+
+    if (withLoading) setLoading(false);
   };
 
   useEffect(() => {
     loadProject(true);
   }, [id]);
 
-  // Determine active tab from URL
   const basePath = `/app/project/${id}`;
   const suffix = location.pathname.replace(basePath, "") || "";
   const activeTab = TAB_SUFFIXES[suffix] || "overview";
