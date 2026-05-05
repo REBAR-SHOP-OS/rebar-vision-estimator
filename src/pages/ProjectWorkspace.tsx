@@ -36,9 +36,6 @@ export default function ProjectWorkspace() {
   return (
     <div className="flex flex-col h-full">
       <WorkflowShell projectId={project.id} project={project} />
-      <div className="px-3 py-1 border-t border-border bg-muted/20 text-[10px] font-mono uppercase tracking-widest text-muted-foreground flex justify-end">
-        <Link to={`/app/legacy/project/${project.id}`} className="hover:text-foreground">Legacy workspace →</Link>
-      </div>
     </div>
   );
 }
