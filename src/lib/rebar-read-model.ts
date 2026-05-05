@@ -61,23 +61,45 @@ function mapProjectRow(legacyProjectId: string, row: any): CanonicalProjectView 
   };
 }
 
-export async function getCanonicalProjectByLegacyId(
+async function getRebarProjectIdByLegacyId(
   supabase: SupabaseClient<Database>,
   legacyProjectId: string,
-): Promise<CanonicalProjectView | null> {
-  const { data: link, error: linkError } = await fromAny(supabase, "rebar_project_links")
+): Promise<string | null> {
+  const { data: link, error } = await fromAny(supabase, "rebar_project_links")
     .select("rebar_project_id")
     .eq("legacy_project_id", legacyProjectId)
     .maybeSingle();
 
-  if (linkError) throw linkError;
-  if (!link?.rebar_project_id) return null;
+  if (error) throw error;
+  return link?.rebar_project_id || null;
+}
+
+async function listRebarProjectFileIds(
+  supabase: SupabaseClient<Database>,
+  rebarProjectId: string,
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .schema("rebar")
+    .from("project_files")
+    .select("id")
+    .eq("project_id", rebarProjectId);
+
+  if (error) throw error;
+  return (data || []).map((file: any) => file.id);
+}
+
+export async function getCanonicalProjectByLegacyId(
+  supabase: SupabaseClient<Database>,
+  legacyProjectId: string,
+): Promise<CanonicalProjectView | null> {
+  const rebarProjectId = await getRebarProjectIdByLegacyId(supabase, legacyProjectId);
+  if (!rebarProjectId) return null;
 
   const { data: project, error: projectError } = await supabase
     .schema("rebar")
     .from("projects")
     .select("id, project_name, customer_name, status, created_at, updated_at, project_number, location, tender_due_at, concrete_grade, rebar_grade, bid_notes")
-    .eq("id", link.rebar_project_id)
+    .eq("id", rebarProjectId)
     .maybeSingle();
 
   if (projectError) throw projectError;
@@ -127,26 +149,32 @@ export async function getCanonicalProjectFiles(
   supabase: SupabaseClient<Database>,
   legacyProjectId: string,
 ): Promise<CanonicalProjectFileView[]> {
-  const project = await getCanonicalProjectByLegacyId(supabase, legacyProjectId);
-  if (!project) return [];
+  const rebarProjectId = await getRebarProjectIdByLegacyId(supabase, legacyProjectId);
+  if (!rebarProjectId) return [];
 
-  const [filesRes, linksRes, sheetsRes] = await Promise.all([
-    supabase
-      .schema("rebar")
-      .from("project_files")
-      .select("id, file_kind, storage_path, original_filename, revision_label, page_count, created_at")
-      .eq("project_id", project.rebarProjectId)
-      .order("created_at", { ascending: false }),
+  const { data: files, error: filesError } = await supabase
+    .schema("rebar")
+    .from("project_files")
+    .select("id, file_kind, storage_path, original_filename, revision_label, page_count, created_at")
+    .eq("project_id", rebarProjectId)
+    .order("created_at", { ascending: false });
+
+  if (filesError) throw filesError;
+  if (!files || files.length === 0) return [];
+
+  const rebarFileIds = files.map((file: any) => file.id);
+  const [linksRes, sheetsRes] = await Promise.all([
     fromAny(supabase, "rebar_project_file_links")
-      .select("legacy_file_id, rebar_project_file_id"),
+      .select("legacy_file_id, rebar_project_file_id")
+      .in("rebar_project_file_id", rebarFileIds),
     supabase
       .schema("rebar")
       .from("drawing_sheets")
       .select("project_file_id, sheet_number, discipline")
+      .in("project_file_id", rebarFileIds)
       .order("page_number", { ascending: true }),
   ]);
 
-  if (filesRes.error) throw filesRes.error;
   if (linksRes.error) throw linksRes.error;
   if (sheetsRes.error) throw sheetsRes.error;
 
@@ -162,7 +190,7 @@ export async function getCanonicalProjectFiles(
     sheetsByFileId.set(sheet.project_file_id, rows);
   }
 
-  return (filesRes.data || []).map((file: any) => {
+  return files.map((file: any) => {
     const sheets = sheetsByFileId.get(file.id) || [];
     const detectedDisciplines = Array.from(
       new Set(sheets.map((sheet: any) => sheet.discipline).filter(Boolean)),
@@ -192,35 +220,32 @@ export async function getCanonicalProjectSummary(
   supabase: SupabaseClient<Database>,
   legacyProjectId: string,
 ): Promise<CanonicalProjectSummary | null> {
-  const project = await getCanonicalProjectByLegacyId(supabase, legacyProjectId);
-  if (!project) return null;
+  const rebarProjectId = await getRebarProjectIdByLegacyId(supabase, legacyProjectId);
+  if (!rebarProjectId) return null;
 
-  const [filesRes, sheetsRes, takeoffRunsRes, estimateVersionsRes, warningsRes] = await Promise.all([
-    supabase.schema("rebar").from("project_files").select("id", { count: "exact", head: true }).eq("project_id", project.rebarProjectId),
-    supabase
-      .schema("rebar")
-      .from("drawing_sheets")
-      .select("id", { count: "exact", head: true })
-      .in(
-        "project_file_id",
-        (await supabase.schema("rebar").from("project_files").select("id").eq("project_id", project.rebarProjectId)).data?.map((file: any) => file.id) || [""],
-      ),
-    supabase.schema("rebar").from("takeoff_runs").select("id", { count: "exact", head: true }).eq("project_id", project.rebarProjectId),
-    supabase.schema("rebar").from("estimate_versions").select("id", { count: "exact", head: true }).eq("project_id", project.rebarProjectId),
-    supabase
-      .schema("rebar")
-      .from("takeoff_warnings")
-      .select("id", { count: "exact", head: true })
-      .in(
-        "takeoff_run_id",
-        (await supabase.schema("rebar").from("takeoff_runs").select("id").eq("project_id", project.rebarProjectId)).data?.map((run: any) => run.id) || [""],
-      ),
+  const rebarFileIds = await listRebarProjectFileIds(supabase, rebarProjectId);
+
+  const [filesRes, sheetsRes, takeoffRunsRes, estimateVersionsRes, takeoffRunsDataRes] = await Promise.all([
+    supabase.schema("rebar").from("project_files").select("id", { count: "exact", head: true }).eq("project_id", rebarProjectId),
+    rebarFileIds.length > 0
+      ? supabase.schema("rebar").from("drawing_sheets").select("id", { count: "exact", head: true }).in("project_file_id", rebarFileIds)
+      : Promise.resolve({ count: 0, error: null } as any),
+    supabase.schema("rebar").from("takeoff_runs").select("id", { count: "exact", head: true }).eq("project_id", rebarProjectId),
+    supabase.schema("rebar").from("estimate_versions").select("id", { count: "exact", head: true }).eq("project_id", rebarProjectId),
+    supabase.schema("rebar").from("takeoff_runs").select("id").eq("project_id", rebarProjectId),
   ]);
 
   if (filesRes.error) throw filesRes.error;
   if (sheetsRes.error) throw sheetsRes.error;
   if (takeoffRunsRes.error) throw takeoffRunsRes.error;
   if (estimateVersionsRes.error) throw estimateVersionsRes.error;
+  if (takeoffRunsDataRes.error) throw takeoffRunsDataRes.error;
+
+  const takeoffRunIds = (takeoffRunsDataRes.data || []).map((run: any) => run.id);
+  const warningsRes = takeoffRunIds.length > 0
+    ? await supabase.schema("rebar").from("takeoff_warnings").select("id", { count: "exact", head: true }).in("takeoff_run_id", takeoffRunIds)
+    : ({ count: 0, error: null } as any);
+
   if (warningsRes.error) throw warningsRes.error;
 
   return {
