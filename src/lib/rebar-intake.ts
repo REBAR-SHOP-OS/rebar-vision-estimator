@@ -14,10 +14,10 @@ export const inferRebarFileKind = (fileName: string, mimeType: string | null): s
   const n = fileName.toLowerCase();
 
   if (/\.(xlsx|xls|csv)$/.test(n)) return "bar_list";
-  if (/spec|specification/.test(n)) return "spec_pdf";
-  if (/addendum|addenda|bulletin/.test(n)) return "addendum_pdf";
 
   if (/\.pdf$/.test(n) || (mimeType || "").includes("pdf")) {
+    if (/(^|[^a-z0-9])(specs?|specifications?)([^a-z0-9]|$)/.test(n)) return "spec_pdf";
+    if (/(^|[^a-z0-9])(addendum|addenda|bulletins?)([^a-z0-9]|$)/.test(n)) return "addendum_pdf";
     const discipline = detectDiscipline(fileName);
     if (discipline === "Structural") return "structural_pdf";
     if (discipline === "Architectural") return "architectural_pdf";

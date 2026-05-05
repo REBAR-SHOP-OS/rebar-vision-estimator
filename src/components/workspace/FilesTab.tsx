@@ -158,7 +158,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
           pages,
           file_name: fileName,
           sha256,
-          legacy_file_id: fileId,
+          pipeline_file_id: fileId,
         },
       });
 
@@ -170,15 +170,19 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
         }).eq("id", dvId);
       }
 
-      await ensureRebarProjectFileBridge(supabase, {
-        legacyFileId: fileId,
-        legacyProjectId: projectId,
-        storagePath: filePath,
-        originalFilename: fileName,
-        fileKind: inferRebarFileKind(fileName, null),
-        checksumSha256: sha256,
-        pageCount: totalPages || pages.length,
-      });
+      try {
+        await ensureRebarProjectFileBridge(supabase, {
+          legacyFileId: fileId,
+          legacyProjectId: projectId,
+          storagePath: filePath,
+          originalFilename: fileName,
+          fileKind: inferRebarFileKind(fileName, null),
+          checksumSha256: sha256,
+          pageCount: totalPages || pages.length,
+        });
+      } catch (bridgeErr) {
+        console.warn("Canonical file bridge sync failed after parsing:", bridgeErr);
+      }
 
       if (!indexErr) {
         try {
