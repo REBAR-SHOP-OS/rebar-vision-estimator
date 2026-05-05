@@ -61,7 +61,7 @@ async function findDrawingSheetId(
   const rebarProjectFileId = fileLink?.rebar_project_file_id;
   if (!rebarProjectFileId) return null;
 
-  let query = supabase.schema("rebar").from("drawing_sheets").select("id").eq("project_file_id", rebarProjectFileId);
+  let query = (supabase as any).schema("rebar").from("drawing_sheets").select("id").eq("project_file_id", rebarProjectFileId);
   if (sourceSheet) {
     query = query.eq("sheet_number", sourceSheet);
   }
@@ -69,7 +69,7 @@ async function findDrawingSheetId(
   const { data } = await query.limit(1).maybeSingle();
   if (data?.id) return data.id;
 
-  const { data: fallback } = await supabase.schema("rebar").from("drawing_sheets").select("id").eq("project_file_id", rebarProjectFileId).order("page_number", { ascending: true }).limit(1).maybeSingle();
+  const { data: fallback } = await (supabase as any).schema("rebar").from("drawing_sheets").select("id").eq("project_file_id", rebarProjectFileId).order("page_number", { ascending: true }).limit(1).maybeSingle();
   return fallback?.id || null;
 }
 
@@ -97,7 +97,7 @@ export async function persistRebarTakeoffFromCanonical(
   const unsupportedLines = params.result.lines.filter((line) => !ALLOWED_BAR_SIZES.has(line.size));
   const runWarnings = unsupportedLines.length > 0 || validLines.some((line) => line.review_required || line.confidence < 0.7);
 
-  const { data: takeoffRun, error: runError } = await supabase.schema("rebar").from("takeoff_runs").insert({
+  const { data: takeoffRun, error: runError } = await (supabase as any).schema("rebar").from("takeoff_runs").insert({
     project_id: rebarProjectId,
     source_revision_label: params.sourceRevisionLabel ?? null,
     parser_provider: params.parserProvider || "gpt",
@@ -124,7 +124,7 @@ export async function persistRebarTakeoffFromCanonical(
     const cutLengthM = inferCutLengthM(line);
     const kgPerM = inferKgPerM(line);
 
-    const { data: item, error: itemError } = await supabase.schema("rebar").from("takeoff_items").insert({
+    const { data: item, error: itemError } = await (supabase as any).schema("rebar").from("takeoff_items").insert({
       takeoff_run_id: takeoffRun.id,
       drawing_sheet_id: drawingSheetId,
       element_type: mapElementType(line.element_type),
@@ -190,12 +190,12 @@ export async function persistRebarTakeoffFromCanonical(
   }
 
   if (warningRows.length > 0) {
-    await supabase.schema("rebar").from("takeoff_warnings").insert(warningRows);
+    await (supabase as any).schema("rebar").from("takeoff_warnings").insert(warningRows);
   }
 
   const assumptions = (params.result.quote.risk_flags || []) as unknown[];
   if (assumptions.length > 0) {
-    await supabase.schema("rebar").from("takeoff_assumptions").insert(
+    await (supabase as any).schema("rebar").from("takeoff_assumptions").insert(
       assumptions.map((flag, index) => ({
         takeoff_run_id: takeoffRun.id,
         assumption_text: String(flag),
@@ -204,10 +204,10 @@ export async function persistRebarTakeoffFromCanonical(
     );
   }
 
-  const { count } = await supabase.schema("rebar").from("estimate_versions").select("id", { count: "exact", head: true }).eq("project_id", rebarProjectId);
+  const { count } = await (supabase as any).schema("rebar").from("estimate_versions").select("id", { count: "exact", head: true }).eq("project_id", rebarProjectId);
   const versionNumber = (count || 0) + 1;
 
-  const { data: estimateVersion, error: estimateError } = await supabase.schema("rebar").from("estimate_versions").insert({
+  const { data: estimateVersion, error: estimateError } = await (supabase as any).schema("rebar").from("estimate_versions").insert({
     project_id: rebarProjectId,
     takeoff_run_id: takeoffRun.id,
     version_number: versionNumber,
