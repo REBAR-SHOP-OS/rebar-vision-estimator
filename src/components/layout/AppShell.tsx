@@ -21,7 +21,7 @@ export default function AppShell() {
   }, [activeProjectId]);
 
   return (
-    <SidebarProvider>
+    <SidebarProvider defaultOpen={false}>
       <div className="min-h-screen flex w-full">
         <AppSidebar activeProjectId={activeProjectId} activeProjectName={projectName} />
         <div className="flex-1 flex flex-col min-w-0">
