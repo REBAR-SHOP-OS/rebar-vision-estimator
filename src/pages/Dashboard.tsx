@@ -10,9 +10,10 @@ import DrawingSearchPanel from "@/components/search/DrawingSearchPanel";
 import ProjectHealthDashboard from "@/components/dashboard/ProjectHealthDashboard";
 import AdminDiagnosticsPanel from "@/components/dashboard/AdminDiagnosticsPanel";
 import { toast } from "sonner";
+import { computeSHA256 } from "@/lib/file-hash";
 import {
-  ensureRebarProjectBridge,
-  ensureRebarProjectFileBridge,
+  createProjectFileWithCanonicalBridge,
+  createProjectWithCanonicalBridge,
   inferRebarFileKind,
 } from "@/lib/rebar-intake";
 
@@ -90,82 +91,75 @@ const Dashboard: React.FC = () => {
     }
 
     const normalizedName = projectName.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
-    const { data, error } = await supabase
-      .from("projects")
-      .insert({ user_id: user.id, name: projectName, normalized_name: normalizedName, workflow_status: "intake" })
-      .select()
-      .single();
 
-    if (error) {
-      if (error.message?.includes("JWT expired") || error.message?.includes("Invalid Refresh Token")) {
+    let project: Project | null = null;
+
+    try {
+      project = await createProjectWithCanonicalBridge(supabase, {
+        userId: user.id,
+        projectName,
+        normalizedName,
+      });
+    } catch (error: any) {
+      if (error?.message?.includes("JWT expired") || error?.message?.includes("Invalid Refresh Token")) {
         toast.error("Session expired. Please sign in again.");
         signOut();
         return;
       }
-      toast.error("Failed to create project");
+      console.error("Failed to create canonical project:", error);
+      toast.error("Project creation failed before canonical rebar sync completed.");
       setCreatingProject(false);
       return;
     }
 
-    try {
-      await ensureRebarProjectBridge(supabase, data.id, projectName, null);
-    } catch (bridgeErr) {
-      console.warn("Failed to mirror project into rebar schema:", bridgeErr);
-      toast.warning("Project created, but rebar-schema sync needs attention.");
-    }
-
-    // Upload all selected files to the new project
     let uploadedCount = 0;
+
     for (const file of files) {
-      const path = `${user.id}/${data.id}/${Date.now()}_${file.name}`;
+      const path = `${user.id}/${project.id}/${Date.now()}_${file.name}`;
       const { error: storageErr } = await supabase.storage.from("blueprints").upload(path, file);
       if (storageErr) {
         console.error("Storage upload error:", file.name, storageErr);
         toast.error(`Upload failed: ${file.name} — ${storageErr.message}`);
         continue;
       }
-      const { data: fileRow, error: fileInsertErr } = await supabase.from("project_files").insert({
-        project_id: data.id,
-        user_id: user.id,
-        file_name: file.name,
-        file_path: path,
-        file_type: file.type || null,
-        file_size: file.size,
-      }).select("id").single();
-      if (fileInsertErr) {
-        toast.error(`Failed to save: ${file.name}`);
-        continue;
+
+      let checksumSha256: string | null = null;
+      try {
+        checksumSha256 = await computeSHA256(file);
+      } catch (hashErr) {
+        console.warn(`Checksum generation failed for ${file.name}:`, hashErr);
       }
 
       try {
-        await ensureRebarProjectFileBridge(supabase, {
-          legacyFileId: fileRow.id,
-          legacyProjectId: data.id,
-          storagePath: path,
-          originalFilename: file.name,
+        await createProjectFileWithCanonicalBridge(supabase, {
+          projectId: project.id,
+          userId: user.id,
+          fileName: file.name,
+          filePath: path,
+          fileType: file.type || null,
+          fileSize: file.size,
           fileKind: inferRebarFileKind(file.name, file.type || null),
+          checksumSha256,
         });
-      } catch (bridgeErr) {
-        console.warn(`Failed to mirror file ${file.name} into rebar schema:`, bridgeErr);
+        uploadedCount++;
+      } catch (fileErr) {
+        console.warn(`Failed to complete canonical intake for ${file.name}:`, fileErr);
+        toast.error(`Canonical file intake failed: ${file.name}`);
       }
-
-      uploadedCount++;
     }
+
     if (uploadedCount > 0) {
       toast.success(`${uploadedCount} file${uploadedCount > 1 ? "s" : ""} uploaded`);
+      supabase.functions.invoke("process-pipeline", { body: { project_id: project.id } }).catch(console.warn);
     } else {
       toast.error("No files were uploaded successfully");
     }
 
-    // Trigger automatic processing pipeline
-    supabase.functions.invoke("process-pipeline", { body: { project_id: data.id } }).catch(console.warn);
-
     setCreatingProject(false);
     if (newProjectFileInputRef.current) newProjectFileInputRef.current.value = "";
-    navigate(`/app/project/${data.id}`);
+    navigate(`/app/project/${project.id}`);
   };
 
-  // Overlay panels
   if (showHealth) return <ProjectHealthDashboard onClose={() => setShowHealth(false)} />;
   if (showDiagnostics) return <AdminDiagnosticsPanel onClose={() => setShowDiagnostics(false)} />;
   if (showSearch) return (
@@ -177,7 +171,7 @@ const Dashboard: React.FC = () => {
       }}
     />
   );
-  if (showOutcomes) return <OutcomeCapture projects={projects.map(p => ({ id: p.id, name: p.name }))} />;
+  if (showOutcomes) return <OutcomeCapture projects={projects.map((p) => ({ id: p.id, name: p.name }))} />;
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
