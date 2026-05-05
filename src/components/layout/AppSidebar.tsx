@@ -50,7 +50,6 @@ const mainNav = [
 
 const projectNav = [
   { title: "Workspace", suffix: "", icon: FolderOpen, end: true },
-  { title: "Legacy View", suffix: "/legacy", icon: Settings },
 ];
 
 export default function AppSidebar({ activeProjectId, activeProjectName }: AppSidebarProps) {
@@ -123,6 +122,20 @@ export default function AppSidebar({ activeProjectId, activeProjectName }: AppSi
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
+                {activeProjectId && (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild>
+                      <NavLink
+                        to={`/app/legacy/project/${activeProjectId}`}
+                        className="hover:bg-muted/50"
+                        activeClassName="bg-sidebar-accent text-primary font-medium"
+                      >
+                        <Settings className="mr-2 h-4 w-4" />
+                        {!collapsed && <span>Legacy View</span>}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
