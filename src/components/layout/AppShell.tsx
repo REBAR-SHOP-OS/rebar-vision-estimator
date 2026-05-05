@@ -3,6 +3,7 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import AppSidebar from "./AppSidebar";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { getCanonicalProjectByLegacyId } from "@/lib/rebar-read-model";
 
 export default function AppShell() {
   const location = useLocation();
@@ -14,10 +15,35 @@ export default function AppShell() {
   }, [location.pathname]);
 
   useEffect(() => {
-    if (!activeProjectId) { setProjectName(""); return; }
-    supabase.from("projects").select("name").eq("id", activeProjectId).single().then(({ data }) => {
-      setProjectName(data?.name || "");
-    });
+    if (!activeProjectId) {
+      setProjectName("");
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadProjectName = async () => {
+      try {
+        const canonicalProject = await getCanonicalProjectByLegacyId(supabase, activeProjectId);
+        if (!cancelled && canonicalProject?.projectName) {
+          setProjectName(canonicalProject.projectName);
+          return;
+        }
+      } catch (error) {
+        console.warn("Failed to load canonical project name:", error);
+      }
+
+      const { data } = await supabase.from("projects").select("name").eq("id", activeProjectId).single();
+      if (!cancelled) {
+        setProjectName(data?.name || "");
+      }
+    };
+
+    loadProjectName();
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeProjectId]);
 
   return (
