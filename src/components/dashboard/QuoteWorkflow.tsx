@@ -23,14 +23,22 @@ interface QuoteVersion {
   estimate_version_id: string;
 }
 
+interface EstimateVersionSummary {
+  id: string;
+  version_number: number;
+  total_estimated_cost: number | null;
+  status: string | null;
+  created_at: string;
+  is_current?: boolean;
+}
+
 const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ projectId, onClose }) => {
   const { user } = useAuth();
   const [quotes, setQuotes] = useState<QuoteVersion[]>([]);
-  const [estimates, setEstimates] = useState<any[]>([]);
+  const [estimates, setEstimates] = useState<EstimateVersionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
 
-  // New quote form
   const [selectedEstimate, setSelectedEstimate] = useState("");
   const [quotedPrice, setQuotedPrice] = useState("");
   const [termsText, setTermsText] = useState("Standard terms apply. Quote valid for 30 days.");
@@ -40,12 +48,22 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
     if (!user) return;
     Promise.all([
       supabase.from("quote_versions").select("*").eq("project_id", projectId).order("version_number", { ascending: false }),
-      supabase.from("estimate_versions").select("id, version_number, total_estimated_cost, status, created_at").eq("project_id", projectId).order("version_number", { ascending: false }),
+      (supabase as any)
+        .from("estimate_versions")
+        .select("id, version_number, total_estimated_cost, status, created_at, is_current")
+        .eq("project_id", projectId)
+        .order("is_current", { ascending: false })
+        .order("version_number", { ascending: false }),
     ]).then(([quotesRes, estimatesRes]) => {
+      const estimateRows = (estimatesRes.data || []) as EstimateVersionSummary[];
       setQuotes((quotesRes.data as QuoteVersion[]) || []);
-      setEstimates(estimatesRes.data || []);
-      if (estimatesRes.data && estimatesRes.data.length > 0) {
-        setSelectedEstimate(estimatesRes.data[0].id);
+      setEstimates(estimateRows);
+
+      const currentEstimate = estimateRows.find((estimate) => estimate.is_current);
+      if (currentEstimate) {
+        setSelectedEstimate(currentEstimate.id);
+      } else if (estimateRows.length > 0) {
+        setSelectedEstimate(estimateRows[0].id);
       }
       setLoading(false);
     });
@@ -75,7 +93,6 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
       toast.success(`Quote v${nextVersion} created`);
       setQuotes(prev => [data as QuoteVersion, ...prev]);
 
-      // Log to audit
       await supabase.from("audit_log").insert({
         user_id: user.id,
         project_id: projectId,
@@ -100,7 +117,6 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
   };
 
   const sendForReview = async (quoteId: string) => {
-    // Create a review share link
     if (!user) return;
     const quote = quotes.find(q => q.id === quoteId);
     if (!quote) return;
@@ -127,7 +143,7 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
 
   const handlePdfExport = async (q: QuoteVersion) => {
     const { data: project } = await supabase.from("projects").select("name, client_name, address").eq("id", projectId).single();
-    const { data: est } = await supabase.from("estimate_versions").select("version_number, total_estimated_cost").eq("id", q.estimate_version_id).single();
+    const { data: est } = await (supabase as any).from("estimate_versions").select("version_number, total_estimated_cost, is_current").eq("id", q.estimate_version_id).single();
     await exportQuotePdf({
       quote: q,
       projectName: project?.name || "Project",
@@ -165,7 +181,6 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
         <div className="text-sm text-muted-foreground">Loading...</div>
       ) : (
         <>
-          {/* Create New Quote */}
           <Card className="border-primary/20">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -182,10 +197,9 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
                 >
                   {estimates.map((est) => (
                     <option key={est.id} value={est.id}>
-                      v{est.version_number} — {fmtDate(est.created_at)} ({est.status})
+                      {est.is_current ? "Current · " : ""}v{est.version_number} — {fmtDate(est.created_at)} ({est.status})
                     </option>
-                  ))
-                  }
+                  ))}
                 </select>
               </div>
               <div>
@@ -222,7 +236,6 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
             </CardContent>
           </Card>
 
-          {/* Existing Quotes */}
           <Card className="border-border">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm">Quotes ({quotes.length})</CardTitle>
@@ -262,8 +275,7 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
                         </Button>
                       </div>
                     </div>
-                  ))
-                  }
+                  ))}
                   {quotes.length === 0 && (
                     <p className="text-xs text-muted-foreground text-center py-8">No quotes yet. Create one above.</p>
                   )}
