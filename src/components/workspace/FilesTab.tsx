@@ -158,6 +158,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
           pages,
           file_name: fileName,
           sha256,
+          legacy_file_id: fileId,
           pipeline_file_id: fileId,
         },
       });
