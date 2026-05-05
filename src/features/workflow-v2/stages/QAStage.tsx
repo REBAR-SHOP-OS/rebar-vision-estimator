@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { StageHeader, Pill, EmptyState, GateBanner, type StageProps } from "./_shared";
 import { ArrowLeft, ArrowRight, Wand2, FileText, ExternalLink } from "lucide-react";
@@ -85,8 +85,8 @@ export default function QAStage({ projectId }: StageProps) {
                   <tbody>
                     {grouped.map((g) => (
                       g.items.length > 0 && (
-                        <>
-                          <tr key={g.key} className="bg-muted/20 border-t border-border">
+                        <Fragment key={g.key}>
+                          <tr className="bg-muted/20 border-t border-border">
                             <td colSpan={4} className="px-3 h-7 text-[10px] uppercase tracking-[0.18em] font-semibold text-muted-foreground">{g.label}</td>
                           </tr>
                           {g.items.map((i) => (
@@ -102,7 +102,7 @@ export default function QAStage({ projectId }: StageProps) {
                               <td className="px-3 text-muted-foreground">{i.status}</td>
                             </tr>
                           ))}
-                        </>
+                        </Fragment>
                       )
                     ))}
                   </tbody>
