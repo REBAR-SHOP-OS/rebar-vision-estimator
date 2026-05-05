@@ -25,10 +25,6 @@ import {
 import {
   LayoutDashboard,
   FolderOpen,
-  Layers,
-  AlertTriangle,
-  Calculator,
-  Pencil,
   Settings,
   Ruler,
   LogOut,
@@ -53,13 +49,8 @@ const mainNav = [
 ];
 
 const projectNav = [
-  { title: "Overview", suffix: "", icon: FolderOpen, end: true },
-  { title: "Files", suffix: "/files", icon: FolderOpen },
-  { title: "Segments", suffix: "/segments", icon: Layers },
-  { title: "QA / Issues", suffix: "/qa", icon: AlertTriangle },
-  { title: "Estimate", suffix: "/estimate", icon: Calculator },
-  { title: "Shop Drawings", suffix: "/shop-drawings", icon: Pencil },
-  { title: "Settings", suffix: "/settings", icon: Settings },
+  { title: "Workspace", suffix: "", icon: FolderOpen, end: true },
+  { title: "Legacy View", suffix: "/legacy", icon: Settings },
 ];
 
 export default function AppSidebar({ activeProjectId, activeProjectName }: AppSidebarProps) {
