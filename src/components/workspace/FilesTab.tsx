@@ -8,6 +8,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
+import {
+  createProjectFileWithCanonicalBridge,
+  detectDiscipline,
+  ensureCurrentProjectRebarBridge,
+  ensureRebarProjectFileBridge,
+  inferRebarFileKind,
+} from "@/lib/rebar-intake";
 
 interface FileRow {
   id: string;
@@ -20,6 +27,16 @@ interface FileRow {
   revision_label?: string;
   parse_status?: string;
   is_superseded?: boolean;
+  is_current?: boolean;
+}
+
+interface RegistryRow {
+  file_id: string;
+  is_active: boolean | null;
+  supersedes_file_id?: string | null;
+  classification?: string | null;
+  detected_discipline?: string | null;
+  id?: string;
 }
 
 export default function FilesTab({ projectId, onProjectRefresh }: { projectId: string; onProjectRefresh?: () => void }) {
@@ -50,21 +67,8 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
     return "unknown";
   };
 
-  const detectDiscipline = (name: string): string | null => {
-    const n = name.toUpperCase();
-    if (/\bS[-_]?\d|STRUCTURAL|STR[-_]/i.test(n)) return "Structural";
-    if (/\bA[-_]?\d|ARCHITECTURAL|ARCH[-_]/i.test(n)) return "Architectural";
-    if (/\bC[-_]?\d|CIVIL/i.test(n)) return "Civil";
-    if (/\bM[-_]?\d|MECHANICAL/i.test(n)) return "Mechanical";
-    if (/\bE[-_]?\d|ELECTRICAL/i.test(n)) return "Electrical";
-    if (/\bP[-_]?\d|PLUMBING/i.test(n)) return "Plumbing";
-    if (/\bL[-_]?\d|LANDSCAPE/i.test(n)) return "Landscape";
-    return null;
-  };
-
   const parseFile = async (fileId: string, fileName: string, filePath: string, onProgress?: (msg: string) => void) => {
     try {
-      // Ensure document_version exists
       const { data: existingDv } = await supabase
         .from("document_versions")
         .select("id")
@@ -93,7 +97,6 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
         .createSignedUrl(filePath, 3600);
       if (!urlData?.signedUrl) return false;
 
-      // Try server-side extraction first
       const { data: extraction, error: extractErr } = await supabase.functions.invoke("extract-pdf-text", {
         body: { pdf_url: urlData.signedUrl, project_id: projectId },
       });
@@ -104,7 +107,6 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       let totalPages = extraction?.total_pages || 0;
       let sha256 = extraction?.sha256 || `file_${fileId}`;
 
-      // If extraction failed or returned no text (large/scanned file), use client-side OCR
       if (extractErr || !hasText) {
         console.log(`[FilesTab] Server extraction empty for ${fileName}, falling back to client-side OCR`);
         onProgress?.(`Rendering pages…`);
@@ -124,7 +126,6 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
           totalPages = pageImages.length;
           pages = [];
 
-          // OCR in batches of 4
           for (let i = 0; i < pageImages.length; i += 4) {
             const batch = pageImages.slice(i, i + 4);
             const batchResults = await Promise.allSettled(
@@ -134,7 +135,6 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
                   body: { image_url: img.signedUrl },
                 });
                 if (ocrErr || !ocrData?.ocr_results) return { pageNumber: img.pageNumber, raw_text: "" };
-                // Merge text from all OCR passes
                 const fullText = ocrData.ocr_results
                   .map((r: any) => r.fullText || "")
                   .filter((t: string) => t.length > 0)
@@ -165,23 +165,34 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
         body: {
           project_id: projectId,
           document_version_id: dvId,
-          pages: pages,
+          pages,
           file_name: fileName,
-          sha256: sha256,
+          sha256,
+          legacy_file_id: fileId,
         },
       });
 
       if (dvId) {
         await supabase.from("document_versions").update({
-          sha256: sha256,
+          sha256,
           page_count: totalPages || pages.length,
           is_scanned: !hasText,
         }).eq("id", dvId);
       }
 
+      await ensureRebarProjectFileBridge(supabase, {
+        legacyFileId: fileId,
+        legacyProjectId: projectId,
+        storagePath: filePath,
+        originalFilename: fileName,
+        fileKind: inferRebarFileKind(fileName, null),
+        checksumSha256: sha256,
+        pageCount: totalPages || pages.length,
+      });
+
       if (!indexErr) {
         try {
-          await supabase
+          await (supabase as any)
             .from("document_registry")
             .update({ parse_status: "parsed", extraction_status: "indexed" })
             .eq("file_id", fileId)
@@ -192,8 +203,85 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       }
 
       return !indexErr;
-    } catch {
+    } catch (error) {
+      console.warn(`Parse pipeline failed for ${fileName}:`, error);
       return false;
+    }
+  };
+
+  const upsertDocumentRegistryLifecycle = async (params: {
+    fileId: string;
+    fileName: string;
+    fileType: string | null;
+    discipline: string | null;
+  }) => {
+    const classification = classifyUploadedFile(params.fileName, params.fileType);
+
+    try {
+      let query = (supabase as any)
+        .from("document_registry")
+        .select("id, file_id, is_active")
+        .eq("project_id", projectId)
+        .eq("classification", classification)
+        .eq("is_active", true);
+
+      if (params.discipline) {
+        query = query.eq("detected_discipline", params.discipline);
+      }
+
+      const { data: activeRows } = await query;
+      const activeRegistryRows = (activeRows || []) as Array<{ id: string; file_id: string; is_active: boolean | null }>;
+      const supersededFileId = activeRegistryRows[0]?.file_id || null;
+
+      await (supabase as any).from("document_registry").upsert(
+        {
+          project_id: projectId,
+          user_id: user!.id,
+          file_id: params.fileId,
+          classification,
+          validation_role: /answer|reference|correct|benchmark/i.test(params.fileName) ? "reference_answer" : "input",
+          parse_status: "pending",
+          extraction_status: "pending",
+          detected_discipline: params.discipline,
+          is_active: true,
+          supersedes_file_id: supersededFileId,
+        },
+        { onConflict: "project_id,file_id" },
+      );
+
+      if (activeRegistryRows.length > 0) {
+        const previousRowIds = activeRegistryRows.map((row) => row.id);
+        await (supabase as any)
+          .from("document_registry")
+          .update({ is_active: false })
+          .in("id", previousRowIds);
+
+        await supabase.from("audit_log").insert({
+          user_id: user!.id,
+          project_id: projectId,
+          action: "file_revision_superseded",
+          details: {
+            archived_file_ids: activeRegistryRows.map((row) => row.file_id),
+            promoted_file_id: params.fileId,
+            classification,
+            detected_discipline: params.discipline,
+          },
+        });
+      }
+
+      await supabase.from("audit_log").insert({
+        user_id: user!.id,
+        project_id: projectId,
+        action: "file_revision_promoted_current",
+        details: {
+          file_id: params.fileId,
+          classification,
+          detected_discipline: params.discipline,
+          supersedes_file_id: supersededFileId,
+        },
+      });
+    } catch {
+      /* document_registry may not exist until migration applied */
     }
   };
 
@@ -203,63 +291,87 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
     const files = Array.from(fileList);
     setUploading(true);
 
-    const uploadedFiles: { id: string; name: string; path: string }[] = [];
+    try {
+      await ensureCurrentProjectRebarBridge(supabase, projectId);
+    } catch (bridgeErr) {
+      console.warn("Canonical project bridge check failed before upload:", bridgeErr);
+      toast.error("Upload blocked until the canonical rebar project bridge is healthy.");
+      setUploading(false);
+      setUploadProgress("");
+      e.target.value = "";
+      return;
+    }
+
+    const uploadedFiles: { id: string; name: string; path: string; type: string | null }[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       setUploadProgress(`Uploading ${i + 1}/${files.length}`);
       const path = `${user.id}/${projectId}/${Date.now()}_${file.name}`;
       const { error: storageErr } = await supabase.storage.from("blueprints").upload(path, file);
-      if (storageErr) { toast.error(`Upload failed: ${file.name}`); continue; }
-      const { data, error: dbErr } = await supabase.from("project_files").insert({
-        project_id: projectId,
-        user_id: user.id,
-        file_name: file.name,
-        file_path: path,
-        file_type: file.type || null,
-        file_size: file.size,
-      }).select("id").single();
-      if (dbErr) { toast.error(`Failed to save: ${file.name}`); continue; }
+      if (storageErr) {
+        toast.error(`Upload failed: ${file.name}`);
+        continue;
+      }
 
-      // Create document_version with discipline tag
       const discipline = detectDiscipline(file.name);
+      let checksumSha256: string | null = null;
       try {
-        const hash = await computeSHA256(file);
+        checksumSha256 = await computeSHA256(file);
+      } catch (hashErr) {
+        console.warn(`Checksum generation failed for ${file.name}:`, hashErr);
+      }
+
+      let legacyFileId: string;
+      try {
+        const fileRow = await createProjectFileWithCanonicalBridge(supabase, {
+          projectId,
+          userId: user.id,
+          fileName: file.name,
+          filePath: path,
+          fileType: file.type || null,
+          fileSize: file.size,
+          fileKind: inferRebarFileKind(file.name, file.type || null),
+          checksumSha256,
+        });
+        legacyFileId = fileRow.id;
+      } catch (bridgeErr) {
+        console.warn(`Canonical file intake failed for ${file.name}:`, bridgeErr);
+        toast.error(`Canonical file intake failed: ${file.name}`);
+        continue;
+      }
+
+      try {
         await supabase.from("document_versions").insert({
           project_id: projectId,
           user_id: user.id,
-          file_id: data.id,
+          file_id: legacyFileId,
           file_name: file.name,
           file_path: path,
-          sha256: hash,
+          sha256: checksumSha256 || `pending_${Date.now()}_${legacyFileId}`,
           source_system: "upload",
           pdf_metadata: discipline ? { discipline } : {},
         });
-      } catch (_) { /* hash/version insert is best-effort */ }
-
-      await logAuditEvent(user.id, "uploaded", "project_file", data.id, projectId);
-      try {
-        await supabase.from("document_registry").upsert(
-          {
-            project_id: projectId,
-            user_id: user.id,
-            file_id: data.id,
-            classification: classifyUploadedFile(file.name, file.type),
-            validation_role: /answer|reference|correct|benchmark/i.test(file.name) ? "reference_answer" : "input",
-            parse_status: "pending",
-            extraction_status: "pending",
-            detected_discipline: discipline,
-          },
-          { onConflict: "project_id,file_id" },
-        );
-      } catch {
-        /* document_registry may not exist until migration applied */
+      } catch (docVersionErr) {
+        console.warn(`document_versions insert failed for ${file.name}:`, docVersionErr);
       }
-      uploadedFiles.push({ id: data.id, name: file.name, path });
-    }
-    toast.success(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
 
-    // Auto-parse each uploaded file
+      await logAuditEvent(user.id, "uploaded", "project_file", legacyFileId, projectId);
+      await upsertDocumentRegistryLifecycle({
+        fileId: legacyFileId,
+        fileName: file.name,
+        fileType: file.type || null,
+        discipline,
+      });
+      uploadedFiles.push({ id: legacyFileId, name: file.name, path, type: file.type || null });
+    }
+
+    if (uploadedFiles.length > 0) {
+      toast.success(`${uploadedFiles.length} file${uploadedFiles.length > 1 ? "s" : ""} uploaded`);
+    } else {
+      toast.error("No files were uploaded successfully");
+    }
+
     let parsedCount = 0;
     for (let i = 0; i < uploadedFiles.length; i++) {
       setUploadProgress(`Parsing ${i + 1}/${uploadedFiles.length}`);
@@ -289,7 +401,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
   const handleParseAll = async () => {
     if (!user) return;
     setParsing(true);
-    const pendingFiles = files.filter(f => f.parse_status === "pending");
+    const pendingFiles = files.filter((f) => f.is_current !== false && f.parse_status === "pending");
     let successCount = 0;
 
     try {
@@ -305,7 +417,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       if (successCount > 0) {
         toast.success(`Parsed & indexed ${successCount} of ${pendingFiles.length} file(s)`);
       } else if (pendingFiles.length > 0) {
-        toast.warning("Files processed but no text extracted (scanned PDFs). Use the chat to analyze with AI Vision.");
+        toast.warning("Files processed but no text extracted (scanned PDFs) or canonical sync failed.");
       }
       loadFiles();
     } catch (err) {
@@ -323,11 +435,15 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       supabase.from("document_versions").select("file_id, source_system, pdf_metadata, page_count, is_scanned").eq("project_id", projectId),
       supabase.from("segment_source_links").select("file_id"),
       supabase.from("validation_issues").select("source_file_id, status").eq("project_id", projectId),
-    ]).then(([filesRes, versionsRes, linksRes, issuesRes]) => {
+      (supabase as any).from("document_registry").select("file_id, is_active, supersedes_file_id, classification, detected_discipline").eq("project_id", projectId),
+    ]).then(([filesRes, versionsRes, linksRes, issuesRes, registryRes]) => {
       const rawFiles = filesRes.data || [];
       const versions = versionsRes.data || [];
+      const registryRows = ((registryRes as any).data || []) as RegistryRow[];
       const versionMap = new Map<string, any>();
+      const registryMap = new Map<string, RegistryRow>();
       versions.forEach((v: any) => { if (v.file_id) versionMap.set(v.file_id, v); });
+      registryRows.forEach((row) => { if (row.file_id) registryMap.set(row.file_id, row); });
       const segCounts: Record<string, number> = {};
       (linksRes.data || []).forEach((link: any) => {
         if (link.file_id) segCounts[link.file_id] = (segCounts[link.file_id] || 0) + 1;
@@ -340,14 +456,22 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       setIssueCounts(issCounts);
       const enriched: FileRow[] = rawFiles.map((f: any) => {
         const ver = versionMap.get(f.id);
+        const registry = registryMap.get(f.id);
         const isParsed = ver?.page_count !== null && ver?.page_count !== undefined;
+        const isCurrent = registry ? registry.is_active !== false : true;
         return {
           ...f,
-          discipline: ver?.pdf_metadata?.discipline || undefined,
+          discipline: ver?.pdf_metadata?.discipline || registry?.detected_discipline || undefined,
           revision_label: ver?.pdf_metadata?.revision_label || undefined,
           parse_status: isParsed ? "parsed" : "pending",
-          is_superseded: ver?.pdf_metadata?.is_superseded || false,
+          is_superseded: !isCurrent,
+          is_current: isCurrent,
         };
+      }).sort((a, b) => {
+        if ((a.is_current ? 1 : 0) !== (b.is_current ? 1 : 0)) {
+          return (b.is_current ? 1 : 0) - (a.is_current ? 1 : 0);
+        }
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
       });
       setFiles(enriched);
       setLoading(false);
@@ -393,7 +517,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
         <h3 className="text-sm font-semibold text-foreground">Files & Revisions</h3>
         <div className="flex items-center gap-2">
           <Badge variant="secondary" className="text-[10px]">{files.length} file{files.length !== 1 ? "s" : ""}</Badge>
-          {files.some(f => f.parse_status === "pending") && (
+          {files.some((f) => f.is_current !== false && f.parse_status === "pending") && (
             <Button size="sm" variant="default" className="gap-1.5 h-7 text-xs" disabled={parsing} onClick={handleParseAll}>
               {parsing ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
               {parsing ? "Parsing…" : "Parse All"}
@@ -428,6 +552,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
                   <div className="flex items-center gap-2">
                     <FileText className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                     <span className="font-medium text-foreground truncate max-w-[250px]">{f.file_name}</span>
+                    {f.is_current && <Badge variant="secondary" className="text-[8px] flex-shrink-0">Current</Badge>}
                     {f.is_superseded && <Badge variant="outline" className="text-[8px] border-destructive/30 text-destructive flex-shrink-0"><Archive className="h-2.5 w-2.5 mr-0.5" />Superseded</Badge>}
                   </div>
                 </td>
