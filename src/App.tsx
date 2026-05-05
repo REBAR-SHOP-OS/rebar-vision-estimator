@@ -14,6 +14,7 @@ import BlueprintViewerPage from "./pages/BlueprintViewerPage";
 import NotFound from "./pages/NotFound";
 import AppShell from "./components/layout/AppShell";
 import ProjectWorkspace from "./pages/ProjectWorkspace";
+import LegacyProjectWorkspace from "./pages/legacy/LegacyProjectWorkspace";
 import SegmentDetail from "./pages/SegmentDetail";
 import StandardsPage from "./pages/StandardsPage";
 import OrdersPage from "./pages/OrdersPage";
