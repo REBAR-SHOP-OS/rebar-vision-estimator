@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { StageHeader, Pill, EmptyState, GateBanner, type StageProps } from "./_shared";
 import {
   ArrowLeft, ArrowRight, Wand2, Filter, Layers, Columns2, GitCompare,
@@ -10,6 +10,96 @@ import { supabase } from "@/integrations/supabase/client";
 import PdfRenderer from "@/components/chat/PdfRenderer";
 
 type TabKey = "change" | "impact" | "evidence" | "action";
+
+type PageTextItem = { str: string; x: number; y: number; w: number; h: number };
+type TextLine = { items: PageTextItem[]; y: number; text: string };
+
+const MIN_ANCHOR_CONFIDENCE = 0.75;
+
+function normalizeText(value: string | null | undefined): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9#./\-\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function clampBbox(
+  bbox: [number, number, number, number] | null,
+  imgW: number,
+  imgH: number,
+): [number, number, number, number] | null {
+  if (!bbox || !imgW || !imgH) return bbox;
+  const x1 = Math.max(0, Math.min(imgW, bbox[0]));
+  const y1 = Math.max(0, Math.min(imgH, bbox[1]));
+  const x2 = Math.max(x1, Math.min(imgW, bbox[2]));
+  const y2 = Math.max(y1, Math.min(imgH, bbox[3]));
+  return x2 > x1 && y2 > y1 ? [x1, y1, x2, y2] : null;
+}
+
+function buildTextLines(pageText: PageTextItem[]): TextLine[] {
+  const heights = pageText.map((t) => t.h).filter((h) => h > 0).sort((a, b) => a - b);
+  const medH = heights.length ? heights[Math.floor(heights.length / 2)] : 8;
+  const yTol = Math.max(4, medH * 0.6);
+  const sorted = [...pageText].sort((a, b) => a.y - b.y || a.x - b.x);
+  const lines: TextLine[] = [];
+  for (const it of sorted) {
+    const last = lines[lines.length - 1];
+    if (last && Math.abs(it.y - last.y) <= yTol) {
+      last.items.push(it);
+    } else {
+      lines.push({ items: [it], y: it.y, text: "" });
+    }
+  }
+  for (const ln of lines) {
+    ln.items.sort((a, b) => a.x - b.x);
+    ln.text = normalizeText(ln.items.map((i) => i.str).join(" "));
+  }
+  return lines;
+}
+
+function findSpanInLine(items: PageTextItem[], needle: string): PageTextItem[] | null {
+  const target = normalizeText(needle);
+  if (!target) return null;
+  const lower = items.map((i) => normalizeText(i.str));
+  let best: PageTextItem[] | null = null;
+  for (let i = 0; i < lower.length; i++) {
+    let acc = "";
+    for (let j = i; j < lower.length; j++) {
+      acc = normalizeText(`${acc} ${lower[j]}`);
+      if (!acc) continue;
+      if (acc.includes(target)) {
+        const candidate = items.slice(i, j + 1);
+        if (!best || candidate.length < best.length) best = candidate;
+        break;
+      }
+    }
+  }
+  return best;
+}
+
+function isLocalizedSpan(items: PageTextItem[], imgW: number, imgH: number): boolean {
+  if (!items.length) return false;
+  const x1 = Math.min(...items.map((s) => s.x));
+  const y1 = Math.min(...items.map((s) => s.y));
+  const x2 = Math.max(...items.map((s) => s.x + s.w));
+  const y2 = Math.max(...items.map((s) => s.y + s.h));
+  const spanW = Math.max(1, x2 - x1);
+  const spanH = Math.max(1, y2 - y1);
+  const widthOk = !imgW || spanW <= imgW * 0.45;
+  const heightOk = !imgH || spanH <= imgH * 0.18;
+  const areaOk = !imgW || !imgH || spanW * spanH <= imgW * imgH * 0.12;
+  return widthOk && heightOk && areaOk;
+}
+
+function getExcerptTokens(value: string | null | undefined): string[] {
+  const stop = new Set(["look", "sheet", "page", "find", "enter", "drawing", "from", "note"]);
+  return Array.from(new Set(
+    normalizeText(value)
+      .split(" ")
+      .filter((tok) => tok && !stop.has(tok) && (tok.length >= 4 || /\d/.test(tok)))
+  )).slice(0, 8);
+}
 
 function tightBox(
   items: Array<{ x: number; y: number; w: number; h: number }>,
