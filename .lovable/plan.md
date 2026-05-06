@@ -1,75 +1,113 @@
-## Problem
+# Manual-Only Authority Enforcement — Patch Plan
 
-The Linked Source Review pane on the QA stage now shows the linked PDF, but it renders the **whole sheet** with no location pin. The reference UI you sent shows the exact callout zoomed in with a marker, plus Change/Impact/Evidence/Action tabs. Two gaps to close:
+Goal: Make `Manual-Standard-Practice-2018` (uploaded into Brain) the sole assumption authority for the takeoff, eliminate hardcoded fallback math, correct source priority (shop > structural > arch context-only), and stamp every estimate row with citation + per-row provenance.
 
-1. **Data**: `validation_issues.source_refs` only stores `{ estimate_item_id, missing }` — no `page_number`, no `bbox`. Without coords we cannot pinpoint anything.
-2. **UI**: the right pane renders a flat full-page image, no zoom-to-region, no marker, no tabs.
+Minimal-diff, file-by-file. No refactors outside what's listed.
 
-## Plan
+---
 
-### 1. Capture location at issue creation (source-of-truth fix)
+## 1. Brain ingestion — extract text at upload time
 
-Edge function `supabase/functions/auto-estimate/index.ts` is where `validation_issues` rows are created. When inserting an `unresolved_geometry` issue, also persist (best-effort, optional) on `source_refs[0]`:
+File: `src/components/chat/BrainKnowledgeDialog.tsx`
 
-- `page_number` (int) — taken from the OCR token / element that triggered the issue
-- `bbox` (`[x1,y1,x2,y2]` in source-page pixel space) — same source as `BlueprintViewer` overlays
-- `image_size` (`{w,h}`) — original page pixel size used for normalization
+Currently uploaded files become `agent_knowledge` rows with `type: "file"`, `file_path`, no `content`. Auto-estimate only reads `title, content`, so the manual is invisible at runtime.
 
-Fallbacks (in order): bbox already on the OCR element → page-level bbox (full sheet) → omit (UI degrades to a centered marker on the page).
+Patch (file upload handler around lines 128–160):
+- After successful upload to `blueprints` storage, parse the PDF text in-browser using existing `pdfjs-dist` (already used elsewhere in project — confirm via `rg "pdfjs"`).
+- Concatenate page text (cap ~500KB) into `content`.
+- Insert row with `type: "file"`, `file_path`, AND populated `content`.
+- Add a small badge in the file list when `content` is empty (so legacy uploads can be re-ingested via a "Re-parse" button calling the same extractor).
 
-No DB migration needed — `source_refs` is `jsonb`. Existing rows keep working.
+No schema change needed (`agent_knowledge.content` already exists).
 
-### 2. Backfill marker for existing rows (no DB writes)
+---
 
-In the QA loader (`src/features/workflow-v2/takeoff-data.ts`), when reading `validation_issues`, also fetch the matching `estimate_items.assumptions_json` for the referenced `estimate_item_id` and pull any `bbox` / `page_number` saved there by previous runs. Surface as `sel.locator = { page, bbox, imageSize }`.
+## 2. Remove fallback assumptions in auto-estimate
 
-### 3. Pinpoint viewer (UI rewrite of the right pane in `QAStage.tsx`)
+File: `supabase/functions/auto-estimate/index.ts`
 
-Replace today's full-page `<img>` with a **focused crop**:
+Targeted edits only:
 
-```text
-┌──────────────────────────────────┐
-│  CHANGE  IMPACT  EVIDENCE  ACTION│   ← tabs
-├──────────────────────────────────┤
-│  ┌────────────────────────────┐  │
-│  │  zoomed PDF region         │  │   ← PdfRenderer renders page,
-│  │      ┌───┐                 │  │     parent <div> applies
-│  │      │ ● │  ← pulsing mark │  │     transform: translate+scale
-│  │      └───┘                 │  │     so bbox center is centered
-│  │                            │  │     at ~2x zoom.
-│  └────────────────────────────┘  │
-│  Drawing: S-5.0 · Page 3/12      │
-│  [Open full sheet] [Show context]│
-└──────────────────────────────────┘
+**a. Delete hardcoded lap fallback (lines ~43, ~173, ~179)**
+- Remove `lapMmFor()` helper.
+- Replace `graph.lapTable.get(sizeKey(size)) ?? lapMmFor(size)` with manual lookup; if the manual provides no lap for that size → push `unresolved_reference: "lap length per Manual §X"` and mark the row `UNRESOLVED_GEOMETRY` (do not compute `barLenMm`).
+
+**b. Delete the "typical construction practice" prompt fallback (line ~410)**
+- Replace the `else` branch with a hard refusal directive:  
+  `No drawing text available — DO NOT estimate. Return empty items[] with blocker reason "NO_DRAWING_TEXT".`
+
+**c. Add manual-required gate (before the OpenAI call, ~line 250)**
+- Fetch `agent_knowledge` rows where `title ILIKE '%manual%standard%practice%2018%'` AND `content IS NOT NULL AND length(content) > 1000`.
+- If none found → return 200 with `{ items: [], blocked: true, reason: "MANUAL_NOT_LOADED" }`. Caller (TakeoffStage) already shows blockers.
+
+**d. Inject manual into prompt as the only assumption authority**
+- Add a `=== ASSUMPTION AUTHORITY (Manual-Standard-Practice-2018) ===` section.
+- System rule: "Every assumption (lap, splice, hook, bend, mass, mesh) MUST cite a section/page from this manual. If the manual does not cover it, set the field UNRESOLVED. NEVER invent."
+
+---
+
+## 3. Correct source priority for production rebar
+
+File: `supabase/functions/auto-estimate/index.ts` (prompt + file selection ~lines 365–410, 565–590)
+
+- Detect file role from `file_name` / `file_type`: `shop` (SD\*, "shop"), `structural` (S\*, "struct"), `architectural` (A\*).
+- Build `drawingTextContext` in priority order: shop → structural. Mark each block with header `[SHOP DRAWING — PRIMARY]`, `[STRUCTURAL — SECONDARY VERIFICATION]`.
+- Exclude architectural OCR text from the takeoff prompt (keep only as titles in a `[CONTEXT ONLY — DO NOT QUANTIFY FROM]` footer).
+- Update prompt rule: "Quantities come from SHOP DRAWINGS first. Use STRUCTURAL only to fill gaps or verify. NEVER derive quantity from architectural sheets."
+
+---
+
+## 4. Per-row provenance + citation fields
+
+File: `supabase/functions/auto-estimate/index.ts` (insert payload ~lines 571–630)
+
+- Stop using one batch `sourceFileId`. Instead require the model to return `source_sheet` (e.g. `SD-06`) and `source_excerpt` per item; map back to the file id via the OCR origin index already built earlier.
+- Extend `assumptions_json` with:
+  ```
+  {
+    authority_document: "Manual-Standard-Practice-2018",
+    authority_section: <string|null>,
+    authority_page: <number|null>,
+    authority_quote: <string|null>,
+    assumption_rule_id: <string|null>
+  }
+  ```
+- If any assumption used but citation missing → mark row `status: "unresolved"` and add to `validation_issues` with `issue_type: "missing_citation"`.
+
+No DB migration required — `assumptions_json` and `source_file_id` columns already exist on `estimate_items`.
+
+---
+
+## 5. Block unresolved rows from contaminating "near-final" estimate
+
+File: `src/features/workflow-v2/stages/TakeoffStage.tsx`
+
+Small UI/logic patch:
+- When computing the headline totals (weight / cost) at the top of the stage, exclude rows where `status === "unresolved"` OR `assumptions_json.authority_document` is missing.
+- Show a banner: "N rows blocked: missing manual citation or unresolved geometry. Resolve before quoting."
+- Disable the "Approve / Send to Quote" CTA while blocked count > 0.
+
+---
+
+## Files touched (6 edits, no new files, no migrations)
+
+```
+src/components/chat/BrainKnowledgeDialog.tsx     — PDF text extraction on upload + Re-parse button
+supabase/functions/auto-estimate/index.ts        — remove fallbacks, manual gate, source priority, per-row provenance, citations
+src/features/workflow-v2/stages/TakeoffStage.tsx — exclude unresolved from totals, gate Approve CTA
 ```
 
-Behavior:
+## Out of scope (intentionally)
 
-- Reuse existing `PdfRenderer` to rasterize only the relevant `page_number` at scale 2.
-- Compute a CSS `transform` on the image wrapper so the bbox center sits in the middle of the panel and the bbox occupies ~60% of the panel's shorter side. If no bbox, render the full page with a centered pin.
-- Overlay a pulsing marker (`<div class="absolute animate-ping">`) at the bbox center using the same normalized coordinates pattern as `DrawingOverlay.tsx`.
-- "Show context" toggles between the tight crop and the full page (both with the marker).
-- "Open full sheet" opens the existing signed URL in a new tab (already wired).
+- No changes to `auto-bar-schedule` (separate path; can mirror later if needed).
+- No DB schema changes.
+- No refactor of OCR pipeline.
+- No removal of `bar mass` / `mesh weight` reference tables (treated as fixed reference data per your spec).
 
-### 4. Tabs (Change / Impact / Evidence / Action)
+## Validation after patch
 
-Add a small tab bar above the viewer using existing shadcn `Tabs`:
-
-- **Change**: title, severity pill, `description`, and the `missing[]` list from `source_refs` rendered as chips.
-- **Impact**: linked `estimate_item` row preview (size, count, length, weight) — already loadable from `estimate_items` via the `estimate_item_id` in `source_refs`.
-- **Evidence**: the Linked Source viewer block above + raw `source_refs` JSON in a collapsible.
-- **Action**: existing `Apply Recommended Fix`, `Return to Takeoff`, `Advance` buttons.
-
-This matches the reference layout without inventing data we don't have.
-
-## Files to edit
-
-- `supabase/functions/auto-estimate/index.ts` — add `page_number`, `bbox`, `image_size` to `source_refs[0]` and to `assumptions_json` when known.
-- `src/features/workflow-v2/takeoff-data.ts` — extend `WorkflowQaIssue` with `locator` and `linked_item` (size/count/length/weight); join from `source_refs[0]` + `estimate_items`.
-- `src/features/workflow-v2/stages/QAStage.tsx` — replace the right pane with tabs + pinpoint viewer; reuse `PdfRenderer` and the existing signed-URL flow.
-
-## Out of scope
-
-- Rewriting OCR pipeline or storing per-token bboxes globally.
-- New tables / migrations.
-- DWG/raster image diffing shown in the reference (that requires a revision delta engine — separate roadmap item).
+1. Upload `Manual-Standard-Practice-2018.pdf` to Brain → confirm `agent_knowledge.content` populated.
+2. Run takeoff with manual present → rows include `authority_section` citations.
+3. Delete manual → re-run → engine returns `MANUAL_NOT_LOADED` blocker, no rows.
+4. Run takeoff with only architectural PDFs → empty items, blocker `NO_SHOP_OR_STRUCTURAL_SOURCE`.
+5. Run takeoff where lap not in manual → row marked `UNRESOLVED`, no fabricated `40*db`.
