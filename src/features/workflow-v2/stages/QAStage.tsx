@@ -1,9 +1,15 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { StageHeader, Pill, EmptyState, GateBanner, type StageProps } from "./_shared";
-import { ArrowLeft, ArrowRight, Wand2 } from "lucide-react";
+import {
+  ArrowLeft, ArrowRight, Wand2, Filter, Layers, Columns2, GitCompare,
+  ZoomIn, ZoomOut, Maximize2, Eye, Edit3, AlertTriangle, RefreshCw,
+  Fingerprint, History, GitBranch, Scale, Edit2, RefreshCw as Sync,
+} from "lucide-react";
 import { loadWorkflowQaIssues, type WorkflowQaIssue } from "../takeoff-data";
 import { supabase } from "@/integrations/supabase/client";
 import PdfRenderer from "@/components/chat/PdfRenderer";
+
+type TabKey = "change" | "impact" | "evidence" | "action";
 
 export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [issues, setIssues] = useState<WorkflowQaIssue[]>([]);
@@ -17,8 +23,10 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [pdfPageCount, setPdfPageCount] = useState(1);
   const [pdfPage, setPdfPage] = useState(1);
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
-  const [tab, setTab] = useState<"change" | "impact" | "evidence" | "action">("change");
+  const [tab, setTab] = useState<TabKey>("change");
   const [zoomMode, setZoomMode] = useState<"tight" | "full">("tight");
+  const [viewMode, setViewMode] = useState<"overlay" | "side" | "diff">("overlay");
+  const [changedOnly, setChangedOnly] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -27,7 +35,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
       const data = await loadWorkflowQaIssues(projectId);
       if (cancelled) return;
       setIssues(data);
-      setSelectedId((current) => data.find((issue) => issue.id === current)?.id || data[0]?.id || null);
+      setSelectedId((c) => data.find((i) => i.id === c)?.id || data[0]?.id || null);
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -35,19 +43,17 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
   const sel = issues.find((i) => i.id === selectedId);
 
-  // Auto-jump to the page that triggered the issue
   useEffect(() => {
     const p = sel?.locator?.page_number;
     if (p && p > 0) setPdfPage(p);
   }, [sel?.id, sel?.locator?.page_number]);
 
-  // Reset zoom mode when switching issues
   useEffect(() => { setZoomMode("tight"); setTab("change"); }, [sel?.id]);
 
-  // Resolve linked source file -> signed URL whenever the selected issue changes
   useEffect(() => {
     let cancelled = false;
-    setPreviewUrl(null); setPreviewKind(null); setPdfImg(null); setPdfPage(1); setPdfPageCount(1); setPreviewName("");
+    setPreviewUrl(null); setPreviewKind(null); setPdfImg(null);
+    setPdfPage(1); setPdfPageCount(1); setPreviewName("");
     const fileId = sel?.source_file_id || sel?.linked_item?.source_file_id || null;
     if (!fileId) return;
     setPreviewLoading(true);
@@ -68,50 +74,44 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
       setPreviewLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [sel?.source_file_id]);
+  }, [sel?.source_file_id, sel?.id]);
 
-  const grouped = useMemo(() => {
-    const crit = issues.filter((i) => ["critical", "error"].includes(i.severity?.toLowerCase()));
-    const warn = issues.filter((i) => i.severity?.toLowerCase() === "warning");
-    const rest = issues.filter((i) => !["critical", "error", "warning"].includes(i.severity?.toLowerCase()));
-    return [
-      { key: "critical", label: `Critical Blockers (${crit.length})`, tone: "blocked" as const, items: crit },
-      { key: "warn", label: `Review Warnings (${warn.length})`, tone: "inferred" as const, items: warn },
-      { key: "rest", label: `Revision Conflicts (${rest.length})`, tone: "direct" as const, items: rest },
-    ];
+  // Group issues by source sheet for the left navigator
+  const sheets = useMemo(() => {
+    const m = new Map<string, { key: string; name: string; items: WorkflowQaIssue[] }>();
+    for (const it of issues) {
+      const key = it.source_file_id || it.sheet_id || "_unlinked";
+      const name = it.sheet_id?.toString().slice(0, 18) || it.title || "Unlinked";
+      if (!m.has(key)) m.set(key, { key, name, items: [] });
+      m.get(key)!.items.push(it);
+    }
+    return Array.from(m.values());
   }, [issues]);
-  const critCount = grouped[0].items.length;
 
-  // ---- Pinpoint geometry ---------------------------------------------------
-  // bbox is in source-page pixel coords. image_size is the original render size.
-  // We compute a normalized center (cx,cy) in [0..1] and (when zoomed in)
-  // translate+scale the rendered image so the marker sits in the panel center.
+  const critCount = issues.filter((i) => ["critical", "error"].includes(i.severity?.toLowerCase())).length;
+  const warnCount = issues.filter((i) => i.severity?.toLowerCase() === "warning").length;
+  const totalImpact = issues.length;
+  const staleOutputs = issues.filter((i) => ["critical", "error"].includes(i.severity?.toLowerCase())).length;
+
+  const visibleSheets = changedOnly ? sheets.filter((s) => s.items.length > 0) : sheets;
+
+  // Bbox-driven crop
   const locator = sel?.locator || null;
   const bbox = locator?.bbox || null;
   const imgW = locator?.image_size?.w || imgSize?.w || 0;
   const imgH = locator?.image_size?.h || imgSize?.h || 0;
-  const center = (() => {
-    if (bbox && imgW && imgH) {
-      return { cx: ((bbox[0] + bbox[2]) / 2) / imgW, cy: ((bbox[1] + bbox[3]) / 2) / imgH };
-    }
-    return { cx: 0.5, cy: 0.5 };
-  })();
-  // Bbox-driven crop: scale so the bbox (with ~25% padding) fills the viewer.
-  // Falls back to a sane default when bbox/image dimensions are missing.
+  const center = bbox && imgW && imgH
+    ? { cx: ((bbox[0] + bbox[2]) / 2) / imgW, cy: ((bbox[1] + bbox[3]) / 2) / imgH }
+    : { cx: 0.5, cy: 0.5 };
   const bboxW = bbox ? Math.max(1, bbox[2] - bbox[0]) : 0;
   const bboxH = bbox ? Math.max(1, bbox[3] - bbox[1]) : 0;
-  const PAD = 1.3; // 30% padding around the element
-  const fitZoom = bbox && imgW && imgH
-    ? Math.min(imgW / (bboxW * PAD), imgH / (bboxH * PAD))
-    : 1;
-  const zoom = zoomMode === "tight" && bbox
-    ? Math.min(12, Math.max(2, fitZoom))
-    : 1;
+  const PAD = 1.3;
+  const fitZoom = bbox && imgW && imgH ? Math.min(imgW / (bboxW * PAD), imgH / (bboxH * PAD)) : 1;
+  const zoom = zoomMode === "tight" && bbox ? Math.min(12, Math.max(2, fitZoom)) : 1;
   const tx = (0.5 - center.cx) * 100 * zoom;
   const ty = (0.5 - center.cy) * 100 * zoom;
-  // ------------------------------------------------------------------------
 
-  const TABS: Array<{ k: typeof tab; label: string }> = [
+  const TABS: Array<{ k: TabKey; label: string }> = [
     { k: "change", label: "Change" },
     { k: "impact", label: "Impact" },
     { k: "evidence", label: "Evidence" },
@@ -139,6 +139,13 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     goToStage?.("takeoff");
   };
 
+  const sheetTone = (items: WorkflowQaIssue[]): "blocked" | "inferred" | "direct" | "default" => {
+    if (items.some((i) => ["critical", "error"].includes(i.severity?.toLowerCase()))) return "blocked";
+    if (items.some((i) => i.severity?.toLowerCase() === "warning")) return "inferred";
+    if (items.length > 0) return "direct";
+    return "default";
+  };
+
   return (
     <div className="flex flex-col h-full">
       {critCount > 0 && (
@@ -147,257 +154,351 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
             tone="blocked"
             title="Approval Gate Blocked"
             message={`${critCount} Critical Blocker${critCount === 1 ? "" : "s"} remaining. Export functionality is currently disabled.`}
-            actions={
-              <div className="flex gap-2">
-                <button className="px-3 h-8 text-[11px] font-semibold uppercase tracking-[0.12em] bg-[hsl(var(--status-blocked))] text-white hover:opacity-90">
-                  Resolve All Blockers
-                </button>
-                <button className="px-3 h-8 text-[11px] font-semibold uppercase tracking-[0.12em] border border-[hsl(var(--status-blocked))] text-[hsl(0_90%_88%)] hover:bg-[hsl(var(--status-blocked))]/20">
-                  Request Override
-                </button>
-              </div>
-            }
           />
         </div>
       )}
       <div className="grid grid-cols-12 flex-1 min-h-0">
-        <div className="col-span-8 border-r border-border flex flex-col min-h-0">
-          <StageHeader
-            kicker="Stage 04"
-            title="QA Issue Management"
-            subtitle="Decides whether items return to takeoff or advance to confirmation."
-            right={
-              <button
-                disabled={loading || critCount > 0}
-                onClick={() => goToStage?.("confirm")}
-                className="inline-flex h-8 items-center justify-center gap-1.5 border border-primary/50 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground disabled:opacity-50"
-              >
-                Advance <ArrowRight className="w-3 h-3" />
-              </button>
-            }
-          />
-          <div className="flex-1 overflow-auto">
-            {loading ? <EmptyState title="Loading QA issues..." /> :
-              issues.length === 0 ? <EmptyState title="No QA issues" hint="No active blockers or warnings found. Advance to confirmation when takeoff looks correct." /> : (
-                <table className="w-full text-[12px] tabular-nums">
-                  <thead className="bg-muted/40 text-[10px] uppercase tracking-[0.14em] text-muted-foreground sticky top-0">
-                    <tr>
-                      <th className="text-left px-3 h-8 w-24">Type</th>
-                      <th className="text-left px-3 h-8">Issue / Reason</th>
-                      <th className="text-left px-3 h-8 w-32">Element ID</th>
-                      <th className="text-left px-3 h-8 w-24">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {grouped.map((g) => (
-                      g.items.length > 0 && (
-                        <Fragment key={g.key}>
-                          <tr className="bg-muted/20 border-t border-border">
-                            <td colSpan={4} className="px-3 h-7 text-[10px] uppercase tracking-[0.18em] font-semibold text-muted-foreground">{g.label}</td>
-                          </tr>
-                          {g.items.map((issue) => (
-                            <tr key={issue.id} onClick={() => setSelectedId(issue.id)}
-                              style={{ height: 36 }}
-                              className={`border-t border-border cursor-pointer ${selectedId === issue.id ? "bg-primary/10" : "hover:bg-accent/40"}`}>
-                              <td className="px-3"><Pill tone={g.tone} solid>{g.key === "critical" ? "BLOCK" : g.key === "warn" ? "WARN" : "REV"}</Pill></td>
-                              <td className="px-3">
-                                <div className="font-medium truncate">{issue.title}</div>
-                                {issue.description && <div className="text-[11px] text-muted-foreground truncate">{issue.description}</div>}
-                              </td>
-                              <td className="px-3 font-mono text-[11px] text-muted-foreground">{issue.sheet_id?.slice(0, 12) || "-"}</td>
-                              <td className="px-3 text-muted-foreground">{issue.status}</td>
-                            </tr>
-                          ))}
-                        </Fragment>
-                      )
-                    ))}
-                  </tbody>
-                </table>
-              )}
-          </div>
-        </div>
-        <div className="col-span-4 flex flex-col min-h-0" style={{ background: "hsl(var(--card))" }}>
-          <StageHeader kicker="Linked Source Review" title={sel ? sel.title : "Select an issue"} />
-          {sel && (
-            <div className="flex border-b border-border text-[10px] uppercase tracking-[0.14em] font-semibold">
-              {TABS.map((t) => (
-                <button
-                  key={t.k}
-                  onClick={() => setTab(t.k)}
-                  className={`flex-1 h-8 ${tab === t.k ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  {t.label}
-                </button>
-              ))}
+        {/* LEFT — Revision Navigator */}
+        <aside className="col-span-3 border-r border-border bg-card flex flex-col min-h-0">
+          <div className="p-3 border-b border-border space-y-3">
+            <div className="flex justify-between items-center">
+              <h2 className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Revision Navigator</h2>
+              <Filter className="w-3.5 h-3.5 text-muted-foreground" />
             </div>
-          )}
-          <div className="flex-1 overflow-auto p-4 space-y-3">
-            {!sel ? <EmptyState title="No issue selected" /> : (
-              <>
-                {/* Pinpoint viewer — always visible above the tab content */}
-                <div className="aspect-video border border-border bg-background relative overflow-hidden blueprint-bg">
-                  {previewKind === "pdf" && previewUrl && (
-                    <PdfRenderer
-                      url={previewUrl}
-                      currentPage={pdfPage}
-                      onPageCount={setPdfPageCount}
-                      onPageRendered={(dataUrl, w, h) => { setPdfImg(dataUrl); setImgSize({ w, h }); }}
-                      scale={2}
-                    />
-                  )}
-                  {/* zoom/pan wrapper */}
-                  {(previewKind === "image" || (previewKind === "pdf" && pdfImg)) && (
-                    <div
-                      className="absolute inset-0"
-                      style={{
-                        transform: `translate(${tx}%, ${ty}%) scale(${zoom})`,
-                        transformOrigin: "center center",
-                        transition: "transform 0.35s ease-out",
-                      }}
-                    >
-                      <img
-                        src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")}
-                        alt={previewName}
-                        onLoad={(e) => {
-                          if (previewKind === "image") {
-                            const t = e.currentTarget;
-                            setImgSize({ w: t.naturalWidth, h: t.naturalHeight });
-                          }
-                        }}
-                        className="absolute inset-0 w-full h-full object-contain"
-                        draggable={false}
-                      />
-                      {bbox && (
-                        <div
-                          className="absolute"
-                          style={{ left: `${center.cx * 100}%`, top: `${center.cy * 100}%`, transform: "translate(-50%,-50%)" }}
+            <label className="flex items-center justify-between bg-background/60 px-2 py-1.5 cursor-pointer">
+              <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Changed Sheets Only</span>
+              <input type="checkbox" checked={changedOnly} onChange={(e) => setChangedOnly(e.target.checked)} className="accent-primary h-3 w-3" />
+            </label>
+            <div className="grid grid-cols-2 gap-1.5">
+              <div className="bg-background/60 p-2 border border-border">
+                <p className="text-[9px] text-muted-foreground uppercase font-bold">Base Rev</p>
+                <p className="text-[12px] font-bold">Rev 2 (IFC)</p>
+              </div>
+              <div className="bg-background/60 p-2 border border-primary/40">
+                <p className="text-[9px] text-primary uppercase font-bold">Target Rev</p>
+                <p className="text-[12px] font-bold">Rev 3 (Delta)</p>
+              </div>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto">
+            {loading ? (
+              <EmptyState title="Loading…" />
+            ) : visibleSheets.length === 0 ? (
+              <EmptyState title="No QA issues" hint="Advance to confirmation when takeoff looks correct." />
+            ) : (
+              visibleSheets.map((sh) => {
+                const tone = sheetTone(sh.items);
+                const isActive = sh.items.some((i) => i.id === selectedId);
+                return (
+                  <Fragment key={sh.key}>
+                    {sh.items.map((it, idx) => {
+                      const sev = it.severity?.toLowerCase();
+                      const tag = ["critical", "error"].includes(sev) ? "Changed" : sev === "warning" ? "Impacted" : "Blocked";
+                      const tagTone = ["critical", "error"].includes(sev) ? "blocked" : sev === "warning" ? "inferred" : "direct";
+                      const isSel = it.id === selectedId;
+                      return (
+                        <button
+                          key={it.id}
+                          onClick={() => setSelectedId(it.id)}
+                          className={`w-full text-left px-3 py-2.5 border-b border-border/60 transition-colors ${isSel ? "bg-primary/10 border-r-2 border-r-primary" : "hover:bg-accent/40 border-r-2 border-r-transparent"}`}
                         >
-                          <span className="relative flex items-center justify-center" style={{ width: 28, height: 28 }}>
-                            <span className="absolute inline-flex h-full w-full rounded-full bg-[hsl(var(--status-blocked))] opacity-60 animate-ping" />
-                            <span className="relative inline-flex rounded-full bg-[hsl(var(--status-blocked))]" style={{ width: 10, height: 10, boxShadow: "0 0 0 3px hsl(var(--background))" }} />
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {!previewUrl && !previewLoading && (
-                    <div className="absolute inset-0 grid place-items-center text-[10px] uppercase tracking-widest text-muted-foreground">No linked drawing for this issue</div>
-                  )}
-                  {previewLoading && (
-                    <div className="absolute inset-0 grid place-items-center text-[10px] uppercase tracking-widest text-muted-foreground">Loading drawing…</div>
-                  )}
-                  <span className="absolute top-2 left-2 text-[10px] font-mono uppercase tracking-widest text-muted-foreground bg-background/80 px-1.5 py-0.5 z-10">
-                    {previewName || sel.sheet_id?.slice(0, 8) || "-"}
-                    {previewKind === "pdf" && pdfPageCount > 0 && <> · p{pdfPage}/{pdfPageCount}</>}
-                    {!bbox && locator?.page_number && <span className="ml-1 text-[hsl(var(--status-inferred))]">(page-linked)</span>}
-                  </span>
-                  <div className="absolute top-2 right-2 z-10 flex items-center gap-1">
-                    {bbox && (
-                      <button
-                        onClick={() => setZoomMode((m) => (m === "tight" ? "full" : "tight"))}
-                        className="text-[10px] uppercase tracking-widest bg-background/80 px-1.5 py-0.5 hover:text-foreground"
-                      >
-                        {zoomMode === "tight" ? "Full sheet" : "Zoom in"}
-                      </button>
-                    )}
-                    {previewUrl && (
-                      <a href={previewUrl} target="_blank" rel="noreferrer" className="text-[10px] uppercase tracking-widest bg-background/80 px-1.5 py-0.5 hover:text-foreground">Open</a>
-                    )}
-                  </div>
-                  {previewKind === "pdf" && pdfPageCount > 1 && (
-                    <div className="absolute bottom-2 right-2 z-10 flex items-center gap-1 bg-background/80 px-1.5 py-0.5 text-[10px] font-mono">
-                      <button className="px-1 hover:text-foreground" disabled={pdfPage <= 1} onClick={() => setPdfPage((p) => Math.max(1, p - 1))}>◀</button>
-                      <span>{pdfPage}/{pdfPageCount}</span>
-                      <button className="px-1 hover:text-foreground" disabled={pdfPage >= pdfPageCount} onClick={() => setPdfPage((p) => Math.min(pdfPageCount, p + 1))}>▶</button>
-                    </div>
-                  )}
-                </div>
-                {!bbox && locator?.page_number && (
-                  <div className="text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--status-inferred))] border border-[hsl(var(--status-inferred))]/30 bg-[hsl(var(--status-inferred))]/10 px-2 py-1">
-                    Drawing linked to page {locator.page_number}. Exact element region is not available yet — use the recommended fix to jump to the blocked takeoff row.
-                  </div>
-                )}
+                          <div className="flex justify-between items-start mb-1 gap-2">
+                            <span className="text-[12px] font-mono font-bold truncate">{idx === 0 ? sh.name.toUpperCase() : `· ${(it.title || it.id).slice(0, 22)}`}</span>
+                            <Pill tone={tagTone as any} solid>{tag}</Pill>
+                          </div>
+                          <div className="flex gap-3 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+                            <span className="flex items-center gap-1"><Edit2 className="w-2.5 h-2.5" /> {it.issue_type || "issue"}</span>
+                            {it.linked_item && <span className="flex items-center gap-1"><Scale className="w-2.5 h-2.5" /> {(it.linked_item.total_weight || 0).toFixed(2)}t</span>}
+                          </div>
+                          {sev === "warning" && (
+                            <p className="text-[10px] text-[hsl(var(--status-blocked))] mt-1 italic font-medium truncate">{it.description?.slice(0, 50) || ""}</p>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </Fragment>
+                );
+              })
+            )}
+          </div>
+        </aside>
 
-                {/* Tab content */}
-                {tab === "change" && (
-                  <>
-                    <div className="ip-card p-3">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="ip-kicker">Issue Focus</span>
-                        <Pill tone={["critical", "error"].includes(sel.severity?.toLowerCase()) ? "blocked" : "inferred"} solid>
-                          {sel.severity?.toUpperCase() || "-"}
-                        </Pill>
-                      </div>
-                      <div className="text-[12px] font-mono mb-1.5">{sel.id.slice(0, 16).toUpperCase()}</div>
-                      <div className="text-[12px] text-muted-foreground leading-relaxed">{sel.description || "No description provided."}</div>
-                      {sel.linked_item?.missing_refs && sel.linked_item.missing_refs.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {sel.linked_item.missing_refs.map((m, i) => (
-                            <span key={i} className="text-[10px] uppercase tracking-[0.1em] px-1.5 py-0.5 bg-[hsl(var(--status-blocked))]/15 text-[hsl(var(--status-blocked))] border border-[hsl(var(--status-blocked))]/30">
-                              missing: {m}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </>
+        {/* CENTER — Drawing Canvas */}
+        <main className="col-span-6 flex flex-col relative min-h-0 bg-background">
+          {/* Summary bar */}
+          <div className="h-10 bg-card border-b border-border flex items-center px-4 gap-5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <span className="flex items-center gap-1.5"><GitBranch className="w-3.5 h-3.5 text-primary" /><span className="text-primary font-bold">{totalImpact}</span> changes detected</span>
+            <span className="w-px h-3 bg-border" />
+            <span><span className="text-foreground font-bold">{warnCount}</span> quantity impacts</span>
+            <span><span className="text-[hsl(var(--status-inferred))] font-bold">{warnCount}</span> rows require re-run</span>
+            <span><span className="text-[hsl(var(--status-blocked))] font-bold">{staleOutputs}</span> outputs stale</span>
+            <div className="flex-1" />
+            <button
+              disabled={loading || critCount > 0}
+              onClick={() => goToStage?.("confirm")}
+              className="inline-flex h-7 items-center gap-1.5 border border-primary/50 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Advance <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+
+          {/* Floating toolbar */}
+          <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 flex gap-1 p-1 bg-card border border-border shadow-2xl">
+            {[
+              { k: "overlay", label: "Overlay", icon: Layers },
+              { k: "side", label: "Side-by-Side", icon: Columns2 },
+              { k: "diff", label: "Difference", icon: GitCompare },
+            ].map((m) => {
+              const Active = m.icon;
+              const on = viewMode === m.k;
+              return (
+                <button
+                  key={m.k}
+                  onClick={() => setViewMode(m.k as any)}
+                  className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] flex items-center gap-1.5 ${on ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent/40"}`}
+                >
+                  <Active className="w-3.5 h-3.5" /> {m.label}
+                </button>
+              );
+            })}
+            <div className="w-px h-6 bg-border mx-1 my-0.5" />
+            <button onClick={() => setZoomMode("tight")} className="p-1.5 text-muted-foreground hover:text-foreground"><ZoomIn className="w-4 h-4" /></button>
+            <button onClick={() => setZoomMode("full")} className="p-1.5 text-muted-foreground hover:text-foreground"><ZoomOut className="w-4 h-4" /></button>
+            <button onClick={() => setZoomMode((m) => m === "tight" ? "full" : "tight")} className="p-1.5 text-muted-foreground hover:text-foreground"><Maximize2 className="w-4 h-4" /></button>
+            <div className="w-px h-6 bg-border mx-1 my-0.5" />
+            <button className="p-1.5 text-muted-foreground hover:text-foreground"><Eye className="w-4 h-4" /></button>
+          </div>
+
+          {/* Canvas */}
+          <div className="flex-1 overflow-hidden relative blueprint-bg">
+            {!sel ? (
+              <div className="absolute inset-0 grid place-items-center text-[10px] uppercase tracking-widest text-muted-foreground">Select an issue from the navigator</div>
+            ) : (
+              <>
+                {previewKind === "pdf" && previewUrl && (
+                  <PdfRenderer
+                    url={previewUrl}
+                    currentPage={pdfPage}
+                    onPageCount={setPdfPageCount}
+                    onPageRendered={(dataUrl, w, h) => { setPdfImg(dataUrl); setImgSize({ w, h }); }}
+                    scale={2}
+                  />
                 )}
-                {tab === "impact" && (
-                  <div className="ip-card p-3 text-[12px]">
-                    <div className="ip-kicker mb-2">Affected Estimate Row</div>
-                    {sel.linked_item ? (
-                      <div className="space-y-1.5 tabular-nums">
-                        <div className="font-medium truncate">{sel.linked_item.description || "—"}</div>
-                        <div className="grid grid-cols-2 gap-2 text-[11px]">
-                          <div><span className="text-muted-foreground">Size</span> <span className="font-mono">{sel.linked_item.bar_size || "—"}</span></div>
-                          <div><span className="text-muted-foreground">Qty</span> <span className="font-mono">{sel.linked_item.quantity_count || "—"}</span></div>
-                          <div><span className="text-muted-foreground">Length</span> <span className="font-mono">{sel.linked_item.total_length || "—"}</span></div>
-                          <div><span className="text-muted-foreground">Weight</span> <span className="font-mono">{sel.linked_item.total_weight || "—"}</span></div>
+                {(previewKind === "image" || (previewKind === "pdf" && pdfImg)) && (
+                  <div
+                    className="absolute inset-0"
+                    style={{
+                      transform: `translate(${tx}%, ${ty}%) scale(${zoom})`,
+                      transformOrigin: "center center",
+                      transition: "transform 0.35s ease-out",
+                    }}
+                  >
+                    <img
+                      src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")}
+                      alt={previewName}
+                      onLoad={(e) => {
+                        if (previewKind === "image") {
+                          const t = e.currentTarget;
+                          setImgSize({ w: t.naturalWidth, h: t.naturalHeight });
+                        }
+                      }}
+                      className="absolute inset-0 w-full h-full object-contain"
+                      draggable={false}
+                    />
+                    {bbox && imgW && imgH && (
+                      <>
+                        {/* Active selection box (Modified — amber) */}
+                        <div
+                          className="absolute border-2 ring-4"
+                          style={{
+                            left: `${(bbox[0] / imgW) * 100}%`,
+                            top: `${(bbox[1] / imgH) * 100}%`,
+                            width: `${((bbox[2] - bbox[0]) / imgW) * 100}%`,
+                            height: `${((bbox[3] - bbox[1]) / imgH) * 100}%`,
+                            borderColor: "hsl(var(--status-inferred))",
+                            background: "hsl(var(--status-inferred) / 0.08)",
+                            boxShadow: "0 0 0 2px hsl(var(--status-inferred) / 0.2)",
+                          }}
+                        >
+                          <div
+                            className="absolute -top-3 -right-3 w-6 h-6 rounded-full grid place-items-center text-white shadow-lg"
+                            style={{ background: "hsl(var(--status-inferred))" }}
+                          >
+                            <Edit3 className="w-3 h-3" />
+                          </div>
                         </div>
-                      </div>
-                    ) : (
-                      <div className="text-[11px] text-muted-foreground italic">No estimate row linked.</div>
+                      </>
                     )}
                   </div>
                 )}
-                {tab === "evidence" && (
-                  <div className="ip-card p-3 text-[11px]">
-                    <div className="ip-kicker mb-2">Source References</div>
-                    <pre className="whitespace-pre-wrap break-all text-[10px] font-mono text-muted-foreground max-h-48 overflow-auto">
-{JSON.stringify(sel.source_refs ?? null, null, 2)}
-                    </pre>
-                  </div>
+                {!previewUrl && !previewLoading && (
+                  <div className="absolute inset-0 grid place-items-center text-[10px] uppercase tracking-widest text-muted-foreground">No linked drawing for this issue</div>
                 )}
-                {tab === "action" && (
-                  <>
-                    <div className="ip-card p-3">
-                      <div className="ip-kicker mb-1.5 flex items-center gap-1.5"><Wand2 className="w-3 h-3" /> Recommended Fix</div>
-                      <div className="text-[12px] italic text-muted-foreground">Review element source and apply standard correction per project spec.</div>
-                    </div>
-                    <button onClick={jumpToTakeoff} className="w-full h-9 inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground text-[11px] font-semibold uppercase tracking-[0.14em] hover:opacity-90">
-                      <Wand2 className="w-3.5 h-3.5" /> Apply Recommended Fix
-                    </button>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={jumpToTakeoff}
-                        className="h-8 inline-flex items-center justify-center gap-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] border border-[hsl(var(--status-inferred))]/50 text-[hsl(var(--status-inferred))] hover:bg-[hsl(var(--status-inferred))]/10"
-                      >
-                        <ArrowLeft className="w-3 h-3" /> Return to Takeoff
-                      </button>
-                      <button
-                        disabled={critCount > 0}
-                        onClick={() => goToStage?.("confirm")}
-                        className="h-8 inline-flex items-center justify-center gap-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] border border-primary/50 text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground disabled:opacity-50"
-                      >
-                        Advance <ArrowRight className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </>
+                {previewLoading && (
+                  <div className="absolute inset-0 grid place-items-center text-[10px] uppercase tracking-widest text-muted-foreground">Loading drawing…</div>
+                )}
+                {!bbox && previewUrl && (
+                  <div className="absolute top-14 right-4 z-10 text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--status-inferred))] border border-[hsl(var(--status-inferred))]/30 bg-[hsl(var(--status-inferred))]/10 px-2 py-1">
+                    Page-linked · exact element region not yet pinned
+                  </div>
                 )}
               </>
             )}
           </div>
-        </div>
+
+          {/* Status rail */}
+          <footer className="h-6 bg-card border-t border-border flex items-center px-3 justify-between text-[10px] text-muted-foreground">
+            <div className="flex gap-4 items-center">
+              <span className="flex items-center gap-1"><Fingerprint className="w-3 h-3" /> Object ID: <span className="text-foreground font-mono">{(sel?.linked_item?.id || sel?.id || "—").slice(0, 12)}</span></span>
+              <span className="flex items-center gap-1"><History className="w-3 h-3" /> Active Revisions: <span className="text-foreground">Rev 2, Rev 3</span></span>
+            </div>
+            <div className="flex items-center gap-3">
+              {previewKind === "pdf" && pdfPageCount > 1 && (
+                <span className="flex items-center gap-1 font-mono">
+                  <button className="px-1 hover:text-foreground" disabled={pdfPage <= 1} onClick={() => setPdfPage((p) => Math.max(1, p - 1))}>◀</button>
+                  p{pdfPage}/{pdfPageCount}
+                  <button className="px-1 hover:text-foreground" disabled={pdfPage >= pdfPageCount} onClick={() => setPdfPage((p) => Math.min(pdfPageCount, p + 1))}>▶</button>
+                </span>
+              )}
+              <span>Zoom: {Math.round(zoom * 100)}%</span>
+              <span className="truncate max-w-[200px]">{previewName || "—"}</span>
+              <span className="w-1.5 h-1.5 bg-[hsl(var(--status-supported))] rounded-full" />
+            </div>
+          </footer>
+        </main>
+
+        {/* RIGHT — Compare Inspector */}
+        <aside className="col-span-3 bg-card border-l border-border flex flex-col min-h-0">
+          <div className="flex border-b border-border bg-background/40">
+            {TABS.map((t) => (
+              <button
+                key={t.k}
+                onClick={() => setTab(t.k)}
+                className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-[0.14em] transition-colors ${tab === t.k ? "text-primary border-b-2 border-primary bg-card" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex-1 overflow-auto p-4 space-y-5">
+            {!sel ? <EmptyState title="No issue selected" /> : (
+              <>
+                {tab === "change" && (
+                  <>
+                    <section>
+                      <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.12em] mb-2 flex items-center gap-1.5">
+                        <GitCompare className="w-3.5 h-3.5" /> Geometric Comparison
+                      </h3>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <div className="bg-background/60 p-3 border border-border">
+                          <p className="text-[9px] text-muted-foreground mb-1 font-bold uppercase">Rev 2 (Old)</p>
+                          <p className="text-[13px] font-bold text-[hsl(var(--status-blocked))]">{sel.linked_item?.bar_size ? `${sel.linked_item.quantity_count}x ${sel.linked_item.bar_size}` : "—"}</p>
+                          <p className="text-[10px] text-muted-foreground mt-1.5">Length: {sel.linked_item?.total_length ? `${sel.linked_item.total_length}mm` : "—"}</p>
+                        </div>
+                        <div className="bg-background/60 p-3 border border-primary/40">
+                          <p className="text-[9px] text-primary mb-1 font-bold uppercase">Rev 3 (New)</p>
+                          <p className="text-[13px] font-bold text-primary">{sel.linked_item?.bar_size ? `${sel.linked_item.quantity_count}x ${sel.linked_item.bar_size}` : "—"}</p>
+                          <p className="text-[10px] text-muted-foreground mt-1.5">Length: {sel.linked_item?.total_length ? `${sel.linked_item.total_length}mm` : "—"}</p>
+                        </div>
+                      </div>
+                    </section>
+                    <section>
+                      <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.12em] mb-2">Issue</h3>
+                      <div className="bg-background/60 p-3 border border-border space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[12px] font-mono">{sel.id.slice(0, 16).toUpperCase()}</span>
+                          <Pill tone={["critical", "error"].includes(sel.severity?.toLowerCase()) ? "blocked" : "inferred"} solid>{sel.severity?.toUpperCase() || "-"}</Pill>
+                        </div>
+                        <div className="text-[12px] font-medium">{sel.title}</div>
+                        <div className="text-[11px] text-muted-foreground leading-relaxed">{sel.description || "No description provided."}</div>
+                        {sel.linked_item?.missing_refs && sel.linked_item.missing_refs.length > 0 && (
+                          <div className="flex flex-wrap gap-1 pt-1">
+                            {sel.linked_item.missing_refs.map((m, i) => (
+                              <span key={i} className="text-[9px] uppercase tracking-[0.1em] px-1.5 py-0.5 bg-[hsl(var(--status-blocked))]/15 text-[hsl(var(--status-blocked))] border border-[hsl(var(--status-blocked))]/30">missing: {m}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </section>
+                  </>
+                )}
+
+                {tab === "impact" && (
+                  <section>
+                    <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.12em] mb-2 flex items-center gap-1.5">
+                      <Sync className="w-3.5 h-3.5" /> Affected Estimate Rows
+                    </h3>
+                    {sel.linked_item ? (
+                      <div className="bg-card p-3 border border-border relative overflow-hidden">
+                        <div className="absolute top-0 right-0 px-2 py-0.5 bg-[hsl(var(--status-inferred))] text-black text-[9px] font-black uppercase">Stale</div>
+                        <div className="flex justify-between items-center mb-1 pr-12">
+                          <span className="text-[12px] font-bold truncate">{sel.linked_item.description || "Row"}</span>
+                          <span className="text-primary font-mono text-[10px]">{(sel.linked_item.total_weight || 0).toFixed(2)}t</span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground tabular-nums">
+                          {sel.linked_item.bar_size || "—"} · qty {sel.linked_item.quantity_count} · len {sel.linked_item.total_length}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-muted-foreground italic">No estimate row linked.</div>
+                    )}
+                  </section>
+                )}
+
+                {tab === "evidence" && (
+                  <section>
+                    <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.12em] mb-2">Audit Record</h3>
+                    <div className="border-l border-border ml-2 pl-4 space-y-3">
+                      <div className="relative">
+                        <div className="absolute -left-[21px] top-1 w-2 h-2 rounded-full bg-primary" />
+                        <p className="text-[11px] font-bold">Detected via {sel.issue_type || "audit"}</p>
+                        <p className="text-[10px] text-muted-foreground">{sel.description || `Issue surfaced on ${sel.sheet_id || "linked sheet"}.`}</p>
+                        <p className="text-[9px] text-muted-foreground/60 font-mono mt-1">{sel.id.slice(0, 18)}</p>
+                      </div>
+                    </div>
+                    {sel.source_refs && (
+                      <pre className="mt-3 whitespace-pre-wrap break-all text-[10px] font-mono text-muted-foreground max-h-48 overflow-auto bg-background/40 p-2 border border-border">
+{JSON.stringify(sel.source_refs, null, 2)}
+                      </pre>
+                    )}
+                  </section>
+                )}
+
+                {tab === "action" && (
+                  <section className="space-y-2">
+                    <div className="bg-background/60 p-3 border border-border">
+                      <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.12em] mb-1.5 flex items-center gap-1.5"><Wand2 className="w-3 h-3" /> Recommended Fix</div>
+                      <div className="text-[11px] italic text-muted-foreground">Review element source and apply standard correction per project spec, then re-run takeoff for this row.</div>
+                    </div>
+                  </section>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Action rail (always visible) */}
+          {sel && (
+            <div className="p-3 bg-background/40 border-t border-border space-y-2">
+              <button
+                onClick={jumpToTakeoff}
+                className="w-full py-2.5 bg-primary text-primary-foreground font-bold text-[11px] uppercase tracking-[0.14em] flex items-center justify-center gap-2 hover:opacity-90"
+              >
+                <RefreshCw className="w-4 h-4" /> Re-run Affected Items
+              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40">
+                  Accept Unchanged
+                </button>
+                <button className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40">
+                  Mark for Review
+                </button>
+              </div>
+              <button className="w-full py-1.5 text-muted-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:text-foreground">
+                Mark No Impact
+              </button>
+            </div>
+          )}
+        </aside>
       </div>
     </div>
   );
