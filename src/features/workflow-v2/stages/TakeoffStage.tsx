@@ -123,13 +123,18 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
         toast.error("No approved scope segments found. Approve scope items in Stage 02 first.");
         return;
       }
-      let ok = 0, failed = 0, totalItems = 0;
+      let ok = 0, failed = 0, totalItems = 0, manualBlocked = 0;
       for (const seg of segments) {
         try {
           const { data: estData, error: invokeErr } = await supabase.functions.invoke("auto-estimate", {
             body: { segment_id: seg.id, project_id: projectId },
           });
           if (invokeErr) throw invokeErr;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if ((estData as any)?.blocked && (estData as any)?.reason === "MANUAL_NOT_LOADED") {
+            manualBlocked++;
+            continue;
+          }
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const created = (estData as any)?.metadata?.items_created
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -143,7 +148,9 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
           failed++;
         }
       }
-      if (ok > 0 && totalItems > 0) {
+      if (manualBlocked > 0 && ok === 0) {
+        toast.error("Manual-Standard-Practice-2018 not loaded in Brain. Upload it (with extracted text) before running takeoff.");
+      } else if (ok > 0 && totalItems > 0) {
         toast.success(`Generated ${totalItems} item(s) across ${ok} segment(s)${failed ? ` (${failed} failed)` : ""}`);
       } else if (ok > 0) {
         toast.warning("0 items generated — drawings may lack rebar data.");
@@ -216,8 +223,12 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
 
   const totals = useMemo(() => ({
     rows: rows.length,
-    weight: rows.reduce((s, r) => s + r.weight, 0),
-    blocked: rows.filter((r) => r.status === "blocked").length,
+    weight: rows
+      .filter((r) => r.geometry_status !== "unresolved")
+      .reduce((s, r) => s + r.weight, 0),
+    blocked: rows.filter(
+      (r) => r.status === "blocked" || r.geometry_status === "unresolved"
+    ).length,
   }), [rows]);
 
   const sel = focusRow;
@@ -455,11 +466,12 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
         )}
         <div className="border-t border-border p-3">
           <button
-            disabled={rows.length === 0}
+            disabled={rows.length === 0 || totals.blocked > 0}
             onClick={() => { state.refresh(); goToStage?.("qa"); }}
             className="w-full h-10 inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground text-[12px] font-semibold uppercase tracking-[0.14em] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <CheckCircle2 className="w-4 h-4" /> Confirm Takeoff Data
+            <CheckCircle2 className="w-4 h-4" />
+            {totals.blocked > 0 ? `${totals.blocked} Blocked — Resolve First` : "Confirm Takeoff Data"}
           </button>
         </div>
       </aside>

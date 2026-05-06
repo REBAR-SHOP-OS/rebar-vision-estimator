@@ -40,10 +40,10 @@ const massFor = (size: string, type: string): number => {
   if (type === "wwm") return WWM_MASS_KG_PER_M2[k] || 0;
   return REBAR_MASS_KG_PER_M[sizeKey(k)] || 0;
 };
-const lapMmFor = (size: string): number => {
-  const dia = REBAR_DIA_MM[sizeKey(size)] || 0;
-  return dia > 0 ? Math.round(40 * dia) : 0; // 40·db default per RSIC class B
-};
+// NOTE: hardcoded lap fallback (e.g. 40·db) removed by policy.
+// Lap lengths must come from Manual-Standard-Practice-2018 (via Brain) or
+// from an explicit LAP table in the structural OCR. If neither source
+// provides a value, the line is marked UNRESOLVED.
 
 // Build a lightweight structural graph from STRUCTURAL OCR pages only.
 // Architectural OCR is intentionally excluded as a geometry source.
@@ -170,13 +170,13 @@ function resolveLine(
   const spacing = spMatch ? Number(spMatch[1]) : 0;
   const wall = graph.walls.find((w) => (w.lengthMm || 0) > 0);
   if (spacing > 0 && wall?.lengthMm) {
-    const lap = graph.lapTable.get(sizeKey(size)) ?? lapMmFor(size);
+    const lap = graph.lapTable.get(sizeKey(size)) ?? 0;
     const qty = Math.ceil(wall.lengthMm / spacing) + 1;
     const missing: string[] = [];
     let barLenMm = 0;
-    if (wall.heightMm) barLenMm = wall.heightMm + lap;
-    else missing.push("wall height (mm)");
-    if (!lap) missing.push(`lap length for ${sizeKey(size)}`);
+    if (!lap) missing.push(`lap length for ${sizeKey(size)} (Manual-Standard-Practice-2018)`);
+    if (wall.heightMm && lap) barLenMm = wall.heightMm + lap;
+    else if (!wall.heightMm) missing.push("wall height (mm)");
     if (barLenMm > 0) {
       const totalLengthM = +(qty * barLenMm / 1000).toFixed(2);
       return {
@@ -252,7 +252,7 @@ serve(async (req) => {
       supabase.from("standards_profiles").select("*").eq("user_id", user.id).eq("is_default", true).limit(1),
       supabase.from("estimate_items").select("id, description, bar_size, quantity_count, total_length, total_weight, confidence").eq("segment_id", segment_id).limit(200),
       supabase.from("drawing_search_index").select("raw_text, page_number, extracted_entities").eq("project_id", project_id).limit(50),
-      supabase.from("agent_knowledge").select("title, content").eq("user_id", user.id).limit(10),
+      supabase.from("agent_knowledge").select("title, content, file_name").eq("user_id", user.id).limit(50),
     ]);
 
     const segment = segRes.data;
@@ -261,11 +261,51 @@ serve(async (req) => {
     const standard = stdRes.data?.[0];
     const existing = existingRes.data || [];
 
-    // Build drawing text from search index (OCR), separating structural (primary)
-    // from architectural (fallback for hidden/missing concrete elements).
+    // ============================================================
+    // MANUAL-ONLY AUTHORITY GATE
+    // Manual-Standard-Practice-2018 (uploaded into Brain) is the
+    // ONLY allowed source of assumptions (lap, splice, hook, bend).
+    // If the manual is not present and parsed (content > 1000 chars),
+    // refuse to estimate — return a blocker the UI can render.
+    // ============================================================
+    const allKnowledge = (knowledgeRes.data || []) as Array<{ title?: string; content?: string; file_name?: string }>;
+    const manualEntry = allKnowledge.find((k) => {
+      const hay = `${k.title || ""} ${k.file_name || ""}`.toLowerCase();
+      return /manual.*standard.*practice.*2018|standard.?practice.?2018/.test(hay)
+        && (k.content || "").length > 1000;
+    });
+    if (!manualEntry) {
+      console.warn("[auto-estimate] BLOCKED: Manual-Standard-Practice-2018 not loaded into Brain (or not parsed).");
+      return new Response(JSON.stringify({
+        success: false,
+        blocked: true,
+        reason: "MANUAL_NOT_LOADED",
+        message: "Manual-Standard-Practice-2018 must be uploaded to Brain (with extracted text) before takeoff can run. No assumptions are allowed without manual citations.",
+        items_created: 0,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const manualText = (manualEntry.content || "").slice(0, 12000);
+
+    // Build drawing text from search index (OCR), with strict source priority for
+    // production rebar quantities:
+    //   1. SHOP DRAWINGS  — PRIMARY quantity source
+    //   2. STRUCTURAL     — SECONDARY verification / gap-fill
+    //   3. ARCHITECTURAL  — CONTEXT ONLY, never quantified from
     let drawingTextContext = "";
     const searchPages = searchIndexRes.data || [];
+    // Build a per-page → file map so the model can cite source sheet
+    const fileByName = new Map<string, { id: string; file_name: string }>();
+    for (const f of files as Array<{ id: string; file_name?: string }>) {
+      if (f.file_name) fileByName.set(f.file_name.toUpperCase(), { id: f.id, file_name: f.file_name });
+    }
+    const isShopName = (n: string) => /\bSHOP\b|^SD[\s_-]?\d|\bSD\d/i.test(n || "");
+    const isStructName = (n: string) => /\bSTRUCT|^S[\s_-]?\d|\bSTR[-_\s]/i.test(n || "");
+    const isArchName = (n: string) => /\bARCH|^A[\s_-]?\d/i.test(n || "");
     if (searchPages.length > 0) {
+      const shop: string[] = [];
       const structural: string[] = [];
       const architectural: string[] = [];
       const other: string[] = [];
@@ -274,20 +314,27 @@ serve(async (req) => {
         if (text.length <= 20) continue;
         const tb = (page.extracted_entities as any)?.title_block || {};
         const disc = String(tb.discipline || "").toLowerCase();
-        const snip = `[Page ${page.page_number}] ${text.substring(0, 2000)}`;
-        if (disc.includes("struct")) structural.push(snip);
+        const sheetTag = (page.extracted_entities as any)?.title_block?.sheet_id || `p${page.page_number}`;
+        const snip = `[SHEET ${sheetTag} · Page ${page.page_number}] ${text.substring(0, 2000)}`;
+        if (disc.includes("shop") || /\bSD\b|SHOP DRAWING/i.test(text.slice(0, 200))) shop.push(snip);
+        else if (disc.includes("struct")) structural.push(snip);
         else if (disc.includes("arch")) architectural.push(snip);
         else other.push(snip);
       }
       const parts: string[] = [];
+      if (shop.length > 0) {
+        parts.push("=== SHOP DRAWING OCR (PRIMARY — production quantities come from here) ===\n" + shop.join("\n\n"));
+      }
       if (structural.length > 0) {
-        parts.push("=== STRUCTURAL OCR (PRIMARY — use these numbers) ===\n" + structural.join("\n\n"));
+        parts.push("=== STRUCTURAL OCR (SECONDARY — verify shop quantities, fill gaps) ===\n" + structural.join("\n\n"));
       }
       if (other.length > 0) {
         parts.push("=== UNCLASSIFIED OCR ===\n" + other.join("\n\n"));
       }
       if (architectural.length > 0) {
-        parts.push("=== ARCHITECTURAL OCR (FALLBACK — only to recover concrete elements missing from structural; tag those lines '(arch-fallback)') ===\n" + architectural.join("\n\n"));
+        // Architectural is CONTEXT ONLY — never feed body text to quantity prompt.
+        const archTitles = architectural.slice(0, 6).map((s) => s.split("\n")[0]).join("\n");
+        parts.push("=== ARCHITECTURAL OCR (CONTEXT ONLY — DO NOT QUANTIFY FROM) ===\n" + archTitles);
       }
       drawingTextContext = parts.join("\n\n").slice(0, 14000);
     } else {
@@ -368,11 +415,16 @@ serve(async (req) => {
       (existing as Array<{ description?: string; bar_size?: string }>).map((e) => normKey(e.description || "", e.bar_size || "")),
     );
 
-    const systemPrompt = `You are a rebar EXTRACTION assistant. You DO NOT compute geometry. A deterministic resolver downstream will calculate qty, length and weight from a structural graph. Your job is to faithfully extract rebar callouts from the drawing text.
+    const systemPrompt = `You are a rebar EXTRACTION assistant. You DO NOT compute geometry. A deterministic resolver downstream will calculate qty, length and weight. Your job is to faithfully extract rebar callouts from the drawing text and CITE THE MANUAL for any assumption.
 Rules:
 - Return ONLY a JSON array of objects, no markdown, no explanation.
-- Each object: { "description": string, "bar_size": string, "quantity_count": number, "total_length": number, "total_weight": number, "confidence": number, "item_type": "rebar" | "wwm" }
-- DISCIPLINE PRIORITY: ONLY use STRUCTURAL OCR for rebar geometry. ARCHITECTURAL OCR may ONLY be used to FLAG a concrete element that has no structural rebar callout — in that case emit one placeholder line with quantity_count=0, total_length=0 and prefix description with "(arch-fallback) ".
+- Each object: { "description": string, "bar_size": string, "quantity_count": number, "total_length": number, "total_weight": number, "confidence": number, "item_type": "rebar" | "wwm", "source_sheet": string | null, "source_excerpt": string | null, "authority_section": string | null, "authority_page": number | null, "authority_quote": string | null }
+- SOURCE PRIORITY (production rebar quantities):
+    1. SHOP DRAWING OCR  — PRIMARY. Quantities MUST come from here when present.
+    2. STRUCTURAL OCR    — SECONDARY. Use only to verify or fill gaps not in shop drawings.
+    3. ARCHITECTURAL OCR — CONTEXT ONLY. NEVER derive a quantity from architectural sheets.
+- ASSUMPTION AUTHORITY: The ONLY allowed source for assumption rules (lap, splice, hook, bend, development length) is "Manual-Standard-Practice-2018" provided below. Every row that uses an assumption MUST set authority_section, authority_page (if available) and authority_quote. If the manual does not cover the needed rule, leave the geometry fields 0 — the resolver will mark UNRESOLVED. NEVER invent a value.
+- Always include "source_sheet" with the SHEET tag from the OCR header (e.g. "SD-06") and "source_excerpt" with a verbatim quoted phrase from that sheet.
 - Extraction policy:
   * If a bar list / footing schedule row is explicitly visible (Mark, Qty, Size, Total Length), copy those EXACT numbers into quantity_count and total_length (m). Set confidence 0.9.
   * If a callout is visible but the geometry is referenced indirectly (e.g. "17 10M BS80 @300 DWL", "1 20M B2035 TOP CONT. IF"), extract ONLY what is literally written: include the bar mark in the description, set quantity_count to the literal count if shown, leave total_length=0, total_weight=0, confidence 0.4. The downstream resolver will compute the rest.
@@ -407,7 +459,11 @@ Lap defaults: ${standard?.lap_defaults ? JSON.stringify(standard.lap_defaults) :
 
 ${knowledgeContext}
 
-${drawingTextContext ? `=== DRAWING TEXT (use this as primary source — parse bar lists, footing schedules, rebar callouts) ===\n${drawingTextContext}\n=== END DRAWING TEXT ===` : "No drawing text available — estimate based on typical construction practice for this element type. Be conservative."}
+=== ASSUMPTION AUTHORITY (Manual-Standard-Practice-2018) ===
+${manualText}
+=== END ASSUMPTION AUTHORITY ===
+
+${drawingTextContext ? `=== DRAWING TEXT ===\n${drawingTextContext}\n=== END DRAWING TEXT ===` : "NO DRAWING TEXT AVAILABLE. DO NOT ESTIMATE. Return an empty JSON array []."}
 
 Generate estimate items for this segment. Base quantities on the ACTUAL drawing data if available, not assumptions.
 
@@ -566,15 +622,32 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       items.forEach((item: any) => { item.confidence = Math.min(item.confidence || 0.5, 0.4); });
     }
 
-    // Prefer first structural-tagged file from names; else first file (per-line provenance still weak until pipeline links rows)
-    const upperNames = files.map((f: { file_name?: string }) => (f.file_name || "").toUpperCase());
-    let sourceFileId: string | null = null;
-    const structIdx = upperNames.findIndex((n: string) => /STRUCTURAL|^S[-_]|\bSTR\b|FTG|FOOT|FOUND/i.test(n));
-    if (structIdx >= 0) sourceFileId = files[structIdx].id;
-    else if (files.length > 0) sourceFileId = files[0].id;
+    // Per-row provenance: prefer the file the model cited via source_sheet,
+    // falling back to filename-role priority (shop > structural). NEVER pick
+    // an architectural file as the source for a quantity row.
+    const upperNames = (files as Array<{ id: string; file_name?: string }>).map(
+      (f) => ({ id: f.id, name: (f.file_name || "").toUpperCase() })
+    );
+    const shopFile = upperNames.find((f) => isShopName(f.name));
+    const structFile = upperNames.find((f) => isStructName(f.name));
+    const defaultSourceId =
+      shopFile?.id || structFile?.id ||
+      upperNames.find((f) => !isArchName(f.name))?.id || null;
+
+    const resolveRowSource = (it: { source_sheet?: string | null }): string | null => {
+      const tag = String(it.source_sheet || "").toUpperCase().trim();
+      if (tag) {
+        const hit = upperNames.find((f) => f.name.includes(tag));
+        if (hit && !isArchName(hit.name)) return hit.id;
+      }
+      return defaultSourceId;
+    };
 
     // Insert items into estimate_items
-    const rows = items.map((item: any) => ({
+    const rows = items.map((item: any) => {
+      const hasAssumption = !!(item._derivation || item._missing_refs?.length);
+      const citationMissing = hasAssumption && !item.authority_section && !item.authority_quote;
+      return {
       segment_id,
       project_id,
       user_id: user.id,
@@ -585,15 +658,24 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       total_weight: Math.max(0, Number(item.total_weight) || 0),
       confidence: Math.min(1, Math.max(0, Number(item.confidence) || 0)),
       item_type: String(item.item_type || "rebar"),
-      status: "draft",
-      source_file_id: sourceFileId || null,
+      status: (item._geometry_status === "unresolved" || citationMissing) ? "unresolved" : "draft",
+      source_file_id: resolveRowSource(item),
       assumptions_json: {
         geometry_status: item._geometry_status || "unresolved",
         missing_refs: item._missing_refs || [],
         derivation: item._derivation || null,
         page_number: item._page_number || null,
+        source_sheet: item.source_sheet || null,
+        source_excerpt: item.source_excerpt || null,
+        authority_document: "Manual-Standard-Practice-2018",
+        authority_section: item.authority_section || null,
+        authority_page: item.authority_page || null,
+        authority_quote: item.authority_quote || null,
+        assumption_rule_id: item.assumption_rule_id || null,
+        citation_missing: citationMissing,
       },
-    }));
+    };
+    });
 
     // De-dup gate: collapse rows on (normalized description, bar_size) keeping highest-confidence,
     // and skip rows that already exist for this segment.

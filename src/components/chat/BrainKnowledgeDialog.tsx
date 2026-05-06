@@ -15,6 +15,36 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { readSpreadsheetFile, rowsToCsvText } from "@/lib/spreadsheet-import";
+import * as pdfjsLib from "pdfjs-dist";
+
+// Worker is already configured in src/lib/pdf-to-images.ts; re-asserting here
+// is safe (idempotent) and avoids load-order issues if this dialog opens first.
+if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+}
+
+// Extract text from a PDF in-browser. Caps at ~500KB so the runtime prompt
+// path stays small. Returns "" if extraction fails (caller shows a warning).
+async function extractPdfText(file: File): Promise<string> {
+  try {
+    const buf = await file.arrayBuffer();
+    const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+    const pageCount = Math.min(doc.numPages, 200);
+    const out: string[] = [];
+    for (let i = 1; i <= pageCount; i++) {
+      const p = await doc.getPage(i);
+      const tc = await p.getTextContent();
+      const text = tc.items.map((it: any) => ("str" in it ? it.str : "")).join(" ");
+      out.push(`[Page ${i}]\n${text}`);
+      if (out.join("\n").length > 500_000) break;
+    }
+    return out.join("\n\n").slice(0, 500_000);
+  } catch (err) {
+    console.warn("[BrainKnowledge] PDF text extraction failed:", err);
+    return "";
+  }
+}
 
 interface KnowledgeItem {
   id: string;
@@ -144,11 +174,25 @@ const BrainKnowledgeDialog: React.FC = () => {
         continue;
       }
 
+      // Extract text so the runtime (auto-estimate) can use this file as an
+      // assumption authority. Without extracted content, the file is invisible
+      // to the takeoff engine.
+      let extracted = "";
+      if (/\.pdf$/i.test(file.name)) {
+        extracted = await extractPdfText(file);
+      } else if (/\.(txt|md|csv)$/i.test(file.name)) {
+        try { extracted = (await file.text()).slice(0, 500_000); } catch { /* ignore */ }
+      }
+      if (!extracted) {
+        toast.warning(`${file.name}: text could not be extracted — file is stored but won't be used as a runtime authority.`);
+      }
+
       const { error } = await supabase.from("agent_knowledge").insert({
         user_id: user.id,
         title: file.name,
         file_path: filePath,
         file_name: file.name,
+        content: extracted || null,
         type: "file",
       });
 
@@ -159,6 +203,33 @@ const BrainKnowledgeDialog: React.FC = () => {
     loadItems();
     setUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // Re-parse a previously uploaded file to populate `content` on legacy rows.
+  const reparseFile = async (item: KnowledgeItem) => {
+    if (!item.file_path || !user) return;
+    try {
+      const { data: signed, error: sErr } = await supabase.storage
+        .from("blueprints")
+        .createSignedUrl(item.file_path, 60);
+      if (sErr || !signed?.signedUrl) throw sErr || new Error("No signed URL");
+      const resp = await fetch(signed.signedUrl);
+      const blob = await resp.blob();
+      const fakeFile = new File([blob], item.file_name || "file.pdf", { type: blob.type });
+      let extracted = "";
+      if (/\.pdf$/i.test(fakeFile.name)) extracted = await extractPdfText(fakeFile);
+      else if (/\.(txt|md|csv)$/i.test(fakeFile.name)) extracted = (await fakeFile.text()).slice(0, 500_000);
+      if (!extracted) { toast.error("Could not extract text"); return; }
+      const { error } = await supabase.from("agent_knowledge")
+        .update({ content: extracted })
+        .eq("id", item.id);
+      if (error) throw error;
+      toast.success(`Parsed ${fakeFile.name} (${(extracted.length / 1000).toFixed(0)}k chars)`);
+      loadItems();
+    } catch (err) {
+      console.warn("Re-parse failed:", err);
+      toast.error("Re-parse failed");
+    }
   };
 
   const deleteItem = async (item: KnowledgeItem) => {
@@ -443,7 +514,21 @@ const BrainKnowledgeDialog: React.FC = () => {
                   <Upload className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-xs truncate">{item.file_name || item.title}</p>
+                    {!item.content ? (
+                      <p className="text-[10px] text-amber-600">Not parsed — runtime can't read this file</p>
+                    ) : (
+                      <p className="text-[10px] text-muted-foreground">{(item.content.length / 1000).toFixed(0)}k chars indexed</p>
+                    )}
                   </div>
+                  {!item.content && (
+                    <button
+                      onClick={() => reparseFile(item)}
+                      className="opacity-0 group-hover:opacity-100 text-[10px] uppercase tracking-wider text-primary hover:underline transition-opacity"
+                      title="Extract text so the takeoff engine can use this file"
+                    >
+                      Parse
+                    </button>
+                  )}
                   <button onClick={() => deleteItem(item)} className="opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive/80 transition-opacity">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
