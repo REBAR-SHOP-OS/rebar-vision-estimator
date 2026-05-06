@@ -162,7 +162,7 @@ const ElementReviewPanel: React.FC<ElementReviewPanelProps> = ({
 
   const confidence = current.extraction?.confidence ?? 0;
   const lowConfidence = confidence < 0.82;
-  const truth = current.extraction?.truth;
+  const truth = current.extraction?.truth as any;
   const answer = answers.get(current.element_id);
 
   return (
