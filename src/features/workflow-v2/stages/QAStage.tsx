@@ -286,8 +286,8 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                 )}
                 {(previewKind === "image" || (previewKind === "pdf" && pdfImg)) && (
                   <div
-                    className="absolute inset-0"
-                    style={{
+                    className={`absolute inset-0 ${viewMode === "side" ? "grid grid-cols-2 gap-px bg-border" : ""}`}
+                    style={viewMode === "side" ? undefined : {
                       transform: `translate(${tx}%, ${ty}%) scale(${zoom})`,
                       transformOrigin: "center center",
                       transition: "transform 0.35s ease-out",
@@ -302,10 +302,20 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                           setImgSize({ w: t.naturalWidth, h: t.naturalHeight });
                         }
                       }}
-                      className="absolute inset-0 w-full h-full object-contain"
+                      className={viewMode === "side" ? "w-full h-full object-contain bg-background" : "absolute inset-0 w-full h-full object-contain"}
+                      style={viewMode === "diff" ? { mixBlendMode: "difference", filter: "invert(1)" } : undefined}
                       draggable={false}
                     />
-                    {bbox && imgW && imgH && (
+                    {viewMode === "side" && (
+                      <img
+                        src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")}
+                        alt={`${previewName} (target rev)`}
+                        className="w-full h-full object-contain bg-background"
+                        style={{ filter: "sepia(1) hue-rotate(180deg) saturate(2)" }}
+                        draggable={false}
+                      />
+                    )}
+                    {viewMode !== "side" && bbox && imgW && imgH && (
                       <>
                         {/* Active selection box — orange pointer */}
                         <div
