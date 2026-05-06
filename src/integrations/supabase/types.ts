@@ -341,6 +341,9 @@ export type Database = {
           id: string
           is_scanned: boolean | null
           page_count: number | null
+          parse_error: string | null
+          parse_status: string
+          parsed_at: string | null
           pdf_metadata: Json | null
           project_id: string
           sha256: string
@@ -356,6 +359,9 @@ export type Database = {
           id?: string
           is_scanned?: boolean | null
           page_count?: number | null
+          parse_error?: string | null
+          parse_status?: string
+          parsed_at?: string | null
           pdf_metadata?: Json | null
           project_id: string
           sha256: string
@@ -371,6 +377,9 @@ export type Database = {
           id?: string
           is_scanned?: boolean | null
           page_count?: number | null
+          parse_error?: string | null
+          parse_status?: string
+          parsed_at?: string | null
           pdf_metadata?: Json | null
           project_id?: string
           sha256?: string
