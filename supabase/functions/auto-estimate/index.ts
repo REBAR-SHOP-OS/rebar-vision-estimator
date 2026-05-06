@@ -258,48 +258,41 @@ function classifyElementForAsk(text: string): "slab_edge"|"strip_footing"|"pad"|
   return "generic";
 }
 function elementNounForAsk(c: string): string {
-  return ({ slab_edge: "slab edge", strip_footing: "strip footing", pad: "pad", wall: "wall", cage: "column/pier cage", generic: "element" } as Record<string,string>)[c] || "element";
-}
-function closingClauseForAsk(c: string): string {
-  return ({
-    slab_edge: "so the system can calculate total edge run, qty, length, and weight",
-    strip_footing: "so the system can calculate total length and weight",
-    pad: "so the system can calculate qty and total length",
-    wall: "so the system can calculate bar length, qty, and weight",
-    cage: "so the system can calculate stirrup count, length, and weight",
-    generic: "so the system can calculate qty, length, and weight",
-  } as Record<string,string>)[c] || "so the system can calculate qty, length, and weight";
+  return ({ slab_edge: "slab", strip_footing: "strip footing", pad: "housekeeping pad", wall: "wall", cage: "column or pier", generic: "element" } as Record<string,string>)[c] || "element";
 }
 function rawInputPhraseForAsk(token: string, c: string): string | null {
   const k = (token || "").toLowerCase().replace(/[^a-z0-9_]/g, "_");
   if (/(perimeter|edge_length|edge_run|run_length|^length$|total_length|element_length)/.test(k)) {
-    if (c === "slab_edge") return "the slab edge length and width shown on the drawing";
-    if (c === "wall")      return "the wall length shown on the drawing";
-    if (c === "pad")       return "the pad length and width shown on the drawing";
-    return "the run/length dimension shown on the drawing";
+    if (c === "slab_edge") return "the slab length and slab width";
+    if (c === "wall")      return "the wall length";
+    if (c === "pad")       return "the pad length and pad width";
+    if (c === "strip_footing") return "the footing length";
+    return "the length";
   }
-  if (/(wall_height|^height$)/.test(k)) return "the wall height shown on the drawing";
+  if (/(wall_height|^height$)/.test(k)) return "the wall height";
   if (/(pad_length|pad_width|element_dimensions|dimensions|footprint|plan_dim)/.test(k)) {
-    if (c === "wall") return "the wall length and height shown on the drawing";
-    return "the element length and width shown on the drawing";
+    if (c === "wall") return "the wall length and wall height";
+    if (c === "slab_edge") return "the slab length and slab width";
+    if (c === "pad") return "the pad length and pad width";
+    return "the length and width";
   }
-  if (/(spacing|o_c|on_center)/.test(k)) return "the bar spacing shown on the drawing";
-  if (/(count|qty|quantity)/.test(k)) return "the bar count shown on the callout";
-  if (/(rebar_callout|^callout$|bar_callout|mark)/.test(k)) return "the rebar callout text shown on the drawing";
-  if (/(cover)/.test(k)) return "the concrete cover shown on the drawing";
-  if (/(thickness)/.test(k)) return "the slab/wall thickness shown on the drawing";
-  if (/(diameter)/.test(k)) return "the diameter shown on the drawing";
+  if (/(spacing|o_c|on_center)/.test(k)) return "the bar spacing";
+  if (/(count|qty|quantity)/.test(k)) return "the bar count";
+  if (/(rebar_callout|^callout$|bar_callout|mark)/.test(k)) return "the rebar callout text";
+  if (/(cover)/.test(k)) return "the concrete cover";
+  if (/(thickness)/.test(k)) return "the thickness";
+  if (/(diameter)/.test(k)) return "the diameter";
   return null;
 }
 function defaultRawInputForAsk(c: string): string {
   return ({
-    slab_edge: "the slab edge length and width shown on the drawing",
-    strip_footing: "the footing run dimension shown on the drawing",
-    pad: "the pad length and width shown on the drawing",
-    wall: "the wall length and height shown on the drawing",
-    cage: "the column/pier dimensions, tie spacing, and overall height shown on the drawing",
-    generic: "the dimensions and bar callout shown on the drawing",
-  } as Record<string,string>)[c] || "the dimensions and bar callout shown on the drawing";
+    slab_edge: "the slab length and slab width",
+    strip_footing: "the footing length",
+    pad: "the pad length and pad width",
+    wall: "the wall length and wall height",
+    cage: "the column or pier dimensions, tie spacing, and overall height",
+    generic: "the dimensions and bar callout",
+  } as Record<string,string>)[c] || "the dimensions and bar callout";
 }
 
 serve(async (req) => {
@@ -1055,9 +1048,12 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         const inputList = phrases.length === 1
           ? phrases[0]
           : phrases.slice(0, -1).join(", ") + ", and " + phrases[phrases.length - 1];
-        const forClause = element ? ` for "${element}"` : (excerpt ? ` for "${String(excerpt).slice(0, 80)}"` : "");
+        const lookAt = locLabel || (aj.page_number ? `Page ${aj.page_number}` : "the drawing");
+        const findPart = element
+          ? `the ${noun} marked "${element}"`
+          : (excerpt ? `the ${noun} for "${String(excerpt).slice(0, 80)}"` : `the ${noun}`);
         const baseTitle = `${noun} — enter drawing dimensions`;
-        const baseDesc = `at the ${noun}: enter ${inputList}${forClause} ${closingClauseForAsk(elClass)}.`;
+        const baseDesc = `Look at ${lookAt}. Find ${findPart}. Enter ${inputList} from the drawing.`;
         return ({
         user_id: user.id,
         project_id,
@@ -1066,7 +1062,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         issue_type: "unresolved_geometry",
         severity: "error",
         title: locLabel ? `${locLabel}: ${baseTitle}` : baseTitle,
-        description: locLabel ? `${locLabel}: ${baseDesc}` : baseDesc,
+        description: baseDesc,
         sheet_id: sheet,
         status: "open",
         source_refs: [{
