@@ -62,19 +62,25 @@ function buildEstimateSummarySheet(wb: ExcelJS.Workbook, params: ExportParams) {
   const barList: any[] = quoteResult.quote.bar_list || [];
   const sizeBreakdownKg: Record<string, number> = quoteResult.quote.size_breakdown_kg || {};
   const sizeBreakdown: Record<string, number> = quoteResult.quote.size_breakdown || {};
-  const meshDetails: any[] = quoteResult.quote.mesh_details || scopeData?.meshDetails || [];
+  const rawMeshDetails: any[] = quoteResult.quote.mesh_details || scopeData?.meshDetails || [];
+  // Extract WWM items from bar_list if mesh_details is empty
+  const meshDetails: any[] = rawMeshDetails.length > 0 ? rawMeshDetails : barList
+    .filter((b) => b.size && /\d.*x.*\d.*W/i.test(b.size))
+    .map((b) => ({
+      location: b.element_type || b.sub_element || "—",
+      mesh_size: b.size,
+      area_sqft: b.area_sqft || b.qty || "—",
+    }));
   const recon = quoteResult.quote.reconciliation || {};
 
-  // Compute weight-by-size
-  const hasSizeKg = Object.keys(sizeBreakdownKg).length > 0;
-  const allSizes = new Set([...Object.keys(sizeBreakdownKg), ...Object.keys(sizeBreakdown)]);
-  const sizeEntries: [string, number][] = [];
-  for (const size of allSizes) {
-    const kg = hasSizeKg
-      ? (sizeBreakdownKg[size] || (sizeBreakdown[size] || 0) * 0.453592)
-      : (sizeBreakdown[size] || 0) * 0.453592;
-    if (kg > 0) sizeEntries.push([size, kg]);
+  // Compute weight-by-size from bar_list (same source as element breakdown)
+  const sizeWeights: Record<string, number> = {};
+  for (const b of barList) {
+    const sz = b.size || "OTHER";
+    const wtKg = typeof b.weight_kg === "number" ? b.weight_kg : (typeof b.weight_lbs === "number" ? b.weight_lbs * 0.453592 : 0);
+    if (wtKg > 0) sizeWeights[sz] = (sizeWeights[sz] || 0) + wtKg;
   }
+  const sizeEntries: [string, number][] = Object.entries(sizeWeights);
   sizeEntries.sort((a, b) => parseInt(a[0].replace(/[^0-9]/g, "")) - parseInt(b[0].replace(/[^0-9]/g, "")));
 
   // Compute weight-by-element
@@ -86,7 +92,9 @@ function buildEstimateSummarySheet(wb: ExcelJS.Workbook, params: ExportParams) {
   }
   const elemEntries = Object.entries(elemWeights).sort((a, b) => b[1] - a[1]);
 
-  const totalKg = recon.drawing_based_total || quoteResult.quote.total_weight_kg || (quoteResult.quote.total_weight_lbs ? quoteResult.quote.total_weight_lbs * 0.453592 : 0);
+  // Compute totalKg from actual visible data instead of stale AI value
+  const computedKg = elemEntries.reduce((s, e) => s + e[1], 0) || sizeEntries.reduce((s, e) => s + e[1], 0);
+  const totalKg = computedKg > 0 ? computedKg : (recon.drawing_based_total || quoteResult.quote.total_weight_kg || (quoteResult.quote.total_weight_lbs ? quoteResult.quote.total_weight_lbs * 0.453592 : 0));
   const totalTons = totalKg / 1000;
 
   // Column widths
@@ -336,8 +344,10 @@ function buildBarListSheet(wb: ExcelJS.Workbook, params: ExportParams) {
         const multiplier = b.multiplier || 1;
         const qty = b.qty || 0;
         const totalPieces = qty * multiplier;
-        const totalLenM = (totalPieces * lengthMm) / 1000;
-        const wtKg = typeof b.weight_kg === "number" ? b.weight_kg : totalLenM * massKgM;
+        // Prefer AI-provided weight_kg; back-calculate length for display
+        const calcLenM = (totalPieces * lengthMm) / 1000;
+        const wtKg = typeof b.weight_kg === "number" ? b.weight_kg : calcLenM * massKgM;
+        const totalLenM = (typeof b.weight_kg === "number" && massKgM > 0) ? b.weight_kg / massKgM : calcLenM;
 
         const identification = [b.size, b.spacing ? `@ ${b.spacing}` : "", b.bar_mark || b.description || ""].filter(Boolean).join(" ");
 
@@ -432,10 +442,19 @@ function buildReconciliationSheet(wb: ExcelJS.Workbook, params: ExportParams) {
   });
 
   const elemRecon: any[] = recon.element_reconciliation || [];
+  let firstDataRow = 0;
+  let lastDataRow = 0;
+  const addDataRow = (values: any[]) => {
+    const r = ws.addRow(values);
+    const currentRow = ws.rowCount;
+    if (!firstDataRow) firstDataRow = currentRow;
+    lastDataRow = currentRow;
+    r.eachCell((cell) => { cell.border = THIN_BORDER; });
+  };
+
   if (elemRecon.length > 0) {
     for (const er of elemRecon) {
-      const r = ws.addRow([er.element || "", er.drawing_weight != null ? r1(er.drawing_weight) : "", er.norm_weight != null ? r1(er.norm_weight) : "", er.variance_percent != null ? r1(er.variance_percent) : "", er.status || "", er.notes || ""]);
-      r.eachCell((cell) => { cell.border = THIN_BORDER; });
+      addDataRow([er.element || "", er.drawing_weight != null ? r1(er.drawing_weight) : "", er.norm_weight != null ? r1(er.norm_weight) : "", er.variance_percent != null ? r1(er.variance_percent) : "", er.status || "", er.notes || ""]);
     }
   } else {
     const elemWeights: Record<string, number> = {};
@@ -445,13 +464,20 @@ function buildReconciliationSheet(wb: ExcelJS.Workbook, params: ExportParams) {
       elemWeights[t] = (elemWeights[t] || 0) + wtKg;
     }
     for (const [elem, wt] of Object.entries(elemWeights)) {
-      const r = ws.addRow([elem, r1(wt), "", "", "", ""]);
-      r.eachCell((cell) => { cell.border = THIN_BORDER; });
+      addDataRow([elem, r1(wt), "", "", "", ""]);
     }
   }
 
   ws.addRow([]);
-  const totalRow = ws.addRow(["TOTAL", recon.drawing_based_total ? r1(recon.drawing_based_total) : "", recon.industry_norm_total ? r1(recon.industry_norm_total) : "", recon.variance_pct != null ? r1(recon.variance_pct) : "", recon.risk_level || "", ""]);
+  const hasSumRange = firstDataRow > 0 && lastDataRow > 0;
+  const totalRow = ws.addRow([
+    "TOTAL",
+    hasSumRange ? { formula: `SUM(B${firstDataRow}:B${lastDataRow})` } : "",
+    hasSumRange ? { formula: `SUM(C${firstDataRow}:C${lastDataRow})` } : "",
+    recon.variance_pct != null ? r1(recon.variance_pct) : "",
+    recon.risk_level || "",
+    "",
+  ]);
   totalRow.eachCell((cell) => {
     cell.fill = YELLOW_FILL;
     cell.font = BOLD_FONT;

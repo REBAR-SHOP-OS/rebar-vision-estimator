@@ -49,7 +49,11 @@ const BlueprintViewer: React.FC<BlueprintViewerProps> = ({
   // PDF state
   const isPdf = isPdfUrl(imageUrl);
   const [pdfPageCount, setPdfPageCount] = useState(0);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(() => {
+    const stored = sessionStorage.getItem("blueprint-viewer-initial-page");
+    if (stored) { sessionStorage.removeItem("blueprint-viewer-initial-page"); return parseInt(stored, 10) || 1; }
+    return 1;
+  });
   const [pdfImageUrl, setPdfImageUrl] = useState<string | null>(null);
 
   // Visible type filter

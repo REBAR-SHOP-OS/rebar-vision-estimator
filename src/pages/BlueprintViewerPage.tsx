@@ -25,6 +25,12 @@ const BlueprintViewerPage: React.FC = () => {
       if (data.reviewStatuses) {
         setReviewStatuses(new Map(Object.entries(data.reviewStatuses) as [string, ReviewStatus][]));
       }
+      // Check URL hash for initial page number (used by provenance links)
+      const hash = window.location.hash;
+      const pageMatch = hash.match(/page=(\d+)/);
+      if (pageMatch) {
+        sessionStorage.setItem("blueprint-viewer-initial-page", pageMatch[1]);
+      }
       setReady(true);
     } catch {
       navigate("/", { replace: true });

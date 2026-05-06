@@ -6,11 +6,19 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { LanguageProvider } from "@/contexts/LanguageContext";
+import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
 import Dashboard from "./pages/Dashboard";
 import ReviewPage from "./pages/ReviewPage";
 import BlueprintViewerPage from "./pages/BlueprintViewerPage";
 import NotFound from "./pages/NotFound";
+import AppShell from "./components/layout/AppShell";
+import ProjectWorkspace from "./pages/ProjectWorkspace";
+import LegacyProjectWorkspace from "./pages/legacy/LegacyProjectWorkspace";
+import SegmentDetail from "./pages/SegmentDetail";
+import StandardsPage from "./pages/StandardsPage";
+import OrdersPage from "./pages/OrdersPage";
+import OrderDetail from "./pages/OrderDetail";
 
 const queryClient = new QueryClient();
 
@@ -35,7 +43,7 @@ const AuthRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       </div>
     );
   }
-  return user ? <Navigate to="/" replace /> : <>{children}</>;
+  return user ? <Navigate to="/app" replace /> : <>{children}</>;
 };
 
 const App = () => (
@@ -48,8 +56,28 @@ const App = () => (
             <Sonner />
             <BrowserRouter>
               <Routes>
+                <Route path="/" element={<LandingPage />} />
                 <Route path="/auth" element={<AuthRoute><AuthPage /></AuthRoute>} />
-                <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+
+                {/* App Shell with sidebar — all protected routes */}
+                <Route path="/app" element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
+                  <Route index element={<Dashboard />} />
+                  <Route path="project/:id" element={<ProjectWorkspace />} />
+                  <Route path="project/:id/segments/:segId" element={<SegmentDetail />} />
+                  {/* Legacy archive — kept reachable but not the primary path */}
+                  <Route path="legacy/project/:id" element={<LegacyProjectWorkspace />} />
+                  <Route path="legacy/project/:id/files" element={<LegacyProjectWorkspace />} />
+                  <Route path="legacy/project/:id/segments" element={<LegacyProjectWorkspace />} />
+                  <Route path="legacy/project/:id/qa" element={<LegacyProjectWorkspace />} />
+                  <Route path="legacy/project/:id/estimate" element={<LegacyProjectWorkspace />} />
+                  <Route path="legacy/project/:id/shop-drawings" element={<LegacyProjectWorkspace />} />
+                  <Route path="legacy/project/:id/outputs" element={<LegacyProjectWorkspace />} />
+                  <Route path="legacy/project/:id/settings" element={<LegacyProjectWorkspace />} />
+                  <Route path="standards" element={<StandardsPage />} />
+                  <Route path="orders" element={<OrdersPage />} />
+                  <Route path="orders/:orderId" element={<OrderDetail />} />
+                </Route>
+
                 <Route path="/blueprint-viewer" element={<ProtectedRoute><BlueprintViewerPage /></ProtectedRoute>} />
                 <Route path="/review/:token" element={<ReviewPage />} />
                 <Route path="*" element={<NotFound />} />

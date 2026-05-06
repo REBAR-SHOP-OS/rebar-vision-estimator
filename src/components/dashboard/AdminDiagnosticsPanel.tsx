@@ -5,7 +5,41 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { FileSearch, Activity, AlertCircle, Clock } from "lucide-react";
+import { FileSearch, Activity, AlertCircle, Clock, Database } from "lucide-react";
+
+const STORAGE_INVENTORY: { bucket: string; access: string; purpose: string }[] = [
+  { bucket: "blueprints", access: "Private (RLS policies on storage.objects)", purpose: "Estimator uploads: PDFs, spreadsheets, rendered OCR page images, optional training/knowledge paths under user prefixes." },
+  { bucket: "lead-files", access: "Public object URLs (CRM edge functions)", purpose: "Sales/pipeline attachments — not part of the verified estimate pipeline." },
+];
+
+const DATA_STORES_NOTE =
+  "This app uses Supabase Postgres as source of truth. If production used a bucket named estimation-files, compare with blueprints above and plan migration; this repo standardizes on blueprints for drawing uploads.";
+
+const CANONICAL_TABLE_GROUPS: { title: string; items: string[] }[] = [
+  {
+    title: "Verified pipeline (exports)",
+    items: [
+      "verified_estimate_results — current canonical JSON + content_hash; Excel/shop exports read this when available",
+      "estimate_line_evidence — optional row-level provenance links",
+      "export_jobs — audit of exports tied to a verified snapshot",
+      "reference_answer_lines + estimation_validation_rules — benchmarks and export thresholds",
+    ],
+  },
+  {
+    title: "Ingestion & extraction",
+    items: [
+      "project_files + document_versions (pdf_metadata pages)",
+      "document_registry — file classification & parse/extraction status",
+      "document_sheets + sheet_regions — per-page index",
+      "extracted_entities — normalized entities (populated from indexing)",
+      "drawing_search_index + logical_drawings — search & reconciliation",
+    ],
+  },
+  {
+    title: "Workspace estimate (segments UI)",
+    items: ["segments", "estimate_items", "bar_items", "segment_source_links", "validation_issues"],
+  },
+];
 
 const AdminDiagnosticsPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { user } = useAuth();
@@ -56,10 +90,11 @@ const AdminDiagnosticsPanel: React.FC<{ onClose: () => void }> = ({ onClose }) =
         <div className="text-sm text-muted-foreground">Loading...</div>
       ) : (
         <Tabs defaultValue="jobs" className="space-y-3">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4">
             <TabsTrigger value="jobs" className="text-xs">Jobs ({processingJobs.length})</TabsTrigger>
             <TabsTrigger value="audit" className="text-xs">Audit ({auditLogs.length})</TabsTrigger>
             <TabsTrigger value="recon" className="text-xs">Recon ({reconciliations.length})</TabsTrigger>
+            <TabsTrigger value="stores" className="text-xs">Data stores</TabsTrigger>
           </TabsList>
 
           <TabsContent value="jobs">
@@ -157,6 +192,44 @@ const AdminDiagnosticsPanel: React.FC<{ onClose: () => void }> = ({ onClose }) =
                     )}
                   </div>
                 </ScrollArea>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="stores">
+            <Card className="border-border mb-3">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Database className="h-4 w-4" /> Data stores audit
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-xs text-muted-foreground">
+                <p>{DATA_STORES_NOTE}</p>
+                <div>
+                  <p className="font-semibold text-foreground mb-1">Storage buckets (code references)</p>
+                  <ul className="space-y-2">
+                    {STORAGE_INVENTORY.map((s) => (
+                      <li key={s.bucket} className="rounded border border-border/60 p-2">
+                        <span className="font-mono text-foreground">{s.bucket}</span>
+                        <span className="block text-[10px] mt-0.5">{s.access}</span>
+                        <span className="block mt-1">{s.purpose}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <p className="font-semibold text-foreground mb-1">Primary Postgres tables</p>
+                  {CANONICAL_TABLE_GROUPS.map((g) => (
+                    <div key={g.title} className="mb-2">
+                      <p className="text-[11px] font-medium text-foreground">{g.title}</p>
+                      <ul className="list-disc pl-4 mt-1 space-y-0.5">
+                        {g.items.map((t) => (
+                          <li key={t}>{t}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
