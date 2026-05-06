@@ -3,7 +3,7 @@ import { StageHeader, Pill, EmptyState, GateBanner, type StageProps } from "./_s
 import {
   ArrowLeft, ArrowRight, Wand2, Filter, Layers, Columns2, GitCompare,
   ZoomIn, ZoomOut, Maximize2, Eye, Edit3, AlertTriangle, RefreshCw,
-  Fingerprint, History, GitBranch, Scale, Edit2, RefreshCw as Sync,
+  Fingerprint, History, GitBranch, Scale, Edit2, RefreshCw as Sync, Bug,
 } from "lucide-react";
 import { loadWorkflowQaIssues, type WorkflowQaIssue } from "../takeoff-data";
 import { supabase } from "@/integrations/supabase/client";
@@ -27,6 +27,15 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [zoomMode, setZoomMode] = useState<"tight" | "full">("tight");
   const [viewMode, setViewMode] = useState<"overlay" | "side" | "diff">("overlay");
   const [changedOnly, setChangedOnly] = useState(true);
+  const [debug, setDebug] = useState(false);
+  const [redrawCount, setRedrawCount] = useState(0);
+  const [lastTrigger, setLastTrigger] = useState<string>("init");
+  const [renderedPage, setRenderedPage] = useState<number | null>(null);
+
+  const bump = (reason: string) => {
+    setRedrawCount((c) => c + 1);
+    setLastTrigger(reason);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -46,6 +55,8 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   useEffect(() => {
     const p = sel?.locator?.page_number;
     if (p && p > 0) setPdfPage(p);
+    bump(`select issue ${sel?.id?.slice(0, 8) || "—"} → page ${p || "?"}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.id, sel?.locator?.page_number]);
 
   useEffect(() => { setZoomMode("tight"); setTab("change"); }, [sel?.id]);
@@ -53,7 +64,12 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   useEffect(() => {
     let cancelled = false;
     setPreviewUrl(null); setPreviewKind(null); setPdfImg(null);
-    setPdfPage(1); setPdfPageCount(1); setPreviewName("");
+    setPdfPageCount(1); setPreviewName("");
+    // Initialize page from the issue locator (do NOT force back to 1, that
+    // was the bug that caused the cover sheet to always appear).
+    const initialPage = sel?.locator?.page_number;
+    if (initialPage && initialPage > 0) setPdfPage(initialPage);
+    else setPdfPage((p) => p || 1);
     const fileId = sel?.source_file_id || sel?.linked_item?.source_file_id || null;
     if (!fileId) return;
     setPreviewLoading(true);
@@ -75,6 +91,10 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     })();
     return () => { cancelled = true; };
   }, [sel?.source_file_id, sel?.id]);
+
+  useEffect(() => { bump(`view mode → ${viewMode}`); /* eslint-disable-next-line */ }, [viewMode]);
+  useEffect(() => { bump(`zoom mode → ${zoomMode}`); /* eslint-disable-next-line */ }, [zoomMode]);
+  useEffect(() => { if (pdfImg) bump(`pdf rendered p${pdfPage}`); /* eslint-disable-next-line */ }, [pdfImg]);
 
   // Group issues by source sheet for the left navigator
   const sheets = useMemo(() => {
@@ -267,6 +287,13 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
             <button onClick={() => setZoomMode((m) => m === "tight" ? "full" : "tight")} className="p-1.5 text-muted-foreground hover:text-foreground"><Maximize2 className="w-4 h-4" /></button>
             <div className="w-px h-6 bg-border mx-1 my-0.5" />
             <button className="p-1.5 text-muted-foreground hover:text-foreground"><Eye className="w-4 h-4" /></button>
+            <button
+              onClick={() => setDebug((d) => !d)}
+              className={`p-1.5 ${debug ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+              title="Toggle debug overlay"
+            >
+              <Bug className="w-4 h-4" />
+            </button>
           </div>
 
           {/* Canvas */}
@@ -280,7 +307,11 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                     url={previewUrl}
                     currentPage={pdfPage}
                     onPageCount={setPdfPageCount}
-                    onPageRendered={(dataUrl, w, h) => { setPdfImg(dataUrl); setImgSize({ w, h }); }}
+                    onPageRendered={(dataUrl, w, h) => {
+                      setPdfImg(dataUrl);
+                      setImgSize({ w, h });
+                      setRenderedPage(pdfPage);
+                    }}
                     scale={2}
                   />
                 )}
@@ -293,79 +324,95 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                       transition: "transform 0.35s ease-out",
                     }}
                   >
-                    <img
-                      src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")}
-                      alt={previewName}
-                      onLoad={(e) => {
-                        if (previewKind === "image") {
-                          const t = e.currentTarget;
-                          setImgSize({ w: t.naturalWidth, h: t.naturalHeight });
-                        }
-                      }}
-                      className={viewMode === "side" ? "w-full h-full object-contain bg-background" : "absolute inset-0 w-full h-full object-contain"}
-                      style={viewMode === "diff" ? { mixBlendMode: "difference", filter: "invert(1)" } : undefined}
-                      draggable={false}
-                    />
-                    {viewMode === "side" && (
+                    {viewMode === "side" ? (
+                      <>
+                        <div className="relative w-full h-full bg-background overflow-hidden">
+                          <div className="absolute top-1 left-1 z-10 px-1.5 py-0.5 bg-card/90 border border-border text-[9px] uppercase tracking-[0.12em] font-bold">Rev 2 (Base)</div>
+                          <img src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")} alt={previewName} className="w-full h-full object-contain" draggable={false} />
+                        </div>
+                        <div className="relative w-full h-full bg-background overflow-hidden">
+                          <div className="absolute top-1 left-1 z-10 px-1.5 py-0.5 bg-primary/20 border border-primary/50 text-[9px] uppercase tracking-[0.12em] font-bold text-primary">Rev 3 (Target)</div>
+                          <img src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")} alt={`${previewName} target`} className="w-full h-full object-contain" style={{ filter: "sepia(1) hue-rotate(150deg) saturate(2.2) contrast(1.1)" }} draggable={false} />
+                        </div>
+                      </>
+                    ) : (
                       <img
                         src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")}
-                        alt={`${previewName} (target rev)`}
-                        className="w-full h-full object-contain bg-background"
-                        style={{ filter: "sepia(1) hue-rotate(180deg) saturate(2)" }}
+                        alt={previewName}
+                        onLoad={(e) => {
+                          if (previewKind === "image") {
+                            const t = e.currentTarget;
+                            setImgSize({ w: t.naturalWidth, h: t.naturalHeight });
+                          }
+                        }}
+                        className="absolute inset-0 w-full h-full object-contain"
+                        style={viewMode === "diff" ? { mixBlendMode: "difference", filter: "invert(1) hue-rotate(180deg)" } : undefined}
                         draggable={false}
                       />
                     )}
                     {viewMode !== "side" && bbox && imgW && imgH && (
                       <>
-                        {/* Active selection box — orange pointer */}
+                        {/* Wrapper that mirrors the object-contain placement of the image so
+                            the pointer aligns with the actual rendered drawing region. */}
                         <div
-                          className="absolute"
+                          className="absolute inset-0 pointer-events-none"
                           style={{
-                            left: `${(bbox[0] / imgW) * 100}%`,
-                            top: `${(bbox[1] / imgH) * 100}%`,
-                            width: `${((bbox[2] - bbox[0]) / imgW) * 100}%`,
-                            height: `${((bbox[3] - bbox[1]) / imgH) * 100}%`,
-                            border: `${Math.max(3, 6 / zoom)}px solid #ff7a1a`,
-                            background: "rgba(34,197,94,0.18)",
-                            boxShadow: `0 0 0 ${Math.max(2, 4 / zoom)}px rgba(255,122,26,0.25)`,
+                            // Compute letterbox: image is contained in the container
+                            // preserving aspect ratio. We don't know container px size
+                            // here, but using percentage of imgW/imgH against the same
+                            // object-contain box keeps overlay aligned because bbox is
+                            // also expressed in image pixel space.
                           }}
                         >
-                          <div
-                            className="absolute -top-3 -right-3 w-6 h-6 rounded-full grid place-items-center text-white shadow-lg"
-                            style={{ background: "#ff7a1a" }}
-                          >
-                            <Edit3 className="w-3 h-3" />
-                          </div>
-                          {/* Ask-question callout */}
-                          <div
-                            className="absolute left-1/2 -translate-x-1/2 bg-card border border-border shadow-2xl px-3 py-2 w-56 z-30"
-                            style={{ top: "calc(100% + 8px)", transform: `translateX(-50%) scale(${1 / Math.max(1, zoom * 0.6)})`, transformOrigin: "top center" }}
-                          >
-                            <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-foreground mb-1.5 truncate">
-                              {sel?.title || "Modification"}
-                            </div>
-                            <div className="text-[10px] text-muted-foreground leading-snug mb-2 line-clamp-3">
-                              {sel?.description || "Is this element correct as detected?"}
-                            </div>
-                            <div className="grid grid-cols-2 gap-1">
-                              <button
-                                onClick={(e) => { e.stopPropagation(); jumpToTakeoff(); }}
-                                className="py-1 bg-primary text-primary-foreground text-[10px] font-bold uppercase tracking-[0.1em] hover:opacity-90"
-                              >
-                                Fix
-                              </button>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); setTab("impact"); }}
-                                className="py-1 bg-card border border-border text-foreground text-[10px] font-bold uppercase tracking-[0.1em] hover:bg-accent/40"
-                              >
-                                Impact
-                              </button>
-                            </div>
-                          </div>
+                          <BBoxPointer
+                            bbox={bbox}
+                            imgW={imgW}
+                            imgH={imgH}
+                            zoom={zoom}
+                            title={sel?.title || "Modification"}
+                            description={sel?.description || "Is this element correct as detected?"}
+                            onFix={jumpToTakeoff}
+                            onImpact={() => setTab("impact")}
+                          />
                         </div>
                       </>
                     )}
                   </div>
+                )}
+                {/* DEBUG OVERLAY */}
+                {debug && (
+                  <div className="absolute top-14 right-4 z-30 w-[300px] bg-card/95 border border-primary/60 shadow-2xl text-[10px] font-mono p-2 space-y-0.5 pointer-events-auto">
+                    <div className="font-bold text-primary uppercase tracking-[0.12em] flex justify-between">
+                      <span>QA Debug</span>
+                      <span>#{redrawCount}</span>
+                    </div>
+                    <div>last: <span className="text-foreground">{lastTrigger}</span></div>
+                    <div>view: <span className="text-primary">{viewMode}</span> · zoom: {zoomMode} ({Math.round(zoom * 100)}%)</div>
+                    <div>blend: {viewMode === "diff" ? "difference / invert(1)" : viewMode === "side" ? "sepia+hue (rev3)" : "none"}</div>
+                    <div>tx/ty: {tx.toFixed(1)}% / {ty.toFixed(1)}%</div>
+                    <div>page req: {pdfPage} · rendered: {renderedPage ?? "—"} / {pdfPageCount}</div>
+                    <div>imgSize: {imgW || "?"}×{imgH || "?"}</div>
+                    <div>bbox: {bbox ? `[${bbox.map((v) => Math.round(v)).join(",")}]` : "none"}</div>
+                    <div>file: <span className="truncate inline-block max-w-[220px] align-bottom">{previewName || "—"}</span></div>
+                    <div>kind: {previewKind || "—"} · loading: {String(previewLoading)}</div>
+                    <div>issue: {sel?.id?.slice(0, 24) || "—"}</div>
+                    <div className="text-[hsl(var(--status-blocked))]">compare src: single (no Rev2/Rev3 assets linked)</div>
+                  </div>
+                )}
+                {/* DEBUG canvas + image bounds */}
+                {debug && (
+                  <>
+                    <div className="absolute inset-0 pointer-events-none border-2 border-dashed border-[hsl(var(--status-inferred))]/70 z-20" />
+                    {bbox && imgW && imgH && (
+                      <div className="absolute inset-0 pointer-events-none z-20" style={{ transform: viewMode === "side" ? undefined : `translate(${tx}%, ${ty}%) scale(${zoom})`, transformOrigin: "center center" }}>
+                        <div className="absolute" style={{
+                          left: `${(bbox[0] / imgW) * 100}%`, top: `${(bbox[1] / imgH) * 100}%`,
+                          width: `${((bbox[2] - bbox[0]) / imgW) * 100}%`, height: `${((bbox[3] - bbox[1]) / imgH) * 100}%`,
+                          border: "1px dashed cyan",
+                        }} />
+                      </div>
+                    )}
+                  </>
                 )}
                 {!previewUrl && !previewLoading && (
                   <div className="absolute inset-0 grid place-items-center text-[10px] uppercase tracking-widest text-muted-foreground">No linked drawing for this issue</div>
@@ -535,6 +582,54 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
             </div>
           )}
         </aside>
+      </div>
+    </div>
+  );
+}
+
+function BBoxPointer({
+  bbox, imgW, imgH, zoom, title, description, onFix, onImpact,
+}: {
+  bbox: [number, number, number, number];
+  imgW: number;
+  imgH: number;
+  zoom: number;
+  title: string;
+  description: string;
+  onFix: () => void;
+  onImpact: () => void;
+}) {
+  // Bbox is in image-pixel space; the image is rendered with object-contain
+  // so percentages of imgW/imgH applied within the same containing box align
+  // with the visible drawing region.
+  const left = (bbox[0] / imgW) * 100;
+  const top = (bbox[1] / imgH) * 100;
+  const width = ((bbox[2] - bbox[0]) / imgW) * 100;
+  const height = ((bbox[3] - bbox[1]) / imgH) * 100;
+  const z = Math.max(1, zoom);
+  return (
+    <div
+      className="absolute pointer-events-auto"
+      style={{
+        left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%`,
+        border: `${Math.max(2, 6 / z)}px solid #ff7a1a`,
+        background: "rgba(34,197,94,0.18)",
+        boxShadow: `0 0 0 ${Math.max(1, 4 / z)}px rgba(255,122,26,0.3)`,
+      }}
+    >
+      <div className="absolute -top-3 -right-3 w-6 h-6 rounded-full grid place-items-center text-white shadow-lg" style={{ background: "#ff7a1a", transform: `scale(${1 / z})`, transformOrigin: "center" }}>
+        <span className="text-[10px] font-bold">!</span>
+      </div>
+      <div
+        className="absolute left-1/2 bg-card border border-border shadow-2xl px-3 py-2 w-56 z-30"
+        style={{ top: "calc(100% + 8px)", transform: `translateX(-50%) scale(${1 / z})`, transformOrigin: "top center" }}
+      >
+        <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-foreground mb-1.5 truncate">{title}</div>
+        <div className="text-[10px] text-muted-foreground leading-snug mb-2 line-clamp-3">{description}</div>
+        <div className="grid grid-cols-2 gap-1">
+          <button onClick={(e) => { e.stopPropagation(); onFix(); }} className="py-1 bg-primary text-primary-foreground text-[10px] font-bold uppercase tracking-[0.1em] hover:opacity-90">Fix</button>
+          <button onClick={(e) => { e.stopPropagation(); onImpact(); }} className="py-1 bg-card border border-border text-foreground text-[10px] font-bold uppercase tracking-[0.1em] hover:bg-accent/40">Impact</button>
+        </div>
       </div>
     </div>
   );
