@@ -175,6 +175,13 @@ Rules:
 - ${scopeHint ? `SCOPE RESTRICTION: ${scopeHint}` : ""}
 - Do NOT duplicate items already estimated: ${existingDesc || "none yet"}.`;
 
+    // Concrete worked example to anchor the model on real numeric output
+    const fewShot = `EXAMPLE (foundation wall segment, OCR snippet "203mm wall, vertical 15M @ 406mm O.C., wall length 12,500mm, wall height 3,000mm"):
+[
+  {"description":"Foundation wall vertical 15M @ 406mm O.C.","bar_size":"15M","quantity_count":32,"total_length":116.48,"total_weight":182.87,"confidence":0.85,"item_type":"rebar"}
+]
+Math: qty = ceil(12500/406)+1 = 32; bar_len = (3000+640)/1000 = 3.64 m; total_length = 32*3.64 = 116.48 m; weight = 116.48*1.570 = 182.87 kg.`;
+
     const userPrompt = `Project: ${project?.name || "Unknown"}
 Type: ${project?.project_type || "Unknown"}
 Scope: ${(project?.scope_items || []).join(", ") || "Not defined"}
@@ -194,7 +201,11 @@ ${knowledgeContext}
 
 ${drawingTextContext ? `=== DRAWING TEXT (use this as primary source — parse bar lists, footing schedules, rebar callouts) ===\n${drawingTextContext}\n=== END DRAWING TEXT ===` : "No drawing text available — estimate based on typical construction practice for this element type. Be conservative."}
 
-Generate estimate items for this segment. Base quantities on the ACTUAL drawing data if available, not assumptions.`;
+Generate estimate items for this segment. Base quantities on the ACTUAL drawing data if available, not assumptions.
+
+${fewShot}
+
+Output the JSON array now. Every object MUST have non-zero quantity_count AND total_length AND total_weight unless you explicitly prefix description with "UNRESOLVED:" and set confidence ≤ 0.2.`;
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
