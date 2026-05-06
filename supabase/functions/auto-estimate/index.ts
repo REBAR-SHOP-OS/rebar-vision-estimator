@@ -40,10 +40,10 @@ const massFor = (size: string, type: string): number => {
   if (type === "wwm") return WWM_MASS_KG_PER_M2[k] || 0;
   return REBAR_MASS_KG_PER_M[sizeKey(k)] || 0;
 };
-const lapMmFor = (size: string): number => {
-  const dia = REBAR_DIA_MM[sizeKey(size)] || 0;
-  return dia > 0 ? Math.round(40 * dia) : 0; // 40·db default per RSIC class B
-};
+// NOTE: hardcoded lap fallback (e.g. 40·db) removed by policy.
+// Lap lengths must come from Manual-Standard-Practice-2018 (via Brain) or
+// from an explicit LAP table in the structural OCR. If neither source
+// provides a value, the line is marked UNRESOLVED.
 
 // Build a lightweight structural graph from STRUCTURAL OCR pages only.
 // Architectural OCR is intentionally excluded as a geometry source.
@@ -170,13 +170,13 @@ function resolveLine(
   const spacing = spMatch ? Number(spMatch[1]) : 0;
   const wall = graph.walls.find((w) => (w.lengthMm || 0) > 0);
   if (spacing > 0 && wall?.lengthMm) {
-    const lap = graph.lapTable.get(sizeKey(size)) ?? lapMmFor(size);
+    const lap = graph.lapTable.get(sizeKey(size)) ?? 0;
     const qty = Math.ceil(wall.lengthMm / spacing) + 1;
     const missing: string[] = [];
     let barLenMm = 0;
-    if (wall.heightMm) barLenMm = wall.heightMm + lap;
-    else missing.push("wall height (mm)");
-    if (!lap) missing.push(`lap length for ${sizeKey(size)}`);
+    if (!lap) missing.push(`lap length for ${sizeKey(size)} (Manual-Standard-Practice-2018)`);
+    if (wall.heightMm && lap) barLenMm = wall.heightMm + lap;
+    else if (!wall.heightMm) missing.push("wall height (mm)");
     if (barLenMm > 0) {
       const totalLengthM = +(qty * barLenMm / 1000).toFixed(2);
       return {
