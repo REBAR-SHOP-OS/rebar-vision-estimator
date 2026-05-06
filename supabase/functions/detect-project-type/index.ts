@@ -7,6 +7,23 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// ── Shared types ──
+
+type ServiceAccountKey = { client_email: string; private_key: string };
+type ImageUrlPart = { type: "image_url"; image_url: { url: string } };
+type TextPart = { type: "text"; text: string };
+type UserContentPart = TextPart | ImageUrlPart;
+
+function tryParseJson<T>(value: string): T | null {
+  try {
+    return JSON.parse(value) as T;
+  } catch (err) {
+    // Intentionally ignore parse errors; we try multiple encodings.
+    console.debug("JSON parse attempt failed:", err);
+    return null;
+  }
+}
+
 // ── Google Vision helpers ──
 
 function base64url(data: Uint8Array): string {
@@ -23,12 +40,12 @@ async function getGoogleAccessToken(): Promise<string> {
   const saKeyRaw = Deno.env.get("GOOGLE_VISION_SA_KEY_V2") || Deno.env.get("GOOGLE_VISION_SA_KEY");
   if (!saKeyRaw) throw new Error("GOOGLE_VISION_SA_KEY not configured");
   
-  let sa: any;
+  let sa: ServiceAccountKey | null = null;
   const cleanJson = saKeyRaw.replace(/^\uFEFF/, '').trim();
-  try { sa = JSON.parse(cleanJson); } catch {}
-  if (!sa) { try { sa = JSON.parse(decodeURIComponent(cleanJson)); } catch {} }
-  if (!sa) { try { sa = JSON.parse(new TextDecoder().decode(decodeBase64(cleanJson))); } catch {} }
-  if (!sa) { try { sa = JSON.parse(cleanJson.replace(/\\n/g, '\n').replace(/\\"/g, '"')); } catch {} }
+  sa = tryParseJson<ServiceAccountKey>(cleanJson);
+  if (!sa) sa = tryParseJson<ServiceAccountKey>(decodeURIComponent(cleanJson));
+  if (!sa) sa = tryParseJson<ServiceAccountKey>(new TextDecoder().decode(decodeBase64(cleanJson)));
+  if (!sa) sa = tryParseJson<ServiceAccountKey>(cleanJson.replace(/\\n/g, '\n').replace(/\\"/g, '"'));
   if (!sa || !sa.client_email || !sa.private_key) throw new Error("GOOGLE_VISION_SA_KEY parse failed");
 
   const now = Math.floor(Date.now() / 1000);
@@ -101,7 +118,7 @@ serve(async (req) => {
     });
 
     // Limit: 3 images for AI vision, 2 for OCR to stay within CPU budget
-    const contentParts: any[] = imageUrls.slice(0, 3).map((url: string) => ({
+    const contentParts: ImageUrlPart[] = imageUrls.slice(0, 3).map((url: string) => ({
       type: "image_url", image_url: { url },
     }));
 
@@ -116,11 +133,9 @@ serve(async (req) => {
           if (imgBuf.byteLength > 2 * 1024 * 1024) continue; // skip large images
           const text = await quickOCR(accessToken, encodeBase64(imgBuf));
           if (text) ocrText += `\n--- OCR from ${url.split('/').pop()?.split('?')[0]} ---\n${text}\n`;
-        } catch {}
-      }
-    }
-
-    // Keyword-based analysis for veto logic
+        } catch (err) {
+          console.warn("OCR failed for image:", url, err);
+        }
     const ocrLower = ocrText.toLowerCase();
     const cageKeywords = ["cage", "spiral", "tied assembly", "cage mark", "prefab", "column cage", "cage schedule", "cage height", "cage dia", "caisson", "drilled pier", "drilled shaft", "belled"];
     const barListKeywords = ["bar list", "bar schedule", "bar mark", "cut length", "bending schedule"];
@@ -315,7 +330,7 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
       }
     }];
 
-    const userContent: any[] = [{ type: "text", text: detectionPrompt }, ...contentParts];
+    const userContent: UserContentPart[] = [{ type: "text", text: detectionPrompt }, ...contentParts];
 
     const aiStart = performance.now();
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -350,7 +365,7 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
     const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
     
     if (toolCall?.function?.arguments) {
-      let result = JSON.parse(toolCall.function.arguments);
+      const result = JSON.parse(toolCall.function.arguments);
       
       // ── Server-side Veto Logic ──
       // If AI returned cage_only but our keyword analysis found building signals, override
