@@ -1,12 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 import { StageHeader, Pill, EmptyState, type StageProps } from "./_shared";
-import { Sparkles, FileText, CheckCircle2 } from "lucide-react";
+import { Sparkles, FileText, CheckCircle2, Loader2, Wand2 } from "lucide-react";
 import { loadWorkflowTakeoffRows, type WorkflowTakeoffRow } from "../takeoff-data";
 
 export default function TakeoffStage({ projectId, state, goToStage }: StageProps) {
   const [rows, setRows] = useState<WorkflowTakeoffRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+
+  const reload = async () => {
+    const mapped = await loadWorkflowTakeoffRows(projectId, state.files);
+    setRows(mapped);
+    setSelectedId((current) => mapped.find((row) => row.id === current)?.id || mapped[0]?.id || null);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -20,6 +29,42 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
     })();
     return () => { cancelled = true; };
   }, [projectId, state.files]);
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const { data: segs, error } = await supabase
+        .from("segments")
+        .select("id,name")
+        .eq("project_id", projectId);
+      if (error) throw error;
+      const segments = segs || [];
+      if (segments.length === 0) {
+        toast.error("No approved scope segments found. Approve scope items in Stage 02 first.");
+        return;
+      }
+      let ok = 0;
+      let failed = 0;
+      for (const seg of segments) {
+        try {
+          const { error: invokeErr } = await supabase.functions.invoke("auto-estimate", {
+            body: { segment_id: seg.id, project_id: projectId },
+          });
+          if (invokeErr) throw invokeErr;
+          ok++;
+        } catch (err) {
+          console.warn(`auto-estimate failed for segment ${seg.name}:`, err);
+          failed++;
+        }
+      }
+      if (ok > 0) toast.success(`Generated takeoff for ${ok} segment${ok > 1 ? "s" : ""}${failed ? ` (${failed} failed)` : ""}`);
+      else toast.error("Takeoff generation failed for all segments.");
+      await reload();
+      state.refresh();
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   const sel = useMemo(() => rows.find((r) => r.id === selectedId), [rows, selectedId]);
   const totals = useMemo(() => ({
@@ -67,11 +112,19 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
             <Pill tone="direct">{totals.rows} ROWS</Pill>
             <Pill tone="supported">{totals.weight.toFixed(0)} KG</Pill>
             {totals.blocked > 0 && <Pill tone="blocked" solid>{totals.blocked} BLOCKED</Pill>}
+            <button
+              onClick={handleGenerate}
+              disabled={generating}
+              className="inline-flex items-center gap-1.5 h-7 px-2.5 border border-primary text-primary text-[10px] font-mono uppercase tracking-wider hover:bg-primary/10 disabled:opacity-50"
+            >
+              {generating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+              {generating ? "Generating…" : rows.length === 0 ? "Generate Takeoff" : "Re-run"}
+            </button>
           </div>}
         />
         <div className="flex-1 overflow-auto">
           {loading ? <EmptyState title="Loading takeoff..." /> :
-            rows.length === 0 ? <EmptyState title="No takeoff rows" hint="Accept scope candidates and run extraction to populate." /> : (
+            rows.length === 0 ? <EmptyState title="No takeoff rows" hint='Approve scope items in Stage 02, then click "Generate Takeoff" above.' /> : (
               <table className="w-full text-[12px] tabular-nums">
                 <thead className="bg-muted/40 text-[10px] uppercase tracking-[0.14em] text-muted-foreground sticky top-0">
                   <tr>
