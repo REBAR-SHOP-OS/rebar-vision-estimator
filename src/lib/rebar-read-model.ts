@@ -61,7 +61,7 @@ function mapProjectRow(legacyProjectId: string, row: any): CanonicalProjectView 
   };
 }
 
-async function getRebarProjectIdByLegacyId(
+export async function getRebarProjectIdByLegacyId(
   supabase: SupabaseClient<Database>,
   legacyProjectId: string,
 ): Promise<string | null> {

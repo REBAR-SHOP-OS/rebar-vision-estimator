@@ -1,45 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { StageHeader, Pill, EmptyState, type StageProps } from "./_shared";
 import { Sparkles, FileText, CheckCircle2 } from "lucide-react";
+import { loadWorkflowTakeoffRows, type WorkflowTakeoffRow } from "../takeoff-data";
 
-interface Row {
-  id: string;
-  mark: string;
-  size: string;
-  shape: string;
-  count: number;
-  length: number;
-  weight: number;
-  status: "ready" | "review" | "blocked";
-  source: string;
-}
-
-export default function TakeoffStage({ projectId, state }: StageProps) {
-  const [rows, setRows] = useState<Row[]>([]);
+export default function TakeoffStage({ projectId, state, goToStage }: StageProps) {
+  const [rows, setRows] = useState<WorkflowTakeoffRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data } = await supabase.from("estimate_items")
-        .select("id, bar_size, description, quantity_count, total_length, total_weight, status, confidence")
-        .eq("project_id", projectId).limit(500);
+      setLoading(true);
+      const mapped = await loadWorkflowTakeoffRows(projectId, state.files);
       if (cancelled) return;
-      const mapped: Row[] = (data || []).map((d, i: number) => ({
-        id: d.id,
-        mark: `M${String(i + 1).padStart(3, "0")}`,
-        size: d.bar_size || "—",
-        shape: (d.description || "Straight").slice(0, 24),
-        count: d.quantity_count || 0,
-        length: Number(d.total_length || 0),
-        weight: Number(d.total_weight || 0),
-        status: (d.status === "approved" ? "ready" : Number(d.confidence) < 0.6 ? "blocked" : "review") as Row["status"],
-        source: state.files[i % Math.max(1, state.files.length)]?.file_name || "—",
-      }));
       setRows(mapped);
-      setSelectedId(mapped[0]?.id || null);
+      setSelectedId((current) => mapped.find((row) => row.id === current)?.id || mapped[0]?.id || null);
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -54,7 +30,6 @@ export default function TakeoffStage({ projectId, state }: StageProps) {
 
   return (
     <div className="grid h-full" style={{ gridTemplateColumns: "260px 1fr 340px" }}>
-      {/* Estimator Copilot */}
       <aside className="border-r border-border flex flex-col min-h-0" style={{ background: "hsl(var(--card))" }}>
         <div className="px-3 h-10 flex items-center border-b border-border">
           <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em]">
@@ -84,10 +59,9 @@ export default function TakeoffStage({ projectId, state }: StageProps) {
         </div>
       </aside>
 
-      {/* Center table */}
       <div className="border-r border-border flex flex-col min-h-0">
         <StageHeader
-          kicker="Stage 03 · Production Takeoff Data"
+          kicker="Stage 03 - Production Takeoff Data"
           title="Takeoff Workspace"
           right={<div className="flex gap-2">
             <Pill tone="direct">{totals.rows} ROWS</Pill>
@@ -96,7 +70,7 @@ export default function TakeoffStage({ projectId, state }: StageProps) {
           </div>}
         />
         <div className="flex-1 overflow-auto">
-          {loading ? <EmptyState title="Loading takeoff…" /> :
+          {loading ? <EmptyState title="Loading takeoff..." /> :
             rows.length === 0 ? <EmptyState title="No takeoff rows" hint="Accept scope candidates and run extraction to populate." /> : (
               <table className="w-full text-[12px] tabular-nums">
                 <thead className="bg-muted/40 text-[10px] uppercase tracking-[0.14em] text-muted-foreground sticky top-0">
@@ -134,7 +108,6 @@ export default function TakeoffStage({ projectId, state }: StageProps) {
         </div>
       </div>
 
-      {/* Quantity Inspector */}
       <aside className="flex flex-col min-h-0" style={{ background: "hsl(var(--card))" }}>
         <div className="border-b border-border">
           <StageHeader kicker="Quantity Inspector" title={sel ? `Item ${sel.mark}` : "Select a row"} />
@@ -148,21 +121,21 @@ export default function TakeoffStage({ projectId, state }: StageProps) {
           {!sel ? <EmptyState title="No row selected" /> : (
             <>
               <div>
-                <div className="ip-kicker mb-2">1 · What This Is</div>
+                <div className="ip-kicker mb-2">1 - What This Is</div>
                 <div className="ip-card p-3">
                   <div className="text-[13px] font-semibold">{sel.shape}</div>
-                  <div className="text-[11px] text-muted-foreground mt-0.5 font-mono">Item {sel.mark} · Bar {sel.size}</div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5 font-mono">Item {sel.mark} - Bar {sel.size}</div>
                 </div>
               </div>
               <div>
-                <div className="ip-kicker mb-2">2 · Where It Came From</div>
+                <div className="ip-kicker mb-2">2 - Where It Came From</div>
                 <div className="ip-card p-3 flex items-center gap-2">
                   <FileText className="w-4 h-4 text-primary" />
                   <div className="flex-1 text-[12px] font-mono truncate">{sel.source}</div>
                 </div>
               </div>
               <div>
-                <div className="ip-kicker mb-2">3 · Calculated Total</div>
+                <div className="ip-kicker mb-2">3 - Calculated Total</div>
                 <div className="grid grid-cols-2 gap-2">
                   <Field label="Quantity" value={String(sel.count)} />
                   <Field label="Length (m)" value={sel.length.toFixed(2)} />
@@ -174,7 +147,14 @@ export default function TakeoffStage({ projectId, state }: StageProps) {
           )}
         </div>
         <div className="border-t border-border p-3">
-          <button className="w-full h-10 inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground text-[12px] font-semibold uppercase tracking-[0.14em] hover:opacity-90">
+          <button
+            disabled={rows.length === 0}
+            onClick={() => {
+              state.refresh();
+              goToStage?.("qa");
+            }}
+            className="w-full h-10 inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground text-[12px] font-semibold uppercase tracking-[0.14em] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
             <CheckCircle2 className="w-4 h-4" /> Confirm Takeoff Data
           </button>
         </div>
