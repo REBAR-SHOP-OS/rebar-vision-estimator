@@ -586,3 +586,51 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     </div>
   );
 }
+
+function BBoxPointer({
+  bbox, imgW, imgH, zoom, title, description, onFix, onImpact,
+}: {
+  bbox: [number, number, number, number];
+  imgW: number;
+  imgH: number;
+  zoom: number;
+  title: string;
+  description: string;
+  onFix: () => void;
+  onImpact: () => void;
+}) {
+  // Bbox is in image-pixel space; the image is rendered with object-contain
+  // so percentages of imgW/imgH applied within the same containing box align
+  // with the visible drawing region.
+  const left = (bbox[0] / imgW) * 100;
+  const top = (bbox[1] / imgH) * 100;
+  const width = ((bbox[2] - bbox[0]) / imgW) * 100;
+  const height = ((bbox[3] - bbox[1]) / imgH) * 100;
+  const z = Math.max(1, zoom);
+  return (
+    <div
+      className="absolute pointer-events-auto"
+      style={{
+        left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%`,
+        border: `${Math.max(2, 6 / z)}px solid #ff7a1a`,
+        background: "rgba(34,197,94,0.18)",
+        boxShadow: `0 0 0 ${Math.max(1, 4 / z)}px rgba(255,122,26,0.3)`,
+      }}
+    >
+      <div className="absolute -top-3 -right-3 w-6 h-6 rounded-full grid place-items-center text-white shadow-lg" style={{ background: "#ff7a1a", transform: `scale(${1 / z})`, transformOrigin: "center" }}>
+        <span className="text-[10px] font-bold">!</span>
+      </div>
+      <div
+        className="absolute left-1/2 bg-card border border-border shadow-2xl px-3 py-2 w-56 z-30"
+        style={{ top: "calc(100% + 8px)", transform: `translateX(-50%) scale(${1 / z})`, transformOrigin: "top center" }}
+      >
+        <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-foreground mb-1.5 truncate">{title}</div>
+        <div className="text-[10px] text-muted-foreground leading-snug mb-2 line-clamp-3">{description}</div>
+        <div className="grid grid-cols-2 gap-1">
+          <button onClick={(e) => { e.stopPropagation(); onFix(); }} className="py-1 bg-primary text-primary-foreground text-[10px] font-bold uppercase tracking-[0.1em] hover:opacity-90">Fix</button>
+          <button onClick={(e) => { e.stopPropagation(); onImpact(); }} className="py-1 bg-card border border-border text-foreground text-[10px] font-bold uppercase tracking-[0.1em] hover:bg-accent/40">Impact</button>
+        </div>
+      </div>
+    </div>
+  );
+}
