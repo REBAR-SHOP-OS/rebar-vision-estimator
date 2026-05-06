@@ -176,7 +176,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
       Math.min(maxW, x2 + padX),
       Math.min(maxH, y2 + padY),
     ];
-  }, [exactBbox, pageText, sel?.id, sel?.location, sel?.linked_item?.bar_size]);
+  }, [exactBbox, pageText, sel?.id, sel?.location, sel?.linked_item?.bar_size, imgW, imgH]);
   const bbox = exactBbox || approxBbox;
   const bboxIsApprox = !exactBbox && !!approxBbox;
   const center = bbox && imgW && imgH
