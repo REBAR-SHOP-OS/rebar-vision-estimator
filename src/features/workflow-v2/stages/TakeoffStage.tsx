@@ -1,17 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { StageHeader, Pill, EmptyState, type StageProps } from "./_shared";
-import { Sparkles, FileText, CheckCircle2, Loader2, Wand2 } from "lucide-react";
+import { Sparkles, FileText, CheckCircle2, Loader2, Wand2, Pencil, Save, X, ChevronDown, ChevronRight } from "lucide-react";
 import { loadWorkflowTakeoffRows, type WorkflowTakeoffRow } from "../takeoff-data";
 import { parseAndIndexFile } from "@/lib/parse-file";
 
+interface EditPatch {
+  count?: number;
+  length?: number;
+  weight?: number;
+  size?: string;
+}
+
 export default function TakeoffStage({ projectId, state, goToStage }: StageProps) {
+  const { user } = useAuth();
   const [rows, setRows] = useState<WorkflowTakeoffRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hoverId, setHoverId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [genStatus, setGenStatus] = useState<string>("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editPatch, setEditPatch] = useState<EditPatch>({});
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const reload = async () => {
     const mapped = await loadWorkflowTakeoffRows(projectId, state.files);
@@ -32,10 +46,27 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
     return () => { cancelled = true; };
   }, [projectId, state.files]);
 
+  // Resolve signed URL of the source file for the highlighted/selected row
+  const focusRow = useMemo(
+    () => rows.find((r) => r.id === (hoverId || selectedId)),
+    [rows, hoverId, selectedId]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const fileId = focusRow?.source_file_id;
+      const f = state.files.find((x) => x.id === fileId);
+      if (!f) { setSignedUrl(null); return; }
+      const { data } = await supabase.storage.from("blueprints").createSignedUrl(f.file_path, 3600);
+      if (!cancelled) setSignedUrl(data?.signedUrl || null);
+    })();
+    return () => { cancelled = true; };
+  }, [focusRow?.source_file_id, state.files]);
+
   const handleGenerate = async () => {
     setGenerating(true);
     try {
-      // ── Step 1: Per-file idempotent parse + index ──
       const files = state.files || [];
       let parsedNow = 0, alreadyIndexed = 0, parseFails = 0;
       for (let i = 0; i < files.length; i++) {
@@ -51,35 +82,29 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
         else if (res.status === "indexed") parsedNow++;
         else parseFails++;
       }
-      if (parseFails > 0) {
-        toast.warning(`${parseFails} file(s) failed to parse. Estimation will use whatever was indexed.`);
-      }
-      if (parsedNow > 0 || alreadyIndexed > 0) {
-        console.log(`[Takeoff] parsed ${parsedNow} new, ${alreadyIndexed} already indexed, ${parseFails} failed`);
-      }
+      if (parseFails > 0) toast.warning(`${parseFails} file(s) failed to parse.`);
 
       setGenStatus("Generating takeoff...");
       const { data: segs, error } = await supabase
-        .from("segments")
-        .select("id,name")
-        .eq("project_id", projectId);
+        .from("segments").select("id,name").eq("project_id", projectId);
       if (error) throw error;
       const segments = segs || [];
       if (segments.length === 0) {
         toast.error("No approved scope segments found. Approve scope items in Stage 02 first.");
         return;
       }
-      let ok = 0;
-      let failed = 0;
-      let totalItems = 0;
+      let ok = 0, failed = 0, totalItems = 0;
       for (const seg of segments) {
         try {
           const { data: estData, error: invokeErr } = await supabase.functions.invoke("auto-estimate", {
             body: { segment_id: seg.id, project_id: projectId },
           });
           if (invokeErr) throw invokeErr;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const created = (estData as any)?.metadata?.items_created
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             ?? (estData as any)?.items_created
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             ?? (Array.isArray((estData as any)?.items) ? (estData as any).items.length : 0);
           totalItems += created || 0;
           ok++;
@@ -89,9 +114,9 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
         }
       }
       if (ok > 0 && totalItems > 0) {
-        toast.success(`Generated ${totalItems} takeoff item${totalItems > 1 ? "s" : ""} across ${ok} segment${ok > 1 ? "s" : ""}${failed ? ` (${failed} failed)` : ""}`);
-      } else if (ok > 0 && totalItems === 0) {
-        toast.warning("0 items generated — drawings may lack rebar data or parsing did not return text. Check Files tab to re-parse.");
+        toast.success(`Generated ${totalItems} item(s) across ${ok} segment(s)${failed ? ` (${failed} failed)` : ""}`);
+      } else if (ok > 0) {
+        toast.warning("0 items generated — drawings may lack rebar data.");
       } else {
         toast.error("Takeoff generation failed for all segments.");
       }
@@ -103,48 +128,106 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
     }
   };
 
-  const sel = useMemo(() => rows.find((r) => r.id === selectedId), [rows, selectedId]);
+  const beginEdit = (r: WorkflowTakeoffRow) => {
+    setEditingId(r.id);
+    setEditPatch({ count: r.count, length: r.length, weight: r.weight, size: r.size });
+  };
+  const cancelEdit = () => { setEditingId(null); setEditPatch({}); };
+
+  const saveEdit = async (r: WorkflowTakeoffRow) => {
+    if (r.raw_kind !== "legacy") {
+      toast.error("Editing canonical takeoff items not supported here yet.");
+      return;
+    }
+    const patch: Record<string, unknown> = {};
+    const original: Record<string, unknown> = { count: r.count, length: r.length, weight: r.weight, size: r.size };
+    const next: Record<string, unknown> = {};
+    if (editPatch.count !== undefined && editPatch.count !== r.count) { patch.quantity_count = editPatch.count; next.count = editPatch.count; }
+    if (editPatch.length !== undefined && editPatch.length !== r.length) { patch.total_length = editPatch.length; next.length = editPatch.length; }
+    if (editPatch.weight !== undefined && editPatch.weight !== r.weight) { patch.total_weight = editPatch.weight; next.weight = editPatch.weight; }
+    if (editPatch.size !== undefined && editPatch.size !== r.size) { patch.bar_size = editPatch.size; next.size = editPatch.size; }
+    if (Object.keys(patch).length === 0) { cancelEdit(); return; }
+
+    const { error } = await supabase.from("estimate_items").update(patch).eq("id", r.raw_id);
+    if (error) { toast.error("Save failed: " + error.message); return; }
+
+    if (user) {
+      await supabase.from("audit_events").insert({
+        user_id: user.id,
+        project_id: projectId,
+        segment_id: r.segment_id,
+        entity_type: "estimate_item",
+        entity_id: r.raw_id,
+        action: "ocr_correction",
+        metadata: { original, corrected: next, source: "takeoff_stage", file_id: r.source_file_id },
+      });
+    }
+
+    setRows((prev) => prev.map((row) => row.id === r.id ? { ...row, ...(next as Partial<WorkflowTakeoffRow>) } as WorkflowTakeoffRow : row));
+    cancelEdit();
+    toast.success("OCR correction saved & logged");
+  };
+
+  // Group rows by segment_name
+  const groups = useMemo(() => {
+    const map = new Map<string, WorkflowTakeoffRow[]>();
+    for (const r of rows) {
+      const key = r.segment_name || "Unassigned";
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(r);
+    }
+    return Array.from(map.entries()).map(([name, items]) => ({
+      name,
+      items,
+      weight: items.reduce((s, r) => s + r.weight, 0),
+      blocked: items.filter((r) => r.status === "blocked").length,
+    }));
+  }, [rows]);
+
   const totals = useMemo(() => ({
     rows: rows.length,
     weight: rows.reduce((s, r) => s + r.weight, 0),
     blocked: rows.filter((r) => r.status === "blocked").length,
   }), [rows]);
 
+  const sel = focusRow;
+  const isImg = sel?.source_file_id ? /\.(png|jpe?g|webp|gif|svg)$/i.test(state.files.find((f) => f.id === sel.source_file_id)?.file_name || "") : false;
+
   return (
-    <div className="grid h-full" style={{ gridTemplateColumns: "260px 1fr 340px" }}>
+    <div className="grid h-full" style={{ gridTemplateColumns: "240px 1fr 380px" }}>
       <aside className="border-r border-border flex flex-col min-h-0" style={{ background: "hsl(var(--card))" }}>
         <div className="px-3 h-10 flex items-center border-b border-border">
           <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em]">
-            <Sparkles className="w-3.5 h-3.5 text-primary" /> Estimator Copilot
+            <Sparkles className="w-3.5 h-3.5 text-primary" /> Segments
           </div>
         </div>
-        <div className="flex-1 overflow-auto p-3 space-y-3 text-[12px]">
-          <div className="ip-card p-3">
-            <div className="ip-kicker mb-1">Pending Changes</div>
-            <div className="text-[11px] text-muted-foreground font-mono">No pending revisions</div>
-          </div>
-          <div className="ip-card p-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="ip-kicker">Issue Queue</div>
-              {totals.blocked > 0 && <Pill tone="blocked" solid>{totals.blocked}</Pill>}
-            </div>
-            <div className="text-[11px] text-muted-foreground">
-              {totals.blocked === 0 ? "No blocking issues detected." : `${totals.blocked} row(s) below confidence threshold.`}
-            </div>
-          </div>
-          <div className="ip-card p-3">
-            <div className="ip-kicker mb-1.5">Copilot Notes</div>
-            <div className="text-[11px] italic text-muted-foreground leading-relaxed">
-              Click any row to inspect linked evidence and proof in the right panel.
-            </div>
-          </div>
+        <div className="flex-1 overflow-auto p-2 space-y-1 text-[12px]">
+          {groups.length === 0 ? (
+            <div className="text-[11px] text-muted-foreground p-2">No segments yet.</div>
+          ) : groups.map((g) => (
+            <button key={g.name}
+              onClick={() => {
+                const first = g.items[0];
+                if (first) setSelectedId(first.id);
+                setCollapsed((c) => ({ ...c, [g.name]: false }));
+              }}
+              className="w-full ip-card p-2 text-left hover:bg-accent/40">
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] font-semibold truncate">{g.name}</div>
+                {g.blocked > 0 && <Pill tone="blocked" solid>{g.blocked}</Pill>}
+              </div>
+              <div className="text-[10px] text-muted-foreground font-mono mt-0.5">
+                {g.items.length} rows · {g.weight.toFixed(0)} kg
+              </div>
+            </button>
+          ))}
         </div>
       </aside>
 
       <div className="border-r border-border flex flex-col min-h-0">
         <StageHeader
           kicker="Stage 03 - Production Takeoff Data"
-          title="Takeoff Workspace"
+          title="Takeoff Workspace · By Segment"
           right={<div className="flex gap-2">
             <Pill tone="direct">{totals.rows} ROWS</Pill>
             <Pill tone="supported">{totals.weight.toFixed(0)} KG</Pill>
@@ -162,87 +245,141 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
         <div className="flex-1 overflow-auto">
           {loading ? <EmptyState title="Loading takeoff..." /> :
             rows.length === 0 ? <EmptyState title="No takeoff rows" hint='Approve scope items in Stage 02, then click "Generate Takeoff" above.' /> : (
-              <table className="w-full text-[12px] tabular-nums">
-                <thead className="bg-muted/40 text-[10px] uppercase tracking-[0.14em] text-muted-foreground sticky top-0">
-                  <tr>
-                    <th className="text-left px-3 h-8 w-16">Item</th>
-                    <th className="text-left px-3 h-8 w-14">Size</th>
-                    <th className="text-left px-3 h-8">Shape</th>
-                    <th className="text-right px-3 h-8 w-14">Qty</th>
-                    <th className="text-right px-3 h-8 w-20">Length</th>
-                    <th className="text-right px-3 h-8 w-20">Weight</th>
-                    <th className="text-left px-3 h-8 w-24">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r, i) => (
-                    <tr key={r.id} onClick={() => setSelectedId(r.id)}
-                      style={{ height: 32 }}
-                      className={`border-t border-border cursor-pointer ${selectedId === r.id ? "bg-primary/10" : i % 2 ? "bg-card/30 hover:bg-accent/40" : "hover:bg-accent/40"}`}>
-                      <td className="px-3 font-mono text-[hsl(var(--status-direct))]">{r.mark}</td>
-                      <td className="px-3">{r.size}</td>
-                      <td className="px-3 truncate max-w-0">{r.shape}</td>
-                      <td className="px-3 text-right">{r.count}</td>
-                      <td className="px-3 text-right">{r.length.toFixed(2)}</td>
-                      <td className="px-3 text-right font-semibold">{r.weight.toFixed(1)}</td>
-                      <td className="px-3">
-                        {r.status === "ready" && <Pill tone="direct" solid>Direct</Pill>}
-                        {r.status === "review" && <Pill tone="inferred" solid>Inferred</Pill>}
-                        {r.status === "blocked" && <Pill tone="blocked" solid>Blocked</Pill>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div>
+                {groups.map((g) => {
+                  const isCollapsed = collapsed[g.name];
+                  return (
+                    <div key={g.name} className="border-b border-border">
+                      <button
+                        onClick={() => setCollapsed((c) => ({ ...c, [g.name]: !c[g.name] }))}
+                        className="w-full flex items-center gap-2 px-3 h-8 bg-muted/40 text-left hover:bg-muted/60"
+                      >
+                        {isCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.12em]">{g.name}</span>
+                        <span className="text-[10px] font-mono text-muted-foreground ml-auto">
+                          {g.items.length} · {g.weight.toFixed(0)} kg
+                        </span>
+                      </button>
+                      {!isCollapsed && (
+                        <table className="w-full text-[12px] tabular-nums">
+                          <thead className="bg-muted/20 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                            <tr>
+                              <th className="text-left px-3 h-7 w-20">Mark</th>
+                              <th className="text-left px-3 h-7 w-16">Size</th>
+                              <th className="text-left px-3 h-7">Shape</th>
+                              <th className="text-right px-3 h-7 w-16">Qty</th>
+                              <th className="text-right px-3 h-7 w-20">Length</th>
+                              <th className="text-right px-3 h-7 w-20">Weight</th>
+                              <th className="text-left px-3 h-7 w-24">Status</th>
+                              <th className="text-right px-3 h-7 w-16"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {g.items.map((r, i) => {
+                              const editing = editingId === r.id;
+                              return (
+                                <tr key={r.id}
+                                  onMouseEnter={() => setHoverId(r.id)}
+                                  onMouseLeave={() => setHoverId(null)}
+                                  onClick={() => setSelectedId(r.id)}
+                                  className={`border-t border-border cursor-pointer ${selectedId === r.id ? "bg-primary/10" : i % 2 ? "bg-card/30 hover:bg-accent/40" : "hover:bg-accent/40"}`}>
+                                  <td className="px-3 font-mono text-[hsl(var(--status-direct))]">{r.mark}</td>
+                                  <td className="px-3">
+                                    {editing ? (
+                                      <input className="w-14 bg-background border border-border px-1 text-[11px]"
+                                        value={editPatch.size ?? ""} onChange={(e) => setEditPatch((p) => ({ ...p, size: e.target.value }))} />
+                                    ) : r.size}
+                                  </td>
+                                  <td className="px-3 truncate max-w-0">{r.shape}</td>
+                                  <td className="px-3 text-right">
+                                    {editing ? (
+                                      <input type="number" className="w-16 bg-background border border-border px-1 text-[11px] text-right"
+                                        value={editPatch.count ?? 0} onChange={(e) => setEditPatch((p) => ({ ...p, count: Number(e.target.value) }))} />
+                                    ) : r.count}
+                                  </td>
+                                  <td className="px-3 text-right">
+                                    {editing ? (
+                                      <input type="number" step="0.01" className="w-20 bg-background border border-border px-1 text-[11px] text-right"
+                                        value={editPatch.length ?? 0} onChange={(e) => setEditPatch((p) => ({ ...p, length: Number(e.target.value) }))} />
+                                    ) : r.length.toFixed(2)}
+                                  </td>
+                                  <td className="px-3 text-right font-semibold">
+                                    {editing ? (
+                                      <input type="number" step="0.1" className="w-20 bg-background border border-border px-1 text-[11px] text-right"
+                                        value={editPatch.weight ?? 0} onChange={(e) => setEditPatch((p) => ({ ...p, weight: Number(e.target.value) }))} />
+                                    ) : r.weight.toFixed(1)}
+                                  </td>
+                                  <td className="px-3">
+                                    {r.status === "ready" && <Pill tone="direct" solid>Direct</Pill>}
+                                    {r.status === "review" && <Pill tone="inferred" solid>Inferred</Pill>}
+                                    {r.status === "blocked" && <Pill tone="blocked" solid>Blocked</Pill>}
+                                  </td>
+                                  <td className="px-3 text-right" onClick={(e) => e.stopPropagation()}>
+                                    {editing ? (
+                                      <div className="inline-flex gap-1">
+                                        <button onClick={() => saveEdit(r)} title="Save" className="p-1 text-primary hover:bg-primary/10"><Save className="w-3.5 h-3.5" /></button>
+                                        <button onClick={cancelEdit} title="Cancel" className="p-1 text-muted-foreground hover:bg-muted"><X className="w-3.5 h-3.5" /></button>
+                                      </div>
+                                    ) : (
+                                      r.raw_kind === "legacy" && (
+                                        <button onClick={() => beginEdit(r)} title="Fix OCR" className="p-1 text-muted-foreground hover:text-primary hover:bg-primary/10">
+                                          <Pencil className="w-3.5 h-3.5" />
+                                        </button>
+                                      )
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
         </div>
       </div>
 
       <aside className="flex flex-col min-h-0" style={{ background: "hsl(var(--card))" }}>
         <div className="border-b border-border">
-          <StageHeader kicker="Quantity Inspector" title={sel ? `Item ${sel.mark}` : "Select a row"} />
-          <div className="flex border-t border-border text-[10px] uppercase tracking-[0.14em] font-semibold">
-            {["Proof", "History", "Warnings", "RFI"].map((t, i) => (
-              <button key={t} className={`flex-1 h-8 border-r border-border last:border-r-0 ${i === 0 ? "text-primary border-b-2 border-b-primary -mb-px" : "text-muted-foreground hover:text-foreground"}`}>{t}</button>
-            ))}
-          </div>
+          <StageHeader kicker="Drawing Evidence" title={sel ? `${sel.segment_name} · ${sel.mark}` : "Hover a row"} />
         </div>
-        <div className="flex-1 overflow-auto p-4 space-y-3">
-          {!sel ? <EmptyState title="No row selected" /> : (
-            <>
-              <div>
-                <div className="ip-kicker mb-2">1 - What This Is</div>
-                <div className="ip-card p-3">
-                  <div className="text-[13px] font-semibold">{sel.shape}</div>
-                  <div className="text-[11px] text-muted-foreground mt-0.5 font-mono">Item {sel.mark} - Bar {sel.size}</div>
-                </div>
-              </div>
-              <div>
-                <div className="ip-kicker mb-2">2 - Where It Came From</div>
-                <div className="ip-card p-3 flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-primary" />
-                  <div className="flex-1 text-[12px] font-mono truncate">{sel.source}</div>
-                </div>
-              </div>
-              <div>
-                <div className="ip-kicker mb-2">3 - Calculated Total</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Field label="Quantity" value={String(sel.count)} />
-                  <Field label="Length (m)" value={sel.length.toFixed(2)} />
-                  <Field label="Weight (kg)" value={sel.weight.toFixed(1)} />
-                  <Field label="Source" value="Drawing" />
-                </div>
-              </div>
-            </>
+        <div className="flex-1 overflow-auto bg-white text-neutral-900">
+          {!sel ? <EmptyState title="No row selected" /> : !signedUrl ? (
+            <div className="h-full flex items-center justify-center text-[10px] text-neutral-400 font-mono uppercase tracking-widest p-4 text-center">
+              {sel.source_file_id ? "Loading drawing…" : `No source drawing linked (source: ${sel.source})`}
+            </div>
+          ) : isImg ? (
+            <img src={signedUrl} alt="" className="w-full h-auto" />
+          ) : (
+            <div className="flex flex-col h-full p-2">
+              <iframe src={signedUrl} title="drawing" className="w-full flex-1 border border-neutral-200" />
+              <a href={signedUrl} target="_blank" rel="noreferrer"
+                className="mt-2 text-[10px] font-mono uppercase tracking-wider text-blue-600 hover:underline text-center">
+                Open in new tab ↗
+              </a>
+            </div>
           )}
         </div>
+        {sel && (
+          <div className="border-t border-border p-3 bg-card text-foreground">
+            <div className="grid grid-cols-3 gap-2 text-[11px] font-mono mb-3">
+              <Field label="Qty" value={String(sel.count)} />
+              <Field label="Len (m)" value={sel.length.toFixed(2)} />
+              <Field label="Wt (kg)" value={sel.weight.toFixed(1)} />
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <FileText className="w-3.5 h-3.5" />
+              <span className="truncate">{sel.source}</span>
+            </div>
+          </div>
+        )}
         <div className="border-t border-border p-3">
           <button
             disabled={rows.length === 0}
-            onClick={() => {
-              state.refresh();
-              goToStage?.("qa");
-            }}
+            onClick={() => { state.refresh(); goToStage?.("qa"); }}
             className="w-full h-10 inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground text-[12px] font-semibold uppercase tracking-[0.14em] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <CheckCircle2 className="w-4 h-4" /> Confirm Takeoff Data
