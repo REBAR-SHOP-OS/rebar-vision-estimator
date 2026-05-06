@@ -209,6 +209,21 @@ function resolveLine(
   };
 }
 
+function inferSegmentType(label: string): string {
+  const n = String(label || "").toLowerCase();
+  if (/(retain|retaining)/.test(n)) return "retaining_wall";
+  if (/(wall|frost wall|foundation wall)/.test(n)) return "wall";
+  if (/(footing|ftg|pile cap|pile|caisson|grade beam|raft|mat)/.test(n)) return "footing";
+  if (/(slab|sog|slab[- ]on[- ]grade|topping|deck)/.test(n)) return "slab";
+  if (/(beam|girder|joist|lintel|bond beam)/.test(n)) return "beam";
+  if (/(column|col\b)/.test(n)) return "column";
+  if (/(pier)/.test(n)) return "pier";
+  if (/(stair)/.test(n)) return "stair";
+  if (/(pit|sump|elevator pit)/.test(n)) return "pit";
+  if (/(curb|stoop|ledge|housekeeping pad|equipment pad)/.test(n)) return "curb";
+  return "miscellaneous";
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
