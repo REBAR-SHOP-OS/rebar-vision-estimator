@@ -1,57 +1,84 @@
-# Fix: Data doesn't flow from Stage 2 → Stage 3
+# Per-File Parse Status — Idempotent Takeoff Generation
 
-## Root cause
+## Goal
 
-Stage 3 (`TakeoffStage`) only **reads** existing `estimate_items` and canonical `rebar.takeoff_items` for the project. For project `6d0fcbf5…`:
+Stop re-parsing/re-OCRing files that are already indexed. Show per-file status. Make "Generate Takeoff" safely re-runnable.
 
-- `project_files`: 2
-- `scope_items` on `projects`: NULL
-- `segments`: 0
-- `estimate_items`: 0
+## Problem today
 
-Stage 2 (`ScopeStage`) currently only:
-1. Updates the local `scope` map in localStorage.
-2. Appends the candidate label to `projects.scope_items`.
-3. Sets `workflow_status = 'scope_detected'`.
+- TakeoffStage checks one project-wide row count (`indexedCount === 0`). If even one page is indexed, no parsing happens for the rest. If zero, every file re-runs from scratch on every click.
+- No per-file feedback — user can't see which file succeeded, failed, or is missing.
+- A re-click after partial failure either does nothing (count > 0) or re-OCRs everything (count = 0).
 
-It **never creates `segments`** and **never invokes `auto-estimate`** (or any takeoff producer). Because of that, Stage 3 always finds zero rows even after the user approves scope items.
+## Solution (minimum patch)
 
-The `auto-estimate` edge function exists and writes to `estimate_items`, but it requires a `segment_id` — which the V2 workflow never creates.
+Add a `parse_status` column to `document_versions` and gate parsing per file.
 
-## Fix (minimum patch)
+### 1. Schema migration
 
-Two small, surgical changes — no rewrites, no UI redesign:
+Add 3 nullable columns to `document_versions`:
 
-### 1. `ScopeStage.tsx` — create a segment when a candidate is approved
+```text
+parse_status   text     default 'pending'   -- pending | parsing | indexed | failed | scanned_failed
+parse_error    text     nullable
+parsed_at      timestamptz nullable
+```
 
-In the existing `setDecision(id, "accept")` branch (the same block that writes `scope_items`), also upsert a `segments` row:
+No data migration needed — existing rows default to `pending` and will be re-evaluated naturally (skipped if their pages already exist in `drawing_search_index`).
 
-- `project_id = projectId`
-- `user_id = auth.uid()`
-- `name = candidate.label`
-- `segment_type = 'miscellaneous'` (default)
-- `status = 'draft'`
-- Idempotent: skip insert if a segment with the same `(project_id, name)` already exists.
+### 2. TakeoffStage.tsx changes
 
-On reject (`hold` / `reroute`), do **not** delete the segment (preserves any downstream work). Existing `scope_items` array logic is unchanged.
+Replace the single `indexedCount` check with a per-file loop:
 
-### 2. `TakeoffStage.tsx` — add a "Generate Takeoff" action when no rows exist
+```text
+for each file f:
+  load document_versions row (or create)
+  if parse_status == 'indexed'  -> skip, continue
+  if parse_status == 'failed' && user is re-running -> retry
+  set parse_status = 'parsing'
+  try:
+    extract-pdf-text
+    if has text -> populate-search-index
+    else        -> client render -> ocr-image -> populate-search-index
+    set parse_status = 'indexed', parsed_at = now()
+  catch e:
+    set parse_status = 'failed', parse_error = e.message
+```
 
-Currently the empty state just says *"Accept scope candidates and run extraction to populate."* Replace the hint with a button that:
+Status pill in the UI uses `parse_status` directly.
 
-1. Fetches `segments` for this project that have no `estimate_items` yet.
-2. For each, calls `supabase.functions.invoke("auto-estimate", { body: { segment_id, project_id }})` sequentially (small N, typically ≤ 7).
-3. Shows a toast with progress and on success calls `state.refresh()` + reloads rows.
+### 3. FilesTab.tsx changes
 
-No schema changes. No new edge functions. Reuses the existing `auto-estimate` function that already writes `estimate_items` rows that `loadLegacyTakeoffRows` consumes.
+Same status writes inside its existing parse helper (single source of truth — extract a tiny helper `runFileParse(fileRef)` shared by both stages so we don't duplicate logic).
+
+### 4. Estimation gate
+
+`auto-estimate` already reads from `drawing_search_index`. No change needed — it just gets more data when more files reach `indexed`.
+
+## What this does NOT change
+
+- Pipeline order stays the same: extract → (OCR fallback) → index → segment → estimate → validate.
+- No change to edge functions.
+- No change to RLS or auth flow.
+- No queue/worker yet — keeps the in-tab orchestration. (We can add `analysis_jobs`-based async later as a separate phase.)
 
 ## Files touched
 
-- `src/features/workflow-v2/stages/ScopeStage.tsx` — add segment upsert inside existing `setDecision` accept branch (~15 lines).
-- `src/features/workflow-v2/stages/TakeoffStage.tsx` — add "Generate Takeoff" button + handler in the existing empty-state slot (~30 lines).
+```text
+supabase/migrations/<new>.sql              # +3 columns on document_versions
+src/features/workflow-v2/stages/TakeoffStage.tsx   # per-file gate + status updates
+src/components/workspace/FilesTab.tsx              # use shared helper, set status
+src/lib/parse-file.ts  (new, ~80 lines)            # shared runFileParse() helper
+```
 
-## Out of scope
+## UX after the change
 
-- No redesign of layout, no new tables, no canonical `rebar.takeoff_runs` writes (those continue to come from the existing canonical pipeline if/when it runs).
-- No changes to `auto-estimate` itself.
-- No deletion of segments on reject (safer default).
+- Click "Generate Takeoff" twice in a row → second click skips already-indexed files instantly and only retries failed ones.
+- Files tab shows a per-file badge: Pending / Parsing / Indexed / Failed.
+- Failed files show the error on hover; user can click "Retry" on that single file without re-running everything.
+
+## Out of scope (next phases)
+
+- Page-classification step (cover/plan/detail/schedule) to skip irrelevant pages — phase 2.
+- Move orchestration to `analysis_jobs` for tab-close resilience — phase 3.
+- Bar-mark prefilter inside `auto-estimate` for token savings — phase 2.
