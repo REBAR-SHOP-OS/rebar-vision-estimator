@@ -136,6 +136,8 @@ serve(async (req) => {
         } catch (err) {
           console.warn("OCR failed for image:", url, err);
         }
+      }
+    }
     const ocrLower = ocrText.toLowerCase();
     const cageKeywords = ["cage", "spiral", "tied assembly", "cage mark", "prefab", "column cage", "cage schedule", "cage height", "cage dia", "caisson", "drilled pier", "drilled shaft", "belled"];
     const barListKeywords = ["bar list", "bar schedule", "bar mark", "cut length", "bending schedule"];
