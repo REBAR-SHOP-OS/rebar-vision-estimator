@@ -717,7 +717,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   }, [user]);
 
   // ── Atomic Truth Pipeline helpers ──
-  const extractAtomicTruthJSON = (content: string): Record<string, unknown> | null => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const extractAtomicTruthJSON = (content: string): any => {
     const startMarker = "%%%ATOMIC_TRUTH_JSON_START%%%";
     const endMarker = "%%%ATOMIC_TRUTH_JSON_END%%%";
     let startIdx = content.indexOf(startMarker);
