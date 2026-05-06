@@ -55,6 +55,7 @@ export interface WorkflowQaIssue {
     source_excerpt?: string | null;
   } | null;
   location_label?: string | null;
+  raw_description?: string | null;
 }
 
 const CLOSED_STATUSES = new Set(["resolved", "closed"]);
