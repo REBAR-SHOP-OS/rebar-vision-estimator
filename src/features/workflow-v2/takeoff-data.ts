@@ -44,6 +44,17 @@ export interface WorkflowQaIssue {
   // Pinpoint locator + linked-row preview (filled by loader)
   locator?: { page_number?: number | null; bbox?: [number, number, number, number] | null; image_size?: { w: number; h: number } | null } | null;
   linked_item?: { id: string; description: string | null; bar_size: string | null; quantity_count: number; total_length: number; total_weight: number; missing_refs: string[]; source_file_id?: string | null; segment_id?: string | null; page_number?: number | null } | null;
+  // Structured drawing location (used to prefix question text)
+  location?: {
+    source_sheet?: string | null;
+    page_number?: number | null;
+    detail_reference?: string | null;
+    grid_reference?: string | null;
+    zone_reference?: string | null;
+    element_reference?: string | null;
+    source_excerpt?: string | null;
+  } | null;
+  location_label?: string | null;
 }
 
 const CLOSED_STATUSES = new Set(["resolved", "closed"]);
@@ -64,6 +75,41 @@ function isOpenStatus(status?: string | null) {
 
 function coercePayload(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function pickStr(...vals: any[]): string | null {
+  for (const v of vals) {
+    if (v === null || v === undefined) continue;
+    const s = String(v).trim();
+    if (s) return s;
+  }
+  return null;
+}
+
+export function buildLocationLabel(loc: WorkflowQaIssue["location"], fallbackSheet?: string | null): string | null {
+  if (!loc) return fallbackSheet ? `Sheet ${fallbackSheet}` : null;
+  const parts: string[] = [];
+  if (loc.source_sheet) parts.push(`Sheet ${loc.source_sheet}`);
+  else if (fallbackSheet) parts.push(`Sheet ${fallbackSheet}`);
+  if (loc.page_number) parts.push(`p.${loc.page_number}`);
+  if (loc.detail_reference) parts.push(`Detail ${loc.detail_reference}`);
+  if (loc.grid_reference) parts.push(`Grid ${loc.grid_reference}`);
+  if (loc.zone_reference) parts.push(loc.zone_reference);
+  if (loc.element_reference) parts.push(loc.element_reference);
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+function extractLocationFromRef(ref: any, aj: Record<string, any>, fallback: { sheet_id?: string | null }) {
+  const r = ref || {};
+  return {
+    source_sheet: pickStr(r.sheet, r.sheet_id, r.source_sheet, aj.sheet, aj.sheet_id, aj.source_sheet, fallback.sheet_id),
+    page_number: Number(r.page_number ?? aj.page_number ?? 0) || null,
+    detail_reference: pickStr(r.detail, r.detail_reference, aj.detail, aj.detail_reference),
+    grid_reference: pickStr(r.grid, r.grid_reference, aj.grid, aj.grid_reference),
+    zone_reference: pickStr(r.zone, r.zone_reference, aj.zone, aj.zone_reference, aj.area),
+    element_reference: pickStr(r.element, r.element_reference, r.mark, aj.element, aj.element_reference, aj.mark, aj.callout),
+    source_excerpt: pickStr(r.excerpt, r.source_excerpt, aj.excerpt, aj.source_excerpt),
+  };
 }
 
 async function getCanonicalTakeoffRuns(legacyProjectId: string) {
@@ -324,6 +370,34 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
         };
       }
       if (!iss.source_file_id && item?.source_file_id) iss.source_file_id = item.source_file_id;
+      // Build structured location & visible label
+      const loc = extractLocationFromRef(ref, aj, { sheet_id: iss.sheet_id });
+      iss.location = loc;
+      iss.location_label = buildLocationLabel(loc, iss.sheet_id);
+      // Prefix the title with the location for actionable QA copy
+      if (iss.location_label && !String(iss.title || "").startsWith(iss.location_label)) {
+        iss.title = `${iss.location_label}: ${iss.title || iss.issue_type || "review item"}`;
+      }
+    }
+  }
+
+  // Ensure every issue has a location_label even without linked items
+  for (const iss of legacyIssues) {
+    if (iss.location_label) continue;
+    const ref = Array.isArray(iss.source_refs) ? iss.source_refs[0] : null;
+    const loc = extractLocationFromRef(ref, {}, { sheet_id: iss.sheet_id });
+    iss.location = loc;
+    iss.location_label = buildLocationLabel(loc, iss.sheet_id);
+    if (iss.location_label && !String(iss.title || "").startsWith(iss.location_label)) {
+      iss.title = `${iss.location_label}: ${iss.title || iss.issue_type || "review item"}`;
+    }
+  }
+
+  // Canonical issues: add location_label from sheet_id if available
+  for (const iss of canonicalIssues) {
+    iss.location_label = iss.sheet_id ? `Item ${String(iss.sheet_id).slice(0, 8)}` : null;
+    if (iss.location_label && !String(iss.title || "").startsWith(iss.location_label)) {
+      iss.title = `${iss.location_label}: ${iss.title || iss.issue_type || "review item"}`;
     }
   }
 
