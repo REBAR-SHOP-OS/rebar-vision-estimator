@@ -252,6 +252,7 @@ function DrawingPreview({ file }: { file: Row }) {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [pageCount, setPageCount] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const canPreview = isPdfFile(file) || isImageFile(file);
@@ -261,6 +262,7 @@ function DrawingPreview({ file }: { file: Row }) {
     setSignedUrl(null);
     setPreviewUrl(null);
     setPageCount(0);
+    setCurrentPage(1);
     setError(null);
     setLoading(true);
 
@@ -292,13 +294,20 @@ function DrawingPreview({ file }: { file: Row }) {
 
   const isPdf = isPdfFile(file);
 
+  const goToPage = (next: number) => {
+    if (next < 1 || next > pageCount || next === currentPage) return;
+    setPreviewUrl(null);
+    setLoading(true);
+    setCurrentPage(next);
+  };
+
   return (
-    <div className="relative min-h-[310px] overflow-hidden border border-border bg-background">
+    <div className="relative min-h-[480px] overflow-hidden border border-border bg-background">
       {signedUrl && isPdf && (
         <PdfRenderer
           url={signedUrl}
-          currentPage={1}
-          scale={1.35}
+          currentPage={currentPage}
+          scale={1.5}
           onPageCount={setPageCount}
           onPageRendered={(imageDataUrl) => {
             setPreviewUrl(imageDataUrl);
@@ -311,7 +320,7 @@ function DrawingPreview({ file }: { file: Row }) {
         <img
           src={previewUrl}
           alt={file.file_name}
-          className="h-full min-h-[310px] w-full object-contain"
+          className="block w-full h-auto max-h-[70vh] object-contain mx-auto"
           onLoad={() => setLoading(false)}
           onError={() => {
             setError("Preview unavailable");
@@ -319,7 +328,7 @@ function DrawingPreview({ file }: { file: Row }) {
           }}
         />
       ) : (
-        <div className="grid min-h-[310px] place-items-center text-muted-foreground">
+        <div className="grid min-h-[480px] place-items-center text-muted-foreground">
           {loading ? <Loader2 className="h-7 w-7 animate-spin opacity-70" /> : <ImageIcon className="h-8 w-8 opacity-40" />}
         </div>
       )}
@@ -330,10 +339,30 @@ function DrawingPreview({ file }: { file: Row }) {
         </div>
       )}
 
-      {pageCount > 1 && (
-        <div className="absolute right-2 top-2 border border-border bg-card/95 px-2 py-1 text-[10px] text-muted-foreground">
-          1 / {pageCount}
-        </div>
+      {isPdf && pageCount > 1 && (
+        <>
+          <button
+            type="button"
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={currentPage <= 1 || loading}
+            className="absolute left-2 top-1/2 -translate-y-1/2 h-8 w-8 grid place-items-center border border-border bg-card/95 text-foreground disabled:opacity-30 hover:bg-card"
+            aria-label="Previous page"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={currentPage >= pageCount || loading}
+            className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 grid place-items-center border border-border bg-card/95 text-foreground disabled:opacity-30 hover:bg-card"
+            aria-label="Next page"
+          >
+            ›
+          </button>
+          <div className="absolute right-2 top-2 border border-border bg-card/95 px-2 py-1 text-[10px] text-muted-foreground tabular-nums">
+            {currentPage} / {pageCount}
+          </div>
+        </>
       )}
     </div>
   );
