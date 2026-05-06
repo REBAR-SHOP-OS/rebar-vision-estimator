@@ -232,12 +232,14 @@ Deno.serve(async (req) => {
       });
     }
 
+    const bridgeLookupFileId = legacy_file_id || pipeline_file_id || null;
+
     let rebarProjectFileId: string | null = null;
-    if (legacy_file_id) {
+    if (bridgeLookupFileId) {
       const { data: linkRow } = await supabase
         .from("rebar_project_file_links")
         .select("rebar_project_file_id")
-        .eq("legacy_file_id", legacy_file_id)
+        .eq("legacy_file_id", bridgeLookupFileId)
         .maybeSingle();
       rebarProjectFileId = linkRow?.rebar_project_file_id || null;
     }
