@@ -2167,11 +2167,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                     onClick={async () => {
                       if (card.action === 'exportExcel') {
                         if (!assertExportAllowed()) return;
-                        await exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData });
+                        await exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData: scopeData as any });
                         toast.success("Excel exported");
                       } else if (card.action === 'exportPdf') {
                         if (!assertExportAllowed()) return;
-                        await exportPdfFile({ quoteResult, elements: validationData?.elements || [], scopeData, projectId });
+                        await exportPdfFile({ quoteResult, elements: validationData?.elements || [], scopeData: scopeData as any, projectId });
                         toast.success("PDF exported");
                       }
                     }}
@@ -2241,7 +2241,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                             return;
                           }
                           if (!assertExportAllowed()) return;
-                          await exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData });
+                          await exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData: scopeData as any });
                           toast.success("Excel exported");
                         } else if (card.action === 'exportPdf') {
                           if (!quoteResult?.quote) {
@@ -2249,7 +2249,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                             return;
                           }
                           if (!assertExportAllowed()) return;
-                          await exportPdfFile({ quoteResult, elements: validationData?.elements || [], scopeData, projectId });
+                          await exportPdfFile({ quoteResult, elements: validationData?.elements || [], scopeData: scopeData as any, projectId });
                           toast.success("PDF exported");
                         } else if (card.sendText) {
                           sendMessage(card.sendText);
