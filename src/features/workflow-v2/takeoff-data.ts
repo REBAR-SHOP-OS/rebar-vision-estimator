@@ -410,7 +410,8 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
       const loc = extractLocationFromRef(ref, aj, { sheet_id: iss.sheet_id });
       iss.location = loc;
       iss.location_label = buildLocationLabel(loc, iss.sheet_id);
-      // Prefix the title with the location for actionable QA copy
+      iss.raw_description = iss.description ?? null;
+      iss.description = buildQuestionText(iss.location_label, loc, iss.description, iss.title);
       if (iss.location_label && !String(iss.title || "").startsWith(iss.location_label)) {
         iss.title = `${iss.location_label}: ${iss.title || iss.issue_type || "review item"}`;
       }
@@ -419,19 +420,25 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
 
   // Ensure every issue has a location_label even without linked items
   for (const iss of legacyIssues) {
-    if (iss.location_label) continue;
+    if (iss.location_label || iss.raw_description !== undefined) continue;
     const ref = Array.isArray(iss.source_refs) ? iss.source_refs[0] : null;
     const loc = extractLocationFromRef(ref, {}, { sheet_id: iss.sheet_id });
     iss.location = loc;
     iss.location_label = buildLocationLabel(loc, iss.sheet_id);
+    iss.raw_description = iss.description ?? null;
+    iss.description = buildQuestionText(iss.location_label, loc, iss.description, iss.title);
     if (iss.location_label && !String(iss.title || "").startsWith(iss.location_label)) {
       iss.title = `${iss.location_label}: ${iss.title || iss.issue_type || "review item"}`;
     }
   }
 
-  // Canonical issues: add location_label from sheet_id if available
+  // Canonical issues: enrich location from takeoff_items, then prefix
+  await enrichCanonicalIssueLocations(canonicalIssues);
   for (const iss of canonicalIssues) {
-    iss.location_label = iss.sheet_id ? `Item ${String(iss.sheet_id).slice(0, 8)}` : null;
+    iss.location_label = buildLocationLabel(iss.location, null)
+      || (iss.sheet_id ? `Item ${String(iss.sheet_id).slice(0, 8)}` : null);
+    iss.raw_description = iss.description ?? null;
+    iss.description = buildQuestionText(iss.location_label, iss.location, iss.description, iss.title);
     if (iss.location_label && !String(iss.title || "").startsWith(iss.location_label)) {
       iss.title = `${iss.location_label}: ${iss.title || iss.issue_type || "review item"}`;
     }
