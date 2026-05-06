@@ -223,8 +223,12 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
 
   const totals = useMemo(() => ({
     rows: rows.length,
-    weight: rows.reduce((s, r) => s + r.weight, 0),
-    blocked: rows.filter((r) => r.status === "blocked").length,
+    weight: rows
+      .filter((r) => r.geometry_status !== "unresolved")
+      .reduce((s, r) => s + r.weight, 0),
+    blocked: rows.filter(
+      (r) => r.status === "blocked" || r.geometry_status === "unresolved"
+    ).length,
   }), [rows]);
 
   const sel = focusRow;
@@ -462,11 +466,12 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
         )}
         <div className="border-t border-border p-3">
           <button
-            disabled={rows.length === 0}
+            disabled={rows.length === 0 || totals.blocked > 0}
             onClick={() => { state.refresh(); goToStage?.("qa"); }}
             className="w-full h-10 inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground text-[12px] font-semibold uppercase tracking-[0.14em] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <CheckCircle2 className="w-4 h-4" /> Confirm Takeoff Data
+            <CheckCircle2 className="w-4 h-4" />
+            {totals.blocked > 0 ? `${totals.blocked} Blocked — Resolve First` : "Confirm Takeoff Data"}
           </button>
         </div>
       </aside>
