@@ -326,8 +326,8 @@ function buildBarListSheet(wb: ExcelJS.Workbook, params: ExportParams) {
     elemRow.getCell(1).border = THIN_BORDER;
     rowNum++;
 
-    // Sub-group by sub_element
-    const subGrouped = groupBy(bars, (b) => b.sub_element || b.description || "");
+    // Sub-group by element_id (e.g. F1, P3, W1) — falls back to sub_element / description.
+    const subGrouped = groupBy(bars, (b) => b.element_id || b.sub_element || b.description || "");
     for (const [subElem, subBars] of Object.entries(subGrouped)) {
       if (subElem && Object.keys(subGrouped).length > 1) {
         const subRow = ws.addRow(["", subElem.toUpperCase()]);
@@ -339,6 +339,7 @@ function buildBarListSheet(wb: ExcelJS.Workbook, params: ExportParams) {
       }
 
       for (const b of subBars) {
+        const isWwm = (b.item_type === "wwm") || /WWM|MESH/i.test(String(b.size || ""));
         const lengthMm = b.length_mm || (b.length_ft ? b.length_ft * 304.8 : 0);
         const massKgM = getMassKgPerM(b.size);
         const multiplier = b.multiplier || 1;
@@ -365,8 +366,8 @@ function buildBarListSheet(wb: ExcelJS.Workbook, params: ExportParams) {
           b.bend_type || b.bend || "",
           b.info1 || "",
           b.info2 || b.spacing || "",
-          r3(totalLenM),
-          r1(wtKg),
+          isWwm ? `${r3(b.area_sqm || totalLenM)} SQ M` : r3(totalLenM),
+          isWwm ? "—" : r1(wtKg),
           b.notes || b.status || "",
         ]);
         dataRow.eachCell((cell, colNumber) => {
