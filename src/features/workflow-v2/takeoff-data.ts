@@ -118,14 +118,13 @@ function buildQuestionText(
 ): string {
   const rawDesc = originalDescription ? String(originalDescription).trim() : "";
   const rawTitle = fallbackTitle ? String(fallbackTitle).trim() : "";
-  // Rewrite "Missing: …" / "Unresolved geometry …" style messages into a
-  // raw-input ask. The estimator must enter values FROM the drawing; the
-  // system does the math. Never ask to "confirm/find/calculate/verify total".
-  const rewritten = rewriteToRawInputAsk(rawDesc, rawTitle, loc);
-  const body = rewritten
-    || rawDesc
+  // Try plain three-step rewrite first ("Look at … Find … Enter …").
+  const rewritten = rewriteToRawInputAsk(rawDesc, rawTitle, loc, label);
+  if (rewritten) return rewritten;
+  // Fall back to the original message, prefixed with the location for context.
+  const body = rawDesc
     || rawTitle
-    || "Enter the dimensions and counts shown on the drawing so the system can calculate qty, length, and weight.";
+    || "Enter the dimensions shown on the drawing.";
   if (label) return `${label}: ${body}`;
   if (loc?.page_number) return `Page ${loc.page_number}: ${body}`;
   if (loc?.source_excerpt) {
@@ -153,45 +152,37 @@ function classifyElement(text: string): "slab_edge"|"strip_footing"|"pad"|"wall"
 
 function elementNoun(c: ReturnType<typeof classifyElement>): string {
   return ({
-    slab_edge: "slab edge",
+    slab_edge: "slab",
     strip_footing: "strip footing",
-    pad: "pad",
+    pad: "housekeeping pad",
     wall: "wall",
-    cage: "column/pier cage",
+    cage: "column or pier",
     generic: "element",
-  })[c];
-}
-
-function closingClause(c: ReturnType<typeof classifyElement>): string {
-  return ({
-    slab_edge: "so the system can calculate total edge run, qty, length, and weight",
-    strip_footing: "so the system can calculate total length and weight",
-    pad: "so the system can calculate qty and total length",
-    wall: "so the system can calculate bar length, qty, and weight",
-    cage: "so the system can calculate stirrup count, length, and weight",
-    generic: "so the system can calculate qty, length, and weight",
   })[c];
 }
 
 function rawInputForToken(token: string, c: ReturnType<typeof classifyElement>): string | null {
   const k = token.toLowerCase().replace(/[^a-z0-9_]/g, "_");
   if (/(perimeter|edge_length|edge_run|run_length|^length$|total_length|element_length)/.test(k)) {
-    if (c === "slab_edge") return "the slab edge length and width shown on the drawing";
-    if (c === "wall")      return "the wall length shown on the drawing";
-    if (c === "pad")       return "the pad length and width shown on the drawing";
-    return "the run/length dimension shown on the drawing";
+    if (c === "slab_edge") return "the slab length and slab width";
+    if (c === "wall")      return "the wall length";
+    if (c === "pad")       return "the pad length and pad width";
+    if (c === "strip_footing") return "the footing length";
+    return "the length";
   }
-  if (/(wall_height|^height$)/.test(k)) return "the wall height shown on the drawing";
+  if (/(wall_height|^height$)/.test(k)) return "the wall height";
   if (/(pad_length|pad_width|element_dimensions|dimensions|footprint|plan_dim)/.test(k)) {
-    if (c === "wall") return "the wall length and height shown on the drawing";
-    return "the element length and width shown on the drawing";
+    if (c === "wall") return "the wall length and wall height";
+    if (c === "slab_edge") return "the slab length and slab width";
+    if (c === "pad") return "the pad length and pad width";
+    return "the length and width";
   }
-  if (/(spacing|o_c|on_center)/.test(k)) return "the bar spacing shown on the drawing";
-  if (/(count|qty|quantity)/.test(k)) return "the bar count shown on the callout";
-  if (/(rebar_callout|^callout$|bar_callout|mark)/.test(k)) return "the rebar callout text shown on the drawing";
-  if (/(cover)/.test(k)) return "the concrete cover shown on the drawing";
-  if (/(thickness)/.test(k)) return "the slab/wall thickness shown on the drawing";
-  if (/(diameter)/.test(k)) return "the diameter shown on the drawing";
+  if (/(spacing|o_c|on_center)/.test(k)) return "the bar spacing";
+  if (/(count|qty|quantity)/.test(k)) return "the bar count";
+  if (/(rebar_callout|^callout$|bar_callout|mark)/.test(k)) return "the rebar callout text";
+  if (/(cover)/.test(k)) return "the concrete cover";
+  if (/(thickness)/.test(k)) return "the thickness";
+  if (/(diameter)/.test(k)) return "the diameter";
   return null;
 }
 
@@ -199,15 +190,14 @@ function rewriteToRawInputAsk(
   desc: string,
   title: string,
   loc: WorkflowQaIssue["location"],
+  label: string | null,
 ): string | null {
   const text = `${title}\n${desc}`;
   const looksUnresolved = /^(missing\b|unresolved geometry)/i.test(desc.trim())
     || /unresolved geometry|missing\s+(refs?|dimensions?|callout)/i.test(text);
-  // Also rewrite generic "verify/confirm/find/calculate ... total/length/qty/perimeter" prompts.
   const looksDerivedAsk = /\b(verify|confirm|find|calculate|compute)\b.*\b(total|length|run|perimeter|qty|quantity|count|weight)\b/i.test(text);
   if (!looksUnresolved && !looksDerivedAsk) return null;
 
-  // Pull missing tokens out of "Missing: a; b; c" body.
   const missingMatch = desc.match(/missing\s*:\s*([^\n]+)/i);
   const tokens = missingMatch
     ? missingMatch[1].split(/[;,]/).map((s) => s.trim()).filter(Boolean)
@@ -216,21 +206,19 @@ function rewriteToRawInputAsk(
   const calloutText = (loc?.element_reference || "").trim();
   const elementClass = classifyElement(`${calloutText} ${title} ${desc}`);
 
-  // Map missing tokens → unique raw-input phrases.
   const phrases: string[] = [];
   for (const t of tokens) {
     const p = rawInputForToken(t, elementClass);
     if (p && !phrases.includes(p)) phrases.push(p);
   }
-  // If we couldn't extract any tokens, fall back to a class-appropriate default.
   if (phrases.length === 0) {
     const defaults: Record<string, string[]> = {
-      slab_edge: ["the slab edge length and width shown on the drawing"],
-      strip_footing: ["the footing run dimension shown on the drawing"],
-      pad: ["the pad length and width shown on the drawing"],
-      wall: ["the wall length and height shown on the drawing"],
-      cage: ["the column/pier dimensions, tie spacing, and overall height shown on the drawing"],
-      generic: ["the dimensions and bar callout shown on the drawing"],
+      slab_edge: ["the slab length and slab width"],
+      strip_footing: ["the footing length"],
+      pad: ["the pad length and pad width"],
+      wall: ["the wall length and wall height"],
+      cage: ["the column or pier dimensions, tie spacing, and overall height"],
+      generic: ["the dimensions and bar callout"],
     };
     phrases.push(...defaults[elementClass]);
   }
@@ -239,8 +227,15 @@ function rewriteToRawInputAsk(
   const inputList = phrases.length === 1
     ? phrases[0]
     : phrases.slice(0, -1).join(", ") + ", and " + phrases[phrases.length - 1];
-  const forClause = calloutText ? ` for "${calloutText}"` : "";
-  return `at the ${noun}: enter ${inputList}${forClause} ${closingClause(elementClass)}.`;
+
+  // Three plain-language steps: Look at … / Find … / Enter …
+  const lookAt = label && label.trim().length > 0
+    ? label.trim()
+    : (loc?.page_number ? `Page ${loc.page_number}` : "the drawing");
+  const findPart = calloutText
+    ? `the ${noun} marked "${calloutText}"`
+    : `the ${noun}`;
+  return `Look at ${lookAt}. Find ${findPart}. Enter ${inputList} from the drawing.`;
 }
 
 function extractLocationFromRef(ref: any, aj: Record<string, any>, fallback: { sheet_id?: string | null }) {
