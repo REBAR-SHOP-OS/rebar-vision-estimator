@@ -1,9 +1,17 @@
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { getCanonicalProjectFiles, type CanonicalProjectFileView } from "@/lib/rebar-read-model";
 
 export interface WorkflowState {
   fileCount: number;
-  files: Array<{ id: string; file_name: string; file_path: string; created_at: string; file_size?: number | null }>;
+  files: Array<{
+    id: string;
+    legacy_file_id?: string | null;
+    file_name: string;
+    file_path: string;
+    created_at: string;
+    file_size?: number | null;
+  }>;
   scopeCandidates: number;
   scopeAccepted: number;
   takeoffRows: number;
@@ -23,6 +31,48 @@ function writeLocal(pid: string, patch: Record<string, unknown>) {
   localStorage.setItem(LS_KEY(pid), JSON.stringify({ ...cur, ...patch }));
 }
 
+function mergeWorkflowFiles(
+  canonicalFiles: CanonicalProjectFileView[],
+  legacyFiles: Array<{ id: string; file_name: string; file_path: string; created_at: string; file_size?: number | null }>,
+) {
+  if (canonicalFiles.length === 0) {
+    return legacyFiles.map((file) => ({
+      ...file,
+      legacy_file_id: file.id,
+    }));
+  }
+
+  const legacyById = new Map(legacyFiles.map((file) => [file.id, file]));
+
+  const canonicalRows = canonicalFiles.map((file) => {
+    const legacyFile = file.legacyFileId ? legacyById.get(file.legacyFileId) : null;
+
+    return {
+      id: file.rebarProjectFileId,
+      legacy_file_id: file.legacyFileId,
+      file_name: file.originalFilename,
+      file_path: file.storagePath,
+      created_at: legacyFile?.created_at || file.uploadedAt,
+      file_size: legacyFile?.file_size || null,
+    };
+  });
+
+  const linkedLegacyIds = new Set(
+    canonicalFiles
+      .map((file) => file.legacyFileId)
+      .filter((legacyFileId): legacyFileId is string => Boolean(legacyFileId)),
+  );
+
+  const legacyOnlyRows = legacyFiles
+    .filter((file) => !linkedLegacyIds.has(file.id))
+    .map((file) => ({
+      ...file,
+      legacy_file_id: file.id,
+    }));
+
+  return [...canonicalRows, ...legacyOnlyRows];
+}
+
 export function useWorkflowState(projectId: string): WorkflowState & {
   setLocal: (patch: Record<string, unknown>) => void;
   local: Record<string, unknown>;
@@ -39,13 +89,17 @@ export function useWorkflowState(projectId: string): WorkflowState & {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [f, vi, ei] = await Promise.all([
+      const [canonicalFiles, f, vi, ei] = await Promise.all([
+        getCanonicalProjectFiles(supabase, projectId).catch((error) => {
+          console.warn("Failed to load canonical workflow files:", error);
+          return [] as CanonicalProjectFileView[];
+        }),
         supabase.from("project_files").select("id,file_name,file_path,created_at,file_size").eq("project_id", projectId).order("created_at", { ascending: false }),
         supabase.from("validation_issues").select("severity,status").eq("project_id", projectId),
         supabase.from("estimate_items").select("id", { count: "exact", head: true }).eq("project_id", projectId),
       ]);
       if (cancelled) return;
-      setFiles(f.data || []);
+      setFiles(mergeWorkflowFiles(canonicalFiles, f.data || []));
       const open = (vi.data || []).filter((i) => (i as Record<string, unknown>).status !== "resolved" && (i as Record<string, unknown>).status !== "closed");
       setQaOpen(open.length);
       setQaCriticalOpen(open.filter((i) => (i as Record<string, unknown>).severity === "critical" || (i as Record<string, unknown>).severity === "error").length);
