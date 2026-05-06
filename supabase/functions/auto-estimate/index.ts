@@ -489,90 +489,38 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       });
     }
 
-    // Mass lookup (kg/m for rebar, kg/m² for WWM) — used to backfill missing weights
-    const REBAR_MASS: Record<string, number> = {
-      "10M": 0.785, "15M": 1.570, "20M": 2.355, "25M": 3.925, "30M": 5.495, "35M": 7.850,
-      "#3": 0.561, "#4": 0.994, "#5": 1.552, "#6": 2.235, "#7": 3.042, "#8": 3.973,
-    };
-    const WWM_MASS: Record<string, number> = {
-      "6X6-W1.4/W1.4": 0.93, "6X6-W2.1/W2.1": 1.37, "6X6-W2.9/W2.9": 1.90,
-      "6X6-W4.0/W4.0": 2.63, "4X4-W2.1/W2.1": 2.05, "4X4-W4.0/W4.0": 3.94,
-    };
-    const massFor = (size: string, type: string): number => {
-      const k = String(size || "").toUpperCase().trim();
-      if (type === "wwm") return WWM_MASS[k] || 0;
-      const m = k.match(/^(10M|15M|20M|25M|30M|35M|#[3-8])/);
-      return m ? REBAR_MASS[m[1]] || 0 : 0;
-    };
-    // Backfill total_weight from total_length × mass when AI returned 0
-    for (const it of items) {
-      const len = Number(it.total_length) || 0;
-      const wgt = Number(it.total_weight) || 0;
-      if (wgt === 0 && len > 0) {
-        const mass = massFor(String(it.bar_size || ""), String(it.item_type || "rebar"));
-        if (mass > 0) it.total_weight = +(len * mass).toFixed(2);
-      }
-    }
+    // ============================================================
+    // DETERMINISTIC GEOMETRY RESOLVER
+    // The AI extracted callouts; we now compute qty/length/weight
+    // from the structural graph and tag each row with a geometry
+    // status so the UI can render UNRESOLVED rows honestly.
+    // ============================================================
+    const structuralOnly = (drawingTextContext || "")
+      .split("=== ARCHITECTURAL OCR")[0]; // never feed arch OCR to geometry
+    const graph = buildStructuralGraph(structuralOnly);
+    console.log(`[auto-estimate] graph: ${graph.barMarks.size} marks, ${graph.walls.length} walls, ${graph.footings.length} footings, ${graph.verifyNotes.length} verify notes`);
 
-    // GEOMETRIC BACKFILL: if AI emitted a line with no length/qty, try to derive
-    // numbers from description tokens (spacing, wall length/height, bar length).
-    // This guarantees the takeoff rows are not all zero when OCR has dimensions.
-    const num = (s: string) => {
-      const m = s.replace(/[, ]/g, "").match(/(\d+(?:\.\d+)?)/);
-      return m ? Number(m[1]) : 0;
-    };
-    const ocrText = (drawingTextContext || "").toUpperCase();
-    // Try to read a representative wall length & height from OCR once
-    const wallLenMatch = ocrText.match(/WALL[^\n]{0,40}?(\d{3,5})\s*MM/);
-    const wallHgtMatch = ocrText.match(/(?:HEIGHT|HGT|HIGH)[^\n]{0,20}?(\d{3,5})\s*MM/);
-    const defaultWallLenMm = wallLenMatch ? Number(wallLenMatch[1]) : 0;
-    const defaultWallHgtMm = wallHgtMatch ? Number(wallHgtMatch[1]) : 0;
-
-    for (const it of items) {
-      const qty = Number(it.quantity_count) || 0;
-      const len = Number(it.total_length) || 0;
-      if (qty > 0 && len > 0) continue;
-      const desc: string = String(it.description || "").toUpperCase();
-      if (desc.startsWith("UNRESOLVED:")) continue;
-
-      const size = String(it.bar_size || "").toUpperCase();
-      const mass = massFor(size, String(it.item_type || "rebar"));
-
-      // pick spacing (mm) from desc or OCR
-      const spMatch = desc.match(/@\s*(\d{2,4})\s*MM/) || ocrText.match(new RegExp(size.replace(/[^A-Z0-9#]/g, "") + "[^\n]{0,40}?@\\s*(\\d{2,4})\\s*MM"));
-      const spacing = spMatch ? Number(spMatch[1]) : 0;
-
-      // pick bar length (mm) from desc e.g. "457mm long"
-      const barLenMatch = desc.match(/(\d{3,5})\s*MM\s*LONG/);
-      let barLenM = barLenMatch ? num(barLenMatch[1]) / 1000 : 0;
-
-      let q = qty;
-      let totalLen = 0;
-
-      if (spacing > 0 && defaultWallLenMm > 0) {
-        const computedQty = Math.ceil(defaultWallLenMm / spacing) + 1;
-        if (q === 0) q = computedQty;
-        if (barLenM === 0 && defaultWallHgtMm > 0) {
-          const lapMm = /15M/.test(size) ? 640 : /20M/.test(size) ? 800 : /10M/.test(size) ? 400 : 500;
-          barLenM = (defaultWallHgtMm + lapMm) / 1000;
-        }
-        if (barLenM > 0) totalLen = +(q * barLenM).toFixed(2);
-      } else if (q > 0 && barLenM > 0) {
-        totalLen = +(q * barLenM).toFixed(2);
-      }
-
-      if (q > 0) it.quantity_count = q;
-      if (totalLen > 0) {
-        it.total_length = totalLen;
-        if (mass > 0) it.total_weight = +(totalLen * mass).toFixed(2);
-      } else if (q === 0 || totalLen === 0) {
-        // Mark as UNRESOLVED so user can see the OCR genuinely lacks geometry
-        if (!desc.startsWith("UNRESOLVED:")) {
-          it.description = `UNRESOLVED: ${it.description}`;
-          it.confidence = Math.min(Number(it.confidence) || 0.2, 0.2);
-        }
-      }
-    }
+    const enriched = items.map((it: any) => {
+      const r = resolveLine(it, graph);
+      const baseDesc = String(it.description || "").trim();
+      const isUnresolved = r.status === "unresolved";
+      const cleanDesc = baseDesc.replace(/^UNRESOLVED:\s*/i, "");
+      return {
+        ...it,
+        description: cleanDesc,
+        quantity_count: r.qty ?? 0,
+        total_length: r.totalLengthM ?? 0,
+        total_weight: r.totalWeightKg ?? 0,
+        // Confidence: resolved keeps AI confidence (capped 0.95), partial halved, unresolved 0
+        confidence: isUnresolved ? 0
+          : r.status === "partial" ? Math.min(Number(it.confidence) || 0.4, 0.5)
+          : Math.min(Number(it.confidence) || 0.7, 0.95),
+        _geometry_status: r.status,
+        _missing_refs: r.missing,
+        _derivation: r.derivation || null,
+      };
+    });
+    items = enriched;
 
     // Weight validation gate — flag outliers
     const totalAiWeight = items.reduce((s: number, i: any) => s + (Number(i.total_weight) || 0), 0);
