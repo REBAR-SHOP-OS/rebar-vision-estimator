@@ -809,7 +809,8 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         _derivation: r.derivation || null,
       };
     });
-    items = enriched;
+    items = enriched.filter((it: any) => itemMatchesSegment(it, segTypeKey, String(segment?.name || "")));
+    console.log(`[auto-estimate] post-filter rows=${items.length} for segment="${segment?.name}" effective_type=${segTypeKey}`);
 
     // Best-effort page locator: for each item, scan OCR pages for the bar mark
     // / bar-size / strongest description token and attach the first matching
