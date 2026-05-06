@@ -42,7 +42,13 @@ export interface WorkflowQaIssue {
   source_file_id?: string | null;
   source_refs?: any;
   // Pinpoint locator + linked-row preview (filled by loader)
-  locator?: { page_number?: number | null; bbox?: [number, number, number, number] | null; image_size?: { w: number; h: number } | null } | null;
+  locator?: {
+    page_number?: number | null;
+    bbox?: [number, number, number, number] | null;
+    image_size?: { w: number; h: number } | null;
+    anchor_confidence?: number | null;
+    anchor_mode?: "exact" | "approximate" | "unavailable" | null;
+  } | null;
   linked_item?: { id: string; description: string | null; bar_size: string | null; quantity_count: number; total_length: number; total_weight: number; missing_refs: string[]; source_file_id?: string | null; segment_id?: string | null; page_number?: number | null } | null;
   // Structured drawing location (used to prefix question text)
   location?: {
@@ -526,6 +532,8 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
         page_number: ref?.page_number ?? aj.page_number ?? null,
         bbox: ref?.bbox ?? aj.bbox ?? null,
         image_size: ref?.image_size ?? aj.image_size ?? null,
+        anchor_confidence: Number(ref?.anchor_confidence ?? aj.anchor_confidence ?? 0) || null,
+        anchor_mode: ref?.anchor_mode ?? aj.anchor_mode ?? null,
       };
       if (item) {
         iss.linked_item = {
