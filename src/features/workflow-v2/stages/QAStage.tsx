@@ -276,7 +276,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     const ro = new ResizeObserver(() => updatePageBox());
     ro.observe(host);
     return () => ro.disconnect();
-  }, [renderStatus, imgSize?.w, imgSize?.h, zoom, viewMode, pdfImg, previewUrl]);
+  }, [renderStatus, imgSize?.w, imgSize?.h, viewMode, pdfImg, previewUrl]);
 
   // Group issues by source sheet for the left navigator
   const sheets = useMemo(() => {
