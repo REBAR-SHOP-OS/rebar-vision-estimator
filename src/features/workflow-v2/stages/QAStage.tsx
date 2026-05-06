@@ -237,7 +237,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                             {it.linked_item && <span className="flex items-center gap-1"><Scale className="w-2.5 h-2.5" /> {(it.linked_item.total_weight || 0).toFixed(2)}t</span>}
                           </div>
                           {sev === "warning" && (
-                            <p className="text-[10px] text-[hsl(var(--status-blocked))] mt-1 italic font-medium truncate">{it.description?.slice(0, 50) || ""}</p>
+                            <p className="text-[10px] text-[hsl(var(--status-blocked))] mt-1 italic font-medium truncate">{(it.location_label ? `${it.location_label} — ` : "") + (it.description || "").replace(it.location_label ? `${it.location_label}: ` : "", "")}</p>
                           )}
                         </button>
                       );

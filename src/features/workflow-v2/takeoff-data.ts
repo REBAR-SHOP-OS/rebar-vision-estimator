@@ -55,6 +55,7 @@ export interface WorkflowQaIssue {
     source_excerpt?: string | null;
   } | null;
   location_label?: string | null;
+  raw_description?: string | null;
 }
 
 const CLOSED_STATUSES = new Set(["resolved", "closed"]);
@@ -107,16 +108,43 @@ export function buildLocationLabel(loc: WorkflowQaIssue["location"], fallbackShe
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+// Build the location-led question text shown in the QA panel.
+// Always lead with the most specific location available; fall back to source excerpt.
+function buildQuestionText(
+  label: string | null,
+  loc: WorkflowQaIssue["location"],
+  originalDescription: string | null | undefined,
+  fallbackTitle: string | null | undefined,
+): string {
+  const body = (originalDescription && String(originalDescription).trim())
+    || (fallbackTitle && String(fallbackTitle).trim())
+    || "Confirm this item against the drawing.";
+  if (label) return `${label}: ${body}`;
+  if (loc?.page_number) return `Page ${loc.page_number}: ${body}`;
+  if (loc?.source_excerpt) {
+    const ex = String(loc.source_excerpt).slice(0, 120);
+    return `Source: "${ex}" — ${body}`;
+  }
+  return body;
+}
+
 function extractLocationFromRef(ref: any, aj: Record<string, any>, fallback: { sheet_id?: string | null }) {
   const r = ref || {};
+  const nestedR = (r.location && typeof r.location === "object") ? r.location : {};
+  const nestedA = (aj.location && typeof aj.location === "object") ? aj.location as Record<string, any> : {};
   return {
-    source_sheet: pickStr(r.sheet, r.sheet_id, r.source_sheet, aj.sheet, aj.sheet_id, aj.source_sheet, fallback.sheet_id),
-    page_number: Number(r.page_number ?? aj.page_number ?? 0) || null,
-    detail_reference: pickStr(r.detail, r.detail_reference, aj.detail, aj.detail_reference),
-    grid_reference: pickStr(r.grid, r.grid_reference, aj.grid, aj.grid_reference),
-    zone_reference: pickStr(r.zone, r.zone_reference, aj.zone, aj.zone_reference, aj.area),
-    element_reference: pickStr(r.element, r.element_reference, r.mark, aj.element, aj.element_reference, aj.mark, aj.callout),
-    source_excerpt: pickStr(r.excerpt, r.source_excerpt, aj.excerpt, aj.source_excerpt),
+    source_sheet: pickStr(nestedR.sheet, nestedA.sheet, r.sheet, r.sheet_id, r.source_sheet, aj.sheet, aj.sheet_id, aj.source_sheet, fallback.sheet_id),
+    page_number: Number(nestedR.page_number ?? nestedA.page_number ?? r.page_number ?? aj.page_number ?? 0) || null,
+    detail_reference: pickStr(nestedR.detail, nestedA.detail, r.detail, r.detail_reference, aj.detail, aj.detail_reference),
+    grid_reference: pickStr(nestedR.grid, nestedA.grid, r.grid, r.grid_reference, aj.grid, aj.grid_reference),
+    zone_reference: pickStr(nestedR.zone, nestedA.zone, r.zone, r.zone_reference, aj.zone, aj.zone_reference, aj.area, r.area, nestedR.area, nestedA.area),
+    element_reference: pickStr(
+      nestedR.element, nestedA.element, r.element, r.element_reference, r.mark, r.callout,
+      r.wall, r.wall_name, r.footing, r.footing_name, r.pad, r.pad_name,
+      aj.element, aj.element_reference, aj.mark, aj.callout,
+      aj.wall, aj.wall_name, aj.footing, aj.footing_name, aj.pad, aj.pad_name,
+    ),
+    source_excerpt: pickStr(nestedR.excerpt, nestedA.excerpt, r.excerpt, r.source_excerpt, aj.excerpt, aj.source_excerpt),
   };
 }
 
@@ -326,6 +354,30 @@ async function loadCanonicalQaIssues(projectId: string): Promise<WorkflowQaIssue
   }));
 }
 
+// For canonical warnings, hydrate location fields from rebar.takeoff_items
+async function enrichCanonicalIssueLocations(issues: WorkflowQaIssue[]) {
+  const itemIds = Array.from(new Set(
+    issues.map((i) => i.sheet_id).filter((v): v is string => !!v)
+  ));
+  if (itemIds.length === 0) return;
+  const { data, error } = await (supabase as any)
+    .schema("rebar")
+    .from("takeoff_items")
+    .select("id,drawing_reference,extraction_payload,source_text,element_type")
+    .in("id", itemIds);
+  if (error) { console.warn("enrichCanonicalIssueLocations failed:", error); return; }
+  const byId = new Map<string, any>((data || []).map((r: any) => [r.id, r]));
+  for (const iss of issues) {
+    const item = iss.sheet_id ? byId.get(iss.sheet_id) : null;
+    if (!item) continue;
+    const payload = (item.extraction_payload && typeof item.extraction_payload === "object") ? item.extraction_payload : {};
+    const loc = extractLocationFromRef(payload, {}, { sheet_id: item.drawing_reference || null });
+    if (!loc.element_reference && item.element_type) loc.element_reference = String(item.element_type);
+    if (!loc.source_excerpt && item.source_text) loc.source_excerpt = String(item.source_text).slice(0, 160);
+    iss.location = loc;
+  }
+}
+
 export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQaIssue[]> {
   const legacyReq = supabase
     .from("validation_issues")
@@ -382,7 +434,8 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
       const loc = extractLocationFromRef(ref, aj, { sheet_id: iss.sheet_id });
       iss.location = loc;
       iss.location_label = buildLocationLabel(loc, iss.sheet_id);
-      // Prefix the title with the location for actionable QA copy
+      iss.raw_description = iss.description ?? null;
+      iss.description = buildQuestionText(iss.location_label, loc, iss.description, iss.title);
       if (iss.location_label && !String(iss.title || "").startsWith(iss.location_label)) {
         iss.title = `${iss.location_label}: ${iss.title || iss.issue_type || "review item"}`;
       }
@@ -391,19 +444,25 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
 
   // Ensure every issue has a location_label even without linked items
   for (const iss of legacyIssues) {
-    if (iss.location_label) continue;
+    if (iss.location_label || iss.raw_description !== undefined) continue;
     const ref = Array.isArray(iss.source_refs) ? iss.source_refs[0] : null;
     const loc = extractLocationFromRef(ref, {}, { sheet_id: iss.sheet_id });
     iss.location = loc;
     iss.location_label = buildLocationLabel(loc, iss.sheet_id);
+    iss.raw_description = iss.description ?? null;
+    iss.description = buildQuestionText(iss.location_label, loc, iss.description, iss.title);
     if (iss.location_label && !String(iss.title || "").startsWith(iss.location_label)) {
       iss.title = `${iss.location_label}: ${iss.title || iss.issue_type || "review item"}`;
     }
   }
 
-  // Canonical issues: add location_label from sheet_id if available
+  // Canonical issues: enrich location from takeoff_items, then prefix
+  await enrichCanonicalIssueLocations(canonicalIssues);
   for (const iss of canonicalIssues) {
-    iss.location_label = iss.sheet_id ? `Item ${String(iss.sheet_id).slice(0, 8)}` : null;
+    iss.location_label = buildLocationLabel(iss.location, null)
+      || (iss.sheet_id ? `Item ${String(iss.sheet_id).slice(0, 8)}` : null);
+    iss.raw_description = iss.description ?? null;
+    iss.description = buildQuestionText(iss.location_label, iss.location, iss.description, iss.title);
     if (iss.location_label && !String(iss.title || "").startsWith(iss.location_label)) {
       iss.title = `${iss.location_label}: ${iss.title || iss.issue_type || "review item"}`;
     }
