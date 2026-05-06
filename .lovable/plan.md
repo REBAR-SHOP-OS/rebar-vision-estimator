@@ -1,78 +1,48 @@
-Implement a focused QA viewer fix plus a temporary debug mode so the drawing compare area becomes inspectable and the broken behavior is visible instead of silent.
+# Make every QA question state the exact drawing location
 
-What I’ll change
+## What's already in place
+`takeoff-data.ts` already builds a `location` object and `location_label` for each `WorkflowQaIssue` from `validation_issues.source_refs[0]` plus `estimate_items.assumptions_json`, and prefixes `iss.title` with the label. `QAStage.tsx` shows the label inside a bordered box under the title. The pieces exist but are incomplete — the spoken **question text** (`description`) and the **list-row preview** still don't lead with the location, structured fields are not consistently extracted on the backend, and there's no source-excerpt fallback when no sheet/grid is known.
 
-1. Fix the PDF page reset bug
-- Preserve the issue’s linked `page_number` when a new QA issue is selected.
-- Remove the current reset sequence that sets `pdfPage` back to 1 after selection.
-- Ensure the preview loader initializes to the locator page instead of always showing the cover/first page.
+## Changes (minimal patches only)
 
-2. Fix pointer placement so it points to the exact element
-- Rework the overlay positioning to anchor against the actual rendered image bounds, not the full container.
-- Stop using percentage placement over an `object-contain` image without accounting for letterboxing.
-- Use the same pattern as the working drawing overlay viewer: render the image in a measurable wrapper and place the bbox overlay relative to that wrapper.
-- Keep the “ask question / fix / impact” callout attached to the bbox.
+### 1. `src/features/workflow-v2/takeoff-data.ts`
+- Extend `extractLocationFromRef` to also pull `callout`, `area`, `wall`, `footing`, `pad`, `pad_name`, `wall_name`, `footing_name` into `element_reference`, and read `aj.location` / `ref.location` if backends already nest them.
+- Build an enriched `question_text` on each `WorkflowQaIssue`:
+  - Format: `"<location_label>: <original description or title>."`
+  - If `location_label` is null, fall back to `Page <n>` and finally to `source_excerpt` (truncated to ~120 chars, prefixed with `Source: "<excerpt>"`).
+- Always set `iss.description` to `question_text` so the QA panel (which renders `sel.description`) shows the location-led sentence. Keep the original message in `iss.raw_description` for debugging.
+- Make sure canonical (rebar.takeoff_warnings) issues also get a real `location_label` from `takeoff_items.drawing_reference` / `extraction_payload.sheet|page|grid|detail|element` (currently it only uses a sliced UUID). Pull that data in `loadCanonicalQaIssues` via a single follow-up select on `takeoff_items`.
+- Add the new structured fields onto `WorkflowQaIssue.location` type: `callout`, `wall_reference`, `footing_reference`, `pad_reference` (plus the existing six). All optional.
 
-3. Make Overlay / Side-by-Side / Difference visibly update
-- Right now all three modes use the same single image, so Difference is effectively a no-op and Side-by-Side looks fake.
-- Add explicit mode behavior:
-  - Overlay: current drawing + bbox/callout.
-  - Side-by-Side: two labeled panes with visible per-pane styling and pointer shown on the active pane.
-  - Difference: visible diff treatment only when a second source exists; otherwise show a clear “compare source missing” notice instead of pretending it works.
-- If the data only has one revision source, the UI will say that clearly in debug mode and in the status area.
+### 2. `src/features/workflow-v2/stages/QAStage.tsx`
+- In the issue list (line 240) replace `it.description?.slice(0,50)` with `(it.location_label || "") + " — " + (it.description||"")` truncated, so each row in the left list also leads with the location.
+- In the right detail panel (line 535–539) keep the boxed `location_label`, but ensure the `description` shown below is the new location-prefixed `question_text`. Also render `source_excerpt` (italic, "Source: …") if present and no grid/detail was resolved.
+- The Modification mini-card (line 412) already concatenates `location_label` — keep as is.
+- Drawing review panel link is already keyed off `locator.page_number` / `linked_item.page_number`; no change needed.
 
-4. Add a QA debug mode
-- Add a small “Debug” toggle in the QA canvas toolbar.
-- When enabled, show:
-  - container bounds
-  - rendered image bounds
-  - bbox bounds and normalized coordinates
-  - current `viewMode`, `zoom`, `tx`, `ty`
-  - requested page vs rendered page
-  - current blend/filter settings
-  - redraw counters / last redraw trigger
-  - source file id, issue id, and whether a compare layer exists
-- Draw colored rectangles for:
-  - canvas container
-  - rendered image area
-  - bbox target
-- Add a compact debug panel pinned to the canvas so you can verify why a mode did or didn’t redraw.
+### 3. Backend persistence (so future issues carry structured fields natively)
 
-5. Improve redraw observability
-- Track redraw triggers from:
-  - issue selection changes
-  - page changes
-  - PDF render callback
-  - image load
-  - view mode changes
-  - zoom mode changes
-- Show a monotonic redraw count and last trigger reason in debug mode.
-- This makes it obvious whether the buttons are failing to update state or the renderer is reusing the same visual source.
+**`supabase/functions/auto-estimate/index.ts`** (and any helper that writes to `validation_issues` / `estimate_items.assumptions_json`):
+- When inserting a `validation_issues` row, populate `source_refs[0]` with the structured shape:
+  ```json
+  {
+    "estimate_item_id": "...",
+    "page_number": 12,
+    "sheet": "S-201",
+    "detail": "4",
+    "grid": "B-4",
+    "zone": "north foundation wall",
+    "element": "F-3",
+    "excerpt": "...verbatim line from drawing text..."
+  }
+  ```
+- When writing `estimate_items.assumptions_json`, mirror the same keys (`sheet`, `detail`, `grid`, `zone`, `element`, `excerpt`, `page_number`) so the loader can reconstruct location even if `source_refs` is empty.
+- No DB schema change required — both columns are already `jsonb`. Existing rows continue to work via the loader's `pickStr` fallbacks.
 
-6. Handle missing locator / compare data safely
-- If an issue only has page-level linkage and no bbox, show that clearly in the debug panel and status rail.
-- If canonical compare data fails to load, surface that state instead of leaving the compare tools looking broken.
+### 4. Verify
+- Open `/app/project/3f840fa0-…` → Review → confirm each QA card's description now starts with `Sheet … · Page … · …:` and that rows without a real sheet show `Page N: …` or `Source: "…"`.
+- Confirm the right-side blueprint panel still scrolls to the same page/bbox.
 
-Likely root causes already identified
-- `pdfPage` is being set from the issue locator, then immediately reset to 1 by the preview-loading effect. That explains why you keep seeing the first page.
-- The bbox overlay is drawn against the full transformed container while the image is rendered with `object-contain`, so the pointer can land in the wrong place or appear disconnected from the actual element.
-- Side-by-Side and Difference currently reuse the same source image, so the buttons change state but do not produce a meaningful visual comparison.
-- There is also a backend warning in the console for missing `rebar_project_links`, which can prevent canonical compare data from loading. I won’t change backend schema in this patch unless necessary, but I’ll make the UI report that compare data is unavailable instead of silently failing.
-
-Files to update
-- `src/features/workflow-v2/stages/QAStage.tsx`
-- Possibly `src/components/chat/PdfRenderer.tsx` for render-cycle metadata callbacks if needed
-- Possibly `src/features/workflow-v2/takeoff-data.ts` only for safer compare-data/status shaping, with a minimal patch
-
-Validation after implementation
-- Select a QA issue with a linked page and confirm the viewer opens on that exact page, not page 1.
-- Toggle Overlay / Side-by-Side / Difference and confirm the canvas state and debug panel both update.
-- Confirm the pointer box sits on the exact drawing region, not on the page margin or unrelated area.
-- Confirm the debug panel shows redraw reasons when switching issues, pages, and modes.
-- Confirm the UI clearly reports when compare data is missing, instead of acting like the buttons work.
-
-Technical details
-- Keep the patch minimal and isolated to the QA drawing viewer.
-- No broad refactor.
-- No changes to generated backend client files.
-- If compare mode depends on unavailable compare assets, the UI will degrade honestly and expose that in debug mode rather than fabricating a diff.
+## Out of scope
+- No new tables, no migrations, no schema changes.
+- No edits to unrelated stages, no UI redesign, no rename of fields.
