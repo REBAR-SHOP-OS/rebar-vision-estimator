@@ -514,7 +514,21 @@ const BrainKnowledgeDialog: React.FC = () => {
                   <Upload className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-xs truncate">{item.file_name || item.title}</p>
+                    {!item.content ? (
+                      <p className="text-[10px] text-amber-600">Not parsed — runtime can't read this file</p>
+                    ) : (
+                      <p className="text-[10px] text-muted-foreground">{(item.content.length / 1000).toFixed(0)}k chars indexed</p>
+                    )}
                   </div>
+                  {!item.content && (
+                    <button
+                      onClick={() => reparseFile(item)}
+                      className="opacity-0 group-hover:opacity-100 text-[10px] uppercase tracking-wider text-primary hover:underline transition-opacity"
+                      title="Extract text so the takeoff engine can use this file"
+                    >
+                      Parse
+                    </button>
+                  )}
                   <button onClick={() => deleteItem(item)} className="opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive/80 transition-opacity">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
