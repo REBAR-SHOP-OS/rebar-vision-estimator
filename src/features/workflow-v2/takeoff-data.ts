@@ -77,6 +77,41 @@ function coercePayload(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function pickStr(...vals: any[]): string | null {
+  for (const v of vals) {
+    if (v === null || v === undefined) continue;
+    const s = String(v).trim();
+    if (s) return s;
+  }
+  return null;
+}
+
+export function buildLocationLabel(loc: WorkflowQaIssue["location"], fallbackSheet?: string | null): string | null {
+  if (!loc) return fallbackSheet ? `Sheet ${fallbackSheet}` : null;
+  const parts: string[] = [];
+  if (loc.source_sheet) parts.push(`Sheet ${loc.source_sheet}`);
+  else if (fallbackSheet) parts.push(`Sheet ${fallbackSheet}`);
+  if (loc.page_number) parts.push(`p.${loc.page_number}`);
+  if (loc.detail_reference) parts.push(`Detail ${loc.detail_reference}`);
+  if (loc.grid_reference) parts.push(`Grid ${loc.grid_reference}`);
+  if (loc.zone_reference) parts.push(loc.zone_reference);
+  if (loc.element_reference) parts.push(loc.element_reference);
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+function extractLocationFromRef(ref: any, aj: Record<string, any>, fallback: { sheet_id?: string | null }) {
+  const r = ref || {};
+  return {
+    source_sheet: pickStr(r.sheet, r.sheet_id, r.source_sheet, aj.sheet, aj.sheet_id, aj.source_sheet, fallback.sheet_id),
+    page_number: Number(r.page_number ?? aj.page_number ?? 0) || null,
+    detail_reference: pickStr(r.detail, r.detail_reference, aj.detail, aj.detail_reference),
+    grid_reference: pickStr(r.grid, r.grid_reference, aj.grid, aj.grid_reference),
+    zone_reference: pickStr(r.zone, r.zone_reference, aj.zone, aj.zone_reference, aj.area),
+    element_reference: pickStr(r.element, r.element_reference, r.mark, aj.element, aj.element_reference, aj.mark, aj.callout),
+    source_excerpt: pickStr(r.excerpt, r.source_excerpt, aj.excerpt, aj.source_excerpt),
+  };
+}
+
 async function getCanonicalTakeoffRuns(legacyProjectId: string) {
   const rebarProjectId = await getRebarProjectIdByLegacyId(supabase, legacyProjectId).catch((error) => {
     console.warn("Failed to resolve canonical takeoff project:", error);
