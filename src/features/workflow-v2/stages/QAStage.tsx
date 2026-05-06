@@ -2,11 +2,20 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { StageHeader, Pill, EmptyState, GateBanner, type StageProps } from "./_shared";
 import { ArrowLeft, ArrowRight, Wand2 } from "lucide-react";
 import { loadWorkflowQaIssues, type WorkflowQaIssue } from "../takeoff-data";
+import { supabase } from "@/integrations/supabase/client";
+import PdfRenderer from "@/components/chat/PdfRenderer";
 
 export default function QAStage({ projectId, goToStage }: StageProps) {
   const [issues, setIssues] = useState<WorkflowQaIssue[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewKind, setPreviewKind] = useState<"pdf" | "image" | null>(null);
+  const [previewName, setPreviewName] = useState<string>("");
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [pdfImg, setPdfImg] = useState<string | null>(null);
+  const [pdfPageCount, setPdfPageCount] = useState(1);
+  const [pdfPage, setPdfPage] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -22,6 +31,33 @@ export default function QAStage({ projectId, goToStage }: StageProps) {
   }, [projectId]);
 
   const sel = issues.find((i) => i.id === selectedId);
+
+  // Resolve linked source file -> signed URL whenever the selected issue changes
+  useEffect(() => {
+    let cancelled = false;
+    setPreviewUrl(null); setPreviewKind(null); setPdfImg(null); setPdfPage(1); setPdfPageCount(1); setPreviewName("");
+    const fileId = sel?.source_file_id;
+    if (!fileId) return;
+    setPreviewLoading(true);
+    (async () => {
+      const { data: file } = await supabase
+        .from("project_files")
+        .select("file_name,file_path,file_type")
+        .eq("id", fileId)
+        .maybeSingle();
+      if (cancelled || !file?.file_path) { setPreviewLoading(false); return; }
+      const { data: signed } = await supabase.storage.from("blueprints").createSignedUrl(file.file_path, 3600);
+      if (cancelled) return;
+      const url = signed?.signedUrl || null;
+      const isPdf = (file.file_path || "").toLowerCase().endsWith(".pdf") || (file.file_type || "").toLowerCase().includes("pdf");
+      setPreviewUrl(url);
+      setPreviewKind(url ? (isPdf ? "pdf" : "image") : null);
+      setPreviewName(file.file_name || "");
+      setPreviewLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [sel?.source_file_id]);
+
   const grouped = useMemo(() => {
     const crit = issues.filter((i) => ["critical", "error"].includes(i.severity?.toLowerCase()));
     const warn = issues.filter((i) => i.severity?.toLowerCase() === "warning");
@@ -116,15 +152,41 @@ export default function QAStage({ projectId, goToStage }: StageProps) {
           <div className="flex-1 overflow-auto p-4 space-y-3">
             {!sel ? <EmptyState title="No issue selected" /> : (
               <>
-                <div className="aspect-video border border-border bg-background grid place-items-center text-muted-foreground relative blueprint-bg">
-                  <div className="absolute inset-0 grid place-items-center">
-                    <div className="w-20 h-20 rounded-full border-2 border-[hsl(var(--status-blocked))]/60 grid place-items-center">
-                      <div className="w-2 h-2 bg-[hsl(var(--status-blocked))] rounded-full" />
-                    </div>
-                  </div>
-                  <span className="absolute top-2 left-2 text-[10px] font-mono uppercase tracking-widest text-muted-foreground bg-background/80 px-1.5 py-0.5">
-                    Drawing: {sel.sheet_id?.slice(0, 8) || "-"}
+                <div className="aspect-video border border-border bg-background grid place-items-center text-muted-foreground relative overflow-hidden blueprint-bg">
+                  {previewKind === "pdf" && previewUrl && (
+                    <PdfRenderer
+                      url={previewUrl}
+                      currentPage={pdfPage}
+                      onPageCount={setPdfPageCount}
+                      onPageRendered={(dataUrl) => setPdfImg(dataUrl)}
+                      scale={1.5}
+                    />
+                  )}
+                  {previewKind === "pdf" && pdfImg && (
+                    <img src={pdfImg} alt={previewName} className="absolute inset-0 w-full h-full object-contain" />
+                  )}
+                  {previewKind === "image" && previewUrl && (
+                    <img src={previewUrl} alt={previewName} className="absolute inset-0 w-full h-full object-contain" />
+                  )}
+                  {!previewUrl && !previewLoading && (
+                    <div className="text-[10px] uppercase tracking-widest">No linked drawing for this issue</div>
+                  )}
+                  {previewLoading && (
+                    <div className="text-[10px] uppercase tracking-widest">Loading drawing…</div>
+                  )}
+                  <span className="absolute top-2 left-2 text-[10px] font-mono uppercase tracking-widest text-muted-foreground bg-background/80 px-1.5 py-0.5 z-10">
+                    Drawing: {previewName || sel.sheet_id?.slice(0, 8) || "-"}
                   </span>
+                  {previewKind === "pdf" && pdfPageCount > 1 && (
+                    <div className="absolute bottom-2 right-2 z-10 flex items-center gap-1 bg-background/80 px-1.5 py-0.5 text-[10px] font-mono">
+                      <button className="px-1 hover:text-foreground" disabled={pdfPage <= 1} onClick={() => setPdfPage((p) => Math.max(1, p - 1))}>◀</button>
+                      <span>{pdfPage}/{pdfPageCount}</span>
+                      <button className="px-1 hover:text-foreground" disabled={pdfPage >= pdfPageCount} onClick={() => setPdfPage((p) => Math.min(pdfPageCount, p + 1))}>▶</button>
+                    </div>
+                  )}
+                  {previewUrl && (
+                    <a href={previewUrl} target="_blank" rel="noreferrer" className="absolute top-2 right-2 z-10 text-[10px] uppercase tracking-widest bg-background/80 px-1.5 py-0.5 hover:text-foreground">Open</a>
+                  )}
                 </div>
                 <div className="ip-card p-3">
                   <div className="flex items-center justify-between mb-1.5">
