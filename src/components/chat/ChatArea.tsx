@@ -235,7 +235,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       // Check if mode was already selected
       const modeMsg = data.find((m) => m.metadata && (m.metadata as Record<string, unknown>).calculationMode);
       if (modeMsg) {
-        const mode = (modeMsg.metadata as Record<string, unknown>).calculationMode;
+        const mode = (modeMsg.metadata as Record<string, unknown>).calculationMode as "smart" | "step-by-step";
         setCalculationMode(mode);
         onModeChange?.(mode);
         onStepChange?.(1);
@@ -1880,7 +1880,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             </div>
           ) : (validationData || importedBarList) ? (() => {
             // Compute estimation group flags
-            const elements = (validationData?.elements as Record<string, unknown>[]) || [];
+            const elements = ((validationData?.elements as any[]) || []) as any[];
             const hasLoose = elements.some((e) => !e.estimation_group || e.estimation_group === "LOOSE_REBAR");
             const hasCage = elements.some((e) => e.estimation_group === "CAGE_ASSEMBLY");
             const hasBothGroups = hasLoose && hasCage;
@@ -1895,17 +1895,17 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 );
 
             // Filter bar list by group
-            const rawBarList = ((quoteResult?.quote as Record<string, unknown>)?.bar_list as Record<string, unknown>[]) || importedBarList || [];
+            const rawBarList: any[] = ((quoteResult?.quote as Record<string, unknown>)?.bar_list as any[]) || importedBarList || [];
             const filteredBarList = estimationGroupFilter === "all"
               ? rawBarList
-              : rawBarList.filter((b) =>
+              : rawBarList.filter((b: any) =>
                   estimationGroupFilter === "cage"
                     ? b.estimation_group === "CAGE_ASSEMBLY"
                     : !b.estimation_group || b.estimation_group === "LOOSE_REBAR"
                 );
 
             // Recompute summary from filtered elements
-            const filteredSummary = validationData?.summary
+            const filteredSummary: any = validationData?.summary
               ? {
                   ...(validationData.summary as Record<string, unknown>),
                   total_elements: filteredElements.length,
@@ -1916,7 +1916,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             const isCageOrBarListOnly = scopeData?.primaryCategory === "cage_only" || scopeData?.primaryCategory === "bar_list_only";
             const showCardsTab = !isCageOrBarListOnly && filteredElements.some((e) => !e.estimation_group || e.estimation_group === "LOOSE_REBAR");
             const showBarListTab = filteredBarList.length > 0;
-            const showBendingTab = filteredBarList.some((b) => b.shape_code && b.shape_code !== "straight" && b.shape_code !== "closed");
+            const showBendingTab = filteredBarList.some((b: any) => b.shape_code && b.shape_code !== "straight" && b.shape_code !== "closed");
 
             const defaultTab = isCageOrBarListOnly ? "barlist" : (showCardsTab ? "cards" : "barlist");
 
