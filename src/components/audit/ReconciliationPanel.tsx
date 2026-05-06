@@ -57,7 +57,7 @@ const ReconciliationPanel: React.FC<ReconciliationPanelProps> = ({ projectId }) 
       supabase.from("drawing_sets").select("*").eq("project_id", projectId),
       supabase.from("estimate_versions").select("*").eq("project_id", projectId),
     ]);
-    if (recRes.data) setRecords(recRes.data);
+    if (recRes.data) setRecords(recRes.data as unknown as ReconciliationRecordRow[]);
     if (dsRes.data) setDrawingSets(dsRes.data);
     if (evRes.data) setEstimateVersions(evRes.data);
     setLoading(false);
