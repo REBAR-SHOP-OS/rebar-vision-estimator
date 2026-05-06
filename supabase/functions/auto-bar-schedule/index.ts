@@ -7,6 +7,59 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// ── Rebar mass table (kg/m) — used for synthetic weight when consensus locks size+length ──
+const BAR_MASS_KG_M: Record<string, number> = {
+  "10M": 0.785, "15M": 1.570, "20M": 2.355, "25M": 3.925, "30M": 5.495, "35M": 7.850,
+  "#3": 0.561, "#4": 0.994, "#5": 1.552, "#6": 2.235, "#7": 3.042, "#8": 3.973,
+};
+
+function normalizeSize(raw: string): string {
+  const s = String(raw || "").toUpperCase().replace(/\s+/g, "");
+  if (/^\d+M$/.test(s)) return s;
+  if (/^#\d+$/.test(s)) return s;
+  if (/^\d+$/.test(s)) return `${s}M`;
+  return s;
+}
+
+async function callGateway(model: string, system: string, user: string, apiKey: string): Promise<string> {
+  const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      temperature: 0,
+    }),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`${model} ${res.status}: ${t.slice(0, 200)}`);
+  }
+  const j = await res.json();
+  return j.choices?.[0]?.message?.content || "";
+}
+
+function parseJsonArray(raw: string): any[] {
+  const cleaned = String(raw || "").replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+  // Try direct parse first
+  try {
+    const v = JSON.parse(cleaned);
+    if (Array.isArray(v)) return v;
+  } catch { /* try extraction */ }
+  // Extract first [...] block
+  const m = cleaned.match(/\[[\s\S]*\]/);
+  if (m) {
+    try {
+      const v = JSON.parse(m[0]);
+      if (Array.isArray(v)) return v;
+    } catch { /* ignore */ }
+  }
+  return [];
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -67,33 +120,30 @@ serve(async (req) => {
 
     const existingMarks = existingBars.map((b: any) => b.mark).filter(Boolean).join(", ");
 
-    // Build drawing text context from OCR search index
+    // ── Engine #1: Google Vision OCR (already in drawing_search_index) — authoritative for NUMBERS ──
     let drawingTextContext = "";
     if (searchPages.length > 0) {
       const snippets: string[] = [];
       for (const page of searchPages) {
         const text = (page.raw_text || "").trim();
         if (text.length > 20) {
-          snippets.push(`[Page ${page.page_number}] ${text.substring(0, 2000)}`);
+          snippets.push(`[Page ${page.page_number}] ${text.substring(0, 2500)}`);
         }
       }
-      drawingTextContext = snippets.join("\n\n").slice(0, 10000);
+      drawingTextContext = snippets.join("\n\n").slice(0, 12000);
     }
 
-    const systemPrompt = `You are a rebar detailing expert. Generate bar schedule items from estimate line items.
+    // ── Triple-engine consensus prompt ──
+    // Same prompt sent to Gemini AND GPT-5; Google Vision text above is the authoritative number source.
+    const systemPrompt = `You are a rebar detailing expert. Extract a bar schedule from the OCR drawing text below.
 Rules:
 - Return ONLY a JSON array, no markdown, no explanation.
-- Each object MUST include "estimate_item_index": the [INDEX=N] number of the source estimate item.
-- Each object: { "mark": string, "size": string, "shape_code": string, "cut_length": number (mm), "quantity": number, "finish_type": string, "cover_value": number (mm), "lap_length": number (mm), "confidence": number (0-1) }
-- **BAR MARKS (CRITICAL)**: If drawing text is provided with ACTUAL bar marks (e.g., B1001, BS03, BS31, B2001, BD01, BT01), use those EXACT marks instead of generic sequential marks (A1, A2, B1). Parse the bar list tables from the drawing text.
-- If no drawing text is available, use sequential marks like "A1", "A2", "B1" etc.
-- shape_code: "straight", "L-shape", "U-shape", "Z-shape", "hook", "stirrup", "closed" as appropriate. If drawing text provides shape dimensions (A, B, C, D, E columns), use them to determine shape_code and cut_length.
-- finish_type: "black", "epoxy", "galvanized" — default "black".
-- cover_value: typical 40-75mm based on exposure.
-- lap_length: standard lap splice length for the bar size (e.g. 40db).
-- cut_length in mm. Convert from meters if estimate gives meters. If drawing provides shape dimensions, compute cut_length from the sum of dimensions.
-- confidence 0.7-0.95 for standard items. Higher confidence when using actual drawing data.
-- Generate 1-3 bar items per estimate line item. Break complex items into individual bar marks.
+- Each object MUST include "estimate_item_index": the [INDEX=N] number of the source estimate item it belongs to.
+- Each object: { "mark": string, "size": string, "shape_code": string, "cut_length_mm": number, "quantity": number, "confidence": number (0-1) }
+- BAR MARKS: Use ACTUAL marks from the OCR text (e.g. B1001, BS03, BD01). If absent, use sequential marks (A1, A2...).
+- shape_code: one of "straight", "L-shape", "U-shape", "Z-shape", "hook", "stirrup", "closed".
+- size: metric (10M/15M/20M/25M/30M/35M) or imperial (#3..#8). Normalize bare digits to ##M.
+- quantity and cut_length_mm MUST be taken VERBATIM from the OCR drawing text. NEVER invent. If OCR is silent, return quantity 0 and cut_length_mm 0 with confidence <= 0.3.
 - Do NOT duplicate existing marks: ${existingMarks || "none yet"}.`;
 
     const estimateSummary = estimateItems.map((e: any, i: number) =>
@@ -108,9 +158,9 @@ Standards: ${standard ? `${standard.name} (${standard.code_family}, ${standard.u
 Estimate items to detail into bar schedule:
 ${estimateSummary}
 
-${drawingTextContext ? `=== DRAWING TEXT (parse bar lists for ACTUAL marks, sizes, quantities, shape dimensions) ===\n${drawingTextContext}\n=== END DRAWING TEXT ===` : ""}
+${drawingTextContext ? `=== GOOGLE VISION OCR (AUTHORITATIVE — extract numbers verbatim) ===\n${drawingTextContext}\n=== END OCR ===` : "(no OCR text available — return empty array)"}
 
-Generate bar schedule items for these estimate items. Use ACTUAL bar marks from drawings if available. For each bar, return the "estimate_item_index" matching the [INDEX=N] of the source estimate item.`;
+Generate the bar schedule. NEVER invent quantities or lengths — if not in OCR text, return 0.`;
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
@@ -119,49 +169,115 @@ Generate bar schedule items for these estimate items. Use ACTUAL bar marks from 
       });
     }
 
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        temperature: 0.3,
-      }),
-    });
-
-    if (!aiResponse.ok) {
-      const status = aiResponse.status;
-      if (status === 429) return new Response(JSON.stringify({ error: "Rate limit exceeded. Try again shortly." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      if (status === 402) return new Response(JSON.stringify({ error: "AI credits exhausted." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      console.error("AI error:", status, await aiResponse.text());
-      return new Response(JSON.stringify({ error: "AI generation failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    // ── Run Gemini + GPT-5 in parallel (Engine #2 and #3) ──
+    let geminiItems: any[] = [];
+    let gptItems: any[] = [];
+    const errors: string[] = [];
+    try {
+      const [geminiRaw, gptRaw] = await Promise.all([
+        callGateway("google/gemini-2.5-pro", systemPrompt, userPrompt, LOVABLE_API_KEY).catch((e) => { errors.push(`gemini:${e.message}`); return ""; }),
+        callGateway("openai/gpt-5", systemPrompt, userPrompt, LOVABLE_API_KEY).catch((e) => { errors.push(`gpt:${e.message}`); return ""; }),
+      ]);
+      geminiItems = parseJsonArray(geminiRaw);
+      gptItems = parseJsonArray(gptRaw);
+    } catch (e) {
+      console.error("Engine call failed:", e);
     }
 
-    const aiData = await aiResponse.json();
-    const rawContent = aiData.choices?.[0]?.message?.content || "";
-
-    let items: any[];
-    try {
-      const jsonStr = rawContent.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-      items = JSON.parse(jsonStr);
-      if (!Array.isArray(items)) throw new Error("Not an array");
-    } catch {
-      console.error("Failed to parse AI response:", rawContent);
-      return new Response(JSON.stringify({ error: "AI returned invalid format. Please try again." }), {
+    if (geminiItems.length === 0 && gptItems.length === 0) {
+      return new Response(JSON.stringify({ error: "All AI engines returned empty.", details: errors }), {
         status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const rows = items.map((item: any) => {
-      const eiIndex = Number(item.estimate_item_index);
-      const linkedEi = !isNaN(eiIndex) && eiIndex >= 0 && eiIndex < estimateItems.length
-        ? estimateItems[eiIndex] : null;
+    // ── Consensus merge ──
+    // Group both engines' outputs by estimate_item_index, then for each group:
+    //   * mark + shape_code: require Gemini & GPT to AGREE (else low confidence + UNVERIFIED)
+    //   * size + quantity + cut_length_mm: prefer values present in Google Vision OCR text
+    //     (we already instructed both engines to extract verbatim — their agreement is the proxy
+    //      for OCR confirmation since both saw the same OCR text)
+    const byIndex = new Map<number, { gemini: any[]; gpt: any[] }>();
+    for (const it of geminiItems) {
+      const idx = Number(it.estimate_item_index);
+      if (isNaN(idx)) continue;
+      if (!byIndex.has(idx)) byIndex.set(idx, { gemini: [], gpt: [] });
+      byIndex.get(idx)!.gemini.push(it);
+    }
+    for (const it of gptItems) {
+      const idx = Number(it.estimate_item_index);
+      if (isNaN(idx)) continue;
+      if (!byIndex.has(idx)) byIndex.set(idx, { gemini: [], gpt: [] });
+      byIndex.get(idx)!.gpt.push(it);
+    }
+
+    const merged: any[] = [];
+    let unverifiedCount = 0;
+    for (const [idx, { gemini, gpt }] of byIndex.entries()) {
+      const linkedEi = idx >= 0 && idx < estimateItems.length ? estimateItems[idx] : null;
+      const max = Math.max(gemini.length, gpt.length, 1);
+      for (let i = 0; i < max; i++) {
+        const g = gemini[i] || {};
+        const o = gpt[i] || {};
+        const gMark = String(g.mark || "").trim();
+        const oMark = String(o.mark || "").trim();
+        const gShape = String(g.shape_code || "").toLowerCase().trim();
+        const oShape = String(o.shape_code || "").toLowerCase().trim();
+        const gSize = normalizeSize(g.size || "");
+        const oSize = normalizeSize(o.size || "");
+        const gQty = Math.max(0, Math.round(Number(g.quantity) || 0));
+        const oQty = Math.max(0, Math.round(Number(o.quantity) || 0));
+        const gLen = Math.max(0, Number(g.cut_length_mm) || 0);
+        const oLen = Math.max(0, Number(o.cut_length_mm) || 0);
+
+        const markAgree = gMark && oMark && gMark === oMark;
+        const shapeAgree = gShape === oShape && gShape !== "";
+        const sizeAgree = gSize && oSize && gSize === oSize;
+        const qtyAgree = gQty > 0 && oQty > 0 && gQty === oQty;
+        const lenAgree = gLen > 0 && oLen > 0 && Math.abs(gLen - oLen) / Math.max(gLen, oLen) < 0.05;
+
+        // Final values
+        const mark = markAgree ? gMark : (gMark || oMark || `M${merged.length + 1}`);
+        const shape = shapeAgree ? gShape : (gShape || oShape || "straight");
+        const size = sizeAgree ? gSize : (gSize || oSize || (linkedEi?.bar_size ? normalizeSize(linkedEi.bar_size) : ""));
+        const qty = qtyAgree ? gQty : (gQty || oQty || 0);
+        const cut_length_mm = lenAgree ? Math.round((gLen + oLen) / 2) : (gLen || oLen || 0);
+
+        // Per-field confidence from agreement count
+        const fields = [markAgree, shapeAgree, sizeAgree, qtyAgree, lenAgree];
+        const agreeCount = fields.filter(Boolean).length;
+        const baseConf = agreeCount / fields.length; // 0..1
+        const confidence = Math.max(0.1, Math.min(0.99, baseConf));
+
+        if (!qtyAgree || !sizeAgree) unverifiedCount++;
+
+        merged.push({
+          estimate_item_index: idx,
+          estimate_item_id: linkedEi?.id || null,
+          mark,
+          size,
+          shape_code: shape,
+          cut_length: cut_length_mm,
+          quantity: qty || 1,
+          confidence,
+          finish_type: "black",
+          cover_value: 50,
+          lap_length: 0,
+          consensus: {
+            gemini: { mark: gMark, size: gSize, shape: gShape, qty: gQty, len: gLen },
+            gpt: { mark: oMark, size: oSize, shape: oShape, qty: oQty, len: oLen },
+            agree: { mark: markAgree, shape: shapeAgree, size: sizeAgree, qty: qtyAgree, length: lenAgree },
+          },
+        });
+      }
+    }
+
+    if (merged.length === 0) {
+      return new Response(JSON.stringify({ error: "No bar items could be derived from consensus." }), {
+        status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const rows = merged.map((item: any) => {
       return {
         segment_id,
         user_id: user.id,
@@ -174,7 +290,7 @@ Generate bar schedule items for these estimate items. Use ACTUAL bar marks from 
         cover_value: Math.max(0, Number(item.cover_value) || 0),
         lap_length: Math.max(0, Number(item.lap_length) || 0),
         confidence: Math.min(1, Math.max(0, Number(item.confidence) || 0)),
-        estimate_item_id: linkedEi?.id || null,
+        estimate_item_id: item.estimate_item_id || null,
       };
     });
 
@@ -190,19 +306,60 @@ Generate bar schedule items for these estimate items. Use ACTUAL bar marks from 
       });
     }
 
+    // ── Backfill estimate_items qty/length/weight when consensus locked them ──
+    // Aggregate consensus values per estimate_item_id
+    const aggByEi = new Map<string, { qty: number; lenMm: number; size: string }>();
+    for (const m of merged) {
+      if (!m.estimate_item_id) continue;
+      // Only backfill when both engines agreed on qty AND size
+      if (!m.consensus.agree.qty || !m.consensus.agree.size) continue;
+      const cur = aggByEi.get(m.estimate_item_id) || { qty: 0, lenMm: 0, size: m.size };
+      cur.qty += Math.max(0, Number(m.quantity) || 0);
+      cur.lenMm += Math.max(0, Number(m.cut_length) || 0) * Math.max(1, Number(m.quantity) || 1);
+      cur.size = m.size || cur.size;
+      aggByEi.set(m.estimate_item_id, cur);
+    }
+    let backfilled = 0;
+    for (const ei of estimateItems) {
+      const agg = aggByEi.get(ei.id);
+      if (!agg) continue;
+      const needsBackfill = (Number(ei.quantity_count) || 0) === 0 || (Number(ei.total_length) || 0) === 0 || (Number(ei.total_weight) || 0) === 0;
+      if (!needsBackfill) continue;
+      const totalLengthM = agg.lenMm / 1000;
+      const massPerM = BAR_MASS_KG_M[normalizeSize(agg.size)] || 0;
+      const totalWeight = totalLengthM * massPerM;
+      const { error: upErr } = await supabase.from("estimate_items").update({
+        quantity_count: agg.qty,
+        total_length: Math.round(totalLengthM * 100) / 100,
+        total_weight: Math.round(totalWeight * 100) / 100,
+        bar_size: agg.size || ei.bar_size,
+      }).eq("id", ei.id);
+      if (!upErr) backfilled++;
+    }
+
     await supabase.from("audit_events").insert({
       user_id: user.id,
       project_id,
       segment_id,
-      action: "auto_bar_schedule",
+      action: "auto_bar_schedule_consensus",
       entity_type: "segment",
       entity_id: segment_id,
-      metadata: { bars_created: inserted?.length || 0 },
+      metadata: {
+        bars_created: inserted?.length || 0,
+        backfilled_estimate_items: backfilled,
+        unverified_fields: unverifiedCount,
+        engines: ["google-vision-ocr", "google/gemini-2.5-pro", "openai/gpt-5"],
+        engine_errors: errors,
+      },
     });
 
     return new Response(JSON.stringify({
       success: true,
       bars_created: inserted?.length || 0,
+      backfilled_estimate_items: backfilled,
+      unverified_fields: unverifiedCount,
+      engines_used: ["google-vision-ocr", "google/gemini-2.5-pro", "openai/gpt-5"],
+      engine_errors: errors,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     console.error("auto-bar-schedule error:", e);
