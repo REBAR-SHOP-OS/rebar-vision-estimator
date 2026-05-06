@@ -30,11 +30,35 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   const [pdfPage, setPdfPage] = useState(1);
   const [pdfPageCount, setPdfPageCount] = useState(0);
   const [pdfImg, setPdfImg] = useState<string | null>(null);
+  const [segRunning, setSegRunning] = useState<string | null>(null);
 
   const reload = async () => {
     const mapped = await loadWorkflowTakeoffRows(projectId, state.files);
     setRows(mapped);
     setSelectedId((current) => mapped.find((row) => row.id === current)?.id || mapped[0]?.id || null);
+  };
+
+  const runSingleSegment = async (segName: string) => {
+    // find segment_id from any row in the group (legacy rows carry segment_id)
+    const seg = rows.find((r) => r.segment_name === segName && r.segment_id)?.segment_id;
+    if (!seg) { toast.error("No segment id for this group."); return; }
+    setSegRunning(segName);
+    try {
+      const { data, error } = await supabase.functions.invoke("auto-estimate", {
+        body: { segment_id: seg, project_id: projectId },
+      });
+      if (error) throw error;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const created = (data as any)?.metadata?.items_created ?? (data as any)?.items_created ?? 0;
+      toast.success(`Segment "${segName}" re-run: ${created} item(s)`);
+      await reload();
+      state.refresh();
+    } catch (err) {
+      console.warn("Per-segment re-run failed:", err);
+      toast.error(`Re-run failed for "${segName}"`);
+    } finally {
+      setSegRunning(null);
+    }
   };
 
   useEffect(() => {
@@ -228,6 +252,16 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
               </div>
               <div className="text-[10px] text-muted-foreground font-mono mt-0.5">
                 {g.items.length} rows · {g.weight.toFixed(0)} kg
+              </div>
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); runSingleSegment(g.name); }}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); runSingleSegment(g.name); } }}
+                className={`mt-1.5 inline-flex items-center gap-1 text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 border ${segRunning === g.name ? "border-muted-foreground/30 text-muted-foreground" : "border-primary/40 text-primary hover:bg-primary/10"}`}
+              >
+                {segRunning === g.name ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Wand2 className="w-2.5 h-2.5" />}
+                {segRunning === g.name ? "Running…" : "Re-run segment"}
               </div>
             </button>
           ))}
