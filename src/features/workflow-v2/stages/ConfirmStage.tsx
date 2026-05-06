@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { StageHeader, EmptyState, type StageProps } from "./_shared";
 import { CheckCircle2, RotateCcw, Send } from "lucide-react";
+import {
+  clearWorkflowEstimatorSignoff,
+  loadWorkflowTakeoffRows,
+  saveWorkflowEstimatorSignoff,
+} from "../takeoff-data";
 
 interface ConfirmRow {
   id: string;
@@ -11,7 +17,8 @@ interface ConfirmRow {
   decision: "approved" | "corrected" | "returned" | "pending";
 }
 
-export default function ConfirmStage({ projectId, state }: StageProps) {
+export default function ConfirmStage({ projectId, state, goToStage }: StageProps) {
+  const { user } = useAuth();
   const [rows, setRows] = useState<ConfirmRow[]>([]);
   const [chat, setChat] = useState<Array<{ role: "estimator" | "system"; text: string; ts: string }>>(() =>
     (state.local.confirmChat as Array<{ role: "estimator" | "system"; text: string; ts: string }>) || []
@@ -19,29 +26,40 @@ export default function ConfirmStage({ projectId, state }: StageProps) {
   const [draft, setDraft] = useState("");
   const [selectedFileId, setSelectedFileId] = useState<string | null>(state.files[0]?.id || null);
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
-      const { data } = await supabase.from("estimate_items")
-        .select("id, description, bar_size, total_weight")
-        .eq("project_id", projectId).limit(50);
-      const mapped: ConfirmRow[] = (data || []).map((d, i: number) => ({
-        id: d.id,
-        label: `${d.bar_size || "—"} · ${d.description || `Item ${i + 1}`}`.slice(0, 60),
-        extracted: `${(Number(d.total_weight || 0)).toFixed(1)} kg`,
-        decision: (state.local.confirmRows?.[d.id] as ConfirmRow["decision"]) || "pending",
-      }));
-      setRows(mapped);
+      const takeoffRows = await loadWorkflowTakeoffRows(projectId, state.files);
+      if (cancelled) return;
+      const decisions = (state.local.confirmRows || {}) as Record<string, ConfirmRow["decision"]>;
+      setRows(takeoffRows.slice(0, 50).map((row) => ({
+        id: row.id,
+        label: `${row.size || "-"} - ${row.shape || row.mark}`.slice(0, 60),
+        extracted: `${row.weight.toFixed(1)} kg`,
+        decision: decisions[row.id] || "pending",
+      })));
     })();
-  }, [projectId]);
+    return () => { cancelled = true; };
+  }, [projectId, state.files, state.local.confirmRows]);
 
   useEffect(() => {
+    if (!selectedFileId && state.files[0]) setSelectedFileId(state.files[0].id);
+    if (selectedFileId && !state.files.some((file) => file.id === selectedFileId)) {
+      setSelectedFileId(state.files[0]?.id || null);
+    }
+  }, [selectedFileId, state.files]);
+
+  useEffect(() => {
+    let cancelled = false;
     (async () => {
       const f = state.files.find((x) => x.id === selectedFileId);
       if (!f) { setSignedUrl(null); return; }
       const { data } = await supabase.storage.from("blueprints").createSignedUrl(f.file_path, 3600);
-      setSignedUrl(data?.signedUrl || null);
+      if (!cancelled) setSignedUrl(data?.signedUrl || null);
     })();
+    return () => { cancelled = true; };
   }, [selectedFileId, state.files]);
 
   const setDecision = (id: string, decision: ConfirmRow["decision"]) => {
@@ -52,19 +70,44 @@ export default function ConfirmStage({ projectId, state }: StageProps) {
   const sendMsg = () => {
     if (!draft.trim()) return;
     const next = [...chat, { role: "estimator" as const, text: draft.trim(), ts: new Date().toISOString() }];
-    setChat(next); state.setLocal({ confirmChat: next }); setDraft("");
+    setChat(next);
+    state.setLocal({ confirmChat: next });
+    setDraft("");
   };
 
-  const finalize = () => {
+  const finalize = async () => {
     const pending = rows.filter((r) => r.decision === "pending").length;
-    if (rows.length > 0 && pending > 0) { toast.error(`${pending} rows still pending`); return; }
+    if (rows.length > 0 && pending > 0) {
+      toast.error(`${pending} rows still pending`);
+      return;
+    }
+    if (!user) {
+      toast.error("Sign in required to record estimator signoff");
+      return;
+    }
+
+    setSaving(true);
+    const { error } = await saveWorkflowEstimatorSignoff(projectId, user.id);
+    setSaving(false);
+    if (error) {
+      toast.error("Failed to record estimator signoff");
+      return;
+    }
+
     state.setLocal({ estimatorConfirmed: true, estimatorConfirmedAt: new Date().toISOString() });
-    toast.success("Estimator signoff recorded — Outputs unlocked");
+    toast.success("Estimator signoff recorded - Outputs unlocked");
     state.refresh();
+    goToStage?.("outputs");
   };
-  const returnToQA = () => {
+
+  const returnToQA = async () => {
+    setSaving(true);
+    await clearWorkflowEstimatorSignoff(projectId);
+    setSaving(false);
     state.setLocal({ estimatorConfirmed: false });
     toast.message("Returned to QA Gate");
+    state.refresh();
+    goToStage?.("qa");
   };
 
   const file = state.files.find((f) => f.id === selectedFileId);
@@ -74,14 +117,22 @@ export default function ConfirmStage({ projectId, state }: StageProps) {
     <div className="grid grid-cols-12 h-full">
       <div className="col-span-7 border-r border-border flex flex-col min-h-0">
         <StageHeader
-          kicker="Stage 05 · Required"
+          kicker="Stage 05 - Required"
           title="Estimator Confirmation"
           subtitle="Pre-finalization checkpoint. Outputs remain locked until signoff is recorded."
           right={<div className="flex gap-2">
-            <button onClick={returnToQA} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider border border-yellow-500/40 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-500/10">
+            <button
+              disabled={saving}
+              onClick={returnToQA}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider border border-yellow-500/40 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-500/10 disabled:opacity-50"
+            >
               <RotateCcw className="w-3 h-3" /> Return to QA
             </button>
-            <button onClick={finalize} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider border border-primary text-primary-foreground bg-primary hover:opacity-90">
+            <button
+              disabled={saving}
+              onClick={finalize}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider border border-primary text-primary-foreground bg-primary hover:opacity-90 disabled:opacity-50"
+            >
               <CheckCircle2 className="w-3 h-3" /> Confirm Signoff
             </button>
           </div>}
@@ -122,7 +173,7 @@ export default function ConfirmStage({ projectId, state }: StageProps) {
             {chat.length === 0 ? <div className="text-muted-foreground">No notes yet.</div> :
               chat.map((m, i) => (
                 <div key={i} className="border-l-2 border-primary/40 pl-2">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">{m.role} · {new Date(m.ts).toLocaleTimeString()}</div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">{m.role} - {new Date(m.ts).toLocaleTimeString()}</div>
                   <div>{m.text}</div>
                 </div>
               ))}

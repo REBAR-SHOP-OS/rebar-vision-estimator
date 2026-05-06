@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { getCanonicalProjectFiles, type CanonicalProjectFileView } from "@/lib/rebar-read-model";
+import { getWorkflowEstimatorSignoff, getWorkflowQaCounts, getWorkflowTakeoffRowCount } from "./takeoff-data";
 
 export interface WorkflowState {
   fileCount: number;
@@ -83,6 +84,7 @@ export function useWorkflowState(projectId: string): WorkflowState & {
   const [qaCriticalOpen, setQaCriticalOpen] = useState(0);
   const [takeoffRows, setTakeoffRows] = useState(0);
   const [approvedScopeItems, setApprovedScopeItems] = useState<string[]>([]);
+  const [serverEstimatorConfirmed, setServerEstimatorConfirmed] = useState(false);
   const [local, setLocalState] = useState<Record<string, unknown>>(() => readLocal(projectId));
   const [tick, setTick] = useState(0);
 
@@ -91,15 +93,16 @@ export function useWorkflowState(projectId: string): WorkflowState & {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [canonicalFiles, f, vi, ei, projectRes] = await Promise.all([
+      const [canonicalFiles, f, projectRes, takeoffRowCount, qaCounts, estimatorSignoff] = await Promise.all([
         getCanonicalProjectFiles(supabase, projectId).catch((error) => {
           console.warn("Failed to load canonical workflow files:", error);
           return [] as CanonicalProjectFileView[];
         }),
         supabase.from("project_files").select("id,file_name,file_path,created_at,file_size").eq("project_id", projectId).order("created_at", { ascending: false }),
-        supabase.from("validation_issues").select("severity,status").eq("project_id", projectId),
-        supabase.from("estimate_items").select("id", { count: "exact", head: true }).eq("project_id", projectId),
         supabase.from("projects").select("scope_items").eq("id", projectId).maybeSingle(),
+        getWorkflowTakeoffRowCount(projectId),
+        getWorkflowQaCounts(projectId),
+        getWorkflowEstimatorSignoff(projectId),
       ]);
       if (cancelled) return;
       setFiles(mergeWorkflowFiles(canonicalFiles, f.data || []));
@@ -107,10 +110,10 @@ export function useWorkflowState(projectId: string): WorkflowState & {
         ? projectRes.data.scope_items.map((item: unknown) => String(item)).filter(Boolean)
         : [];
       setApprovedScopeItems(serverScopeItems);
-      const open = (vi.data || []).filter((i) => (i as Record<string, unknown>).status !== "resolved" && (i as Record<string, unknown>).status !== "closed");
-      setQaOpen(open.length);
-      setQaCriticalOpen(open.filter((i) => (i as Record<string, unknown>).severity === "critical" || (i as Record<string, unknown>).severity === "error").length);
-      setTakeoffRows(ei.count || 0);
+      setTakeoffRows(takeoffRowCount);
+      setQaOpen(qaCounts.open);
+      setQaCriticalOpen(qaCounts.critical);
+      setServerEstimatorConfirmed(estimatorSignoff);
     })();
     return () => { cancelled = true; };
   }, [projectId, tick]);
@@ -136,7 +139,7 @@ export function useWorkflowState(projectId: string): WorkflowState & {
     takeoffRows,
     qaOpen,
     qaCriticalOpen,
-    estimatorConfirmed: !!local.estimatorConfirmed,
+    estimatorConfirmed: !!local.estimatorConfirmed || serverEstimatorConfirmed,
     refresh,
     setLocal,
     local,

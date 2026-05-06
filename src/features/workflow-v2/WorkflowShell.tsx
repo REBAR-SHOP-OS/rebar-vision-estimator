@@ -44,7 +44,7 @@ export default function WorkflowShell({ projectId, project }: Props) {
     files: state.fileCount > 0 ? "complete" : "pending",
     scope: state.scopeAccepted > 0 ? "complete" : state.fileCount > 0 ? "active" : "locked",
     takeoff: state.takeoffRows > 0 ? "complete" : state.scopeAccepted > 0 ? "active" : "locked",
-    qa: state.qaCriticalOpen > 0 ? "blocked" : state.takeoffRows > 0 ? "active" : "locked",
+    qa: state.takeoffRows > 0 ? (state.qaCriticalOpen > 0 ? "blocked" : "active") : "locked",
     confirm: state.estimatorConfirmed ? "complete" : (state.qaCriticalOpen === 0 && state.takeoffRows > 0) ? "active" : "locked",
     outputs: state.estimatorConfirmed ? "active" : "locked",
   }) as Record<StageKey, "complete" | "active" | "locked" | "blocked" | "pending">, [state]);
