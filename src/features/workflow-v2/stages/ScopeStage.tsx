@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { StageHeader, Pill, EmptyState, type StageProps } from "./_shared";
@@ -17,27 +17,57 @@ interface Candidate {
 export default function ScopeStage({ projectId, state, goToStage }: StageProps) {
   const { user } = useAuth();
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [detecting, setDetecting] = useState(false);
+  const detectedRef = useRef<string | null>(null);
+  const cached = (state.local.scopeCandidates as Candidate[] | undefined) || [];
+  // De-dup by label so we never show the same archetype twice (e.g. once per uploaded PDF).
   const candidates: Candidate[] = useMemo(() => {
-    if (state.files.length === 0) return [];
-    const archetypes = [
-      { label: "Footings — Strip & Pad", evidence: "Foundation plan dimensions + schedule" },
-      { label: "Walls — Foundation/Retaining", evidence: "Wall sections, elevation marks" },
-      { label: "Slabs on Grade", evidence: "Plan hatching + slab schedule" },
-      { label: "Suspended Slabs / Decks", evidence: "Floor framing plans" },
-      { label: "Columns & Piers", evidence: "Column schedule + section detail" },
-      { label: "Grade Beams", evidence: "Foundation plan + beam schedule" },
-      { label: "Stairs", evidence: "Architectural stair details" },
-    ];
-    return state.files.flatMap((f, i) =>
-      archetypes.slice(0, 3 + (i % 3)).map((a, j) => ({
-        id: `${f.id}::${j}`,
-        label: a.label,
-        source: f.file_name,
-        confidence: Math.max(0.55, Math.min(0.97, 0.7 + ((j + i) % 5) * 0.05)),
-        evidence: a.evidence,
-      }))
-    );
-  }, [state.files]);
+    const seen = new Map<string, Candidate>();
+    for (const c of cached) {
+      const key = c.label.trim().toLowerCase();
+      const prev = seen.get(key);
+      if (!prev || (c.confidence || 0) > (prev.confidence || 0)) seen.set(key, c);
+    }
+    return Array.from(seen.values());
+  }, [cached]);
+
+  // Run real OCR-driven scope detection once per project (and re-run on file count change).
+  useEffect(() => {
+    if (state.files.length === 0) return;
+    const sig = `${projectId}:${state.files.length}`;
+    if (detectedRef.current === sig) return;
+    if (cached.length > 0 && detectedRef.current === null) {
+      detectedRef.current = sig;
+      return;
+    }
+    detectedRef.current = sig;
+    let cancelled = false;
+    (async () => {
+      setDetecting(true);
+      try {
+        const { data, error } = await supabase.functions.invoke("auto-segments", {
+          body: { projectId },
+        });
+        if (cancelled || error || !data?.suggestions) return;
+        const next: Candidate[] = (data.suggestions as Array<{
+          name: string; segment_type?: string; notes?: string | null;
+        }>).map((s, i) => ({
+          id: `${s.name}-${i}`,
+          label: s.name,
+          source: s.notes || s.segment_type || "OCR",
+          confidence: 0.75,
+          evidence: s.notes || `Detected ${s.segment_type || "element"} from drawings`,
+        }));
+        state.setLocal({ scopeCandidates: next });
+      } catch (e) {
+        console.warn("auto-segments invoke failed:", e);
+      } finally {
+        if (!cancelled) setDetecting(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, state.files.length]);
 
   const decisions = (state.local.scope || {}) as Record<string, Decision>;
   const [selectedId, setSelectedId] = useState<string | null>(candidates[0]?.id || null);
@@ -147,7 +177,10 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
           right={<Pill tone="info">{newCount} New</Pill>}
         />
         {candidates.length === 0 ? (
-          <EmptyState title="No scope candidates" hint="Upload drawings to surface candidates." />
+          <EmptyState
+            title={detecting ? "Detecting scope…" : "No scope candidates"}
+            hint={detecting ? "Reading OCR from structural & architectural sheets." : "Upload drawings, then run scope detection."}
+          />
         ) : (
           <div className="flex-1 overflow-auto p-3 space-y-2">
             {candidates.map((c) => {

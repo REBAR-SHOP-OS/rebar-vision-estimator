@@ -106,7 +106,17 @@ serve(async (req) => {
     }
 
     const project = projRes.data;
-    const estimateItems = estRes.data || [];
+    const rawEstimateItems = estRes.data || [];
+    // De-dup duplicate estimate rows (same description + bar_size) so we don't
+    // emit two BS marks for the same physical bar set.
+    const norm = (s: string) => (s || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const seen = new Map<string, any>();
+    for (const it of rawEstimateItems as any[]) {
+      const key = `${norm(it.description || "")}|${(it.bar_size || "").toUpperCase().trim()}`;
+      const prev = seen.get(key);
+      if (!prev || (Number(it.total_weight) || 0) > (Number(prev.total_weight) || 0)) seen.set(key, it);
+    }
+    const estimateItems = Array.from(seen.values());
     const existingBars = existingRes.data || [];
     const standard = stdRes.data?.[0];
 

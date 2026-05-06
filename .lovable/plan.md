@@ -1,103 +1,58 @@
+## Problem (from CRU-1 screenshot + audit)
+
+Stage 02 shows the same archetypes ("Footings — Strip & Pad", "Walls — Foundation/Retaining", "Slabs on Grade") **once per uploaded PDF** (Structural (4).pdf AND Architectural.pdf). That is the root cause of the overlap you flagged. The candidates are not coming from OCR — `src/features/workflow-v2/stages/ScopeStage.tsx` (lines 20–40) generates them synthetically by crossing a fixed `archetypes` array with `state.files`. The real candidate generator (`supabase/functions/auto-segments`) is never invoked from Stage 02, and it already enforces "structural shows rebar; architectural shows dimensions/hidden scope" — we just aren't using its output.
+
+`auto-estimate` already encodes the **Concrete = Rebar axiom** and a structural-first source picker (lines 174, 386), but it feeds OCR from `drawing_search_index` without weighting by discipline, so when structural pages are noisy it can silently rely on architectural numbers without flagging it.
+
+`auto-bar-schedule` and `generate-shop-drawing` both read from `estimate_items` only — so any duplication upstream is replicated downstream into the SD callouts and bar schedule.
 
 ## Goal
-Use `LONDON_CRU1` (CRU-1 Architectural + Structural PDFs → estimate XLSX → SD06–SD12 shop drawings) as a **reference of how good output looks**. Generalise the lessons across the pipeline; do not lock the app to this project's scope (next project may be a hospital, a bridge, etc.).
 
-## Findings from the sample
-
-### A. Estimate XLSX (what good looks like)
-- One sheet, header legend block on top:
-  - Bar mass table `10M..35M` (kg/m), grade note (`400R`), concrete strength (`35 MPa`), inch→ft conversion table.
-- Bar-list grammar — every row has these 9 columns in order:
-  `SL.No | Identification | Multiplier | Qty | Bar Dia | Length (in) | Length (mm) | Bend | Total Length (m) | Total Wgt (kg) | Notes`
-- Hierarchy: **Bucket header (FOOTING / PIER / STEP-ON-GRADE / SLAB-ON-GRADE / WALL …) → element id (F1, F2, P1, FW …) → bars under that element**.
-- WWM rows store **area (SQ M)** in the length cell, not weight.
-- Identification string follows `<size>MM @<spacing> <position>` (e.g. `15MM @250 MM BEW`, `4 15MM VERTICAL`, `10MM @300 MM TIES 3 SET`, `15MM@406 DOWELL`).
-
-### B. Shop Drawings PDF (what good looks like)
-- Per-pour sheets (W1 elevation, W3 elevation, footing schedule, …) annotated with grid (1, 1.1, 1.2 / A, B, C / G1..G11) and elevation labels (`B/FTG.EL.`, `T/FTG.`, `T/SOG`, `T/WALL`, `T/PIER`, `T/LEDGE`).
-- Bar callouts in canonical grammar:  `<qty> <size>M B<mark> @<spacing> <position>`
-  - `BS<n>` for **straight** marks, `B<n>` for **bent** marks.
-  - Positions: `TOP CONT.`, `TOP ADD'L`, `BOT. CONT.`, `D/V`, `TIES`, `TOP TIES`, `VERT.`, `DIAG.`, `DWL.`, `SLAB DWL.`, `COR.`.
-  - Suffix `IF` on continuous bars = "if needed".
-- Footing schedule sheet: `MARK | SIZE (LxWxD) | QTY | REINFORCEMENT (ref. detail) | REMARKS`.
-- "ENG. PLEASE VERIFY …" notes = uncertainty markers (already maps to `UNVERIFIED_ASSUMPTION`).
-
-### C. Universal axiom (cross-project)
-- **Wherever there is concrete, there is rebar.** Any concrete element discovered in the structural drawings (footing, pier, pile cap, wall, column, beam, slab, SOG, frost wall, ledge, stair, retaining wall, grade beam, pile, mat, raft, equipment pad, curb, stoop, …) MUST have at least one rebar entry — otherwise raise a `MISSING_REBAR` validation issue against that segment.
+1. Stage 02 candidates come from real OCR (structural primary, architectural fallback / hidden-scope), de-duplicated by element identity, never per-file.
+2. `auto-estimate` ranks structural OCR first, only consults architectural to recover *missing* concrete elements (Concrete = Rebar axiom), and tags each line with the discipline it was confirmed against.
+3. `auto-bar-schedule` and `generate-shop-drawing` consume the de-duplicated estimate set so SD callouts/schedules can't double-count.
+4. No regressions to existing London CRU-1 fixture (`tests/fixtures/london-cru1/manifest.json`) or `concrete-rebar-gate` test.
 
 ## Changes (minimum patch)
 
-### 1. Lock the bar-list column contract
-File: `src/lib/excel-export.ts` — `buildBarListSheet`.
-- Reorder/rename headers to the canonical 11-column order from §A. (`Length (in)` and `Length (mm)` both required; current export merges them as "Length ft-in" + "Length mm" — keep `Length (in)` as the inches integer + fraction and keep `Length (mm)` numeric.)
-- Group order: bucket header (Yellow merged) → element id (Light-blue merged sub-row) → bar rows. Use `b.element_id` for the sub-row instead of `b.sub_element || b.description` so `F1`, `P3`, `W1` come through verbatim.
-- WWM rows: write area into the `Total Length (Mtr.)` cell with unit suffix `SQ M`, write `—` in `Total Wgt kg` (matches sample).
-- Add the legend block above the headers (bar mass table + grade + concrete + inch→ft table) — pulled from `scopeData.standardsLegend` with sensible defaults.
+### A. Real Stage 02 candidates — `src/features/workflow-v2/stages/ScopeStage.tsx`
+- Drop the synthetic `archetypes` × `files` cross-product.
+- On mount (when `state.files.length > 0` and no candidates cached), call `supabase.functions.invoke("auto-segments", { body: { projectId } })` once and persist the result in `state.local.scopeCandidates`.
+- Map suggestions → `Candidate { id: name, label: name, source: notes (drawing refs), confidence, evidence: notes }`. One candidate per unique `name` — no per-file duplication.
+- Keep the existing approve/reject UI and `segments` upsert path unchanged.
+- Empty-state hint becomes: "Run scope detection — no concrete elements surfaced yet."
 
-### 2. Bucket-aware estimator (`auto-estimate`)
-File: `supabase/functions/auto-estimate/index.ts`.
-- Replace the binary `hasStructuralFoundation/hasStructuralSuper` heuristic with a generic **5-bucket detector** (FOUNDATION / VERTICAL / HORIZONTAL / SLAB / MISC) keyed on tokens, not file names. Buckets are emitted in the system prompt as a checklist; AI must justify which buckets are PRESENT/ABSENT and cite the OCR token.
-- Append axiom to the system prompt: *"Wherever the drawing shows concrete (footing, pier, wall, column, beam, slab-on-grade, suspended slab, stair, grade beam, pile cap, mat, ledge, curb, equipment pad, retaining wall, frost wall, stoop, …) there MUST be rebar. If you find concrete with no callouts, emit a single placeholder line with `confidence: 0.1`, `description: "<elem> — UNRESOLVED rebar"`, qty/length/weight = 0."*
-- Add post-processing: after parse, walk the structural OCR text for known concrete keywords; for any keyword present that has zero matching `description`, insert a `MISSING_REBAR` row into `validation_issues` (severity=Error, blocks approval per existing gating rules).
+### B. Discipline-weighted OCR — `supabase/functions/auto-estimate/index.ts`
+- When fetching `drawing_search_index`, also pull `extracted_entities->title_block->discipline` (already stored).
+- Build two text buffers: `structuralOCR` and `architecturalOCR`. Concatenate as `structuralOCR` first, then a clearly delimited `=== ARCHITECTURAL FALLBACK (use only to recover missing concrete elements) ===` block, then architectural.
+- Extend the system prompt: "Prefer values from structural pages. Only use the architectural block to add a line for a concrete element that has no structural rebar callout, and tag its description with `(arch-fallback)`. Never overwrite a structural number with an architectural one."
+- Source-file picker (line 386) already prefers structural — leave intact.
 
-### 3. Bar-mark prefix policy in `auto-bar-schedule`
-File: `supabase/functions/auto-bar-schedule/index.ts`.
-- Extend the system prompt: *"Use prefix `BS` for STRAIGHT shape_code, `B` for any bent shape (L/U/Z/hook/stirrup/closed). When falling back to synthetic marks, follow the same prefix rule."*
-- Synthetic mark generator: replace `M${n}` with `BS${n}` / `B${n}` according to `shape`.
+### C. De-dup gate before insert — `supabase/functions/auto-estimate/index.ts`
+- Before `supabase.from("estimate_items").insert(rows)`, collapse rows on `(segment_id, normalize(description), bar_size)` keeping the highest-confidence row and summing identical-geometry duplicates only when both are sourced from the same discipline.
+- Re-query existing `estimate_items` for this segment and skip rows whose normalized key already exists (the current `existingDesc` is only passed to the prompt — make it an actual hard filter).
 
-### 4. Shop drawing callout grammar
-File: `supabase/functions/generate-shop-drawing/shop-drawing-template.ts`.
-- Add a `formatCallout(bar)` helper that emits exactly:
-  `${qty} ${size} ${prefix}${mark} ${spacing? "@"+spacing : ""} ${position}`
-  where `prefix` derives from `shape_code` per §3 and `position` is taken from `bar.info1` (or inferred: `TIES`/`TOP TIES` for stirrups, `D/V` for verticals, `TOP CONT.`/`BOT. CONT.` for continuous longitudinals, `DWL.` for dowels).
-- Use this helper in every elevation/section view that currently prints `bar_mark` raw.
-- Add a **Footing Schedule** sheet generator (one table sheet) when ≥3 footing-type elements exist: columns `MARK | SIZE (LxWxD) | QTY | REINFORCEMENT | REMARKS`. Source values from `segments.metadata.dimensions` with `—` placeholder + UNVERIFIED flag if missing.
+### D. Shop-drawing & bar-schedule consume the same de-duplicated set
+- `supabase/functions/auto-bar-schedule/index.ts`: add the same normalization step on its `estimate_items` read (line 95) so a stray duplicate row from older runs cannot produce two BS marks.
+- `supabase/functions/generate-shop-drawing/shop-drawing-template.ts`: no logic change — already iterates over what it's given. Verified via existing `src/test/shop-drawing-template.test.ts`.
 
-### 5. Element-id passthrough in takeoff/confirm
-File: `src/features/workflow-v2/takeoff-data.ts`.
-- Surface `bar_items.element_id` (and fall back to first token of `description`, e.g. `F1`, `P3`) into `WorkflowTakeoffRow.element_id`. ConfirmStage already groups by segment; expose this on the row tooltip so the estimator can see "F1 → 10× 15M …".
-
-### 6. Concrete = Rebar validation gate
-New file: `src/lib/validation/concrete-rebar-gate.ts` (~50 lines, pure function).
-- Input: `{ concreteKeywordsFound: string[], estimateRows: any[] }`.
-- Output: list of `MISSING_REBAR` issues.
-- Wire into `auto-estimate` post-processing (#2) and into the existing 6-gate validation in `useWorkflowState`/scope stage.
-- Add to the validation-gates memory (`mem://logic/validation-gates`) as gate #7.
-
-### 7. Regression fixture (sample preservation)
-- Create `tests/fixtures/london-cru1/` containing:
-  - `inputs/CRU-1_Architectral.pdf`, `inputs/CRU-1_Structural.pdf`
-  - `expected/estimate.xlsx` (the user's `LONDON_CRU1-3.xlsx`)
-  - `expected/shop_drawings.pdf` (the user's `SD06_TO_SD12-3.pdf`)
-  - `manifest.json`: project type, expected total weight (sum of the kg column ≈ recompute on load), expected element ids per bucket, list of canonical positions and bend types observed.
-- Add `src/test/fixtures/london-cru1.spec.ts` that loads the manifest and asserts:
-  - parser detects all 5 buckets present in the manifest (FOUNDATION + VERTICAL + SLAB present; HORIZONTAL absent in this sample — the test asserts the absent set too).
-  - `concrete-rebar-gate` returns no MISSING_REBAR issues against the expected estimate.
-  - bar-list exporter produces the canonical 11 columns.
-- This is **data**, not logic — adding new fixtures later (a hospital, a bridge) requires only a new folder; nothing in the engine is hard-coded to LONDON.
-
-### 8. Memory updates
-- `mem://logic/calculation-integrity`: add **"Concrete=Rebar axiom — every concrete element implies ≥1 rebar line; missing → MISSING_REBAR Error issue."**
-- `mem://logic/engineering-standards`: add **"Bar-mark prefix: `BS` straight, `B` bent. Callout grammar: `<qty> <size>M <prefix><mark> @<spacing> <position>`."**
-- `mem://features/reporting-and-results`: add **"Excel bar-list canonical 11 columns and bucket→element→bar hierarchy; legend block on top."**
-- New memory `mem://testing/fixtures` referencing `tests/fixtures/<project>/manifest.json` convention.
+### E. Tests
+- Extend `src/test/concrete-rebar-gate.test.ts` (or add `auto-estimate-dedup.test.ts`) to assert: given OCR with `WALL W1` on both structural and architectural pages, only one `WALL W1` line is produced and it is tagged structural.
+- Re-run `tests/fixtures/london-cru1/manifest.json` regression — bucket presence/absence must remain identical.
 
 ## Out of scope
-- No DB migrations.
-- No UI redesign — only TakeoffStage tooltip surface change.
-- No new edge functions — only edits to `auto-estimate`, `auto-bar-schedule`, `generate-shop-drawing`.
-- No hard-coded LONDON values in production code paths; sample lives only under `tests/fixtures/`.
+
+- No DB schema changes.
+- No UI redesign of Stage 02 beyond swapping the data source.
+- Excel / PDF exporters untouched (last week's wiring stays).
 
 ## Files touched
-1. `src/lib/excel-export.ts` — column contract + legend block
-2. `supabase/functions/auto-estimate/index.ts` — bucket detector + axiom prompt + post-process
-3. `supabase/functions/auto-bar-schedule/index.ts` — BS/B prefix rule
-4. `supabase/functions/generate-shop-drawing/shop-drawing-template.ts` — callout grammar + footing schedule sheet
-5. `src/features/workflow-v2/takeoff-data.ts` — element_id passthrough
-6. `src/lib/validation/concrete-rebar-gate.ts` — NEW
-7. `tests/fixtures/london-cru1/**` — NEW (sample data + manifest)
-8. `src/test/fixtures/london-cru1.spec.ts` — NEW
-9. Memory files (4 updates)
+
+- `src/features/workflow-v2/stages/ScopeStage.tsx` (replace candidate source)
+- `supabase/functions/auto-estimate/index.ts` (discipline weighting + dedup gate)
+- `supabase/functions/auto-bar-schedule/index.ts` (dedup read)
+- `src/test/concrete-rebar-gate.test.ts` (add dedup assertion) or new test file
 
 ## Risk
-Low. All changes are additive or in-place column reorders. No schema changes. Existing exports continue to work because the new columns are a superset of today's, and the bucket detector falls back to the current heuristic when OCR text is empty.
+
+Low. Stage 02 already has an empty-state branch, so if `auto-segments` returns `[]` the screen degrades gracefully instead of showing fake archetypes. All other paths are additive filters.
