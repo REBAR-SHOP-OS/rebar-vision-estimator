@@ -568,7 +568,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
           { role: "user", content: userPrompt },
         ],
         temperature: 0,
-        max_tokens: 16000,
+        max_tokens: 32000,
       }),
     });
 
@@ -614,11 +614,44 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       items = JSON.parse(jsonStr);
       if (!Array.isArray(items)) throw new Error("Not an array");
     } catch {
-      console.error("Failed to parse AI response:", rawContent);
-      return new Response(JSON.stringify({ error: "AI returned invalid format. Please try again." }), {
-        status: 422,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      // Repair truncated JSON: keep only complete top-level objects in the array
+      try {
+        let s = rawContent.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+        const startIdx = s.indexOf("[");
+        if (startIdx === -1) throw new Error("no array");
+        s = s.slice(startIdx + 1);
+        const objs: string[] = [];
+        let depth = 0, inStr = false, esc = false, buf = "";
+        for (let i = 0; i < s.length; i++) {
+          const ch = s[i];
+          buf += ch;
+          if (inStr) {
+            if (esc) esc = false;
+            else if (ch === "\\") esc = true;
+            else if (ch === '"') inStr = false;
+            continue;
+          }
+          if (ch === '"') { inStr = true; continue; }
+          if (ch === "{") depth++;
+          else if (ch === "}") {
+            depth--;
+            if (depth === 0) {
+              const trimmed = buf.trim().replace(/^,\s*/, "");
+              try { objs.push(JSON.stringify(JSON.parse(trimmed))); } catch { /* skip */ }
+              buf = "";
+            }
+          }
+        }
+        if (objs.length === 0) throw new Error("no complete objects");
+        items = JSON.parse("[" + objs.join(",") + "]");
+        console.warn(`[auto-estimate] Repaired truncated JSON: kept ${items.length} complete items (finish=${finishReason})`);
+      } catch {
+        console.error("Failed to parse AI response:", rawContent);
+        return new Response(JSON.stringify({ error: "AI returned invalid format. Please try again." }), {
+          status: 422,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     // ============================================================
