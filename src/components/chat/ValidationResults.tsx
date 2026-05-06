@@ -198,7 +198,7 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
 
   const weightMap: Record<string, Record<string, unknown>> = {};
   if (quoteResult?.quote?.elements) {
-    for (const el of quoteResult.quote.elements) weightMap[el.element_id] = el;
+    for (const el of quoteResult.quote.elements as any[]) weightMap[el.element_id] = el;
   }
 
   const hasBboxData = (el: ValidationElement) => {
