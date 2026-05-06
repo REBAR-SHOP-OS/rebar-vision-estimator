@@ -557,6 +557,11 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       item_type: String(item.item_type || "rebar"),
       status: "draft",
       source_file_id: sourceFileId || null,
+      assumptions_json: {
+        geometry_status: item._geometry_status || "unresolved",
+        missing_refs: item._missing_refs || [],
+        derivation: item._derivation || null,
+      },
     }));
 
     // De-dup gate: collapse rows on (normalized description, bar_size) keeping highest-confidence,
@@ -581,6 +586,27 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // Open a validation_issue for every unresolved row so the QA queue surfaces them.
+    const unresolvedIssues = dedupedRows
+      .map((r, idx) => ({ r, id: inserted?.[idx]?.id }))
+      .filter((x) => (x.r as any).assumptions_json?.geometry_status === "unresolved")
+      .map((x) => ({
+        user_id: user.id,
+        project_id,
+        segment_id,
+        source_file_id: sourceFileId || null,
+        issue_type: "unresolved_geometry",
+        severity: "error",
+        title: `Unresolved geometry: ${x.r.description.slice(0, 80)}`,
+        description: `Missing: ${((x.r as any).assumptions_json?.missing_refs || []).join("; ")}${graph.verifyNotes.length ? `\nDetailer notes: ${graph.verifyNotes.slice(0, 3).join(" | ")}` : ""}`,
+        status: "open",
+        source_refs: [{ estimate_item_id: x.id, missing: (x.r as any).assumptions_json?.missing_refs || [] }],
+      }));
+    if (unresolvedIssues.length > 0) {
+      const { error: viErr } = await supabase.from("validation_issues").insert(unresolvedIssues);
+      if (viErr) console.warn("validation_issues insert failed:", viErr.message);
     }
 
     // Update segment confidence to avg of its estimate items (deduped set)
