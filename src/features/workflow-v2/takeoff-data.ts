@@ -370,6 +370,14 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
         };
       }
       if (!iss.source_file_id && item?.source_file_id) iss.source_file_id = item.source_file_id;
+      // Build structured location & visible label
+      const loc = extractLocationFromRef(ref, aj, { sheet_id: iss.sheet_id });
+      iss.location = loc;
+      iss.location_label = buildLocationLabel(loc, iss.sheet_id);
+      // Prefix the title with the location for actionable QA copy
+      if (iss.location_label && !String(iss.title || "").startsWith(iss.location_label)) {
+        iss.title = `${iss.location_label}: ${iss.title || iss.issue_type || "review item"}`;
+      }
     }
   }
 
