@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { readSpreadsheetFile, rowsToCsvText } from "@/lib/spreadsheet-import";
 import * as pdfjsLib from "pdfjs-dist";
+import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 
 // Worker is already configured in src/lib/pdf-to-images.ts; re-asserting here
 // is safe (idempotent) and avoids load-order issues if this dialog opens first.
@@ -42,6 +43,67 @@ async function extractPdfText(file: File): Promise<string> {
     return out.join("\n\n").slice(0, 500_000);
   } catch (err) {
     console.warn("[BrainKnowledge] PDF text extraction failed:", err);
+    return "";
+  }
+}
+
+// OCR a single image file via the ocr-image edge function. Uploads to a temp
+// path under the user's blueprints space, signs a URL, and returns extracted
+// text. Returns "" if anything fails.
+async function ocrImageFile(file: File, userId: string): Promise<string> {
+  try {
+    const tmpPath = `${userId}/knowledge-tmp/${Date.now()}_${file.name}`;
+    const up = await supabase.storage.from("blueprints").upload(tmpPath, file, { upsert: true });
+    if (up.error) throw up.error;
+    const { data: signed } = await supabase.storage.from("blueprints").createSignedUrl(tmpPath, 600);
+    if (!signed?.signedUrl) throw new Error("No signed URL");
+    const { data: ocrData } = await supabase.functions.invoke("ocr-image", {
+      body: { image_url: signed.signedUrl },
+    });
+    const txt = (ocrData?.ocr_results || [])
+      .map((r: any) => r.fullText || "")
+      .filter((t: string) => t.length > 0)
+      .sort((a: string, b: string) => b.length - a.length)[0] || "";
+    // Best-effort cleanup; ignore errors
+    supabase.storage.from("blueprints").remove([tmpPath]).catch(() => {});
+    return txt.slice(0, 500_000);
+  } catch (err) {
+    console.warn("[BrainKnowledge] image OCR failed:", err);
+    return "";
+  }
+}
+
+// PDF fallback: render pages to images in the browser and OCR each via the
+// ocr-image edge function. Used when pdfjs text extraction yields nothing
+// (i.e. scanned PDFs).
+async function ocrPdfFile(file: File, projectIdLike: string): Promise<string> {
+  try {
+    const tmpPath = `${projectIdLike}/knowledge-tmp/${Date.now()}_${file.name}`;
+    const up = await supabase.storage.from("blueprints").upload(tmpPath, file, { upsert: true });
+    if (up.error) throw up.error;
+    const { data: signed } = await supabase.storage.from("blueprints").createSignedUrl(tmpPath, 1800);
+    if (!signed?.signedUrl) throw new Error("No signed URL");
+    const pages = await renderPdfPagesToImages(signed.signedUrl, projectIdLike, { maxPages: 30, scale: 1.5 });
+    const out: string[] = [];
+    for (let bi = 0; bi < pages.length; bi += 4) {
+      const batch = pages.slice(bi, bi + 4);
+      const results = await Promise.allSettled(batch.map(async (img) => {
+        const { data: ocrData } = await supabase.functions.invoke("ocr-image", {
+          body: { image_url: img.signedUrl },
+        });
+        const txt = (ocrData?.ocr_results || [])
+          .map((r: any) => r.fullText || "")
+          .filter((t: string) => t.length > 0)
+          .sort((a: string, b: string) => b.length - a.length)[0] || "";
+        return `[Page ${img.pageNumber}]\n${txt}`;
+      }));
+      for (const r of results) if (r.status === "fulfilled") out.push(r.value);
+      if (out.join("\n").length > 500_000) break;
+    }
+    supabase.storage.from("blueprints").remove([tmpPath]).catch(() => {});
+    return out.join("\n\n").slice(0, 500_000);
+  } catch (err) {
+    console.warn("[BrainKnowledge] PDF OCR fallback failed:", err);
     return "";
   }
 }
@@ -180,8 +242,11 @@ const BrainKnowledgeDialog: React.FC = () => {
       let extracted = "";
       if (/\.pdf$/i.test(file.name)) {
         extracted = await extractPdfText(file);
+        if (!extracted) extracted = await ocrPdfFile(file, user.id);
       } else if (/\.(txt|md|csv)$/i.test(file.name)) {
         try { extracted = (await file.text()).slice(0, 500_000); } catch { /* ignore */ }
+      } else if (/\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(file.name)) {
+        extracted = await ocrImageFile(file, user.id);
       }
       if (!extracted) {
         toast.warning(`${file.name}: text could not be extracted — file is stored but won't be used as a runtime authority.`);
@@ -217,8 +282,14 @@ const BrainKnowledgeDialog: React.FC = () => {
       const blob = await resp.blob();
       const fakeFile = new File([blob], item.file_name || "file.pdf", { type: blob.type });
       let extracted = "";
-      if (/\.pdf$/i.test(fakeFile.name)) extracted = await extractPdfText(fakeFile);
-      else if (/\.(txt|md|csv)$/i.test(fakeFile.name)) extracted = (await fakeFile.text()).slice(0, 500_000);
+      if (/\.pdf$/i.test(fakeFile.name)) {
+        extracted = await extractPdfText(fakeFile);
+        if (!extracted) extracted = await ocrPdfFile(fakeFile, user.id);
+      } else if (/\.(txt|md|csv)$/i.test(fakeFile.name)) {
+        extracted = (await fakeFile.text()).slice(0, 500_000);
+      } else if (/\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(fakeFile.name)) {
+        extracted = await ocrImageFile(fakeFile, user.id);
+      }
       if (!extracted) { toast.error("Could not extract text"); return; }
       const { error } = await supabase.from("agent_knowledge")
         .update({ content: extracted })
