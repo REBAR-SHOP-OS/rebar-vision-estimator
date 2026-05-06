@@ -354,6 +354,30 @@ async function loadCanonicalQaIssues(projectId: string): Promise<WorkflowQaIssue
   }));
 }
 
+// For canonical warnings, hydrate location fields from rebar.takeoff_items
+async function enrichCanonicalIssueLocations(issues: WorkflowQaIssue[]) {
+  const itemIds = Array.from(new Set(
+    issues.map((i) => i.sheet_id).filter((v): v is string => !!v)
+  ));
+  if (itemIds.length === 0) return;
+  const { data, error } = await (supabase as any)
+    .schema("rebar")
+    .from("takeoff_items")
+    .select("id,drawing_reference,extraction_payload,source_text,element_type")
+    .in("id", itemIds);
+  if (error) { console.warn("enrichCanonicalIssueLocations failed:", error); return; }
+  const byId = new Map<string, any>((data || []).map((r: any) => [r.id, r]));
+  for (const iss of issues) {
+    const item = iss.sheet_id ? byId.get(iss.sheet_id) : null;
+    if (!item) continue;
+    const payload = (item.extraction_payload && typeof item.extraction_payload === "object") ? item.extraction_payload : {};
+    const loc = extractLocationFromRef(payload, {}, { sheet_id: item.drawing_reference || null });
+    if (!loc.element_reference && item.element_type) loc.element_reference = String(item.element_type);
+    if (!loc.source_excerpt && item.source_text) loc.source_excerpt = String(item.source_text).slice(0, 160);
+    iss.location = loc;
+  }
+}
+
 export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQaIssue[]> {
   const legacyReq = supabase
     .from("validation_issues")
