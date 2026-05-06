@@ -868,11 +868,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   };
 
   const buildSyntheticQuote = (elements: any[], summary: any) => {
-    const barList = (elements as Record<string, unknown>[]).flatMap((e) => {
+    const barList: any[] = (elements as Record<string, unknown>[]).flatMap((e) => {
       const barLines = ((e.extraction as Record<string, unknown>)?.truth as Record<string, unknown>)?.bar_lines as Record<string, unknown>[] | undefined
         || e.bar_lines as Record<string, unknown>[] | undefined
         || [];
-      return barLines.map((b) => ({
+      return barLines.map((b: any) => ({
         ...b,
         element_type: e.element_type || e.type || "OTHER",
         element_id: e.element_id || e.id || "",
