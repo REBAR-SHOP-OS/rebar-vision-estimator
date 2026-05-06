@@ -135,8 +135,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadProgress, setUploadProgress] = useState<{ fileName: string; progress: number } | null>(null);
   const messageCountSinceLastLearn = useRef(0);
-  const [validationData, setValidationData] = useState<Record<string, unknown> | null>(null);
-  const [quoteResult, setQuoteResult] = useState<Record<string, unknown> | null>(null);
+  const [validationData, setValidationData] = useState<Record<string, any> | null>(null);
+  const [quoteResult, setQuoteResult] = useState<Record<string, any> | null>(null);
   const [exportGate, setExportGate] = useState<ExportGateResult | null>(null);
   const [userAnswers, setUserAnswers] = useState<{ element_id: string; field: string; value: string }[]>([]);
   const [showScopePanel, setShowScopePanel] = useState(false);
@@ -785,7 +785,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     return candidates;
   };
 
-  const runValidation = async (elements: unknown[], answers?: unknown[]) => {
+  const runValidation = async (elements: any[], answers?: any[]) => {
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess?.session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
@@ -807,7 +807,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     }
   };
 
-  const runPricing = async (elements: unknown[], mode: "ai_express" | "verified") => {
+  const runPricing = async (elements: any[], mode: "ai_express" | "verified") => {
     try {
       const truthElements = (elements as Record<string, unknown>[])
         .filter((e) => mode === "ai_express" ? e.status === "READY" : true)
@@ -866,7 +866,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     }
   };
 
-  const buildSyntheticQuote = (elements: unknown[], summary: unknown) => {
+  const buildSyntheticQuote = (elements: any[], summary: any) => {
     const barList = (elements as Record<string, unknown>[]).flatMap((e) => {
       const barLines = ((e.extraction as Record<string, unknown>)?.truth as Record<string, unknown>)?.bar_lines as Record<string, unknown>[] | undefined
         || e.bar_lines as Record<string, unknown>[] | undefined
@@ -914,7 +914,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     };
   };
 
-  const persistEstimateVersion = async (elements: unknown[], quote: Record<string, unknown>) => {
+  const persistEstimateVersion = async (elements: any[], quote: Record<string, any>) => {
     if (!user) return;
     try {
       const scopeSource = scopeDataRef.current;
