@@ -7,9 +7,9 @@ import ShareReviewDialog from "./ShareReviewDialog";
 
 interface ApprovalWorkflowProps {
   projectId: string;
-  quoteResult: Record<string, unknown>;
+  quoteResult: any;
   elements: { status?: string }[];
-  scopeData?: Record<string, unknown>;
+  scopeData?: any;
   confidenceScore?: number;
 }
 
@@ -18,6 +18,7 @@ interface ReviewComment {
   share_id: string;
   created_at: string;
   content?: string | null;
+  author_name?: string | null;
 }
 
 interface WorkflowNotification {
@@ -27,6 +28,10 @@ interface WorkflowNotification {
   message?: string | null;
   type?: string | null;
   read?: boolean | null;
+  status?: string | null;
+  channel?: string | null;
+  recipient_name?: string | null;
+  recipient_email?: string | null;
 }
 
 type WorkflowStage = "estimation_ready" | "sent_to_ben" | "ben_approved" | "sent_to_neel" | "neel_approved" | "sent_to_customer";
@@ -71,7 +76,7 @@ const ApprovalWorkflow: React.FC<ApprovalWorkflowProps> = ({ projectId, quoteRes
 
   const buildMethodologyExplanation = () => {
     const barList = quoteResult?.quote?.bar_list || [];
-    const grouped: Record<string, unknown[]> = {};
+    const grouped: Record<string, any[]> = {};
     for (const b of barList) {
       const t = b.element_type || "OTHER";
       if (!grouped[t]) grouped[t] = [];
