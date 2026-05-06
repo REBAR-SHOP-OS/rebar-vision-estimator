@@ -7,6 +7,208 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// ============================================================================
+// Deterministic structural graph + geometry resolver
+// ----------------------------------------------------------------------------
+// Geometry-first rebar: instead of asking the AI to compute lengths, we ask
+// the AI to extract callouts, then we resolve them against a graph built from
+// the structural OCR (footing schedules, wall elevations, lap defaults, bar
+// shapes). Rows that cannot be resolved are persisted with
+// assumptions_json.geometry_status = 'unresolved' and confidence 0 so the UI
+// can render "—" + a red badge instead of a misleading zero.
+// ============================================================================
+
+const REBAR_DIA_MM: Record<string, number> = {
+  "10M": 11.3, "15M": 16.0, "20M": 19.5, "25M": 25.2, "30M": 29.9, "35M": 35.7,
+  "#3": 9.5,  "#4": 12.7,  "#5": 15.9,  "#6": 19.1,  "#7": 22.2,  "#8": 25.4,
+};
+const REBAR_MASS_KG_PER_M: Record<string, number> = {
+  "10M": 0.785, "15M": 1.570, "20M": 2.355, "25M": 3.925, "30M": 5.495, "35M": 7.850,
+  "#3": 0.561, "#4": 0.994, "#5": 1.552, "#6": 2.235, "#7": 3.042, "#8": 3.973,
+};
+const WWM_MASS_KG_PER_M2: Record<string, number> = {
+  "6X6-W1.4/W1.4": 0.93, "6X6-W2.1/W2.1": 1.37, "6X6-W2.9/W2.9": 1.90,
+  "6X6-W4.0/W4.0": 2.63, "4X4-W2.1/W2.1": 2.05, "4X4-W4.0/W4.0": 3.94,
+};
+const sizeKey = (s: string) => {
+  const k = String(s || "").toUpperCase().trim();
+  const m = k.match(/^(10M|15M|20M|25M|30M|35M|#[3-8])/);
+  return m ? m[1] : k;
+};
+const massFor = (size: string, type: string): number => {
+  const k = String(size || "").toUpperCase().trim();
+  if (type === "wwm") return WWM_MASS_KG_PER_M2[k] || 0;
+  return REBAR_MASS_KG_PER_M[sizeKey(k)] || 0;
+};
+const lapMmFor = (size: string): number => {
+  const dia = REBAR_DIA_MM[sizeKey(size)] || 0;
+  return dia > 0 ? Math.round(40 * dia) : 0; // 40·db default per RSIC class B
+};
+
+// Build a lightweight structural graph from STRUCTURAL OCR pages only.
+// Architectural OCR is intentionally excluded as a geometry source.
+interface StructuralGraph {
+  // Bar marks the OCR explicitly defines, e.g. "BS80" or "B2035"
+  barMarks: Map<string, { size?: string; shape?: string; raw: string }>;
+  // Wall callouts: "WALL ... 12500MM ... 3000MM HIGH"
+  walls: Array<{ id?: string; lengthMm?: number; heightMm?: number; raw: string }>;
+  // Footing schedule rows: "F1 ... 2400 X 600 ... 2-15M T&B"
+  footings: Array<{ id?: string; lengthMm?: number; widthMm?: number; raw: string }>;
+  // Lap table overrides keyed by size: { "15M": 800 }
+  lapTable: Map<string, number>;
+  // Detailer's verify notes
+  verifyNotes: string[];
+}
+
+function buildStructuralGraph(structuralText: string): StructuralGraph {
+  const g: StructuralGraph = {
+    barMarks: new Map(),
+    walls: [],
+    footings: [],
+    lapTable: new Map(),
+    verifyNotes: [],
+  };
+  if (!structuralText) return g;
+  const text = structuralText.toUpperCase();
+
+  // Bar marks: BS\d{2,3} or B\d{4} optionally followed by size token
+  const markRx = /\b(B[S]?\d{2,4})\b[^\n]{0,80}?(10M|15M|20M|25M|30M|35M|#[3-8])?/g;
+  let mm: RegExpExecArray | null;
+  while ((mm = markRx.exec(text))) {
+    const id = mm[1];
+    if (g.barMarks.has(id)) continue;
+    g.barMarks.set(id, { size: mm[2], raw: mm[0].slice(0, 100) });
+  }
+
+  // Wall dimensions
+  const wallRx = /WALL[^\n]{0,80}?(\d{3,5})\s*MM[^\n]{0,40}?(?:HIGH|HEIGHT|HGT)?[^\n]{0,20}?(\d{3,5})?\s*MM?/g;
+  let wm: RegExpExecArray | null;
+  while ((wm = wallRx.exec(text))) {
+    const a = Number(wm[1]); const b = wm[2] ? Number(wm[2]) : undefined;
+    // Heuristic: longer is length, shorter is height
+    const lengthMm = b && b > a ? b : a;
+    const heightMm = b && b > a ? a : b;
+    g.walls.push({ lengthMm, heightMm, raw: wm[0].slice(0, 80) });
+    if (g.walls.length >= 8) break;
+  }
+
+  // Footing schedule: "F1 2400 X 600" or "F12 1200x1200"
+  const ftgRx = /\b(F\d{1,3})\b[^\n]{0,40}?(\d{3,5})\s*[X×]\s*(\d{3,5})/g;
+  let fm: RegExpExecArray | null;
+  while ((fm = ftgRx.exec(text))) {
+    g.footings.push({ id: fm[1], lengthMm: Number(fm[2]), widthMm: Number(fm[3]), raw: fm[0].slice(0, 80) });
+    if (g.footings.length >= 16) break;
+  }
+
+  // Lap table: "LAP 15M = 800" or "15M LAP 800MM"
+  const lapRx = /(10M|15M|20M|25M|30M|35M|#[3-8])[^\n]{0,20}?LAP[^\n]{0,10}?(\d{3,4})/g;
+  const lapRx2 = /LAP[^\n]{0,10}?(10M|15M|20M|25M|30M|35M|#[3-8])[^\n]{0,10}?(\d{3,4})/g;
+  for (const rx of [lapRx, lapRx2]) {
+    let lm: RegExpExecArray | null;
+    while ((lm = rx.exec(text))) g.lapTable.set(sizeKey(lm[1]), Number(lm[2]));
+  }
+
+  // Detailer verify notes
+  const verifyRx = /(?:PLEASE\s+)?(?:ENG\.?\s+)?VERIFY[^\n]{0,80}/g;
+  let vm: RegExpExecArray | null;
+  while ((vm = verifyRx.exec(text))) {
+    g.verifyNotes.push(vm[0].trim());
+    if (g.verifyNotes.length >= 12) break;
+  }
+  return g;
+}
+
+// Resolve a single AI line item against the graph. Pure function.
+type GeometryStatus = "resolved" | "partial" | "unresolved";
+interface ResolveResult {
+  qty?: number;
+  totalLengthM?: number;
+  totalWeightKg?: number;
+  status: GeometryStatus;
+  missing: string[];
+  derivation?: string;
+}
+function resolveLine(
+  it: { description?: string; bar_size?: string; quantity_count?: number; total_length?: number; total_weight?: number; item_type?: string },
+  graph: StructuralGraph,
+): ResolveResult {
+  const desc = String(it.description || "").toUpperCase();
+  const size = String(it.bar_size || "").toUpperCase();
+  const type = String(it.item_type || "rebar");
+  const aiQty = Number(it.quantity_count) || 0;
+  const aiLen = Number(it.total_length) || 0;
+  const mass = massFor(size, type);
+
+  // CASE A — AI already produced a qty AND length backed by an explicit bar list.
+  // Trust the AI value but require provenance: description must reference a mark
+  // present in the graph OR contain explicit dimension tokens.
+  if (aiQty > 0 && aiLen > 0) {
+    const markMatch = desc.match(/\b(B[S]?\d{2,4})\b/);
+    const hasDims = /\d{3,5}\s*MM/.test(desc);
+    const known = markMatch ? graph.barMarks.has(markMatch[1]) : false;
+    if (known || hasDims) {
+      return {
+        qty: aiQty,
+        totalLengthM: aiLen,
+        totalWeightKg: Number(it.total_weight) > 0 ? Number(it.total_weight) : +(aiLen * mass).toFixed(2),
+        status: "resolved",
+        missing: [],
+        derivation: known ? `mark ${markMatch![1]} from schedule` : "explicit dimensions in callout",
+      };
+    }
+    // AI guessed without provenance — downgrade to partial
+    return {
+      qty: aiQty, totalLengthM: aiLen,
+      totalWeightKg: Number(it.total_weight) > 0 ? Number(it.total_weight) : +(aiLen * mass).toFixed(2),
+      status: "partial",
+      missing: ["provenance: no bar mark or explicit dimension found in description"],
+    };
+  }
+
+  // CASE B — Try deterministic derivation from spacing + a wall
+  const spMatch = desc.match(/@\s*(\d{2,4})\s*MM/);
+  const spacing = spMatch ? Number(spMatch[1]) : 0;
+  const wall = graph.walls.find((w) => (w.lengthMm || 0) > 0);
+  if (spacing > 0 && wall?.lengthMm) {
+    const lap = graph.lapTable.get(sizeKey(size)) ?? lapMmFor(size);
+    const qty = Math.ceil(wall.lengthMm / spacing) + 1;
+    const missing: string[] = [];
+    let barLenMm = 0;
+    if (wall.heightMm) barLenMm = wall.heightMm + lap;
+    else missing.push("wall height (mm)");
+    if (!lap) missing.push(`lap length for ${sizeKey(size)}`);
+    if (barLenMm > 0) {
+      const totalLengthM = +(qty * barLenMm / 1000).toFixed(2);
+      return {
+        qty, totalLengthM,
+        totalWeightKg: +(totalLengthM * mass).toFixed(2),
+        status: missing.length ? "partial" : "resolved",
+        missing,
+        derivation: `qty=ceil(${wall.lengthMm}/${spacing})+1=${qty}; bar=${(wall.heightMm || 0)}+${lap}mm`,
+      };
+    }
+    return { qty, status: "partial", missing: ["bar developed length"], derivation: `qty=${qty} from wall`, };
+  }
+
+  // CASE C — bar mark referenced but no shape geometry available
+  const markMatch = desc.match(/\b(B[S]?\d{2,4})\b/);
+  if (markMatch) {
+    const known = graph.barMarks.get(markMatch[1]);
+    return {
+      status: "unresolved",
+      missing: known
+        ? [`shape geometry for ${markMatch[1]}`, "host element dimensions"]
+        : [`${markMatch[1]} not defined in any structural schedule`],
+    };
+  }
+
+  // CASE D — concrete element placeholder, no rebar callout in OCR
+  return {
+    status: "unresolved",
+    missing: ["rebar callout", "element dimensions"],
+  };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
