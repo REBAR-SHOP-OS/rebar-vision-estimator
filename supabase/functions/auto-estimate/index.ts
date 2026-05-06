@@ -245,6 +245,63 @@ function itemMatchesSegment(item: { description?: string; source_excerpt?: strin
   return !!(name && name.length >= 4 && text.includes(name));
 }
 
+// --- Raw-input ask helpers (deterministic) -----------------------------------
+// Estimator questions must ask for drawing-direct values only. Never request
+// derived totals (perimeter, total length, qty, weight). System computes those.
+function classifyElementForAsk(text: string): "slab_edge"|"strip_footing"|"pad"|"wall"|"cage"|"generic" {
+  const t = (text || "").toLowerCase();
+  if (/\b(slab\s*edge|frost\s*slab|slab\s*on\s*grade|sog\b|edge\s*of\s*slab)/.test(t)) return "slab_edge";
+  if (/\b(strip\s*footing|cont(?:inuous)?\s*footing|wall\s*footing|footing|ftg)\b/.test(t)) return "strip_footing";
+  if (/\b(housekeeping\s*pad|equipment\s*pad|pad)\b/.test(t)) return "pad";
+  if (/\b(wall|stem\s*wall|foundation\s*wall|retaining\s*wall)\b/.test(t)) return "wall";
+  if (/\b(column|pier|cage|tie\s*column)\b/.test(t)) return "cage";
+  return "generic";
+}
+function elementNounForAsk(c: string): string {
+  return ({ slab_edge: "slab edge", strip_footing: "strip footing", pad: "pad", wall: "wall", cage: "column/pier cage", generic: "element" } as Record<string,string>)[c] || "element";
+}
+function closingClauseForAsk(c: string): string {
+  return ({
+    slab_edge: "so the system can calculate total edge run, qty, length, and weight",
+    strip_footing: "so the system can calculate total length and weight",
+    pad: "so the system can calculate qty and total length",
+    wall: "so the system can calculate bar length, qty, and weight",
+    cage: "so the system can calculate stirrup count, length, and weight",
+    generic: "so the system can calculate qty, length, and weight",
+  } as Record<string,string>)[c] || "so the system can calculate qty, length, and weight";
+}
+function rawInputPhraseForAsk(token: string, c: string): string | null {
+  const k = (token || "").toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  if (/(perimeter|edge_length|edge_run|run_length|^length$|total_length|element_length)/.test(k)) {
+    if (c === "slab_edge") return "the slab edge length and width shown on the drawing";
+    if (c === "wall")      return "the wall length shown on the drawing";
+    if (c === "pad")       return "the pad length and width shown on the drawing";
+    return "the run/length dimension shown on the drawing";
+  }
+  if (/(wall_height|^height$)/.test(k)) return "the wall height shown on the drawing";
+  if (/(pad_length|pad_width|element_dimensions|dimensions|footprint|plan_dim)/.test(k)) {
+    if (c === "wall") return "the wall length and height shown on the drawing";
+    return "the element length and width shown on the drawing";
+  }
+  if (/(spacing|o_c|on_center)/.test(k)) return "the bar spacing shown on the drawing";
+  if (/(count|qty|quantity)/.test(k)) return "the bar count shown on the callout";
+  if (/(rebar_callout|^callout$|bar_callout|mark)/.test(k)) return "the rebar callout text shown on the drawing";
+  if (/(cover)/.test(k)) return "the concrete cover shown on the drawing";
+  if (/(thickness)/.test(k)) return "the slab/wall thickness shown on the drawing";
+  if (/(diameter)/.test(k)) return "the diameter shown on the drawing";
+  return null;
+}
+function defaultRawInputForAsk(c: string): string {
+  return ({
+    slab_edge: "the slab edge length and width shown on the drawing",
+    strip_footing: "the footing run dimension shown on the drawing",
+    pad: "the pad length and width shown on the drawing",
+    wall: "the wall length and height shown on the drawing",
+    cage: "the column/pier dimensions, tie spacing, and overall height shown on the drawing",
+    generic: "the dimensions and bar callout shown on the drawing",
+  } as Record<string,string>)[c] || "the dimensions and bar callout shown on the drawing";
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
