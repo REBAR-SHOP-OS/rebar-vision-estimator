@@ -109,14 +109,21 @@ export function buildLocationLabel(loc: WorkflowQaIssue["location"], fallbackShe
 
 function extractLocationFromRef(ref: any, aj: Record<string, any>, fallback: { sheet_id?: string | null }) {
   const r = ref || {};
+  const nestedR = (r.location && typeof r.location === "object") ? r.location : {};
+  const nestedA = (aj.location && typeof aj.location === "object") ? aj.location as Record<string, any> : {};
   return {
-    source_sheet: pickStr(r.sheet, r.sheet_id, r.source_sheet, aj.sheet, aj.sheet_id, aj.source_sheet, fallback.sheet_id),
-    page_number: Number(r.page_number ?? aj.page_number ?? 0) || null,
-    detail_reference: pickStr(r.detail, r.detail_reference, aj.detail, aj.detail_reference),
-    grid_reference: pickStr(r.grid, r.grid_reference, aj.grid, aj.grid_reference),
-    zone_reference: pickStr(r.zone, r.zone_reference, aj.zone, aj.zone_reference, aj.area),
-    element_reference: pickStr(r.element, r.element_reference, r.mark, aj.element, aj.element_reference, aj.mark, aj.callout),
-    source_excerpt: pickStr(r.excerpt, r.source_excerpt, aj.excerpt, aj.source_excerpt),
+    source_sheet: pickStr(nestedR.sheet, nestedA.sheet, r.sheet, r.sheet_id, r.source_sheet, aj.sheet, aj.sheet_id, aj.source_sheet, fallback.sheet_id),
+    page_number: Number(nestedR.page_number ?? nestedA.page_number ?? r.page_number ?? aj.page_number ?? 0) || null,
+    detail_reference: pickStr(nestedR.detail, nestedA.detail, r.detail, r.detail_reference, aj.detail, aj.detail_reference),
+    grid_reference: pickStr(nestedR.grid, nestedA.grid, r.grid, r.grid_reference, aj.grid, aj.grid_reference),
+    zone_reference: pickStr(nestedR.zone, nestedA.zone, r.zone, r.zone_reference, aj.zone, aj.zone_reference, aj.area, r.area, nestedR.area, nestedA.area),
+    element_reference: pickStr(
+      nestedR.element, nestedA.element, r.element, r.element_reference, r.mark, r.callout,
+      r.wall, r.wall_name, r.footing, r.footing_name, r.pad, r.pad_name,
+      aj.element, aj.element_reference, aj.mark, aj.callout,
+      aj.wall, aj.wall_name, aj.footing, aj.footing_name, aj.pad, aj.pad_name,
+    ),
+    source_excerpt: pickStr(nestedR.excerpt, nestedA.excerpt, r.excerpt, r.source_excerpt, aj.excerpt, aj.source_excerpt),
   };
 }
 
