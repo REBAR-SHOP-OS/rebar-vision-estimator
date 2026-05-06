@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Brain, Upload, Trash2, FileText, Plus, Loader2, GraduationCap, Lightbulb, Pencil, Check, X } from "lucide-react";
+import { Brain, Upload, Trash2, FileText, Plus, Loader2, GraduationCap, Lightbulb, Pencil, Check, X, ShieldCheck, ShieldAlert, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -457,6 +457,52 @@ const BrainKnowledgeDialog: React.FC = () => {
   const learnedItems = items.filter((i) => i.type === "learned");
   const totalCount = items.length + trainingExamples.length;
 
+  // RSIC Manual health: aggregate any uploaded chunks whose title/file_name
+  // matches the canonical manual name. Mirrors the gate in
+  // supabase/functions/auto-estimate/index.ts (MANUAL_NOT_LOADED).
+  const manualChunks = items.filter((i) => {
+    const hay = `${i.title || ""} ${i.file_name || ""}`.toLowerCase();
+    return /manual.*standard.*practice.*2018|standard.?practice.?2018|rsic.*manual/.test(hay);
+  });
+  const manualParsedChars = manualChunks.reduce((sum, c) => sum + (c.content?.length || 0), 0);
+  const manualReady = manualChunks.length > 0 && manualParsedChars >= 1000;
+  const manualUploadedNotParsed = manualChunks.length > 0 && manualParsedChars < 1000;
+  const [installingManual, setInstallingManual] = useState(false);
+
+  const installBundledRsicManual = async () => {
+    if (!user) return;
+    setInstallingManual(true);
+    try {
+      const url = "/manuals/Manual-Standard-Practice-2018.pdf";
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      const file = new File([blob], "Manual-Standard-Practice-2018.pdf", { type: "application/pdf" });
+      const filePath = `${user.id}/knowledge/${Date.now()}_${file.name}`;
+      const { error: upErr } = await supabase.storage.from("blueprints").upload(filePath, file, { upsert: true });
+      if (upErr) throw upErr;
+      let extracted = await extractPdfText(file);
+      if (!extracted) extracted = await ocrPdfFile(file, user.id);
+      const { error } = await supabase.from("agent_knowledge").insert({
+        user_id: user.id,
+        title: file.name,
+        file_path: filePath,
+        file_name: file.name,
+        content: extracted || null,
+        type: "file",
+      });
+      if (error) throw error;
+      if (!extracted) toast.warning("Manual stored but text could not be extracted. Try Re-parse.");
+      else toast.success(`RSIC Manual installed (${(extracted.length / 1000).toFixed(0)}k chars)`);
+      await loadItems();
+    } catch (err) {
+      console.warn("[BrainKnowledge] install bundled manual failed:", err);
+      toast.error("Could not install bundled RSIC Manual.");
+    } finally {
+      setInstallingManual(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -553,6 +599,40 @@ const BrainKnowledgeDialog: React.FC = () => {
 
           {/* Files Tab */}
           <TabsContent value="files" className="space-y-3">
+            {/* RSIC Manual authority health */}
+            <div
+              className={`rounded-md border p-3 text-xs space-y-2 ${manualReady ? "border-emerald-500/40 bg-emerald-500/5" : "border-amber-500/50 bg-amber-500/5"}`}
+            >
+              <div className="flex items-center gap-2 font-semibold uppercase tracking-wider">
+                {manualReady ? (
+                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                ) : (
+                  <ShieldAlert className="h-4 w-4 text-amber-600" />
+                )}
+                <span>RSIC Manual of Standard Practice 2018</span>
+              </div>
+              {manualReady ? (
+                <p className="text-muted-foreground">
+                  Authority loaded — {manualChunks.length} chunk(s), {(manualParsedChars / 1000).toFixed(0)}k chars parsed.
+                  Auto-estimate may cite lap/splice/hook/bend rules from this document.
+                </p>
+              ) : manualUploadedNotParsed ? (
+                <p className="text-muted-foreground">
+                  Manual is uploaded but text was not extracted ({manualParsedChars} chars). Use the Re-parse action on the file row, or re-install below. Takeoff will be <b>blocked</b> until parsing succeeds.
+                </p>
+              ) : (
+                <p className="text-muted-foreground">
+                  Not installed. Auto-estimate will <b>block</b> with <code>MANUAL_NOT_LOADED</code> and refuse to fabricate assumption values.
+                </p>
+              )}
+              {!manualReady && (
+                <Button size="sm" variant="outline" className="gap-1" disabled={installingManual} onClick={installBundledRsicManual}>
+                  {installingManual ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                  {installingManual ? "Installing…" : "Install bundled RSIC Manual"}
+                </Button>
+              )}
+            </div>
+
             <div className="space-y-2 border rounded-lg p-3">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Upload Files ({fileCount}/10)
