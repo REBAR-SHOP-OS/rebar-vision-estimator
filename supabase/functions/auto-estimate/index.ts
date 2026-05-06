@@ -48,7 +48,7 @@ serve(async (req) => {
       supabase.from("projects").select("name, project_type, scope_items, description").eq("id", project_id).single(),
       supabase.from("project_files").select("id, file_name, file_type").eq("project_id", project_id).limit(20),
       supabase.from("standards_profiles").select("*").eq("user_id", user.id).eq("is_default", true).limit(1),
-      supabase.from("estimate_items").select("description, bar_size").eq("segment_id", segment_id).limit(50),
+      supabase.from("estimate_items").select("id, description, bar_size, quantity_count, total_length, total_weight, confidence").eq("segment_id", segment_id).limit(200),
       supabase.from("drawing_search_index").select("raw_text, page_number, extracted_entities").eq("project_id", project_id).limit(50),
       supabase.from("agent_knowledge").select("title, content").eq("user_id", user.id).limit(10),
     ]);
@@ -59,18 +59,35 @@ serve(async (req) => {
     const standard = stdRes.data?.[0];
     const existing = existingRes.data || [];
 
-    // Build drawing text from search index (OCR) first, fallback to doc versions
+    // Build drawing text from search index (OCR), separating structural (primary)
+    // from architectural (fallback for hidden/missing concrete elements).
     let drawingTextContext = "";
     const searchPages = searchIndexRes.data || [];
     if (searchPages.length > 0) {
-      const textSnippets: string[] = [];
+      const structural: string[] = [];
+      const architectural: string[] = [];
+      const other: string[] = [];
       for (const page of searchPages) {
         const text = (page.raw_text || "").trim();
-        if (text.length > 20) {
-          textSnippets.push(`[Page ${page.page_number}] ${text.substring(0, 2000)}`);
-        }
+        if (text.length <= 20) continue;
+        const tb = (page.extracted_entities as any)?.title_block || {};
+        const disc = String(tb.discipline || "").toLowerCase();
+        const snip = `[Page ${page.page_number}] ${text.substring(0, 2000)}`;
+        if (disc.includes("struct")) structural.push(snip);
+        else if (disc.includes("arch")) architectural.push(snip);
+        else other.push(snip);
       }
-      drawingTextContext = textSnippets.join("\n\n").slice(0, 12000);
+      const parts: string[] = [];
+      if (structural.length > 0) {
+        parts.push("=== STRUCTURAL OCR (PRIMARY — use these numbers) ===\n" + structural.join("\n\n"));
+      }
+      if (other.length > 0) {
+        parts.push("=== UNCLASSIFIED OCR ===\n" + other.join("\n\n"));
+      }
+      if (architectural.length > 0) {
+        parts.push("=== ARCHITECTURAL OCR (FALLBACK — only to recover concrete elements missing from structural; tag those lines '(arch-fallback)') ===\n" + architectural.join("\n\n"));
+      }
+      drawingTextContext = parts.join("\n\n").slice(0, 14000);
     } else {
       try {
         const { data: docVersions } = await supabase
@@ -142,11 +159,18 @@ serve(async (req) => {
     }
 
     const existingDesc = existing.map((e: any) => e.description).filter(Boolean).join(", ");
+    // Normalized key for de-dup (segment-scoped)
+    const normKey = (desc: string, size: string) =>
+      `${(desc || "").toLowerCase().replace(/\s+/g, " ").replace(/[^a-z0-9 #@\.\-]/g, "").trim()}|${(size || "").toUpperCase().trim()}`;
+    const existingKeys = new Set(
+      (existing as Array<{ description?: string; bar_size?: string }>).map((e) => normKey(e.description || "", e.bar_size || "")),
+    );
 
     const systemPrompt = `You are a rebar estimating expert. Output estimate line items ONLY from drawing evidence in the user message.
 Rules:
 - Return ONLY a JSON array of objects, no markdown, no explanation.
 - Each object: { "description": string, "bar_size": string, "quantity_count": number, "total_length": number (meters for rebar, m² for wwm), "total_weight": number (kg), "confidence": number (0-1), "item_type": "rebar" | "wwm" }
+- DISCIPLINE PRIORITY: When the OCR contains both STRUCTURAL and ARCHITECTURAL sections, ALWAYS prefer numbers from STRUCTURAL. Only emit a line sourced from the ARCHITECTURAL block if the corresponding concrete element has NO matching structural rebar callout — and in that case prefix the description with "(arch-fallback) ". Never overwrite a structural number with an architectural one. Do NOT emit two lines for the same element from different disciplines.
 - Bar sizes: use metric (10M, 15M, 20M, 25M, 30M, 35M) or imperial (#3, #4, #5, #6, #7, #8) based on standards.
 - Confidence must reflect evidence strength from schedules/callouts — use low values when inferring.
 - If the drawing text section is present, extract ONLY what is explicitly supported; do not invent quantities.
@@ -403,9 +427,20 @@ Output the JSON array now. Every object MUST have non-zero quantity_count AND to
       source_file_id: sourceFileId || null,
     }));
 
+    // De-dup gate: collapse rows on (normalized description, bar_size) keeping highest-confidence,
+    // and skip rows that already exist for this segment.
+    const dedupMap = new Map<string, typeof rows[number]>();
+    for (const r of rows) {
+      const k = normKey(r.description, r.bar_size);
+      if (existingKeys.has(k)) continue;
+      const prev = dedupMap.get(k);
+      if (!prev || (r.confidence as number) > (prev.confidence as number)) dedupMap.set(k, r);
+    }
+    const dedupedRows = Array.from(dedupMap.values());
+
     const { data: inserted, error: insertErr } = await supabase
       .from("estimate_items")
-      .insert(rows)
+      .insert(dedupedRows)
       .select("id");
 
     if (insertErr) {
