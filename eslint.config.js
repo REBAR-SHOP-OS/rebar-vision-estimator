@@ -9,6 +9,16 @@ const denoGlobals = {
   globalThis: "readonly",
 };
 
+const lintRules = {
+  "@typescript-eslint/no-unused-vars": "off",
+  "@typescript-eslint/no-explicit-any": "error",
+  "no-empty": "error",
+  "@typescript-eslint/no-empty-object-type": "off",
+  "no-useless-escape": "error",
+  "no-constant-binary-expression": "error",
+  "prefer-const": "error",
+};
+
 export default tseslint.config(
   { ignores: ["dist"] },
   {
@@ -25,13 +35,18 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
-      "@typescript-eslint/no-unused-vars": "off",
-      "@typescript-eslint/no-explicit-any": "error",
-      "no-empty": "error",
-      "@typescript-eslint/no-empty-object-type": "off",
-      "no-useless-escape": "error",
-      "no-constant-binary-expression": "error",
-      "prefer-const": "error",
+      ...lintRules,
+    },
+  },
+  {
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    files: ["*.config.ts"],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.node,
+    },
+    rules: {
+      ...lintRules,
     },
   },
   {
@@ -45,13 +60,7 @@ export default tseslint.config(
       },
     },
     rules: {
-      "@typescript-eslint/no-unused-vars": "off",
-      "@typescript-eslint/no-explicit-any": "error",
-      "no-empty": "error",
-      "@typescript-eslint/no-empty-object-type": "off",
-      "no-useless-escape": "error",
-      "no-constant-binary-expression": "error",
-      "prefer-const": "error",
+      ...lintRules,
     },
   },
 );
