@@ -96,7 +96,17 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     }
     return { cx: 0.5, cy: 0.5 };
   })();
-  const zoom = zoomMode === "tight" && bbox ? 2.4 : 1;
+  // Bbox-driven crop: scale so the bbox (with ~25% padding) fills the viewer.
+  // Falls back to a sane default when bbox/image dimensions are missing.
+  const bboxW = bbox ? Math.max(1, bbox[2] - bbox[0]) : 0;
+  const bboxH = bbox ? Math.max(1, bbox[3] - bbox[1]) : 0;
+  const PAD = 1.3; // 30% padding around the element
+  const fitZoom = bbox && imgW && imgH
+    ? Math.min(imgW / (bboxW * PAD), imgH / (bboxH * PAD))
+    : 1;
+  const zoom = zoomMode === "tight" && bbox
+    ? Math.min(12, Math.max(2, fitZoom))
+    : 1;
   const tx = (0.5 - center.cx) * 100 * zoom;
   const ty = (0.5 - center.cy) * 100 * zoom;
   // ------------------------------------------------------------------------
