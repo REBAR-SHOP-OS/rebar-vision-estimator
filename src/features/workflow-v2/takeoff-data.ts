@@ -38,6 +38,8 @@ export interface WorkflowQaIssue {
   status: string;
   sheet_id?: string | null;
   issue_type: string;
+  source_file_id?: string | null;
+  source_refs?: any;
 }
 
 const CLOSED_STATUSES = new Set(["resolved", "closed"]);
@@ -260,13 +262,15 @@ async function loadCanonicalQaIssues(projectId: string): Promise<WorkflowQaIssue
     status: "open",
     sheet_id: warning.takeoff_item_id || null,
     issue_type: "takeoff_warning",
+    source_file_id: null,
+    source_refs: null,
   }));
 }
 
 export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQaIssue[]> {
   const legacyReq = supabase
     .from("validation_issues")
-    .select("id,title,description,severity,status,sheet_id,issue_type")
+    .select("id,title,description,severity,status,sheet_id,issue_type,source_file_id,source_refs")
     .eq("project_id", projectId)
     .order("severity", { ascending: true });
 
