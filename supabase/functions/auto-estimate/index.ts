@@ -713,7 +713,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         user_id: user.id,
         project_id,
         segment_id,
-        source_file_id: sourceFileId || null,
+        source_file_id: null,
         issue_type: "unresolved_geometry",
         severity: "error",
         title: `Unresolved geometry: ${x.r.description.slice(0, 80)}`,
