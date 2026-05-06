@@ -209,6 +209,42 @@ function resolveLine(
   };
 }
 
+function inferSegmentType(label: string): string {
+  const n = String(label || "").toLowerCase();
+  if (/(retain|retaining)/.test(n)) return "retaining_wall";
+  if (/(wall|frost wall|foundation wall)/.test(n)) return "wall";
+  if (/(footing|ftg|pile cap|pile|caisson|grade beam|raft|mat)/.test(n)) return "footing";
+  if (/(slab|sog|slab[- ]on[- ]grade|topping|deck)/.test(n)) return "slab";
+  if (/(beam|girder|joist|lintel|bond beam)/.test(n)) return "beam";
+  if (/(column|col\b)/.test(n)) return "column";
+  if (/(pier)/.test(n)) return "pier";
+  if (/(stair)/.test(n)) return "stair";
+  if (/(pit|sump|elevator pit)/.test(n)) return "pit";
+  if (/(curb|stoop|ledge|housekeeping pad|equipment pad)/.test(n)) return "curb";
+  return "miscellaneous";
+}
+
+function itemMatchesSegment(item: { description?: string; source_excerpt?: string | null }, segType: string, segName: string): boolean {
+  if (segType === "miscellaneous") return true;
+  const text = `${item.description || ""} ${item.source_excerpt || ""}`.toUpperCase();
+  const name = String(segName || "").toUpperCase();
+  const tests: Record<string, RegExp> = {
+    footing: /\b(FOOTING|FTG|F-\d|WF-\d|LEVELING PAD|PILE\s?CAP|PILE|CAISSON|GRADE\s?BEAM|RAFT|MAT)\b/,
+    slab: /\b(SLAB|SOG|SLAB[-\s]?ON[-\s]?GRADE|FROST SLAB|WWM|W\.W\.M|MESH|6X6|HOUSEKEEPING PAD|PAD EDGE)\b/,
+    wall: /\b(WALL|FOUNDATION WALL|RETAINING WALL|BRICK LEDGE|DOOR OPENINGS|VERTICAL BARS|STAGGERED)\b/,
+    retaining_wall: /\b(RETAINING|RETAINING WALL)\b/,
+    column: /\b(COLUMN|COL\b|C-\d)\b/,
+    pier: /\b(PIER|P-\d)\b/,
+    beam: /\b(BEAM|GIRDER|JOIST|LINTEL|BOND BEAM|GB-\d|B-\d{2,})\b/,
+    stair: /\b(STAIR)\b/,
+    pit: /\b(PIT|SUMP|ELEVATOR PIT)\b/,
+    curb: /\b(CURB|STOOP|LEDGE|HOUSEKEEPING PAD|EQUIPMENT PAD)\b/,
+  };
+  const rx = tests[segType];
+  if (rx?.test(text)) return true;
+  return !!(name && name.length >= 4 && text.includes(name));
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -342,7 +378,9 @@ serve(async (req) => {
       pit:            /\b(PIT|SUMP|ELEVATOR\s?PIT)\b/,
       curb:           /\b(CURB|STOOP|LEDGE|HOUSEKEEPING\s?PAD|EQUIPMENT\s?PAD)\b/,
     };
-    const segTypeKey = String(segment?.segment_type || "miscellaneous").toLowerCase();
+    const storedSegType = String(segment?.segment_type || "miscellaneous").toLowerCase();
+    const inferredSegType = inferSegmentType(String(segment?.name || ""));
+    const segTypeKey = storedSegType !== "miscellaneous" ? storedSegType : inferredSegType;
     const segNameUpper = String(segment?.name || "").toUpperCase();
     const segRelevance = SEGMENT_TOKENS[segTypeKey] || null;
     const isPageRelevant = (text: string): boolean => {
@@ -374,16 +412,20 @@ serve(async (req) => {
         if (text.length <= 20) continue;
         if (!isPageRelevant(text)) continue;
         const tb = (page.extracted_entities as any)?.title_block || {};
+        const dvFileId = page.document_version_id ? dvToFileId.get(String(page.document_version_id)) : null;
+        const dvFileName = dvFileId
+          ? String((files as any[]).find((f: any) => f.id === dvFileId)?.file_name || "")
+          : "";
         const disc = String(tb.discipline || "").toLowerCase();
         const sheetTag = (page.extracted_entities as any)?.title_block?.sheet_id || `p${page.page_number}`;
         const snip = `[SHEET ${sheetTag} · Page ${page.page_number}] ${text.substring(0, 2000)}`;
         relevantPages.push({ snip, document_version_id: page.document_version_id || null, page_number: Number(page.page_number) || 0, sheetTag: String(sheetTag) });
-        if (disc.includes("shop") || /\bSD\b|SHOP DRAWING/i.test(text.slice(0, 200))) shop.push(snip);
-        else if (disc.includes("struct")) structural.push(snip);
-        else if (disc.includes("arch")) architectural.push(snip);
+        if (disc.includes("shop") || isShopName(dvFileName) || /\bSD\b|SHOP DRAWING/i.test(text.slice(0, 200))) shop.push(snip);
+        else if (disc.includes("struct") || isStructName(dvFileName) || /\bS-\d|FOUNDATION PLAN|ELEVATIONS|CONCRETE REINFORCING|LEVELING PAD|F-\d|WF-\d/i.test(text.slice(0, 400))) structural.push(snip);
+        else if (disc.includes("arch") || isArchName(dvFileName)) architectural.push(snip);
         else other.push(snip);
       }
-      console.log(`[auto-estimate] segment="${segment?.name}" type=${segTypeKey} relevant_pages=${relevantPages.length}/${searchPages.length}`);
+      console.log(`[auto-estimate] segment="${segment?.name}" stored_type=${storedSegType} effective_type=${segTypeKey} relevant_pages=${relevantPages.length}/${searchPages.length}`);
       const parts: string[] = [];
       if (shop.length > 0) {
         parts.push("=== SHOP DRAWING OCR (PRIMARY — production quantities come from here) ===\n" + shop.join("\n\n"));
@@ -767,7 +809,8 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         _derivation: r.derivation || null,
       };
     });
-    items = enriched;
+    items = enriched.filter((it: any) => itemMatchesSegment(it, segTypeKey, String(segment?.name || "")));
+    console.log(`[auto-estimate] post-filter rows=${items.length} for segment="${segment?.name}" effective_type=${segTypeKey}`);
 
     // Best-effort page locator: for each item, scan OCR pages for the bar mark
     // / bar-size / strongest description token and attach the first matching
