@@ -10,6 +10,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [genStatus, setGenStatus] = useState<string>("");
 
   const reload = async () => {
     const mapped = await loadWorkflowTakeoffRows(projectId, state.files);
@@ -33,6 +34,74 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   const handleGenerate = async () => {
     setGenerating(true);
     try {
+      // ── Step 1: Ensure project files are parsed & indexed ──
+      const files = state.files || [];
+      if (files.length > 0) {
+        const { count: indexedCount } = await supabase
+          .from("drawing_search_index")
+          .select("id", { count: "exact", head: true })
+          .eq("project_id", projectId);
+
+        if (!indexedCount || indexedCount === 0) {
+          setGenStatus(`Parsing ${files.length} file(s)...`);
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) throw new Error("Not authenticated");
+
+          for (let i = 0; i < files.length; i++) {
+            const f = files[i];
+            setGenStatus(`Parsing ${i + 1}/${files.length}: ${f.file_name}`);
+            try {
+              const { data: urlData } = await supabase.storage
+                .from("blueprints")
+                .createSignedUrl(f.file_path, 3600);
+              if (!urlData?.signedUrl) continue;
+
+              // Ensure document_version row exists
+              const legacyFileId = f.legacy_file_id || f.id;
+              const { data: existingDv } = await supabase
+                .from("document_versions")
+                .select("id")
+                .eq("file_id", legacyFileId)
+                .maybeSingle();
+              let dvId = existingDv?.id;
+              if (!dvId) {
+                const { data: newDv } = await supabase.from("document_versions").insert({
+                  project_id: projectId,
+                  user_id: user.id,
+                  file_id: legacyFileId,
+                  file_name: f.file_name,
+                  file_path: f.file_path,
+                  sha256: `pending_${Date.now()}_${legacyFileId}`,
+                  source_system: "upload",
+                }).select("id").single();
+                dvId = newDv?.id;
+              }
+
+              const { data: extraction } = await supabase.functions.invoke("extract-pdf-text", {
+                body: { pdf_url: urlData.signedUrl, project_id: projectId },
+              });
+              const pages = extraction?.pages || [];
+              const sha256 = extraction?.sha256 || `file_${legacyFileId}`;
+              if (pages.length > 0 && dvId) {
+                await supabase.functions.invoke("populate-search-index", {
+                  body: {
+                    project_id: projectId,
+                    document_version_id: dvId,
+                    pages,
+                    file_name: f.file_name,
+                    sha256,
+                    pipeline_file_id: legacyFileId,
+                  },
+                });
+              }
+            } catch (parseErr) {
+              console.warn(`Parse failed for ${f.file_name}:`, parseErr);
+            }
+          }
+        }
+      }
+
+      setGenStatus("Generating takeoff...");
       const { data: segs, error } = await supabase
         .from("segments")
         .select("id,name")
@@ -45,24 +114,35 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
       }
       let ok = 0;
       let failed = 0;
+      let totalItems = 0;
       for (const seg of segments) {
         try {
-          const { error: invokeErr } = await supabase.functions.invoke("auto-estimate", {
+          const { data: estData, error: invokeErr } = await supabase.functions.invoke("auto-estimate", {
             body: { segment_id: seg.id, project_id: projectId },
           });
           if (invokeErr) throw invokeErr;
+          const created = (estData as any)?.metadata?.items_created
+            ?? (estData as any)?.items_created
+            ?? (Array.isArray((estData as any)?.items) ? (estData as any).items.length : 0);
+          totalItems += created || 0;
           ok++;
         } catch (err) {
           console.warn(`auto-estimate failed for segment ${seg.name}:`, err);
           failed++;
         }
       }
-      if (ok > 0) toast.success(`Generated takeoff for ${ok} segment${ok > 1 ? "s" : ""}${failed ? ` (${failed} failed)` : ""}`);
-      else toast.error("Takeoff generation failed for all segments.");
+      if (ok > 0 && totalItems > 0) {
+        toast.success(`Generated ${totalItems} takeoff item${totalItems > 1 ? "s" : ""} across ${ok} segment${ok > 1 ? "s" : ""}${failed ? ` (${failed} failed)` : ""}`);
+      } else if (ok > 0 && totalItems === 0) {
+        toast.warning("0 items generated — drawings may lack rebar data or parsing did not return text. Check Files tab to re-parse.");
+      } else {
+        toast.error("Takeoff generation failed for all segments.");
+      }
       await reload();
       state.refresh();
     } finally {
       setGenerating(false);
+      setGenStatus("");
     }
   };
 
@@ -118,7 +198,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
               className="inline-flex items-center gap-1.5 h-7 px-2.5 border border-primary text-primary text-[10px] font-mono uppercase tracking-wider hover:bg-primary/10 disabled:opacity-50"
             >
               {generating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
-              {generating ? "Generating…" : rows.length === 0 ? "Generate Takeoff" : "Re-run"}
+              {generating ? (genStatus || "Generating…") : rows.length === 0 ? "Generate Takeoff" : "Re-run"}
             </button>
           </div>}
         />
