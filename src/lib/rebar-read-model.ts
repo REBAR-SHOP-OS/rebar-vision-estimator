@@ -78,7 +78,7 @@ async function listRebarProjectFileIds(
   supabase: SupabaseClient<Database>,
   rebarProjectId: string,
 ): Promise<string[]> {
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .schema("rebar")
     .from("project_files")
     .select("id")
@@ -95,7 +95,7 @@ export async function getCanonicalProjectByLegacyId(
   const rebarProjectId = await getRebarProjectIdByLegacyId(supabase, legacyProjectId);
   if (!rebarProjectId) return null;
 
-  const { data: project, error: projectError } = await supabase
+  const { data: project, error: projectError } = await (supabase as any)
     .schema("rebar")
     .from("projects")
     .select("id, project_name, customer_name, status, created_at, updated_at, project_number, location, tender_due_at, concrete_grade, rebar_grade, bid_notes")
@@ -115,7 +115,7 @@ export async function getCanonicalProjectFiles(
   const rebarProjectId = await getRebarProjectIdByLegacyId(supabase, legacyProjectId);
   if (!rebarProjectId) return [];
 
-  const { data: files, error: filesError } = await supabase
+  const { data: files, error: filesError } = await (supabase as any)
     .schema("rebar")
     .from("project_files")
     .select("id, file_kind, storage_path, original_filename, revision_label, page_count, created_at")
@@ -130,7 +130,7 @@ export async function getCanonicalProjectFiles(
     fromAny(supabase, "rebar_project_file_links")
       .select("legacy_file_id, rebar_project_file_id")
       .in("rebar_project_file_id", rebarFileIds),
-    supabase
+    (supabase as any)
       .schema("rebar")
       .from("drawing_sheets")
       .select("project_file_id, sheet_number, discipline")
@@ -188,13 +188,14 @@ export async function getCanonicalProjectSummary(
 
   const rebarFileIds = await listRebarProjectFileIds(supabase, rebarProjectId);
 
+  const sb: any = supabase;
   const [filesRes, sheetsRes, estimateVersionsRes, takeoffRunsDataRes] = await Promise.all([
-    supabase.schema("rebar").from("project_files").select("id", { count: "exact", head: true }).eq("project_id", rebarProjectId),
+    sb.schema("rebar").from("project_files").select("id", { count: "exact", head: true }).eq("project_id", rebarProjectId),
     rebarFileIds.length > 0
-      ? supabase.schema("rebar").from("drawing_sheets").select("id", { count: "exact", head: true }).in("project_file_id", rebarFileIds)
+      ? sb.schema("rebar").from("drawing_sheets").select("id", { count: "exact", head: true }).in("project_file_id", rebarFileIds)
       : Promise.resolve({ count: 0, error: null } as any),
-    supabase.schema("rebar").from("estimate_versions").select("id", { count: "exact", head: true }).eq("project_id", rebarProjectId),
-    supabase.schema("rebar").from("takeoff_runs").select("id").eq("project_id", rebarProjectId),
+    sb.schema("rebar").from("estimate_versions").select("id", { count: "exact", head: true }).eq("project_id", rebarProjectId),
+    sb.schema("rebar").from("takeoff_runs").select("id").eq("project_id", rebarProjectId),
   ]);
 
   if (filesRes.error) throw filesRes.error;
@@ -204,7 +205,7 @@ export async function getCanonicalProjectSummary(
 
   const takeoffRunIds = (takeoffRunsDataRes.data || []).map((run: any) => run.id);
   const warningsRes = takeoffRunIds.length > 0
-    ? await supabase.schema("rebar").from("takeoff_warnings").select("id", { count: "exact", head: true }).in("takeoff_run_id", takeoffRunIds)
+    ? await sb.schema("rebar").from("takeoff_warnings").select("id", { count: "exact", head: true }).in("takeoff_run_id", takeoffRunIds)
     : ({ count: 0, error: null } as any);
 
   if (warningsRes.error) throw warningsRes.error;
