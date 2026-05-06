@@ -1,117 +1,82 @@
-# Manual-Only Authority Enforcement — Patch Plan
+## Goal
+Make Stage 03 generate segment-specific takeoff rows from the correct drawings, with correct evidence links, and replace the current bad rows so the workspace reflects reality.
 
-Goal: Make `Manual-Standard-Practice-2018` (uploaded into Brain) the sole assumption authority for the takeoff, eliminate hardcoded fallback math, correct source priority (shop > structural > arch context-only), and stamp every estimate row with citation + per-row provenance.
+## What I’ll change
 
-Minimal-diff, file-by-file. No refactors outside what's listed.
+### 1. Fix scope-to-segment typing at approval time
+Update the scope approval flow so approved segments keep a meaningful `segment_type` instead of always being saved as `miscellaneous`.
 
----
+Why this matters:
+- your current project has `SOG Slab-on-Grade`, `Footings`, and `Walls`, but all 3 were stored as `miscellaneous`
+- `auto-estimate` uses `segment.segment_type` for prompt context and validation gates
+- bad segment typing makes the estimator treat unrelated elements too loosely
 
-## 1. Brain ingestion — extract text at upload time
+Files:
+- `src/features/workflow-v2/stages/ScopeStage.tsx`
 
-File: `src/components/chat/BrainKnowledgeDialog.tsx`
+### 2. Restrict `auto-estimate` to the right OCR context for each segment
+Refactor the edge function so it no longer estimates each segment from the full mixed project OCR corpus.
 
-Currently uploaded files become `agent_knowledge` rows with `type: "file"`, `file_path`, no `content`. Auto-estimate only reads `title, content`, so the manual is invisible at runtime.
+Current problem confirmed in this project:
+- the function reads all indexed pages for the project
+- architectural and structural pages are mixed into one prompt
+- the same wall/frost slab/housekeeping-pad lines are being extracted into multiple segments
+- all three segments ended up with mostly the same unresolved rows
 
-Patch (file upload handler around lines 128–160):
-- After successful upload to `blueprints` storage, parse the PDF text in-browser using existing `pdfjs-dist` (already used elsewhere in project — confirm via `rg "pdfjs"`).
-- Concatenate page text (cap ~500KB) into `content`.
-- Insert row with `type: "file"`, `file_path`, AND populated `content`.
-- Add a small badge in the file list when `content` is empty (so legacy uploads can be re-ingested via a "Re-parse" button calling the same extractor).
+Fix:
+- load drawing index rows with `document_version_id` in addition to page text
+- build per-file / per-discipline page groups
+- choose pages relevant to the segment:
+  - `slab` / SOG -> slab-on-grade, WWM, slab detail pages
+  - `footing` -> footing schedule/detail pages
+  - `wall` -> foundation wall / wall detail pages
+- keep architectural sheets as optional context only, never as a quantity source
+- prefer structural/shop pages that actually mention the segment tokens
 
-No schema change needed (`agent_knowledge.content` already exists).
+Files:
+- `supabase/functions/auto-estimate/index.ts`
 
----
+### 3. Fix row evidence and preview linking
+Right now evidence is misleading because the estimator only has `page_number` and guessed `source_sheet`, so it falls back to the structural PDF even when page numbers overlap across files.
 
-## 2. Remove fallback assumptions in auto-estimate
+Fix:
+- use `document_version_id` from `drawing_search_index` to resolve the actual source file for each extracted row
+- attach the correct `source_file_id` and page metadata to `estimate_items`
+- propagate that same source file to generated QA issues so the right sheet opens in the preview panel
 
-File: `supabase/functions/auto-estimate/index.ts`
+Files:
+- `supabase/functions/auto-estimate/index.ts`
+- possibly `src/features/workflow-v2/takeoff-data.ts` if a small loader adjustment is needed
 
-Targeted edits only:
+### 4. Replace stale bad rows on re-run
+The current project already contains bad rows, and the existing de-dup logic will otherwise preserve them.
 
-**a. Delete hardcoded lap fallback (lines ~43, ~173, ~179)**
-- Remove `lapMmFor()` helper.
-- Replace `graph.lapTable.get(sizeKey(size)) ?? lapMmFor(size)` with manual lookup; if the manual provides no lap for that size → push `unresolved_reference: "lap length per Manual §X"` and mark the row `UNRESOLVED_GEOMETRY` (do not compute `barLenMm`).
+Fix:
+- on segment re-run, replace stale auto-generated unresolved/draft rows for that segment before inserting the fresh result set
+- clear related unresolved QA issues for that same segment so QA reflects the new run
 
-**b. Delete the "typical construction practice" prompt fallback (line ~410)**
-- Replace the `else` branch with a hard refusal directive:  
-  `No drawing text available — DO NOT estimate. Return empty items[] with blocker reason "NO_DRAWING_TEXT".`
+This avoids keeping the current polluted dataset after the estimator is corrected.
 
-**c. Add manual-required gate (before the OpenAI call, ~line 250)**
-- Fetch `agent_knowledge` rows where `title ILIKE '%manual%standard%practice%2018%'` AND `content IS NOT NULL AND length(content) > 1000`.
-- If none found → return 200 with `{ items: [], blocked: true, reason: "MANUAL_NOT_LOADED" }`. Caller (TakeoffStage) already shows blockers.
+Files:
+- `supabase/functions/auto-estimate/index.ts`
 
-**d. Inject manual into prompt as the only assumption authority**
-- Add a `=== ASSUMPTION AUTHORITY (Manual-Standard-Practice-2018) ===` section.
-- System rule: "Every assumption (lap, splice, hook, bend, mass, mesh) MUST cite a section/page from this manual. If the manual does not cover it, set the field UNRESOLVED. NEVER invent."
+### 5. Re-validate on this exact project
+After patching, I’ll verify the real outcome by checking that:
+- rows differ meaningfully by segment instead of repeating across all groups
+- `SOG Slab-on-Grade` shows slab/mesh-related items
+- `Footings` shows footing-related items
+- `Walls` shows wall-related items
+- evidence links point to the correct PDF and page
+- QA blockers drop from “everything unresolved” to only genuinely unresolved rows
 
----
+## Technical notes
+- Confirmed from data: all current segments are saved as `miscellaneous`
+- Confirmed from data: all 25 current rows are unresolved and repeated across segments
+- Confirmed from code: `auto-estimate` queries `drawing_search_index` without `document_version_id`, so file provenance is lost during takeoff generation
+- Confirmed from code: unresolved QA issues are inserted with `source_file_id: null`, which weakens traceability
+- Confirmed from DB: this project has two indexed PDFs with overlapping page numbers, so page-only matching is not reliable
 
-## 3. Correct source priority for production rebar
+## Expected result
+After implementation, takeoff should stop cloning the same OCR snippets into every segment and instead produce segment-specific rows tied to the correct source drawing.
 
-File: `supabase/functions/auto-estimate/index.ts` (prompt + file selection ~lines 365–410, 565–590)
-
-- Detect file role from `file_name` / `file_type`: `shop` (SD\*, "shop"), `structural` (S\*, "struct"), `architectural` (A\*).
-- Build `drawingTextContext` in priority order: shop → structural. Mark each block with header `[SHOP DRAWING — PRIMARY]`, `[STRUCTURAL — SECONDARY VERIFICATION]`.
-- Exclude architectural OCR text from the takeoff prompt (keep only as titles in a `[CONTEXT ONLY — DO NOT QUANTIFY FROM]` footer).
-- Update prompt rule: "Quantities come from SHOP DRAWINGS first. Use STRUCTURAL only to fill gaps or verify. NEVER derive quantity from architectural sheets."
-
----
-
-## 4. Per-row provenance + citation fields
-
-File: `supabase/functions/auto-estimate/index.ts` (insert payload ~lines 571–630)
-
-- Stop using one batch `sourceFileId`. Instead require the model to return `source_sheet` (e.g. `SD-06`) and `source_excerpt` per item; map back to the file id via the OCR origin index already built earlier.
-- Extend `assumptions_json` with:
-  ```
-  {
-    authority_document: "Manual-Standard-Practice-2018",
-    authority_section: <string|null>,
-    authority_page: <number|null>,
-    authority_quote: <string|null>,
-    assumption_rule_id: <string|null>
-  }
-  ```
-- If any assumption used but citation missing → mark row `status: "unresolved"` and add to `validation_issues` with `issue_type: "missing_citation"`.
-
-No DB migration required — `assumptions_json` and `source_file_id` columns already exist on `estimate_items`.
-
----
-
-## 5. Block unresolved rows from contaminating "near-final" estimate
-
-File: `src/features/workflow-v2/stages/TakeoffStage.tsx`
-
-Small UI/logic patch:
-- When computing the headline totals (weight / cost) at the top of the stage, exclude rows where `status === "unresolved"` OR `assumptions_json.authority_document` is missing.
-- Show a banner: "N rows blocked: missing manual citation or unresolved geometry. Resolve before quoting."
-- Disable the "Approve / Send to Quote" CTA while blocked count > 0.
-
----
-
-## Files touched (6 edits, no new files, no migrations)
-
-```
-src/components/chat/BrainKnowledgeDialog.tsx     — PDF text extraction on upload + Re-parse button
-supabase/functions/auto-estimate/index.ts        — remove fallbacks, manual gate, source priority, per-row provenance, citations
-src/features/workflow-v2/stages/TakeoffStage.tsx — exclude unresolved from totals, gate Approve CTA
-```
-
-## Out of scope (intentionally)
-
-- No changes to `auto-bar-schedule` (separate path; can mirror later if needed).
-- No DB schema changes.
-- No refactor of OCR pipeline.
-- No removal of `bar mass` / `mesh weight` reference tables (treated as fixed reference data per your spec).
-
-## Validation after patch
-
-1. Upload `Manual-Standard-Practice-2018.pdf` to Brain → confirm `agent_knowledge.content` populated.
-2. Run takeoff with manual present → rows include `authority_section` citations.
-3. Delete manual → re-run → engine returns `MANUAL_NOT_LOADED` blocker, no rows.
-4. Run takeoff with only architectural PDFs → empty items, blocker `NO_SHOP_OR_STRUCTURAL_SOURCE`.
-5. Run takeoff where lap not in manual → row marked `UNRESOLVED`, no fabricated `40*db`.
-
-
----
-Status: implemented 2026-05-06T20:20Z
+Approve this plan and I’ll implement the minimal patch.

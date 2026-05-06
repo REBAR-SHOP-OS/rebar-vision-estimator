@@ -251,7 +251,7 @@ serve(async (req) => {
       supabase.from("project_files").select("id, file_name, file_type").eq("project_id", project_id).limit(20),
       supabase.from("standards_profiles").select("*").eq("user_id", user.id).eq("is_default", true).limit(1),
       supabase.from("estimate_items").select("id, description, bar_size, quantity_count, total_length, total_weight, confidence").eq("segment_id", segment_id).limit(200),
-      supabase.from("drawing_search_index").select("raw_text, page_number, extracted_entities").eq("project_id", project_id).limit(50),
+      supabase.from("drawing_search_index").select("raw_text, page_number, extracted_entities, document_version_id").eq("project_id", project_id).limit(80),
       supabase.from("agent_knowledge").select("title, content, file_name").eq("user_id", user.id).limit(50),
     ]);
 
@@ -260,6 +260,29 @@ serve(async (req) => {
     const files = filesRes.data || [];
     const standard = stdRes.data?.[0];
     const existing = existingRes.data || [];
+
+    // Map document_version_id -> project_files.id for per-row provenance.
+    // We need the document_versions.file_id (legacy file id) to reach project_files.id.
+    const dvIds = Array.from(new Set(((searchIndexRes.data || []) as any[])
+      .map((p) => p.document_version_id).filter(Boolean)));
+    const dvToFileId = new Map<string, string>();
+    if (dvIds.length > 0) {
+      const { data: dvRows } = await supabase
+        .from("document_versions")
+        .select("id, file_id, file_name")
+        .in("id", dvIds as string[]);
+      const fileById = new Map((files as Array<{ id: string; file_name?: string }>)
+        .map((f) => [f.id, f]));
+      for (const dv of (dvRows || [])) {
+        // Prefer matching by file_id (legacy upload id), fall back to file_name.
+        if (dv.file_id && fileById.has(dv.file_id)) {
+          dvToFileId.set(dv.id, dv.file_id);
+        } else {
+          const byName = (files as any[]).find((f: any) => f.file_name === dv.file_name);
+          if (byName) dvToFileId.set(dv.id, byName.id);
+        }
+      }
+    }
 
     // ============================================================
     // MANUAL-ONLY AUTHORITY GATE
@@ -298,8 +321,38 @@ serve(async (req) => {
     //   1. SHOP DRAWINGS  — PRIMARY quantity source
     //   2. STRUCTURAL     — SECONDARY verification / gap-fill
     //   3. ARCHITECTURAL  — CONTEXT ONLY, never quantified from
+    // Pages are also filtered to those relevant to the current segment so each
+    // segment is estimated against its own evidence, not the full project corpus.
     let drawingTextContext = "";
-    const searchPages = searchIndexRes.data || [];
+    const searchPages = (searchIndexRes.data || []) as Array<any>;
+
+    // Segment-aware relevance filter. We classify each OCR page by which
+    // construction bucket it talks about, and only feed pages relevant to
+    // the current segment_type into the prompt. This stops the same wall /
+    // slab / footing callouts from being repeated into every segment.
+    const SEGMENT_TOKENS: Record<string, RegExp> = {
+      footing:        /\b(FOOTING|FTG|PILE\s?CAP|PILE|CAISSON|GRADE\s?BEAM|RAFT|MAT|F-?\d|FROST\s?WALL|FROST)\b/,
+      slab:           /\b(SLAB|SOG|SLAB[-\s]?ON[-\s]?GRADE|TOPPING|DECK|WWM|MESH|6X6-?W)\b/,
+      wall:           /\b(WALL|FOUNDATION\s?WALL|RETAINING\s?WALL|SHEAR\s?WALL|CMU|ICF|FW-?\d)\b/,
+      retaining_wall: /\b(RETAINING|RETAINING\s?WALL)\b/,
+      column:         /\b(COLUMN|\bCOL\b|C-?\d)\b/,
+      pier:           /\b(PIER|P-?\d)\b/,
+      beam:           /\b(BEAM|GIRDER|JOIST|LINTEL|BOND\s?BEAM|GB-?\d|B-?\d{3,})\b/,
+      stair:          /\b(STAIR)\b/,
+      pit:            /\b(PIT|SUMP|ELEVATOR\s?PIT)\b/,
+      curb:           /\b(CURB|STOOP|LEDGE|HOUSEKEEPING\s?PAD|EQUIPMENT\s?PAD)\b/,
+    };
+    const segTypeKey = String(segment?.segment_type || "miscellaneous").toLowerCase();
+    const segNameUpper = String(segment?.name || "").toUpperCase();
+    const segRelevance = SEGMENT_TOKENS[segTypeKey] || null;
+    const isPageRelevant = (text: string): boolean => {
+      if (!segRelevance) return true; // miscellaneous → keep all pages
+      const u = text.toUpperCase();
+      if (segRelevance.test(u)) return true;
+      // also accept pages that mention the literal segment name
+      if (segNameUpper && segNameUpper.length >= 4 && u.includes(segNameUpper)) return true;
+      return false;
+    };
     // Build a per-page → file map so the model can cite source sheet
     const fileByName = new Map<string, { id: string; file_name: string }>();
     for (const f of files as Array<{ id: string; file_name?: string }>) {
@@ -308,6 +361,9 @@ serve(async (req) => {
     const isShopName = (n: string) => /\bSHOP\b|^SD[\s_-]?\d|\bSD\d/i.test(n || "");
     const isStructName = (n: string) => /\bSTRUCT|^S[\s_-]?\d|\bSTR[-_\s]/i.test(n || "");
     const isArchName = (n: string) => /\bARCH|^A[\s_-]?\d/i.test(n || "");
+    // Per-page metadata so we can later resolve provenance back to a file.
+    type RelevantPage = { snip: string; document_version_id: string | null; page_number: number; sheetTag: string };
+    const relevantPages: RelevantPage[] = [];
     if (searchPages.length > 0) {
       const shop: string[] = [];
       const structural: string[] = [];
@@ -316,15 +372,18 @@ serve(async (req) => {
       for (const page of searchPages) {
         const text = (page.raw_text || "").trim();
         if (text.length <= 20) continue;
+        if (!isPageRelevant(text)) continue;
         const tb = (page.extracted_entities as any)?.title_block || {};
         const disc = String(tb.discipline || "").toLowerCase();
         const sheetTag = (page.extracted_entities as any)?.title_block?.sheet_id || `p${page.page_number}`;
         const snip = `[SHEET ${sheetTag} · Page ${page.page_number}] ${text.substring(0, 2000)}`;
+        relevantPages.push({ snip, document_version_id: page.document_version_id || null, page_number: Number(page.page_number) || 0, sheetTag: String(sheetTag) });
         if (disc.includes("shop") || /\bSD\b|SHOP DRAWING/i.test(text.slice(0, 200))) shop.push(snip);
         else if (disc.includes("struct")) structural.push(snip);
         else if (disc.includes("arch")) architectural.push(snip);
         else other.push(snip);
       }
+      console.log(`[auto-estimate] segment="${segment?.name}" type=${segTypeKey} relevant_pages=${relevantPages.length}/${searchPages.length}`);
       const parts: string[] = [];
       if (shop.length > 0) {
         parts.push("=== SHOP DRAWING OCR (PRIMARY — production quantities come from here) ===\n" + shop.join("\n\n"));
@@ -365,6 +424,19 @@ serve(async (req) => {
       } catch (drawErr) {
         console.warn("Could not fetch drawing text:", drawErr);
       }
+    }
+
+    // If the segment-aware filter removed everything, refuse to estimate.
+    // Generating against the full corpus is exactly the bug we are fixing.
+    if (searchPages.length > 0 && relevantPages.length === 0) {
+      console.warn(`[auto-estimate] No drawing pages relevant to segment "${segment?.name}" (${segTypeKey}). Skipping.`);
+      return new Response(JSON.stringify({
+        success: true,
+        items_created: 0,
+        skipped: true,
+        reason: "NO_RELEVANT_DRAWING_PAGES",
+        message: `No OCR pages mention this segment (${segment?.name}). Upload or re-parse the relevant drawing.`,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // Build RSIC knowledge context
@@ -638,12 +710,23 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       shopFile?.id || structFile?.id ||
       upperNames.find((f) => !isArchName(f.name))?.id || null;
 
-    const resolveRowSource = (it: { source_sheet?: string | null }): string | null => {
+    const resolveRowSource = (it: { source_sheet?: string | null; _page_number?: number | null }): string | null => {
+      // 1. Prefer the document_version that produced the OCR page we picked.
+      const pn = Number(it._page_number || 0);
+      if (pn > 0) {
+        const hitPage = relevantPages.find((p) => p.page_number === pn);
+        if (hitPage?.document_version_id) {
+          const fid = dvToFileId.get(hitPage.document_version_id);
+          if (fid) return fid;
+        }
+      }
+      // 2. Fall back to a sheet-tag match against file names.
       const tag = String(it.source_sheet || "").toUpperCase().trim();
       if (tag) {
         const hit = upperNames.find((f) => f.name.includes(tag));
         if (hit && !isArchName(hit.name)) return hit.id;
       }
+      // 3. Default — never pick an architectural file.
       return defaultSourceId;
     };
 
@@ -683,6 +766,24 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
 
     // De-dup gate: collapse rows on (normalized description, bar_size) keeping highest-confidence,
     // and skip rows that already exist for this segment.
+    // Replace stale auto-generated rows for this segment so re-runs reflect
+    // the new estimator output instead of accumulating duplicates.
+    const { error: cleanupErr } = await supabase
+      .from("estimate_items")
+      .delete()
+      .eq("segment_id", segment_id)
+      .in("status", ["unresolved", "draft"]);
+    if (cleanupErr) console.warn("[auto-estimate] cleanup of stale rows failed:", cleanupErr.message);
+    // Also clear unresolved-geometry validation issues for this segment.
+    const { error: viCleanupErr } = await supabase
+      .from("validation_issues")
+      .delete()
+      .eq("segment_id", segment_id)
+      .eq("issue_type", "unresolved_geometry");
+    if (viCleanupErr) console.warn("[auto-estimate] cleanup of stale validation issues failed:", viCleanupErr.message);
+    // Refresh existingKeys so we don't accidentally still de-dup against the
+    // rows we just deleted.
+    existingKeys.clear();
     const dedupMap = new Map<string, typeof rows[number]>();
     for (const r of rows) {
       const k = normKey(r.description, r.bar_size);
@@ -713,7 +814,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         user_id: user.id,
         project_id,
         segment_id,
-        source_file_id: null,
+        source_file_id: (x.r as any).source_file_id || null,
         issue_type: "unresolved_geometry",
         severity: "error",
         title: `Unresolved geometry: ${x.r.description.slice(0, 80)}`,
