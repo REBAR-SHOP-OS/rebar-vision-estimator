@@ -18,6 +18,12 @@ export interface WorkflowTakeoffRow {
   weight: number;
   status: "ready" | "review" | "blocked";
   source: string;
+  // Newly added — minimal fields for segment grouping, blueprint preview & inline OCR edit
+  segment_id: string | null;
+  segment_name: string;
+  source_file_id: string | null;
+  raw_id: string;        // raw DB id (without legacy:/canonical: prefix)
+  raw_kind: "legacy" | "canonical";
 }
 
 export interface WorkflowQaIssue {
@@ -64,7 +70,7 @@ async function getCanonicalTakeoffRuns(legacyProjectId: string) {
 async function loadLegacyTakeoffRows(projectId: string, files: WorkflowFileRef[]): Promise<WorkflowTakeoffRow[]> {
   const { data, error } = await supabase
     .from("estimate_items")
-    .select("id, bar_size, description, quantity_count, total_length, total_weight, status, confidence, source_file_id")
+    .select("id, bar_size, description, quantity_count, total_length, total_weight, status, confidence, source_file_id, segment_id")
     .eq("project_id", projectId)
     .limit(500);
 
@@ -73,11 +79,37 @@ async function loadLegacyTakeoffRows(projectId: string, files: WorkflowFileRef[]
     return [];
   }
 
+  // Resolve segment names in one shot
+  const segIds = Array.from(new Set((data || []).map((r) => r.segment_id).filter(Boolean) as string[]));
+  const segMap = new Map<string, string>();
+  if (segIds.length) {
+    const { data: segs } = await supabase.from("segments").select("id,name").in("id", segIds);
+    (segs || []).forEach((s) => segMap.set(s.id, s.name));
+  }
+
+  // Pull real bar marks from bar_items where available
+  const itemIds = (data || []).map((r) => r.id);
+  const markMap = new Map<string, string>();
+  if (itemIds.length) {
+    const { data: bars } = await supabase
+      .from("bar_items")
+      .select("estimate_item_id, mark")
+      .in("estimate_item_id", itemIds);
+    (bars || []).forEach((b: any) => {
+      if (b.estimate_item_id && b.mark && !markMap.has(b.estimate_item_id)) {
+        markMap.set(b.estimate_item_id, String(b.mark));
+      }
+    });
+  }
+
   return (data || []).map((row, index: number) => {
     const file = files.find((candidate) => candidate.legacy_file_id === row.source_file_id || candidate.id === row.source_file_id);
+    const realMark = markMap.get(row.id);
     return {
       id: `legacy:${row.id}`,
-      mark: `M${String(index + 1).padStart(3, "0")}`,
+      raw_id: row.id,
+      raw_kind: "legacy" as const,
+      mark: realMark || `M${String(index + 1).padStart(3, "0")}`,
       size: row.bar_size || "-",
       shape: (row.description || "Straight").slice(0, 40),
       count: row.quantity_count || 0,
@@ -85,6 +117,9 @@ async function loadLegacyTakeoffRows(projectId: string, files: WorkflowFileRef[]
       weight: Number(row.total_weight || 0),
       status: (row.status === "approved" ? "ready" : Number(row.confidence) < 0.6 ? "blocked" : "review") as WorkflowTakeoffRow["status"],
       source: file?.file_name || "Legacy estimate",
+      segment_id: row.segment_id || null,
+      segment_name: row.segment_id ? (segMap.get(row.segment_id) || "Unassigned") : "Unassigned",
+      source_file_id: file?.id || row.source_file_id || null,
     };
   });
 }
@@ -114,6 +149,8 @@ async function loadCanonicalTakeoffRows(projectId: string): Promise<WorkflowTake
     const confidence = Number(row.confidence || 0);
     return {
       id: `canonical:${row.id}`,
+      raw_id: row.id,
+      raw_kind: "canonical" as const,
       mark: `T${String(index + 1).padStart(3, "0")}`,
       size: row.bar_size || "-",
       shape: String(row.source_text || `${row.element_type || "Element"} / ${row.shape_type || "straight"}`).slice(0, 40),
@@ -122,6 +159,9 @@ async function loadCanonicalTakeoffRows(projectId: string): Promise<WorkflowTake
       weight: Number(row.total_weight_kg || 0),
       status: (run?.status === "ready_for_review" ? "ready" : confidence < 0.6 ? "blocked" : "review") as WorkflowTakeoffRow["status"],
       source: String(payload.source_file_name || row.drawing_reference || run?.source_revision_label || "Canonical takeoff"),
+      segment_id: null,
+      segment_name: String(row.element_type || "Canonical"),
+      source_file_id: null,
     };
   });
 }
