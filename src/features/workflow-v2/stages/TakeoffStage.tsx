@@ -74,6 +74,24 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
     return () => { cancelled = true; };
   }, [projectId, state.files]);
 
+  useEffect(() => {
+    const focus = state.local.takeoffFocus as {
+      raw_id?: string;
+      raw_kind?: "legacy" | "canonical";
+      source_file_id?: string | null;
+      page_number?: number | null;
+    } | undefined;
+    if (!focus) return;
+
+    const target = rows.find((row) => {
+      if (focus.raw_id && focus.raw_kind) return row.raw_id === focus.raw_id && row.raw_kind === focus.raw_kind;
+      return !!focus.source_file_id && row.source_file_id === focus.source_file_id;
+    });
+
+    if (target && target.id !== selectedId) setSelectedId(target.id);
+    if (focus.page_number && focus.page_number > 0) setPdfPage(focus.page_number);
+  }, [rows, selectedId, state.local.takeoffFocus]);
+
   // Resolve signed URL of the source file for the highlighted/selected row
   const focusRow = useMemo(
     () => rows.find((r) => r.id === (hoverId || selectedId)),
@@ -92,7 +110,12 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
     return () => { cancelled = true; };
   }, [focusRow?.source_file_id, state.files]);
 
-  useEffect(() => { setPdfPage(1); setPdfPageCount(0); setPdfImg(null); }, [signedUrl]);
+  useEffect(() => {
+    const focus = state.local.takeoffFocus as { page_number?: number | null } | undefined;
+    setPdfPage(focus?.page_number && focus.page_number > 0 ? focus.page_number : 1);
+    setPdfPageCount(0);
+    setPdfImg(null);
+  }, [signedUrl, state.local.takeoffFocus]);
 
   const handleGenerate = async () => {
     setGenerating(true);
