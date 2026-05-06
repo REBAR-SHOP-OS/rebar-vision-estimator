@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { Upload, FileText, AlertTriangle, CheckCircle2, ImageIcon } from "lucide-react";
+import { Upload, FileText, AlertTriangle, CheckCircle2, ImageIcon, Loader2 } from "lucide-react";
 import { StageHeader, Pill, type StageProps, EmptyState } from "./_shared";
+import PdfRenderer from "@/components/chat/PdfRenderer";
 import {
   createProjectFileWithCanonicalBridge,
   detectDiscipline,
@@ -25,6 +26,14 @@ interface Row {
 function inferRevision(name: string): string {
   const m = name.match(/[_\s-](rev|r|v)[_\-\s]?([0-9]+)/i);
   return m ? `R${m[2]}` : "R0";
+}
+
+function isPdfFile(file: Row) {
+  return /\.pdf$/i.test(file.file_name) || /\.pdf($|\?)/i.test(file.file_path);
+}
+
+function isImageFile(file: Row) {
+  return /\.(png|jpe?g|webp|gif|bmp)$/i.test(file.file_name) || /\.(png|jpe?g|webp|gif|bmp)($|\?)/i.test(file.file_path);
 }
 
 export default function FilesStage({ projectId, state }: StageProps) {
@@ -197,9 +206,7 @@ export default function FilesStage({ projectId, state }: StageProps) {
             <EmptyState title="No drawing selected" />
           ) : (
             <>
-              <div className="aspect-video border border-border bg-background grid place-items-center text-muted-foreground">
-                <ImageIcon className="w-8 h-8 opacity-40" />
-              </div>
+              <DrawingPreview file={sel} />
               <div>
                 <div className="ip-kicker mb-2">Metadata</div>
                 <div className="grid grid-cols-2 gap-2 text-[12px]">
@@ -237,6 +244,97 @@ export default function FilesStage({ projectId, state }: StageProps) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function DrawingPreview({ file }: { file: Row }) {
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [pageCount, setPageCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const canPreview = isPdfFile(file) || isImageFile(file);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSignedUrl(null);
+    setPreviewUrl(null);
+    setPageCount(0);
+    setError(null);
+    setLoading(true);
+
+    if (!canPreview) {
+      setLoading(false);
+      return () => { cancelled = true; };
+    }
+
+    supabase.storage
+      .from("blueprints")
+      .createSignedUrl(file.file_path, 3600)
+      .then(({ data, error: urlError }) => {
+        if (cancelled) return;
+        if (urlError || !data?.signedUrl) {
+          console.warn("Drawing preview signed URL failed:", urlError);
+          setError("Preview unavailable");
+          setLoading(false);
+          return;
+        }
+
+        setSignedUrl(data.signedUrl);
+        if (isImageFile(file)) {
+          setPreviewUrl(data.signedUrl);
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [file.id, file.file_path, canPreview]);
+
+  const isPdf = isPdfFile(file);
+
+  return (
+    <div className="relative min-h-[310px] overflow-hidden border border-border bg-background">
+      {signedUrl && isPdf && (
+        <PdfRenderer
+          url={signedUrl}
+          currentPage={1}
+          scale={1.35}
+          onPageCount={setPageCount}
+          onPageRendered={(imageDataUrl) => {
+            setPreviewUrl(imageDataUrl);
+            setLoading(false);
+          }}
+        />
+      )}
+
+      {previewUrl ? (
+        <img
+          src={previewUrl}
+          alt={file.file_name}
+          className="h-full min-h-[310px] w-full object-contain"
+          onLoad={() => setLoading(false)}
+          onError={() => {
+            setError("Preview unavailable");
+            setLoading(false);
+          }}
+        />
+      ) : (
+        <div className="grid min-h-[310px] place-items-center text-muted-foreground">
+          {loading ? <Loader2 className="h-7 w-7 animate-spin opacity-70" /> : <ImageIcon className="h-8 w-8 opacity-40" />}
+        </div>
+      )}
+
+      {error && (
+        <div className="absolute inset-x-3 bottom-3 border border-border bg-card/95 px-3 py-2 text-[11px] text-muted-foreground">
+          {error}
+        </div>
+      )}
+
+      {pageCount > 1 && (
+        <div className="absolute right-2 top-2 border border-border bg-card/95 px-2 py-1 text-[10px] text-muted-foreground">
+          1 / {pageCount}
+        </div>
+      )}
     </div>
   );
 }
