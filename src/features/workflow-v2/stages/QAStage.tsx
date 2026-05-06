@@ -11,6 +11,30 @@ import PdfRenderer from "@/components/chat/PdfRenderer";
 
 type TabKey = "change" | "impact" | "evidence" | "action";
 
+function tightBox(
+  items: Array<{ x: number; y: number; w: number; h: number }>,
+  imgW: number,
+  imgH: number,
+): [number, number, number, number] | null {
+  if (!items || items.length === 0) return null;
+  const x1 = Math.min(...items.map((m) => m.x));
+  const y1 = Math.min(...items.map((m) => m.y));
+  const x2 = Math.max(...items.map((m) => m.x + m.w));
+  const y2 = Math.max(...items.map((m) => m.y + m.h));
+  const h = Math.max(1, y2 - y1);
+  // Tight padding: ~half a line vertically, small horizontal breathing room.
+  const padX = Math.max(8, h * 0.6);
+  const padY = Math.max(6, h * 0.5);
+  const maxW = imgW || Number.POSITIVE_INFINITY;
+  const maxH = imgH || Number.POSITIVE_INFINITY;
+  return [
+    Math.max(0, x1 - padX),
+    Math.max(0, y1 - padY),
+    Math.min(maxW, x2 + padX),
+    Math.min(maxH, y2 + padY),
+  ];
+}
+
 export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [issues, setIssues] = useState<WorkflowQaIssue[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
