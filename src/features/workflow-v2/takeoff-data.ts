@@ -381,6 +381,26 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
     }
   }
 
+  // Ensure every issue has a location_label even without linked items
+  for (const iss of legacyIssues) {
+    if (iss.location_label) continue;
+    const ref = Array.isArray(iss.source_refs) ? iss.source_refs[0] : null;
+    const loc = extractLocationFromRef(ref, {}, { sheet_id: iss.sheet_id });
+    iss.location = loc;
+    iss.location_label = buildLocationLabel(loc, iss.sheet_id);
+    if (iss.location_label && !String(iss.title || "").startsWith(iss.location_label)) {
+      iss.title = `${iss.location_label}: ${iss.title || iss.issue_type || "review item"}`;
+    }
+  }
+
+  // Canonical issues: add location_label from sheet_id if available
+  for (const iss of canonicalIssues) {
+    iss.location_label = iss.sheet_id ? `Item ${String(iss.sheet_id).slice(0, 8)}` : null;
+    if (iss.location_label && !String(iss.title || "").startsWith(iss.location_label)) {
+      iss.title = `${iss.location_label}: ${iss.title || iss.issue_type || "review item"}`;
+    }
+  }
+
   return [...legacyIssues, ...canonicalIssues];
 }
 
