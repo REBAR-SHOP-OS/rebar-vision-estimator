@@ -159,6 +159,24 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     setLastTrigger(reason);
   };
 
+  const updatePageBox = () => {
+    const host = canvasRef.current;
+    if (!host) return;
+    const img = host.querySelector('img[data-qa-preview="true"]') as HTMLImageElement | null;
+    if (!img || !img.naturalWidth || !img.naturalHeight) return;
+    const parent = img.parentElement?.getBoundingClientRect();
+    if (!parent) return;
+    const scale = Math.min(parent.width / img.naturalWidth, parent.height / img.naturalHeight);
+    const width = img.naturalWidth * scale;
+    const height = img.naturalHeight * scale;
+    setPageBox({
+      left: (parent.width - width) / 2,
+      top: (parent.height - height) / 2,
+      width,
+      height,
+    });
+  };
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -249,6 +267,16 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   useEffect(() => { bump(`zoom mode → ${zoomMode}`); /* eslint-disable-next-line */ }, [zoomMode]);
   useEffect(() => { bump(`zoom level → ${zoomLevel.toFixed(2)}x`); /* eslint-disable-next-line */ }, [zoomLevel]);
   useEffect(() => { if (pdfImg) bump(`pdf rendered p${pdfPage}`); /* eslint-disable-next-line */ }, [pdfImg]);
+
+  useEffect(() => {
+    if (renderStatus !== "ready") return;
+    updatePageBox();
+    const host = canvasRef.current;
+    if (!host || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => updatePageBox());
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, [renderStatus, imgSize?.w, imgSize?.h, zoom, viewMode, pdfImg, previewUrl]);
 
   // Group issues by source sheet for the left navigator
   const sheets = useMemo(() => {
@@ -611,6 +639,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                       <img
                         src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")}
                         alt={previewName}
+                        data-qa-preview="true"
                         onLoad={(e) => {
                           const t = e.currentTarget;
                           const naturalW = t.naturalWidth;
@@ -622,17 +651,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                             setRenderStatus("ready");
                             setRenderError(null);
                           }
-                          const parent = t.parentElement?.getBoundingClientRect();
-                          if (!parent) return;
-                          const scale = Math.min(parent.width / naturalW, parent.height / naturalH);
-                          const width = naturalW * scale;
-                          const height = naturalH * scale;
-                          setPageBox({
-                            left: (parent.width - width) / 2,
-                            top: (parent.height - height) / 2,
-                            width,
-                            height,
-                          });
+                          updatePageBox();
                         }}
                         className="absolute inset-0 w-full h-full object-contain"
                         style={viewMode === "diff" ? { mixBlendMode: "difference", filter: "invert(1) hue-rotate(180deg)" } : undefined}
@@ -792,15 +811,15 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                           <div className="border-2 border-primary bg-primary/5 px-2 py-1.5 text-[10px] uppercase tracking-[0.1em] text-primary font-bold flex items-center gap-1.5"><span>📍</span><span className="truncate">{sel.location_label}</span></div>
                         )}
                         <div className="text-[9px] uppercase tracking-[0.12em] flex items-center gap-1.5">
-                          {exactBbox ? (
+                          {anchorStatus === "exact" ? (
                             <span className="px-1.5 py-0.5 bg-primary/10 text-primary border border-primary/30">Anchor: exact</span>
-                          ) : approxBbox ? (
-                            <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 border border-amber-500/30" title={approxReason}>Anchor: approximate</span>
+                          ) : anchorStatus === "approximate" ? (
+                            <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 border border-amber-500/30" title={anchorReason}>Anchor: approximate</span>
                           ) : (
-                            <span className="px-1.5 py-0.5 bg-muted text-muted-foreground border border-border" title={approxReason}>Anchor: unavailable</span>
+                            <span className="px-1.5 py-0.5 bg-muted text-muted-foreground border border-border" title={anchorReason}>Anchor: unavailable</span>
                           )}
-                          {!exactBbox && approxReason && (
-                            <span className="text-muted-foreground normal-case tracking-normal text-[10px] italic truncate">{approxReason}</span>
+                          {anchorStatus !== "exact" && anchorReason && (
+                            <span className="text-muted-foreground normal-case tracking-normal text-[10px] italic truncate">{anchorReason}</span>
                           )}
                         </div>
                         <div className="text-[11px] text-muted-foreground leading-relaxed">{sel.description || "No description provided."}</div>
