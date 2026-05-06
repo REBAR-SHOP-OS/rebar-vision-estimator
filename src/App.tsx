@@ -14,6 +14,7 @@ import BlueprintViewerPage from "./pages/BlueprintViewerPage";
 import NotFound from "./pages/NotFound";
 import AppShell from "./components/layout/AppShell";
 import ProjectWorkspace from "./pages/ProjectWorkspace";
+import LegacyProjectWorkspace from "./pages/legacy/LegacyProjectWorkspace";
 import SegmentDetail from "./pages/SegmentDetail";
 import StandardsPage from "./pages/StandardsPage";
 import OrdersPage from "./pages/OrdersPage";
@@ -62,12 +63,16 @@ const App = () => (
                 <Route path="/app" element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
                   <Route index element={<Dashboard />} />
                   <Route path="project/:id" element={<ProjectWorkspace />} />
-                  <Route path="project/:id/files" element={<ProjectWorkspace />} />
-                  <Route path="project/:id/segments" element={<ProjectWorkspace />} />
                   <Route path="project/:id/segments/:segId" element={<SegmentDetail />} />
-                  <Route path="project/:id/qa" element={<ProjectWorkspace />} />
-                  <Route path="project/:id/outputs" element={<ProjectWorkspace />} />
-                  <Route path="project/:id/settings" element={<ProjectWorkspace />} />
+                  {/* Legacy archive — kept reachable but not the primary path */}
+                  <Route path="legacy/project/:id" element={<LegacyProjectWorkspace />} />
+                  <Route path="legacy/project/:id/files" element={<LegacyProjectWorkspace />} />
+                  <Route path="legacy/project/:id/segments" element={<LegacyProjectWorkspace />} />
+                  <Route path="legacy/project/:id/qa" element={<LegacyProjectWorkspace />} />
+                  <Route path="legacy/project/:id/estimate" element={<LegacyProjectWorkspace />} />
+                  <Route path="legacy/project/:id/shop-drawings" element={<LegacyProjectWorkspace />} />
+                  <Route path="legacy/project/:id/outputs" element={<LegacyProjectWorkspace />} />
+                  <Route path="legacy/project/:id/settings" element={<LegacyProjectWorkspace />} />
                   <Route path="standards" element={<StandardsPage />} />
                   <Route path="orders" element={<OrdersPage />} />
                   <Route path="orders/:orderId" element={<OrderDetail />} />

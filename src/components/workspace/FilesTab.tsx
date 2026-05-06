@@ -8,6 +8,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
+import {
+  createProjectFileWithCanonicalBridge,
+  detectDiscipline,
+  ensureCurrentProjectRebarBridge,
+  ensureRebarProjectFileBridge,
+  inferRebarFileKind,
+} from "@/lib/rebar-intake";
 
 interface FileRow {
   id: string;
@@ -50,21 +57,8 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
     return "unknown";
   };
 
-  const detectDiscipline = (name: string): string | null => {
-    const n = name.toUpperCase();
-    if (/\bS[-_]?\d|STRUCTURAL|STR[-_]/i.test(n)) return "Structural";
-    if (/\bA[-_]?\d|ARCHITECTURAL|ARCH[-_]/i.test(n)) return "Architectural";
-    if (/\bC[-_]?\d|CIVIL/i.test(n)) return "Civil";
-    if (/\bM[-_]?\d|MECHANICAL/i.test(n)) return "Mechanical";
-    if (/\bE[-_]?\d|ELECTRICAL/i.test(n)) return "Electrical";
-    if (/\bP[-_]?\d|PLUMBING/i.test(n)) return "Plumbing";
-    if (/\bL[-_]?\d|LANDSCAPE/i.test(n)) return "Landscape";
-    return null;
-  };
-
   const parseFile = async (fileId: string, fileName: string, filePath: string, onProgress?: (msg: string) => void) => {
     try {
-      // Ensure document_version exists
       const { data: existingDv } = await supabase
         .from("document_versions")
         .select("id")
@@ -93,7 +87,6 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
         .createSignedUrl(filePath, 3600);
       if (!urlData?.signedUrl) return false;
 
-      // Try server-side extraction first
       const { data: extraction, error: extractErr } = await supabase.functions.invoke("extract-pdf-text", {
         body: { pdf_url: urlData.signedUrl, project_id: projectId },
       });
@@ -104,7 +97,6 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       let totalPages = extraction?.total_pages || 0;
       const sha256 = extraction?.sha256 || `file_${fileId}`;
 
-      // If extraction failed or returned no text (large/scanned file), use client-side OCR
       if (extractErr || !hasText) {
         console.log(`[FilesTab] Server extraction empty for ${fileName}, falling back to client-side OCR`);
         onProgress?.(`Rendering pages…`);
@@ -124,7 +116,6 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
           totalPages = pageImages.length;
           pages = [];
 
-          // OCR in batches of 4
           for (let i = 0; i < pageImages.length; i += 4) {
             const batch = pageImages.slice(i, i + 4);
             const batchResults = await Promise.allSettled(
@@ -134,7 +125,6 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
                   body: { image_url: img.signedUrl },
                 });
                 if (ocrErr || !ocrData?.ocr_results) return { pageNumber: img.pageNumber, raw_text: "" };
-                // Merge text from all OCR passes
                 const fullText = ocrData.ocr_results
                   .map((r: any) => r.fullText || "")
                   .filter((t: string) => t.length > 0)
@@ -165,18 +155,33 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
         body: {
           project_id: projectId,
           document_version_id: dvId,
-          pages: pages,
+          pages,
           file_name: fileName,
-          sha256: sha256,
+          sha256,
+          pipeline_file_id: fileId,
         },
       });
 
       if (dvId) {
         await supabase.from("document_versions").update({
-          sha256: sha256,
+          sha256,
           page_count: totalPages || pages.length,
           is_scanned: !hasText,
         }).eq("id", dvId);
+      }
+
+      try {
+        await ensureRebarProjectFileBridge(supabase, {
+          legacyFileId: fileId,
+          legacyProjectId: projectId,
+          storagePath: filePath,
+          originalFilename: fileName,
+          fileKind: inferRebarFileKind(fileName, null),
+          checksumSha256: sha256,
+          pageCount: totalPages || pages.length,
+        });
+      } catch (bridgeErr) {
+        console.warn("Canonical file bridge sync failed after parsing:", bridgeErr);
       }
 
       if (!indexErr) {
@@ -192,7 +197,8 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       }
 
       return !indexErr;
-    } catch {
+    } catch (error) {
+      console.warn(`Parse pipeline failed for ${fileName}:`, error);
       return false;
     }
   };
@@ -203,47 +209,78 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
     const files = Array.from(fileList);
     setUploading(true);
 
-    const uploadedFiles: { id: string; name: string; path: string }[] = [];
+    try {
+      await ensureCurrentProjectRebarBridge(supabase, projectId);
+    } catch (bridgeErr) {
+      console.warn("Canonical project bridge check failed before upload:", bridgeErr);
+      toast.error("Upload blocked until the canonical rebar project bridge is healthy.");
+      setUploading(false);
+      setUploadProgress("");
+      e.target.value = "";
+      return;
+    }
+
+    const uploadedFiles: { id: string; name: string; path: string; type: string | null }[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       setUploadProgress(`Uploading ${i + 1}/${files.length}`);
       const path = `${user.id}/${projectId}/${Date.now()}_${file.name}`;
       const { error: storageErr } = await supabase.storage.from("blueprints").upload(path, file);
-      if (storageErr) { toast.error(`Upload failed: ${file.name}`); continue; }
-      const { data, error: dbErr } = await supabase.from("project_files").insert({
-        project_id: projectId,
-        user_id: user.id,
-        file_name: file.name,
-        file_path: path,
-        file_type: file.type || null,
-        file_size: file.size,
-      }).select("id").single();
-      if (dbErr) { toast.error(`Failed to save: ${file.name}`); continue; }
+      if (storageErr) {
+        toast.error(`Upload failed: ${file.name}`);
+        continue;
+      }
 
-      // Create document_version with discipline tag
       const discipline = detectDiscipline(file.name);
+      let checksumSha256: string | null = null;
       try {
-        const hash = await computeSHA256(file);
+        checksumSha256 = await computeSHA256(file);
+      } catch (hashErr) {
+        console.warn(`Checksum generation failed for ${file.name}:`, hashErr);
+      }
+
+      let legacyFileId: string;
+      try {
+        const fileRow = await createProjectFileWithCanonicalBridge(supabase, {
+          projectId,
+          userId: user.id,
+          fileName: file.name,
+          filePath: path,
+          fileType: file.type || null,
+          fileSize: file.size,
+          fileKind: inferRebarFileKind(file.name, file.type || null),
+          checksumSha256,
+        });
+        legacyFileId = fileRow.id;
+      } catch (bridgeErr) {
+        console.warn(`Canonical file intake failed for ${file.name}:`, bridgeErr);
+        toast.error(`Canonical file intake failed: ${file.name}`);
+        continue;
+      }
+
+      try {
         await supabase.from("document_versions").insert({
           project_id: projectId,
           user_id: user.id,
-          file_id: data.id,
+          file_id: legacyFileId,
           file_name: file.name,
           file_path: path,
-          sha256: hash,
+          sha256: checksumSha256 || `pending_${Date.now()}_${legacyFileId}`,
           source_system: "upload",
           pdf_metadata: discipline ? { discipline } : {},
         });
-      } catch (_) { /* hash/version insert is best-effort */ }
+      } catch (docVersionErr) {
+        console.warn(`document_versions insert failed for ${file.name}:`, docVersionErr);
+      }
 
-      await logAuditEvent(user.id, "uploaded", "project_file", data.id, projectId);
+      await logAuditEvent(user.id, "uploaded", "project_file", legacyFileId, projectId);
       try {
         await (supabase as any).from("document_registry").upsert(
           {
             project_id: projectId,
             user_id: user.id,
-            file_id: data.id,
+            file_id: legacyFileId,
             classification: classifyUploadedFile(file.name, file.type),
             validation_role: /answer|reference|correct|benchmark/i.test(file.name) ? "reference_answer" : "input",
             parse_status: "pending",
@@ -255,11 +292,15 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       } catch {
         /* document_registry may not exist until migration applied */
       }
-      uploadedFiles.push({ id: data.id, name: file.name, path });
+      uploadedFiles.push({ id: legacyFileId, name: file.name, path, type: file.type || null });
     }
-    toast.success(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
 
-    // Auto-parse each uploaded file
+    if (uploadedFiles.length > 0) {
+      toast.success(`${uploadedFiles.length} file${uploadedFiles.length > 1 ? "s" : ""} uploaded`);
+    } else {
+      toast.error("No files were uploaded successfully");
+    }
+
     let parsedCount = 0;
     for (let i = 0; i < uploadedFiles.length; i++) {
       setUploadProgress(`Parsing ${i + 1}/${uploadedFiles.length}`);
@@ -289,7 +330,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
   const handleParseAll = async () => {
     if (!user) return;
     setParsing(true);
-    const pendingFiles = files.filter(f => f.parse_status === "pending");
+    const pendingFiles = files.filter((f) => f.parse_status === "pending");
     let successCount = 0;
 
     try {
@@ -305,7 +346,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       if (successCount > 0) {
         toast.success(`Parsed & indexed ${successCount} of ${pendingFiles.length} file(s)`);
       } else if (pendingFiles.length > 0) {
-        toast.warning("Files processed but no text extracted (scanned PDFs). Use the chat to analyze with AI Vision.");
+        toast.warning("Files processed but no text extracted (scanned PDFs) or canonical sync failed.");
       }
       loadFiles();
     } catch (err) {
@@ -393,7 +434,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
         <h3 className="text-sm font-semibold text-foreground">Files & Revisions</h3>
         <div className="flex items-center gap-2">
           <Badge variant="secondary" className="text-[10px]">{files.length} file{files.length !== 1 ? "s" : ""}</Badge>
-          {files.some(f => f.parse_status === "pending") && (
+          {files.some((f) => f.parse_status === "pending") && (
             <Button size="sm" variant="default" className="gap-1.5 h-7 text-xs" disabled={parsing} onClick={handleParseAll}>
               {parsing ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
               {parsing ? "Parsing…" : "Parse All"}

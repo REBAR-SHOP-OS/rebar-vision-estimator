@@ -2,7 +2,7 @@
  * Loads the app logo as a base64 data URI for embedding in exports.
  * Also provides an ArrayBuffer version for ExcelJS image embedding.
  */
-import logoUrl from "@/assets/logo.png";
+import logoUrl from "@/assets/logo-rebar-shop.png";
 
 let cachedDataUri: string | null = null;
 let cachedBuffer: ArrayBuffer | null = null;

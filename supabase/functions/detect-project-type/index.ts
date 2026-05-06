@@ -51,7 +51,7 @@ serve(async (req) => {
     });
 
     // Limit: 3 images for AI vision, 2 for OCR to stay within CPU budget
-    const contentParts: any[] = imageUrls.slice(0, 3).map((url: string) => ({
+    const contentParts: ImageUrlPart[] = imageUrls.slice(0, 3).map((url: string) => ({
       type: "image_url", image_url: { url },
     }));
 
@@ -66,7 +66,9 @@ serve(async (req) => {
           if (imgBuf.byteLength > 2 * 1024 * 1024) continue; // skip large images
           const text = await quickOCR(accessToken, encodeBase64(imgBuf));
           if (text) ocrText += `\n--- OCR from ${url.split('/').pop()?.split('?')[0]} ---\n${text}\n`;
-        } catch { /* skip unreadable image */ }
+        } catch (err) {
+          console.warn("OCR failed for image:", url, err);
+        }
       }
     }
 
@@ -265,7 +267,7 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
       }
     }];
 
-    const userContent: any[] = [{ type: "text", text: detectionPrompt }, ...contentParts];
+    const userContent: UserContentPart[] = [{ type: "text", text: detectionPrompt }, ...contentParts];
 
     const aiStart = performance.now();
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {

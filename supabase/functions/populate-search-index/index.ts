@@ -11,10 +11,10 @@ const COMMON_WORDS = new Set([
 /** Expanded bar mark patterns */
 function extractBarMarks(text: string): string[] {
   const patterns = [
-    /\b([A-Z]{1,2}\d{1,3})\b/g,       // A1, AB12, B200
-    /\bBM[- ]?(\d{1,5})\b/gi,          // BM-001, BM 12, BM001
-    /\b(\d{1,5}[A-Z])\b/g,             // 12A, 200B
-    /\b(#\d{1,3})\b/g,                 // #4, #10
+    /\b([A-Z]{1,2}\d{1,3})\b/g,
+    /\bBM[- ]?(\d{1,5})\b/gi,
+    /\b(\d{1,5}[A-Z])\b/g,
+    /\b(#\d{1,3})\b/g,
   ];
   const marks = new Set<string>();
   for (const pattern of patterns) {
@@ -29,7 +29,6 @@ function extractBarMarks(text: string): string[] {
   return Array.from(marks);
 }
 
-/** Compute data quality flags */
 function computeQualityFlags(page: {
   raw_text?: string;
   title_block?: Record<string, string>;
@@ -46,7 +45,6 @@ function computeQualityFlags(page: {
   return flags;
 }
 
-/** Compute confidence score (0.0 – 1.0) */
 function computeConfidence(flags: string[]): number {
   let score = 1.0;
   const penalties: Record<string, number> = {
@@ -62,6 +60,127 @@ function computeConfidence(flags: string[]): number {
   return Math.max(0, Math.round(score * 100) / 100);
 }
 
+function mapSheetCategory(drawingType: string | null, rawText: string): string {
+  const haystack = `${drawingType || ""} ${rawText.slice(0, 400)}`.toLowerCase();
+  if (haystack.includes("foundation")) return "foundation_plan";
+  if (haystack.includes("slab")) return "slab_plan";
+  if (haystack.includes("wall section") || haystack.includes("wall sec")) return "wall_section";
+  if (haystack.includes("grade beam")) return "grade_beam_detail";
+  if (haystack.includes("schedule")) return "schedule";
+  if (haystack.includes("notes") || haystack.includes("general note")) return "notes";
+  if (haystack.trim().length > 0) return "general";
+  return "unknown";
+}
+
+async function syncRebarDrawingPage(params: {
+  supabase: any;
+  rebarProjectFileId: string | null;
+  pageNumber: number;
+  rawText: string;
+  titleBlock: Record<string, string>;
+  discipline: string | null;
+  drawingType: string | null;
+  barMarks: string[];
+  confidence: number;
+  isOcr: boolean;
+}) {
+  const {
+    supabase,
+    rebarProjectFileId,
+    pageNumber,
+    rawText,
+    titleBlock,
+    discipline,
+    drawingType,
+    barMarks,
+    confidence,
+    isOcr,
+  } = params;
+
+  if (!rebarProjectFileId) return;
+
+  const sheetNumber = titleBlock.sheet_number || null;
+  const sheetName = titleBlock.sheet_title || titleBlock.sheet_name || drawingType || null;
+  const revisionLabel = titleBlock.revision_code || null;
+  const scaleText = titleBlock.scale || null;
+  const detectedCategory = mapSheetCategory(drawingType, rawText);
+
+  const { data: drawingSheets, error: sheetError } = await supabase
+    .schema("rebar")
+    .from("drawing_sheets")
+    .upsert(
+      {
+        project_file_id: rebarProjectFileId,
+        page_number: pageNumber,
+        sheet_number: sheetNumber,
+        sheet_name: sheetName,
+        detected_category: detectedCategory,
+        discipline,
+        revision_label: revisionLabel,
+        scale_text: scaleText,
+        scale_confidence: scaleText ? confidence : null,
+        notes_found: /\bnote(s)?\b/i.test(rawText),
+        ocr_text: rawText,
+      },
+      { onConflict: "project_file_id,page_number" },
+    )
+    .select("id")
+    .limit(1);
+
+  const drawingSheetId = drawingSheets?.[0]?.id;
+  if (sheetError || !drawingSheetId) {
+    console.error("Failed to sync rebar drawing sheet:", sheetError);
+    return;
+  }
+
+  await supabase.schema("rebar").from("drawing_detections").delete().eq("drawing_sheet_id", drawingSheetId);
+
+  const detections: Array<Record<string, unknown>> = [];
+  const pushDetection = (detectionType: string, label: string, valueText: string | null, metadata: Record<string, unknown> = {}) => {
+    if (!valueText) return;
+    detections.push({
+      drawing_sheet_id: drawingSheetId,
+      detection_type: detectionType,
+      label,
+      value_text: valueText,
+      confidence,
+      metadata,
+    });
+  };
+
+  pushDetection("title_block", "sheet_number", sheetNumber, { source: "title_block" });
+  pushDetection("title_block", "sheet_name", sheetName, { source: "title_block" });
+  pushDetection("title_block", "discipline", discipline, { source: "title_block" });
+  pushDetection("title_block", "revision", revisionLabel, { source: "title_block" });
+  pushDetection("title_block", "scale", scaleText, { source: "title_block" });
+  pushDetection("drawing_type", "drawing_type", drawingType, { source: "title_block" });
+  if (barMarks.length > 0) {
+    detections.push({
+      drawing_sheet_id: drawingSheetId,
+      detection_type: "bar_marks",
+      label: "bar_marks",
+      value_text: barMarks.join(", "),
+      confidence,
+      metadata: { count: barMarks.length },
+    });
+  }
+  detections.push({
+    drawing_sheet_id: drawingSheetId,
+    detection_type: "ocr",
+    label: isOcr ? "ocr_page" : "text_page",
+    value_text: rawText.slice(0, 1000),
+    confidence,
+    metadata: { extraction_version: EXTRACTION_VERSION },
+  });
+
+  if (detections.length > 0) {
+    const { error: detectionError } = await supabase.schema("rebar").from("drawing_detections").insert(detections);
+    if (detectionError) {
+      console.error("Failed to sync rebar drawing detections:", detectionError);
+    }
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders(req) });
@@ -72,7 +191,6 @@ Deno.serve(async (req) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceKey);
 
-    // Auth
     const authHeader = req.headers.get("authorization");
     let userId: string | null = null;
     if (authHeader) {
@@ -99,6 +217,7 @@ Deno.serve(async (req) => {
       pipeline_file_id,
       source_system,
       is_ocr,
+      legacy_file_id,
     } = body;
 
     if (!project_id || !pages || !Array.isArray(pages)) {
@@ -108,7 +227,16 @@ Deno.serve(async (req) => {
       });
     }
 
-    // SHA-256 dedup check
+    let rebarProjectFileId: string | null = null;
+    if (legacy_file_id) {
+      const { data: linkRow } = await supabase
+        .from("rebar_project_file_links")
+        .select("rebar_project_file_id")
+        .eq("legacy_file_id", legacy_file_id)
+        .maybeSingle();
+      rebarProjectFileId = linkRow?.rebar_project_file_id || null;
+    }
+
     if (doc_sha256) {
       const { data: existing } = await supabase
         .from("drawing_search_index")
@@ -147,10 +275,7 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Extract bar marks with expanded patterns
       const barMarks = extractBarMarks(rawText);
-
-      // Upsert logical drawing
       const sheetId = tb.sheet_number || null;
       const discipline = tb.discipline || null;
       const drawingType = tb.drawing_type || null;
@@ -169,7 +294,6 @@ Deno.serve(async (req) => {
         if (existing) {
           logicalDrawingId = existing.id;
 
-          // Revision chain: update latest_revision_code
           const newRevCode = tb.revision_code || null;
           if (newRevCode) {
             await supabase
@@ -178,7 +302,6 @@ Deno.serve(async (req) => {
               .eq("id", existing.id);
           }
 
-          // If no revision_chain_id yet, assign one
           if (!existing.revision_chain_id) {
             const chainId = crypto.randomUUID();
             await supabase
@@ -204,7 +327,6 @@ Deno.serve(async (req) => {
           logicalDrawingId = created?.id || null;
         }
 
-        // Revision conflict detection
         const newRevisionLabel = tb.revision_code || null;
         if (logicalDrawingId && newRevisionLabel) {
           const { data: existingEntries } = await supabase
@@ -239,7 +361,6 @@ Deno.serve(async (req) => {
           }
         }
       } else {
-        // Missing sheet ID — create reconciliation record
         qualityIssues.push(`Page ${page.page_number}: missing sheet_id`);
         await supabase.from("reconciliation_records").insert({
           user_id: userId,
@@ -255,7 +376,6 @@ Deno.serve(async (req) => {
         });
       }
 
-      // Compute quality flags and confidence
       const qualityFlags = computeQualityFlags({
         raw_text: rawText,
         title_block: tb,
@@ -266,7 +386,6 @@ Deno.serve(async (req) => {
       const confidence = computeConfidence(qualityFlags);
       const needsReview = qualityFlags.length > 0 && confidence < 0.7;
 
-      // Insert via RPC
       const { error } = await supabase.rpc("upsert_search_index", {
         p_user_id: userId,
         p_project_id: project_id,
@@ -288,7 +407,6 @@ Deno.serve(async (req) => {
       if (error) {
         console.error(`Index page ${page.page_number} error:`, error);
       } else {
-        // Update the new columns on the inserted row
         const { data: latest } = await supabase
           .from("drawing_search_index")
           .select("id")
@@ -317,7 +435,6 @@ Deno.serve(async (req) => {
             .eq("id", latest.id);
         }
 
-        // Persist per-page sheet index + normalized extraction entity (verified pipeline)
         if (document_version_id) {
           const { data: sheetRows, error: sheetErr } = await supabase
             .from("document_sheets")
@@ -358,8 +475,29 @@ Deno.serve(async (req) => {
           }
         }
 
+        await syncRebarDrawingPage({
+          supabase,
+          rebarProjectFileId,
+          pageNumber: page.page_number || 1,
+          rawText,
+          titleBlock: tb,
+          discipline,
+          drawingType,
+          barMarks,
+          confidence,
+          isOcr: Boolean(is_ocr || page.is_ocr),
+        });
+
         indexed++;
       }
+    }
+
+    if (rebarProjectFileId && doc_sha256) {
+      await supabase
+        .schema("rebar")
+        .from("project_files")
+        .update({ checksum_sha256: doc_sha256 })
+        .eq("id", rebarProjectFileId);
     }
 
     return new Response(

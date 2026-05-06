@@ -239,11 +239,13 @@ export type Database = {
           cover_value: number | null
           created_at: string | null
           cut_length: number | null
+          deterministic_match: boolean
           estimate_item_id: string | null
           finish_type: string | null
           id: string
           lap_length: number | null
           mark: string | null
+          provenance_state: string
           quantity: number | null
           segment_id: string
           shape_code: string | null
@@ -255,11 +257,13 @@ export type Database = {
           cover_value?: number | null
           created_at?: string | null
           cut_length?: number | null
+          deterministic_match?: boolean
           estimate_item_id?: string | null
           finish_type?: string | null
           id?: string
           lap_length?: number | null
           mark?: string | null
+          provenance_state?: string
           quantity?: number | null
           segment_id: string
           shape_code?: string | null
@@ -271,11 +275,13 @@ export type Database = {
           cover_value?: number | null
           created_at?: string | null
           cut_length?: number | null
+          deterministic_match?: boolean
           estimate_item_id?: string | null
           finish_type?: string | null
           id?: string
           lap_length?: number | null
           mark?: string | null
+          provenance_state?: string
           quantity?: number | null
           segment_id?: string
           shape_code?: string | null
@@ -1616,30 +1622,42 @@ export type Database = {
       shop_drawings: {
         Row: {
           created_at: string
+          drawing_mode: string
+          export_class: string | null
           html_content: string
           id: string
           options: Json
           project_id: string
           user_id: string
+          validation_state: Json
           version: number
+          watermark_mode: string
         }
         Insert: {
           created_at?: string
+          drawing_mode?: string
+          export_class?: string | null
           html_content: string
           id?: string
           options?: Json
           project_id: string
           user_id: string
+          validation_state?: Json
           version?: number
+          watermark_mode?: string
         }
         Update: {
           created_at?: string
+          drawing_mode?: string
+          export_class?: string | null
           html_content?: string
           id?: string
           options?: Json
           project_id?: string
           user_id?: string
+          validation_state?: Json
           version?: number
+          watermark_mode?: string
         }
         Relationships: [
           {
@@ -1788,6 +1806,56 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      verified_estimate_results: {
+        Row: {
+          blocked_reasons: Json | null
+          content_hash: string
+          created_at: string
+          id: string
+          inputs_hash: string | null
+          is_current: boolean
+          project_id: string
+          result_json: Json
+          status: string
+          user_id: string
+          version_number: number
+        }
+        Insert: {
+          blocked_reasons?: Json | null
+          content_hash: string
+          created_at?: string
+          id?: string
+          inputs_hash?: string | null
+          is_current?: boolean
+          project_id: string
+          result_json: Json
+          status: string
+          user_id: string
+          version_number?: number
+        }
+        Update: {
+          blocked_reasons?: Json | null
+          content_hash?: string
+          created_at?: string
+          id?: string
+          inputs_hash?: string | null
+          is_current?: boolean
+          project_id?: string
+          result_json?: Json
+          status?: string
+          user_id?: string
+          version_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "verified_estimate_results_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

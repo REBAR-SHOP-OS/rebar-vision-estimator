@@ -1106,7 +1106,7 @@ function buildScheduleSheets(
   return entriesPerPage.map((entries, pageIndex) => {
     const rows = entries.map((entry) => {
       if (entry.kind === "section") {
-        return `<tr class="section-row"><td colspan="14">${escapeHtml(entry.title)}</td></tr>`;
+        return `<tr class="section-row"><td colspan="13">${escapeHtml(entry.title)}</td></tr>`;
       }
 
       const bar = entry.bar!;
@@ -1115,16 +1115,15 @@ function buildScheduleSheets(
           <td>${escapeHtml(options.barMarks ? bar.barMark : bar.elementId)}</td>
           <td>${escapeHtml(bar.size)}</td>
           <td>${escapeHtml(bar.shapeCode)}</td>
-          <td class="num">${formatNumber(bar.qty)}</td>
-          <td class="num">${formatNumber(bar.multiplier)}</td>
           <td class="num">${formatNumber(bar.pieces)}</td>
           <td class="num">${bar.lengthMm > 0 ? formatNumber(bar.lengthMm) : "—"}</td>
-          <td class="num">${bar.totalLengthM > 0 ? formatNumber(bar.totalLengthM, 2) : "—"}</td>
-          <td class="num">${bar.weightKg > 0 ? formatNumber(bar.weightKg, 1) : "—"}</td>
           <td class="num">${options.includeDims && bar.legA ? formatNumber(bar.legA) : "—"}</td>
           <td class="num">${options.includeDims && bar.legB ? formatNumber(bar.legB) : "—"}</td>
           <td class="num">${options.includeDims && bar.legC ? formatNumber(bar.legC) : "—"}</td>
           <td class="num">${options.includeDims && bar.legD ? formatNumber(bar.legD) : "—"}</td>
+          <td class="num">—</td>
+          <td class="num">—</td>
+          <td class="num">${bar.weightKg > 0 ? formatNumber(bar.weightKg, 1) : "—"}</td>
           <td>${escapeHtml(bar.note || "—")}</td>
         </tr>
       `;
@@ -1187,24 +1186,23 @@ function buildScheduleSheets(
         <table class="bbs-table">
           <thead>
             <tr>
-              <th>BM</th>
-              <th>Size</th>
-              <th>Shape</th>
-              <th class="num">Qty</th>
-              <th class="num">Mult</th>
-              <th class="num">Pieces</th>
-              <th class="num">Cut mm</th>
-              <th class="num">Total m</th>
-              <th class="num">Wt kg</th>
+              <th>MARK</th>
+              <th>SIZE</th>
+              <th>TYPE</th>
+              <th class="num">NO.</th>
+              <th class="num">LENGTH</th>
               <th class="num">A</th>
               <th class="num">B</th>
               <th class="num">C</th>
               <th class="num">D</th>
-              <th>Notes</th>
+              <th class="num">E</th>
+              <th class="num">R</th>
+              <th class="num">WEIGHT</th>
+              <th>REMARKS</th>
             </tr>
           </thead>
           <tbody>
-            ${rows || `<tr><td colspan="14">No bar list data available.</td></tr>`}
+            ${rows || `<tr><td colspan="13">No bar list data available.</td></tr>`}
           </tbody>
         </table>
       `,
@@ -1339,9 +1337,9 @@ function buildSheetHtml(
             <div class="mini-title">Revision and issue record</div>
             <table class="mini-table">
               <tr><th>Issue</th><th>Remarks</th><th>Date</th><th>By</th></tr>
-              <tr><td>△ A</td><td>FOR APPROVAL</td><td>${escapeHtml(params.dateStr)}</td><td>${escapeHtml(revisionInitials)}</td></tr>
-              <tr><td>△ B</td><td>AS PER A/E COMMENTS</td><td>${escapeHtml(params.dateStr)}</td><td>RS</td></tr>
-              <tr><td>△ C</td><td>AS PER NEW DRAWING</td><td>${escapeHtml(params.dateStr)}</td><td>RS</td></tr>
+              <tr><td><span class="rev-mark"><svg viewBox="0 0 10 10" aria-hidden="true"><polygon points="5,1 9,9 1,9"/></svg>A</span></td><td>FOR APPROVAL</td><td>${escapeHtml(params.dateStr)}</td><td>${escapeHtml(revisionInitials)}</td></tr>
+              <tr><td><span class="rev-mark"><svg viewBox="0 0 10 10" aria-hidden="true"><polygon points="5,1 9,9 1,9"/></svg>B</span></td><td>AS PER A/E COMMENTS</td><td>${escapeHtml(params.dateStr)}</td><td>RS</td></tr>
+              <tr><td><span class="rev-mark"><svg viewBox="0 0 10 10" aria-hidden="true"><polygon points="5,1 9,9 1,9"/></svg>C</span></td><td>AS PER NEW DRAWING</td><td>${escapeHtml(params.dateStr)}</td><td>RS</td></tr>
             </table>
           </aside>
 
@@ -1474,8 +1472,8 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
         <title>${escapeHtml(projectName)} - Shop Drawing Draft</title>
         <style>
           @page {
-            size: letter landscape;
-            margin: 0.3in;
+            size: 17in 11in;
+            margin: 0;
           }
 
           * {
@@ -1485,8 +1483,8 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
           html, body {
             margin: 0;
             padding: 0;
-            font-family: Arial, Helvetica, sans-serif;
-            color: #111;
+            font-family: "RomanS", Consolas, "Courier New", monospace;
+            color: #000;
             background: #d1d5db;
           }
 
@@ -1495,13 +1493,14 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
           }
 
           .sheet {
-            width: 10.4in;
-            min-height: 7.9in;
+            width: 17in;
+            min-height: 11in;
             margin: 0 auto 18px;
             background: #fff;
             box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
             page-break-after: always;
             break-after: page;
+            padding: 0.4in;
           }
 
           .sheet:last-child {
@@ -1510,25 +1509,44 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
           }
 
           .sheet-frame {
-            height: 7.9in;
-            border: 2px solid #111;
+            height: 10.2in;
+            border: 2pt solid #000;
+            outline: 1pt solid #000;
+            outline-offset: 4px;
             padding: 6px;
           }
 
           .sheet-grid {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) 280px;
-            grid-template-rows: minmax(0, 1fr) 194px;
-            gap: 8px;
+            grid-template-columns: minmax(0, 1fr) 2.2in;
+            grid-template-rows: minmax(0, 1fr) 2.0in;
+            grid-template-areas:
+              "main  title"
+              "ref   title"
+              "rev   title";
+            gap: 6px;
             height: 100%;
           }
+
+          .main-area  { grid-area: main; }
+          .reference-area { grid-area: ref; }
+          .revision-area  { grid-area: rev; }
+          .title-block    { grid-area: title; }
 
           .main-area,
           .revision-area,
           .reference-area,
           .title-block {
-            border: 1px solid #111;
+            border: 1pt solid #000;
             overflow: hidden;
+          }
+
+          .main-area {
+            background-color: #fff;
+            background-image:
+              radial-gradient(circle, #d8d8d8 0.5px, transparent 0.5px);
+            background-size: 0.5in 0.5in;
+            background-position: 0 0;
           }
 
           .main-area {
@@ -1928,6 +1946,10 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
             line-height: 1.35;
           }
 
+          .bbs-table {
+            font-family: Consolas, "Courier New", monospace;
+          }
+
           .bbs-table th,
           .bbs-table td {
             font-size: 8px;
@@ -1935,6 +1957,13 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            border: 0.5pt solid #000;
+          }
+
+          .bbs-table th {
+            background: #f0f0f0;
+            font-weight: 700;
+            letter-spacing: 0.04em;
           }
 
           .bbs-table td:last-child,
@@ -2016,9 +2045,26 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
           }
 
           .logo-row img {
-            width: 44px;
-            height: 44px;
+            max-width: 110px;
+            max-height: 44px;
+            width: auto;
+            height: auto;
             object-fit: contain;
+          }
+
+          .rev-mark {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            font-weight: 700;
+          }
+
+          .rev-mark svg {
+            width: 8px;
+            height: 8px;
+            fill: none;
+            stroke: #111;
+            stroke-width: 1.2;
           }
 
           .company-name {
@@ -2080,10 +2126,11 @@ export function buildShopDrawingHtml(params: BuildShopDrawingParams): string {
               min-height: auto;
               margin: 0;
               box-shadow: none;
+              padding: 0.4in;
             }
 
             .sheet-frame {
-              height: calc(7.9in - 2px);
+              height: calc(10.2in - 2px);
             }
           }
         </style>

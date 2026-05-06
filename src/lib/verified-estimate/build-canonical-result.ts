@@ -63,15 +63,18 @@ function resolveSheetLabel(
   sourceFileId: string | null,
   docVersionToFile: DocVersionToFileMap,
   sheets: SheetIndexRow[],
+  fileName?: string | null,
 ): string | null {
   if (!sourceFileId) return null;
   const dvs = [...docVersionToFile.entries()].filter(([, fid]) => fid === sourceFileId).map(([dv]) => dv);
-  if (dvs.length === 0) return null;
-  const forDv = sheets.filter((s) => dvs.includes(s.document_version_id));
-  if (forDv.length === 0) return null;
-  forDv.sort((a, b) => a.page_number - b.page_number);
-  const first = forDv[0];
-  return first.sheet_number || `p${first.page_number}`;
+  const forDv = dvs.length > 0 ? sheets.filter((s) => dvs.includes(s.document_version_id)) : [];
+  if (forDv.length > 0) {
+    forDv.sort((a, b) => a.page_number - b.page_number);
+    const first = forDv[0];
+    return first.sheet_number || `p${first.page_number}`;
+  }
+  // Fallback: file-level reference so provenance is non-null
+  return fileName ? `${fileName} (p1)` : "p1";
 }
 
 /**
@@ -110,7 +113,7 @@ export function buildCanonicalResultFromWorkspace(input: {
     const srcList = input.segmentSources.get(b.segment_id) || [];
     const source_file_id = srcList[0] || null;
     const source_file_name = source_file_id ? filesById.get(source_file_id)?.file_name || null : null;
-    const source_sheet = resolveSheetLabel(source_file_id, input.docVersionToFile, input.documentSheets);
+    const source_sheet = resolveSheetLabel(source_file_id, input.docVersionToFile, input.documentSheets, source_file_name);
     const extraction_method = "workspace_bar_item";
     const confidence = b.confidence != null ? Number(b.confidence) : 0.75;
     const review_required = !source_file_id || !source_sheet;
@@ -163,7 +166,7 @@ export function buildCanonicalResultFromWorkspace(input: {
       const wt = Number(ei.total_weight) || 0;
       const source_file_id = ei.source_file_id;
       const source_file_name = source_file_id ? filesById.get(source_file_id)?.file_name || null : null;
-      const source_sheet = resolveSheetLabel(source_file_id, input.docVersionToFile, input.documentSheets);
+      const source_sheet = resolveSheetLabel(source_file_id, input.docVersionToFile, input.documentSheets, source_file_name);
       const review_required = !source_file_id || !source_sheet;
       const line_key = `${ei.segment_id}|ei|${ei.id || ei.description || "row"}|${idx++}`;
       lines.push({

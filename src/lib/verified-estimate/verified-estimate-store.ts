@@ -11,6 +11,7 @@ import {
 } from "./build-canonical-result";
 import { diffReferenceVsCanonical } from "./reference-diff";
 import { evaluateExportGate, type ExportGateResult } from "./export-gate";
+import { persistRebarTakeoffFromCanonical } from "@/lib/rebar-takeoff-persistence";
 
 // Helper to bypass type checking for tables not yet in generated types
 const fromAny = (supabase: SupabaseClient<Database>, table: string) =>
@@ -187,6 +188,75 @@ export async function getCurrentVerifiedEstimate(
   return data;
 }
 
+/**
+ * Mark every line in the current canonical snapshot as committed (review_required = false),
+ * recompute size_breakdown_kg / total_weight_kg, and save a new verified snapshot.
+ * Returns the count of lines committed.
+ */
+export async function commitAllLinesForExport(
+  supabase: SupabaseClient<Database>,
+  projectId: string,
+  userId: string,
+): Promise<{ committed: number; gate: ExportGateResult }> {
+  // Always rebuild from workspace first so we operate on the freshest snapshot.
+  await refreshVerifiedEstimateFromWorkspace(supabase, projectId, userId);
+  const current = await getCurrentVerifiedEstimate(supabase, projectId);
+  if (!current) throw new Error("No canonical snapshot to commit.");
+
+  const result = current.result_json as CanonicalEstimateResultV1;
+  const lines = (result.lines || []).map((l) => ({
+    ...l,
+    review_required: false,
+    validation_status: l.validation_status === "pending" ? "ok" : l.validation_status,
+  }));
+
+  const size_breakdown_kg: Record<string, number> = {};
+  for (const line of lines) {
+    const sz = line.size || "unknown";
+    size_breakdown_kg[sz] = (size_breakdown_kg[sz] || 0) + (line.weight_kg || 0);
+  }
+  const total_weight_kg = Object.values(size_breakdown_kg).reduce((a, b) => a + b, 0);
+
+  const committedResult: CanonicalEstimateResultV1 = {
+    ...result,
+    lines,
+    quote: {
+      ...result.quote,
+      size_breakdown_kg,
+      total_weight_kg,
+      total_weight_lbs: total_weight_kg / 0.453592,
+      job_status: "OK",
+    },
+  };
+
+  // Re-run gate with committed lines (validation issues + reference diff still apply).
+  const [issuesRes, refRes, rulesRes] = await Promise.all([
+    supabase.from("validation_issues").select("severity, status, issue_type").eq("project_id", projectId),
+    fromAny(supabase, "reference_answer_lines").select("normalized_key, mark, quantity, unit").eq("project_id", projectId),
+    fromAny(supabase, "estimation_validation_rules").select("rule_type, payload, is_active").eq("user_id", userId),
+  ]);
+  const referenceDiff =
+    refRes.data && refRes.data.length > 0
+      ? diffReferenceVsCanonical(refRes.data as any[], committedResult.lines)
+      : null;
+  const gate = evaluateExportGate({
+    lines: committedResult.lines,
+    validationIssues: issuesRes.data || [],
+    referenceDiff,
+    rules: (rulesRes.data || []) as { rule_type: string; payload: Record<string, unknown>; is_active: boolean | null }[],
+  });
+
+  await saveVerifiedEstimateResult(supabase, {
+    projectId,
+    userId,
+    result: committedResult,
+    status: gate.canExport ? "verified" : "blocked",
+    blockedReasons: gate.blocked_reasons,
+  });
+
+  return { committed: lines.length, gate };
+}
+
 /** Persist chat-derived quote as current verified snapshot and return export gate outcome. */
 export async function persistVerifiedEstimateFromChat(
   supabase: SupabaseClient<Database>,
@@ -232,6 +302,17 @@ export async function persistVerifiedEstimateFromChat(
     });
   } catch (e) {
     console.warn("[persistVerifiedEstimateFromChat] verified_estimate_results unavailable:", e);
+  }
+
+  try {
+    await persistRebarTakeoffFromCanonical(supabase, {
+      legacyProjectId: params.projectId,
+      userId: params.userId,
+      result,
+      parserProvider: params.usedFallbackJson ? "gpt_fallback_json" : "gpt_structured",
+    });
+  } catch (e) {
+    console.warn("[persistVerifiedEstimateFromChat] rebar takeoff persistence unavailable:", e);
   }
 
   return gate;
