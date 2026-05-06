@@ -368,45 +368,27 @@ serve(async (req) => {
       (existing as Array<{ description?: string; bar_size?: string }>).map((e) => normKey(e.description || "", e.bar_size || "")),
     );
 
-    const systemPrompt = `You are a rebar estimating expert. Output estimate line items ONLY from drawing evidence in the user message.
+    const systemPrompt = `You are a rebar EXTRACTION assistant. You DO NOT compute geometry. A deterministic resolver downstream will calculate qty, length and weight from a structural graph. Your job is to faithfully extract rebar callouts from the drawing text.
 Rules:
 - Return ONLY a JSON array of objects, no markdown, no explanation.
-- Each object: { "description": string, "bar_size": string, "quantity_count": number, "total_length": number (meters for rebar, m² for wwm), "total_weight": number (kg), "confidence": number (0-1), "item_type": "rebar" | "wwm" }
-- DISCIPLINE PRIORITY: When the OCR contains both STRUCTURAL and ARCHITECTURAL sections, ALWAYS prefer numbers from STRUCTURAL. Only emit a line sourced from the ARCHITECTURAL block if the corresponding concrete element has NO matching structural rebar callout — and in that case prefix the description with "(arch-fallback) ". Never overwrite a structural number with an architectural one. Do NOT emit two lines for the same element from different disciplines.
-- Bar sizes: use metric (10M, 15M, 20M, 25M, 30M, 35M) or imperial (#3, #4, #5, #6, #7, #8) based on standards.
-- Confidence must reflect evidence strength from schedules/callouts — use low values when inferring.
-- If the drawing text section is present, extract ONLY what is explicitly supported; do not invent quantities.
-- If drawing text is absent or insufficient, return an empty JSON array [] — do NOT fabricate "typical practice" items.
-- Weight must be consistent with bar size and length using standard rebar weights. Use these mass values (kg/m): 10M=0.785, 15M=1.570, 20M=2.355, 25M=3.925, 30M=5.495, 35M=7.850, #3=0.561, #4=0.994, #5=1.552, #6=2.235, #7=3.042, #8=3.973.
-- MANDATORY COMPUTATION: For every line you MUST compute non-zero quantity_count, total_length (m) and total_weight (kg) from the OCR. Use these formulas when explicit bar list rows are not present:
-  * Vertical wall bars: qty = ceil(wall_length_mm / spacing_mm) + 1; bar_length_m = (wall_height_mm + lap_mm) / 1000; total_length = qty * bar_length_m.
-  * Horizontal wall bars: qty = ceil(wall_height_mm / spacing_mm) + 1; bar_length_m = (wall_length_mm + lap_mm) / 1000; total_length = qty * bar_length_m.
-  * Footing/grade-beam continuous bars: qty = number_of_continuous_bars (from schedule, default 2 top + 2 bot if a section view shows it); total_length = qty * footing_length_m.
-  * Slab bars EW: per direction qty = ceil(slab_dim_perp_mm / spacing_mm) + 1; total_length = qty * (slab_dim_parallel_m + lap_m).
-  * Dowels: qty = ceil(perimeter_mm / spacing_mm); total_length = qty * (dowel_length_mm / 1000).
-  * total_weight = total_length * mass_per_m for the bar size.
-  Lap default = 40 * bar_dia_mm if lap not stated (10M=400, 15M=640, 20M=800, 25M=1000).
-  Use spacing/lengths from the OCR (e.g. "@406 mm O.C.", "203mm wall", "457mm long"). Treat dimension callouts as authoritative.
-- ZERO-VALUE RULE: A line with quantity_count=0 AND total_length=0 is FORBIDDEN unless the OCR truly has no geometry. Prefer computing from inferred geometry over emitting zeros. If you must emit a zero line, set confidence ≤ 0.2 and prefix description with "UNRESOLVED:".
-- Output raw JSON numbers only — no thousands separators, no units inside number fields.
-- WIRE MESH (WWM) DETECTION: If drawing text mentions "WWM", "welded wire mesh", "wire mesh", "W2.9", "W4.0", "MW9.1", mesh designations like "6x6-W2.9/W2.9" or "152x152 MW9.1/MW9.1", generate items with item_type "wwm" instead of "rebar".
-  - For WWM items: bar_size = mesh designation (e.g. "6x6-W2.9"), total_length = area in m², quantity_count = number of sheets (standard sheet = 5'×10' = 4.65 m², add 150mm overlap).
-  - WWM mass references (kg/m²): 6x6-W1.4/W1.4=0.93, 6x6-W2.1/W2.1=1.37, 6x6-W2.9/W2.9=1.90, 6x6-W4.0/W4.0=2.63, 4x4-W2.1/W2.1=2.05, 4x4-W4.0/W4.0=3.94.
-  - Weight formula for WWM: total_weight = total_length (m²) × mass (kg/m²).
-  - If a slab/SOG segment has BOTH rebar and mesh callouts, generate items for BOTH.
-- CRITICAL: If drawing text is provided below, use the ACTUAL bar sizes, quantities, and lengths from the drawings — do NOT guess or inflate. Parse footing schedules, bar schedules, and rebar callouts directly.
-- CRITICAL: Parse bar list tables from the drawing text. Each row typically has: Bar Mark, Qty, Size, Total Length, Type, and shape dimensions (A, B, C, D, E). Use these EXACT values for quantity_count and total_length.
-- CRITICAL: Only estimate items that belong to THIS segment type. Do NOT add superstructure items to foundation segments or vice versa.
-- CONCRETE = REBAR AXIOM (universal): every concrete element (footing, pier, pile cap, wall, column, beam, slab, SOG, suspended slab, stair, grade beam, frost wall, ledge, curb, equipment pad, retaining wall, mat, raft, stoop, …) MUST yield at least one rebar (or WWM) line. If the OCR mentions a concrete element with no rebar callout, emit ONE placeholder line with description "<element> — UNRESOLVED rebar (verify drawings)", quantity_count 0, total_length 0, total_weight 0, confidence 0.1, item_type "rebar".
+- Each object: { "description": string, "bar_size": string, "quantity_count": number, "total_length": number, "total_weight": number, "confidence": number, "item_type": "rebar" | "wwm" }
+- DISCIPLINE PRIORITY: ONLY use STRUCTURAL OCR for rebar geometry. ARCHITECTURAL OCR may ONLY be used to FLAG a concrete element that has no structural rebar callout — in that case emit one placeholder line with quantity_count=0, total_length=0 and prefix description with "(arch-fallback) ".
+- Extraction policy:
+  * If a bar list / footing schedule row is explicitly visible (Mark, Qty, Size, Total Length), copy those EXACT numbers into quantity_count and total_length (m). Set confidence 0.9.
+  * If a callout is visible but the geometry is referenced indirectly (e.g. "17 10M BS80 @300 DWL", "1 20M B2035 TOP CONT. IF"), extract ONLY what is literally written: include the bar mark in the description, set quantity_count to the literal count if shown, leave total_length=0, total_weight=0, confidence 0.4. The downstream resolver will compute the rest.
+  * NEVER invent dimensions, spacing, wall heights or lap lengths. NEVER guess. If a number is not literally on the drawing, leave it 0.
+- Bar sizes: use metric (10M, 15M, 20M, 25M, 30M, 35M) or imperial (#3..#8).
+- WIRE MESH (WWM): if mesh designations appear, set item_type="wwm", bar_size=mesh designation. Leave area=0 unless slab dimensions are literally given.
+- Always include the bar mark (BSxx, Bxxxx) in the description verbatim when present — the resolver keys off it.
+- Quote the source phrase from OCR in the description so provenance can be checked, e.g. "17 10M BS80 @300 DWL.".
 - ${scopeHint ? `SCOPE RESTRICTION: ${scopeHint}` : ""}
 - Do NOT duplicate items already estimated: ${existingDesc || "none yet"}.`;
 
-    // Concrete worked example to anchor the model on real numeric output
-    const fewShot = `EXAMPLE (foundation wall segment, OCR snippet "203mm wall, vertical 15M @ 406mm O.C., wall length 12,500mm, wall height 3,000mm"):
-[
-  {"description":"Foundation wall vertical 15M @ 406mm O.C.","bar_size":"15M","quantity_count":32,"total_length":116.48,"total_weight":182.87,"confidence":0.85,"item_type":"rebar"}
-]
-Math: qty = ceil(12500/406)+1 = 32; bar_len = (3000+640)/1000 = 3.64 m; total_length = 32*3.64 = 116.48 m; weight = 116.48*1.570 = 182.87 kg.`;
+    const fewShot = `EXAMPLES of correct EXTRACTION (do not compute):
+OCR snippet: "17 10M BS80 @300 DWL." →
+  {"description":"17 10M BS80 @300 DWL.","bar_size":"10M","quantity_count":17,"total_length":0,"total_weight":0,"confidence":0.4,"item_type":"rebar"}
+OCR snippet bar list row "BS31  12  15M  3650mm  Type 1" →
+  {"description":"BS31 Type 1","bar_size":"15M","quantity_count":12,"total_length":43.80,"total_weight":68.77,"confidence":0.9,"item_type":"rebar"}`;
 
     const userPrompt = `Project: ${project?.name || "Unknown"}
 Type: ${project?.project_type || "Unknown"}
@@ -431,7 +413,7 @@ Generate estimate items for this segment. Base quantities on the ACTUAL drawing 
 
 ${fewShot}
 
-Output the JSON array now. Every object MUST have non-zero quantity_count AND total_length AND total_weight unless you explicitly prefix description with "UNRESOLVED:" and set confidence ≤ 0.2.`;
+Output the JSON array now. Extract literally from the OCR; do not guess geometry. Lines without an explicit bar-list row should keep total_length=0 — the deterministic resolver will compute it.`;
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
