@@ -115,6 +115,12 @@ async function loadLegacyTakeoffRows(projectId: string, files: WorkflowFileRef[]
   return (data || []).map((row, index: number) => {
     const file = files.find((candidate) => candidate.legacy_file_id === row.source_file_id || candidate.id === row.source_file_id);
     const realMark = markMap.get(row.id);
+    const rawLen = Number(row.total_length || 0);
+    let rawWgt = Number(row.total_weight || 0);
+    if (rawWgt === 0 && rawLen > 0) {
+      const mass = massForSize(row.bar_size || "");
+      if (mass > 0) rawWgt = +(rawLen * mass).toFixed(2);
+    }
     return {
       id: `legacy:${row.id}`,
       raw_id: row.id,
@@ -123,8 +129,8 @@ async function loadLegacyTakeoffRows(projectId: string, files: WorkflowFileRef[]
       size: row.bar_size || "-",
       shape: (row.description || "Straight").slice(0, 40),
       count: row.quantity_count || 0,
-      length: Number(row.total_length || 0),
-      weight: Number(row.total_weight || 0),
+      length: rawLen,
+      weight: rawWgt,
       status: (row.status === "approved" ? "ready" : Number(row.confidence) < 0.6 ? "blocked" : "review") as WorkflowTakeoffRow["status"],
       source: file?.file_name || "Legacy estimate",
       segment_id: row.segment_id || null,
