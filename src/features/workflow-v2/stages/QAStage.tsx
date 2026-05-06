@@ -142,30 +142,41 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
       if (m) push(m[1] || m[2]);
     }
     if (anchors.length === 0) return null;
-    // Find first matching item per anchor; prefer longest anchor first.
+    // Prefer longest/most-specific anchor first; pick the single best hit and
+    // cluster only nearby items so we don't union opposite ends of the sheet.
     anchors.sort((a, b) => b.length - a.length);
-    const matches: typeof pageText = [];
+    let seed: { x: number; y: number; w: number; h: number } | null = null;
     for (const a of anchors) {
       const needle = a.toLowerCase().replace(/\s+/g, " ");
-      const hits = pageText.filter((t) => t.str.toLowerCase().replace(/\s+/g, " ").includes(needle));
-      if (hits.length > 0) {
-        // Take up to first 6 hits to bound the region.
-        matches.push(...hits.slice(0, 6));
-        if (matches.length >= 3) break;
-      }
+      const hit = pageText.find((t) => t.str.toLowerCase().replace(/\s+/g, " ").includes(needle));
+      if (hit) { seed = hit; break; }
     }
-    if (matches.length === 0) return null;
-    const xs = matches.map((m) => m.x);
-    const ys = matches.map((m) => m.y);
-    const xe = matches.map((m) => m.x + m.w);
-    const ye = matches.map((m) => m.y + m.h);
-    const x1 = Math.min(...xs), y1 = Math.min(...ys);
-    const x2 = Math.max(...xe), y2 = Math.max(...ye);
-    // Pad 30px on each side for visual breathing room.
-    const padX = Math.max(20, (x2 - x1) * 0.25);
-    const padY = Math.max(20, (y2 - y1) * 0.6);
-    return [Math.max(0, x1 - padX), Math.max(0, y1 - padY), x2 + padX, y2 + padY];
-  }, [exactBbox, pageText, sel?.id, sel?.location, sel?.linked_item?.bar_size]);
+    if (!seed) return null;
+    const cx = seed.x + seed.w / 2;
+    const cy = seed.y + seed.h / 2;
+    // Cluster radius: ~250px — keeps the bbox local to the callout area.
+    const R = 250;
+    const cluster = pageText.filter((t) => {
+      const tx = t.x + t.w / 2, ty = t.y + t.h / 2;
+      return Math.abs(tx - cx) <= R && Math.abs(ty - cy) <= R;
+    });
+    const matches = cluster.length ? cluster : [seed];
+    const x1 = Math.min(...matches.map((m) => m.x));
+    const y1 = Math.min(...matches.map((m) => m.y));
+    const x2 = Math.max(...matches.map((m) => m.x + m.w));
+    const y2 = Math.max(...matches.map((m) => m.y + m.h));
+    // Modest padding; clamp to image bounds when known.
+    const padX = 30;
+    const padY = 30;
+    const maxW = imgW || Number.POSITIVE_INFINITY;
+    const maxH = imgH || Number.POSITIVE_INFINITY;
+    return [
+      Math.max(0, x1 - padX),
+      Math.max(0, y1 - padY),
+      Math.min(maxW, x2 + padX),
+      Math.min(maxH, y2 + padY),
+    ];
+  }, [exactBbox, pageText, sel?.id, sel?.location, sel?.linked_item?.bar_size, imgW, imgH]);
   const bbox = exactBbox || approxBbox;
   const bboxIsApprox = !exactBbox && !!approxBbox;
   const center = bbox && imgW && imgH
