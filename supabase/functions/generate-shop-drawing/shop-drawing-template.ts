@@ -685,7 +685,7 @@ function buildElementDetailCard(
 ): string {
   const detailRows = bars.slice(0, 5).map((bar) => `
     <tr>
-      <td>${escapeHtml(bar.barMark)}</td>
+      <td>${escapeHtml(formatBarCallout(bar))}</td>
       <td>${escapeHtml(bar.size)}</td>
       <td class="num">${formatNumber(bar.pieces)}</td>
       <td>${bar.note ? escapeHtml(bar.note) : escapeHtml(bar.shapeCode)}</td>
@@ -1142,7 +1142,7 @@ function buildScheduleSheets(
       const bar = entry.bar!;
       return `
         <tr>
-          <td>${escapeHtml(options.barMarks ? bar.barMark : bar.elementId)}</td>
+          <td>${escapeHtml(options.barMarks ? formatBarCallout(bar) : bar.elementId)}</td>
           <td>${escapeHtml(bar.size)}</td>
           <td>${escapeHtml(bar.shapeCode)}</td>
           <td class="num">${formatNumber(bar.pieces)}</td>
