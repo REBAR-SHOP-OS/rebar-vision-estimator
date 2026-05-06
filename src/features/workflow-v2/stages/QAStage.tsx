@@ -48,7 +48,7 @@ export default function QAStage({ projectId, goToStage }: StageProps) {
   useEffect(() => {
     let cancelled = false;
     setPreviewUrl(null); setPreviewKind(null); setPdfImg(null); setPdfPage(1); setPdfPageCount(1); setPreviewName("");
-    const fileId = sel?.source_file_id;
+    const fileId = sel?.source_file_id || sel?.linked_item?.source_file_id || null;
     if (!fileId) return;
     setPreviewLoading(true);
     (async () => {
@@ -107,6 +107,27 @@ export default function QAStage({ projectId, goToStage }: StageProps) {
     { k: "evidence", label: "Evidence" },
     { k: "action", label: "Action" },
   ];
+
+  const jumpToTakeoff = () => {
+    const linked = sel?.linked_item;
+    (state as StageProps["state"]).setLocal({
+      takeoffFocus: linked
+        ? {
+            raw_id: linked.id,
+            raw_kind: "legacy",
+            source_file_id: linked.source_file_id || sel?.source_file_id || null,
+            segment_id: linked.segment_id || null,
+            page_number: linked.page_number ?? sel?.locator?.page_number ?? null,
+            issue_id: sel?.id || null,
+          }
+        : {
+            source_file_id: sel?.source_file_id || null,
+            page_number: sel?.locator?.page_number ?? null,
+            issue_id: sel?.id || null,
+          },
+    });
+    goToStage?.("takeoff");
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -236,16 +257,17 @@ export default function QAStage({ projectId, goToStage }: StageProps) {
                         className="absolute inset-0 w-full h-full object-contain"
                         draggable={false}
                       />
-                      {/* Pulsing marker at the issue center (always shown — page-center fallback if no bbox) */}
-                      <div
-                        className="absolute"
-                        style={{ left: `${center.cx * 100}%`, top: `${center.cy * 100}%`, transform: "translate(-50%,-50%)" }}
-                      >
-                        <span className="relative flex items-center justify-center" style={{ width: 28, height: 28 }}>
-                          <span className="absolute inline-flex h-full w-full rounded-full bg-[hsl(var(--status-blocked))] opacity-60 animate-ping" />
-                          <span className="relative inline-flex rounded-full bg-[hsl(var(--status-blocked))]" style={{ width: 10, height: 10, boxShadow: "0 0 0 3px hsl(var(--background))" }} />
-                        </span>
-                      </div>
+                      {bbox && (
+                        <div
+                          className="absolute"
+                          style={{ left: `${center.cx * 100}%`, top: `${center.cy * 100}%`, transform: "translate(-50%,-50%)" }}
+                        >
+                          <span className="relative flex items-center justify-center" style={{ width: 28, height: 28 }}>
+                            <span className="absolute inline-flex h-full w-full rounded-full bg-[hsl(var(--status-blocked))] opacity-60 animate-ping" />
+                            <span className="relative inline-flex rounded-full bg-[hsl(var(--status-blocked))]" style={{ width: 10, height: 10, boxShadow: "0 0 0 3px hsl(var(--background))" }} />
+                          </span>
+                        </div>
+                      )}
                     </div>
                   )}
                   {!previewUrl && !previewLoading && (
@@ -257,7 +279,7 @@ export default function QAStage({ projectId, goToStage }: StageProps) {
                   <span className="absolute top-2 left-2 text-[10px] font-mono uppercase tracking-widest text-muted-foreground bg-background/80 px-1.5 py-0.5 z-10">
                     {previewName || sel.sheet_id?.slice(0, 8) || "-"}
                     {previewKind === "pdf" && pdfPageCount > 0 && <> · p{pdfPage}/{pdfPageCount}</>}
-                    {!bbox && <span className="ml-1 text-[hsl(var(--status-inferred))]">(approx.)</span>}
+                    {!bbox && locator?.page_number && <span className="ml-1 text-[hsl(var(--status-inferred))]">(page-linked)</span>}
                   </span>
                   <div className="absolute top-2 right-2 z-10 flex items-center gap-1">
                     {bbox && (
@@ -280,6 +302,11 @@ export default function QAStage({ projectId, goToStage }: StageProps) {
                     </div>
                   )}
                 </div>
+                {!bbox && locator?.page_number && (
+                  <div className="text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--status-inferred))] border border-[hsl(var(--status-inferred))]/30 bg-[hsl(var(--status-inferred))]/10 px-2 py-1">
+                    Drawing linked to page {locator.page_number}. Exact element region is not available yet — use the recommended fix to jump to the blocked takeoff row.
+                  </div>
+                )}
 
                 {/* Tab content */}
                 {tab === "change" && (
@@ -337,12 +364,12 @@ export default function QAStage({ projectId, goToStage }: StageProps) {
                       <div className="ip-kicker mb-1.5 flex items-center gap-1.5"><Wand2 className="w-3 h-3" /> Recommended Fix</div>
                       <div className="text-[12px] italic text-muted-foreground">Review element source and apply standard correction per project spec.</div>
                     </div>
-                    <button className="w-full h-9 inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground text-[11px] font-semibold uppercase tracking-[0.14em] hover:opacity-90">
+                    <button onClick={jumpToTakeoff} className="w-full h-9 inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground text-[11px] font-semibold uppercase tracking-[0.14em] hover:opacity-90">
                       <Wand2 className="w-3.5 h-3.5" /> Apply Recommended Fix
                     </button>
                     <div className="grid grid-cols-2 gap-2">
                       <button
-                        onClick={() => goToStage?.("takeoff")}
+                        onClick={jumpToTakeoff}
                         className="h-8 inline-flex items-center justify-center gap-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] border border-[hsl(var(--status-inferred))]/50 text-[hsl(var(--status-inferred))] hover:bg-[hsl(var(--status-inferred))]/10"
                       >
                         <ArrowLeft className="w-3 h-3" /> Return to Takeoff
