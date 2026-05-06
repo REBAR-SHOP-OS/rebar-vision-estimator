@@ -144,6 +144,7 @@ Rules:
 - shape_code: one of "straight", "L-shape", "U-shape", "Z-shape", "hook", "stirrup", "closed".
 - size: metric (10M/15M/20M/25M/30M/35M) or imperial (#3..#8). Normalize bare digits to ##M.
 - quantity and cut_length_mm MUST be taken VERBATIM from the OCR drawing text. NEVER invent. If OCR is silent, return quantity 0 and cut_length_mm 0 with confidence <= 0.3.
+- BAR-MARK PREFIX RULE: marks for STRAIGHT bars MUST start with "BS" (e.g. BS01, BS1005). Marks for any BENT shape (L/U/Z/hook/stirrup/closed) MUST start with "B" (e.g. B01, B1005). Preserve mark prefixes from the OCR text when present; otherwise assign per shape.
 - Do NOT duplicate existing marks: ${existingMarks || "none yet"}.`;
 
     const estimateSummary = estimateItems.map((e: any, i: number) =>
@@ -236,8 +237,10 @@ Generate the bar schedule. NEVER invent quantities or lengths — if not in OCR 
         const lenAgree = gLen > 0 && oLen > 0 && Math.abs(gLen - oLen) / Math.max(gLen, oLen) < 0.05;
 
         // Final values
-        const mark = markAgree ? gMark : (gMark || oMark || `M${merged.length + 1}`);
         const shape = shapeAgree ? gShape : (gShape || oShape || "straight");
+        const isStraight = /^straight$/i.test(shape);
+        const fallbackPrefix = isStraight ? "BS" : "B";
+        const mark = markAgree ? gMark : (gMark || oMark || `${fallbackPrefix}${merged.length + 1}`);
         const size = sizeAgree ? gSize : (gSize || oSize || (linkedEi?.bar_size ? normalizeSize(linkedEi.bar_size) : ""));
         const qty = qtyAgree ? gQty : (gQty || oQty || 0);
         const cut_length_mm = lenAgree ? Math.round((gLen + oLen) / 2) : (gLen || oLen || 0);
