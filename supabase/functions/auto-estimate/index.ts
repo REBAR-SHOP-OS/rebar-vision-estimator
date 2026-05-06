@@ -415,11 +415,16 @@ serve(async (req) => {
       (existing as Array<{ description?: string; bar_size?: string }>).map((e) => normKey(e.description || "", e.bar_size || "")),
     );
 
-    const systemPrompt = `You are a rebar EXTRACTION assistant. You DO NOT compute geometry. A deterministic resolver downstream will calculate qty, length and weight from a structural graph. Your job is to faithfully extract rebar callouts from the drawing text.
+    const systemPrompt = `You are a rebar EXTRACTION assistant. You DO NOT compute geometry. A deterministic resolver downstream will calculate qty, length and weight. Your job is to faithfully extract rebar callouts from the drawing text and CITE THE MANUAL for any assumption.
 Rules:
 - Return ONLY a JSON array of objects, no markdown, no explanation.
-- Each object: { "description": string, "bar_size": string, "quantity_count": number, "total_length": number, "total_weight": number, "confidence": number, "item_type": "rebar" | "wwm" }
-- DISCIPLINE PRIORITY: ONLY use STRUCTURAL OCR for rebar geometry. ARCHITECTURAL OCR may ONLY be used to FLAG a concrete element that has no structural rebar callout — in that case emit one placeholder line with quantity_count=0, total_length=0 and prefix description with "(arch-fallback) ".
+- Each object: { "description": string, "bar_size": string, "quantity_count": number, "total_length": number, "total_weight": number, "confidence": number, "item_type": "rebar" | "wwm", "source_sheet": string | null, "source_excerpt": string | null, "authority_section": string | null, "authority_page": number | null, "authority_quote": string | null }
+- SOURCE PRIORITY (production rebar quantities):
+    1. SHOP DRAWING OCR  — PRIMARY. Quantities MUST come from here when present.
+    2. STRUCTURAL OCR    — SECONDARY. Use only to verify or fill gaps not in shop drawings.
+    3. ARCHITECTURAL OCR — CONTEXT ONLY. NEVER derive a quantity from architectural sheets.
+- ASSUMPTION AUTHORITY: The ONLY allowed source for assumption rules (lap, splice, hook, bend, development length) is "Manual-Standard-Practice-2018" provided below. Every row that uses an assumption MUST set authority_section, authority_page (if available) and authority_quote. If the manual does not cover the needed rule, leave the geometry fields 0 — the resolver will mark UNRESOLVED. NEVER invent a value.
+- Always include "source_sheet" with the SHEET tag from the OCR header (e.g. "SD-06") and "source_excerpt" with a verbatim quoted phrase from that sheet.
 - Extraction policy:
   * If a bar list / footing schedule row is explicitly visible (Mark, Qty, Size, Total Length), copy those EXACT numbers into quantity_count and total_length (m). Set confidence 0.9.
   * If a callout is visible but the geometry is referenced indirectly (e.g. "17 10M BS80 @300 DWL", "1 20M B2035 TOP CONT. IF"), extract ONLY what is literally written: include the bar mark in the description, set quantity_count to the literal count if shown, leave total_length=0, total_weight=0, confidence 0.4. The downstream resolver will compute the rest.
@@ -454,7 +459,11 @@ Lap defaults: ${standard?.lap_defaults ? JSON.stringify(standard.lap_defaults) :
 
 ${knowledgeContext}
 
-${drawingTextContext ? `=== DRAWING TEXT (use this as primary source — parse bar lists, footing schedules, rebar callouts) ===\n${drawingTextContext}\n=== END DRAWING TEXT ===` : "No drawing text available — estimate based on typical construction practice for this element type. Be conservative."}
+=== ASSUMPTION AUTHORITY (Manual-Standard-Practice-2018) ===
+${manualText}
+=== END ASSUMPTION AUTHORITY ===
+
+${drawingTextContext ? `=== DRAWING TEXT ===\n${drawingTextContext}\n=== END DRAWING TEXT ===` : "NO DRAWING TEXT AVAILABLE. DO NOT ESTIMATE. Return an empty JSON array []."}
 
 Generate estimate items for this segment. Base quantities on the ACTUAL drawing data if available, not assumptions.
 
