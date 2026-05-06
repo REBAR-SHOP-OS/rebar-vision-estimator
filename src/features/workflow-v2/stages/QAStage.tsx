@@ -523,6 +523,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
           {/* Canvas */}
           <div
+            ref={canvasRef}
             className="flex-1 overflow-hidden relative blueprint-bg cursor-grab active:cursor-grabbing select-none"
             onWheel={(e) => {
               if (!sel) return;
@@ -570,8 +571,19 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                       setPdfImg(dataUrl);
                       setImgSize({ w, h });
                       setRenderedPage(pdfPage);
+                      setRenderStatus("ready");
+                      setRenderError(null);
                     }}
                     onPageText={setPageText}
+                    onRenderStateChange={(state) => {
+                      setRenderStatus(state.status);
+                      setRenderError(state.error ?? null);
+                      if (state.status === "loading") {
+                        setPdfImg(null);
+                        setRenderedPage(null);
+                        setPageBox(null);
+                      }
+                    }}
                     scale={2}
                   />
                 )}
@@ -600,35 +612,44 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                         src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")}
                         alt={previewName}
                         onLoad={(e) => {
+                          const t = e.currentTarget;
+                          const naturalW = t.naturalWidth;
+                          const naturalH = t.naturalHeight;
+                          if (!naturalW || !naturalH) return;
                           if (previewKind === "image") {
-                            const t = e.currentTarget;
-                            setImgSize({ w: t.naturalWidth, h: t.naturalHeight });
+                            setImgSize({ w: naturalW, h: naturalH });
+                            setRenderedPage(sel?.locator?.page_number ?? 1);
+                            setRenderStatus("ready");
+                            setRenderError(null);
                           }
+                          const parent = t.parentElement?.getBoundingClientRect();
+                          if (!parent) return;
+                          const scale = Math.min(parent.width / naturalW, parent.height / naturalH);
+                          const width = naturalW * scale;
+                          const height = naturalH * scale;
+                          setPageBox({
+                            left: (parent.width - width) / 2,
+                            top: (parent.height - height) / 2,
+                            width,
+                            height,
+                          });
                         }}
                         className="absolute inset-0 w-full h-full object-contain"
                         style={viewMode === "diff" ? { mixBlendMode: "difference", filter: "invert(1) hue-rotate(180deg)" } : undefined}
                         draggable={false}
                       />
                     )}
-                    {viewMode !== "side" && bbox && imgW && imgH && (
+                    {viewMode !== "side" && renderStatus === "ready" && renderedPage === pdfPage && bbox && imgW && imgH && pageBox && (
                       <>
-                        {/* Wrapper that mirrors the object-contain placement of the image so
-                            the pointer aligns with the actual rendered drawing region. */}
                         <div
                           className="absolute inset-0 pointer-events-none"
-                          style={{
-                            // Compute letterbox: image is contained in the container
-                            // preserving aspect ratio. We don't know container px size
-                            // here, but using percentage of imgW/imgH against the same
-                            // object-contain box keeps overlay aligned because bbox is
-                            // also expressed in image pixel space.
-                          }}
                         >
                           <BBoxPointer
                             bbox={bbox}
                             imgW={imgW}
                             imgH={imgH}
                             zoom={zoom}
+                            pageBox={pageBox}
                             approximate={bboxIsApprox}
                             title={sel?.title || "Modification"}
                             description={[sel?.location_label, sel?.description || "Is this element correct as detected?"].filter(Boolean).join(" — ")}
@@ -681,14 +702,22 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                 {previewLoading && (
                   <div className="absolute inset-0 grid place-items-center text-[10px] uppercase tracking-widest text-muted-foreground">Loading drawing…</div>
                 )}
-                {!bbox && previewUrl && (
-                  <div className="absolute top-14 right-4 z-10 text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--status-inferred))] border border-[hsl(var(--status-inferred))]/30 bg-[hsl(var(--status-inferred))]/10 px-2 py-1">
-                    Page-linked · exact element region not yet pinned
+                {renderStatus === "error" && (
+                  <div className="absolute inset-0 grid place-items-center px-6 text-center">
+                    <div className="border border-border bg-card px-4 py-3 text-sm text-foreground max-w-md">
+                      <div className="font-bold mb-1">Could not render {previewName || "drawing"}</div>
+                      <div className="text-muted-foreground text-xs">{renderError || `Page ${pdfPage} could not be displayed.`}</div>
+                    </div>
                   </div>
                 )}
-                {bboxIsApprox && previewUrl && (
+                {renderStatus === "ready" && !bbox && previewUrl && (
+                  <div className="absolute top-14 right-4 z-10 text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--status-inferred))] border border-[hsl(var(--status-inferred))]/30 bg-[hsl(var(--status-inferred))]/10 px-2 py-1">
+                    Page linked · no trusted object box on this page
+                  </div>
+                )}
+                {anchorStatus === "approximate" && renderStatus === "ready" && previewUrl && (
                   <div className="absolute top-14 right-4 z-10 text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--status-inferred))] border border-[hsl(var(--status-inferred))]/40 bg-[hsl(var(--status-inferred))]/10 px-2 py-1">
-                    Approximate anchor · matched from text
+                    Approximate anchor · review source excerpt before measuring
                   </div>
                 )}
               </>
