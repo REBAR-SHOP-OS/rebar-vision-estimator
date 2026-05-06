@@ -15,6 +15,36 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { readSpreadsheetFile, rowsToCsvText } from "@/lib/spreadsheet-import";
+import * as pdfjsLib from "pdfjs-dist";
+
+// Worker is already configured in src/lib/pdf-to-images.ts; re-asserting here
+// is safe (idempotent) and avoids load-order issues if this dialog opens first.
+if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+}
+
+// Extract text from a PDF in-browser. Caps at ~500KB so the runtime prompt
+// path stays small. Returns "" if extraction fails (caller shows a warning).
+async function extractPdfText(file: File): Promise<string> {
+  try {
+    const buf = await file.arrayBuffer();
+    const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+    const pageCount = Math.min(doc.numPages, 200);
+    const out: string[] = [];
+    for (let i = 1; i <= pageCount; i++) {
+      const p = await doc.getPage(i);
+      const tc = await p.getTextContent();
+      const text = tc.items.map((it: any) => ("str" in it ? it.str : "")).join(" ");
+      out.push(`[Page ${i}]\n${text}`);
+      if (out.join("\n").length > 500_000) break;
+    }
+    return out.join("\n\n").slice(0, 500_000);
+  } catch (err) {
+    console.warn("[BrainKnowledge] PDF text extraction failed:", err);
+    return "";
+  }
+}
 
 interface KnowledgeItem {
   id: string;
