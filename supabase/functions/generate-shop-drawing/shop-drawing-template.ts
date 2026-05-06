@@ -167,6 +167,36 @@ function normalizeShapeCode(shapeCode: unknown): string {
   return raw;
 }
 
+/**
+ * Canonical bar callout grammar:
+ *   <qty> <size> <prefix><mark> [@<spacing>] [<position>]
+ * Prefix derives from shapeCode: STRAIGHT -> "BS", any bent shape -> "B".
+ * Marks already prefixed with BS/B are preserved verbatim.
+ */
+function formatBarCallout(bar: NormalizedBar): string {
+  const isStraight = /^STRAIGHT$/i.test(bar.shapeCode);
+  const expected = isStraight ? "BS" : "B";
+  const rawMark = String(bar.barMark || "").trim();
+  const hasPrefix = /^B[S]?\d/i.test(rawMark);
+  const mark = hasPrefix ? rawMark : `${expected}${rawMark.replace(/^[A-Z]+/i, "") || "0"}`;
+  const note = (bar.note || "").toUpperCase();
+  const spacingMatch = note.match(/SPACING\s+([@\w./-]+)/);
+  const spacing = spacingMatch ? spacingMatch[1] : "";
+  const position = note
+    .replace(/SPACING\s+[@\w./-]+/, "")
+    .replace(/\|/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const parts = [
+    String(bar.pieces || bar.qty || ""),
+    bar.size,
+    mark,
+    spacing ? `@${spacing.replace(/^@/, "")}` : "",
+    position,
+  ].filter(Boolean);
+  return parts.join(" ");
+}
+
 function inferLengthMm(bar: ShopDrawingBar): number {
   const lengthMm = toNumber(bar.length_mm);
   if (lengthMm > 0) return lengthMm;
