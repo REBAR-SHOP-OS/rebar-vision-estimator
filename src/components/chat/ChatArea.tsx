@@ -1965,10 +1965,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                         elements={filteredElements}
                         summary={filteredSummary}
                         questions={validationData.questions || []}
-                        quoteResult={quoteResult}
+                        quoteResult={quoteResult as any}
                         onAnswerQuestion={handleAnswerQuestion}
                         onRequestQuote={handleRequestQuote}
-                        scopeData={scopeData}
+                        scopeData={scopeData as any}
                         onShowOnDrawing={handleShowOnDrawing}
                         onToggleViewer={() => openBlueprintViewer()}
                         showViewer={showBlueprintViewer}
@@ -1987,7 +1987,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                         barList={filteredBarList}
                         onShowOnDrawing={handleShowOnDrawing}
                         selectedElementId={selectedElementId}
-                        onImport={(data) => setImportedBarList(data)}
+                        onImport={(data) => setImportedBarList(data as any)}
                       />
                     </TabsContent>
                   )}
@@ -2058,7 +2058,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                         {(quoteResult.excluded as Record<string, unknown>[]).map((ex, i) => <p key={i}>• {ex.element_id as string}: {ex.reason as string}</p>)}
                       </div>
                     )}
-                    <ExportButtons ref={(el) => { if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 300); }} quoteResult={quoteResult} elements={validationData?.elements || []} scopeData={scopeData} projectId={projectId} exportGate={exportGate} />
+                    <ExportButtons ref={(el) => { if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 300); }} quoteResult={quoteResult as any} elements={validationData?.elements || []} scopeData={scopeData as any} projectId={projectId} exportGate={exportGate} />
                   </div>
                 )}
 
@@ -2066,9 +2066,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 {quoteResult && (
                   <ApprovalWorkflow
                     projectId={projectId}
-                    quoteResult={quoteResult}
+                    quoteResult={quoteResult as any}
                     elements={validationData?.elements || []}
-                    scopeData={scopeData}
+                    scopeData={scopeData as any}
                   />
                 )}
               </div>
