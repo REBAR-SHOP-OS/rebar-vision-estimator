@@ -985,8 +985,22 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         if (zone) locParts.push(String(zone));
         if (element) locParts.push(String(element));
         const locLabel = locParts.join(" · ");
-        const baseTitle = `Unresolved geometry: ${x.r.description.slice(0, 80)}`;
-        const baseDesc = `Missing: ${(aj.missing_refs || []).join("; ")}${graph.verifyNotes.length ? `\nDetailer notes: ${graph.verifyNotes.slice(0, 3).join(" | ")}` : ""}`;
+        // Build a raw-input ask: never request derived values (totals, perimeter, qty).
+        // Estimator enters drawing-direct dimensions; the system does the math.
+        const elClass = classifyElementForAsk(`${element || ""} ${x.r.description || ""}`);
+        const noun = elementNounForAsk(elClass);
+        const phrases: string[] = [];
+        for (const tok of (aj.missing_refs || [])) {
+          const p = rawInputPhraseForAsk(String(tok), elClass);
+          if (p && !phrases.includes(p)) phrases.push(p);
+        }
+        if (phrases.length === 0) phrases.push(defaultRawInputForAsk(elClass));
+        const inputList = phrases.length === 1
+          ? phrases[0]
+          : phrases.slice(0, -1).join(", ") + ", and " + phrases[phrases.length - 1];
+        const forClause = element ? ` for "${element}"` : (excerpt ? ` for "${String(excerpt).slice(0, 80)}"` : "");
+        const baseTitle = `${noun} — enter drawing dimensions`;
+        const baseDesc = `at the ${noun}: enter ${inputList}${forClause} ${closingClauseForAsk(elClass)}.`;
         return ({
         user_id: user.id,
         project_id,
