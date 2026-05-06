@@ -901,12 +901,13 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 }
 
 function BBoxPointer({
-  bbox, imgW, imgH, zoom, title, description, onFix, onImpact, approximate,
+  bbox, imgW, imgH, zoom, pageBox, title, description, onFix, onImpact, approximate,
 }: {
   bbox: [number, number, number, number];
   imgW: number;
   imgH: number;
   zoom: number;
+  pageBox: { left: number; top: number; width: number; height: number };
   title: string;
   description: string;
   onFix: () => void;
@@ -927,7 +928,10 @@ function BBoxPointer({
     <div
       className="absolute pointer-events-auto"
       style={{
-        left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%`,
+        left: `calc(${pageBox.left}px + ${left}% * ${pageBox.width / 100})`,
+        top: `calc(${pageBox.top}px + ${top}% * ${pageBox.height / 100})`,
+        width: `${(width / 100) * pageBox.width}px`,
+        height: `${(height / 100) * pageBox.height}px`,
         border: `${Math.max(2, 6 / z)}px ${approximate ? "dashed" : "solid"} ${stroke}`,
         background: fillBg,
         boxShadow: `0 0 0 ${Math.max(1, 4 / z)}px ${stroke}55`,
