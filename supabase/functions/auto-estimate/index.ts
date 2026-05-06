@@ -622,15 +622,32 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       items.forEach((item: any) => { item.confidence = Math.min(item.confidence || 0.5, 0.4); });
     }
 
-    // Prefer first structural-tagged file from names; else first file (per-line provenance still weak until pipeline links rows)
-    const upperNames = files.map((f: { file_name?: string }) => (f.file_name || "").toUpperCase());
-    let sourceFileId: string | null = null;
-    const structIdx = upperNames.findIndex((n: string) => /STRUCTURAL|^S[-_]|\bSTR\b|FTG|FOOT|FOUND/i.test(n));
-    if (structIdx >= 0) sourceFileId = files[structIdx].id;
-    else if (files.length > 0) sourceFileId = files[0].id;
+    // Per-row provenance: prefer the file the model cited via source_sheet,
+    // falling back to filename-role priority (shop > structural). NEVER pick
+    // an architectural file as the source for a quantity row.
+    const upperNames = (files as Array<{ id: string; file_name?: string }>).map(
+      (f) => ({ id: f.id, name: (f.file_name || "").toUpperCase() })
+    );
+    const shopFile = upperNames.find((f) => isShopName(f.name));
+    const structFile = upperNames.find((f) => isStructName(f.name));
+    const defaultSourceId =
+      shopFile?.id || structFile?.id ||
+      upperNames.find((f) => !isArchName(f.name))?.id || null;
+
+    const resolveRowSource = (it: { source_sheet?: string | null }): string | null => {
+      const tag = String(it.source_sheet || "").toUpperCase().trim();
+      if (tag) {
+        const hit = upperNames.find((f) => f.name.includes(tag));
+        if (hit && !isArchName(hit.name)) return hit.id;
+      }
+      return defaultSourceId;
+    };
 
     // Insert items into estimate_items
-    const rows = items.map((item: any) => ({
+    const rows = items.map((item: any) => {
+      const hasAssumption = !!(item._derivation || item._missing_refs?.length);
+      const citationMissing = hasAssumption && !item.authority_section && !item.authority_quote;
+      return {
       segment_id,
       project_id,
       user_id: user.id,
@@ -641,15 +658,24 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       total_weight: Math.max(0, Number(item.total_weight) || 0),
       confidence: Math.min(1, Math.max(0, Number(item.confidence) || 0)),
       item_type: String(item.item_type || "rebar"),
-      status: "draft",
-      source_file_id: sourceFileId || null,
+      status: (item._geometry_status === "unresolved" || citationMissing) ? "unresolved" : "draft",
+      source_file_id: resolveRowSource(item),
       assumptions_json: {
         geometry_status: item._geometry_status || "unresolved",
         missing_refs: item._missing_refs || [],
         derivation: item._derivation || null,
         page_number: item._page_number || null,
+        source_sheet: item.source_sheet || null,
+        source_excerpt: item.source_excerpt || null,
+        authority_document: "Manual-Standard-Practice-2018",
+        authority_section: item.authority_section || null,
+        authority_page: item.authority_page || null,
+        authority_quote: item.authority_quote || null,
+        assumption_rule_id: item.assumption_rule_id || null,
+        citation_missing: citationMissing,
       },
-    }));
+    };
+    });
 
     // De-dup gate: collapse rows on (normalized description, bar_size) keeping highest-confidence,
     // and skip rows that already exist for this segment.
