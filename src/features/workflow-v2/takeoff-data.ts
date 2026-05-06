@@ -44,6 +44,17 @@ export interface WorkflowQaIssue {
   // Pinpoint locator + linked-row preview (filled by loader)
   locator?: { page_number?: number | null; bbox?: [number, number, number, number] | null; image_size?: { w: number; h: number } | null } | null;
   linked_item?: { id: string; description: string | null; bar_size: string | null; quantity_count: number; total_length: number; total_weight: number; missing_refs: string[]; source_file_id?: string | null; segment_id?: string | null; page_number?: number | null } | null;
+  // Structured drawing location (used to prefix question text)
+  location?: {
+    source_sheet?: string | null;
+    page_number?: number | null;
+    detail_reference?: string | null;
+    grid_reference?: string | null;
+    zone_reference?: string | null;
+    element_reference?: string | null;
+    source_excerpt?: string | null;
+  } | null;
+  location_label?: string | null;
 }
 
 const CLOSED_STATUSES = new Set(["resolved", "closed"]);
