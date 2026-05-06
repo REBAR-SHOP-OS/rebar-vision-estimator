@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { StageHeader, Pill, EmptyState, type StageProps } from "./_shared";
 import { ArrowRight, Check, X, GitMerge, Split, Layers, Loader2 } from "lucide-react";
 
@@ -14,6 +15,7 @@ interface Candidate {
 }
 
 export default function ScopeStage({ projectId, state, goToStage }: StageProps) {
+  const { user } = useAuth();
   const [savingId, setSavingId] = useState<string | null>(null);
   const candidates: Candidate[] = useMemo(() => {
     if (state.files.length === 0) return [];
@@ -85,6 +87,31 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
         .update(update)
         .eq("id", projectId);
       if (updateError) throw updateError;
+
+      // Materialize a segment so Stage 3 (Takeoff) has something to estimate against.
+      if (d === "accept" && user) {
+        try {
+          const { data: existingSeg } = await supabase
+            .from("segments")
+            .select("id")
+            .eq("project_id", projectId)
+            .eq("name", candidate.label)
+            .maybeSingle();
+          if (!existingSeg?.id) {
+            await supabase.from("segments").insert({
+              project_id: projectId,
+              user_id: user.id,
+              name: candidate.label,
+              segment_type: "miscellaneous",
+              status: "draft",
+              confidence: candidate.confidence,
+            });
+          }
+        } catch (segErr) {
+          console.warn("Failed to upsert segment for approved scope:", segErr);
+        }
+      }
+
       state.refresh();
     } catch (error) {
       console.warn("Failed to persist V2 scope decision:", error);
