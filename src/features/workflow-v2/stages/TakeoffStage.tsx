@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { StageHeader, Pill, EmptyState, type StageProps } from "./_shared";
 import { Sparkles, FileText, CheckCircle2, Loader2, Wand2, Pencil, Save, X, ChevronDown, ChevronRight } from "lucide-react";
+import PdfRenderer from "@/components/chat/PdfRenderer";
 import { loadWorkflowTakeoffRows, type WorkflowTakeoffRow } from "../takeoff-data";
 import { parseAndIndexFile } from "@/lib/parse-file";
 
@@ -26,6 +27,9 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   const [editPatch, setEditPatch] = useState<EditPatch>({});
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [pdfPage, setPdfPage] = useState(1);
+  const [pdfPageCount, setPdfPageCount] = useState(0);
+  const [pdfImg, setPdfImg] = useState<string | null>(null);
 
   const reload = async () => {
     const mapped = await loadWorkflowTakeoffRows(projectId, state.files);
@@ -55,7 +59,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const fileId = focusRow?.source_file_id;
+      const fileId = focusRow?.source_file_id || state.files[0]?.id;
       const f = state.files.find((x) => x.id === fileId);
       if (!f) { setSignedUrl(null); return; }
       const { data } = await supabase.storage.from("blueprints").createSignedUrl(f.file_path, 3600);
@@ -63,6 +67,8 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
     })();
     return () => { cancelled = true; };
   }, [focusRow?.source_file_id, state.files]);
+
+  useEffect(() => { setPdfPage(1); setPdfPageCount(0); setPdfImg(null); }, [signedUrl]);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -191,7 +197,11 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   }), [rows]);
 
   const sel = focusRow;
-  const isImg = sel?.source_file_id ? /\.(png|jpe?g|webp|gif|svg)$/i.test(state.files.find((f) => f.id === sel.source_file_id)?.file_name || "") : false;
+  const previewFileId = sel?.source_file_id || state.files[0]?.id;
+  const previewFile = state.files.find((f) => f.id === previewFileId);
+  const previewName = previewFile?.file_name || "";
+  const isImg = /\.(png|jpe?g|webp|gif|svg)$/i.test(previewName);
+  const isPdf = /\.pdf$/i.test(previewName);
 
   return (
     <div className="grid h-full" style={{ gridTemplateColumns: "240px 1fr 380px" }}>
@@ -347,20 +357,45 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
           <StageHeader kicker="Drawing Evidence" title={sel ? `${sel.segment_name} · ${sel.mark}` : "Hover a row"} />
         </div>
         <div className="flex-1 overflow-auto bg-white text-neutral-900">
-          {!sel ? <EmptyState title="No row selected" /> : !signedUrl ? (
+          {!previewFile ? <EmptyState title="No drawings uploaded" /> : !signedUrl ? (
             <div className="h-full flex items-center justify-center text-[10px] text-neutral-400 font-mono uppercase tracking-widest p-4 text-center">
-              {sel.source_file_id ? "Loading drawing…" : `No source drawing linked (source: ${sel.source})`}
+              Loading drawing…
             </div>
           ) : isImg ? (
             <img src={signedUrl} alt="" className="w-full h-auto" />
-          ) : (
+          ) : isPdf ? (
             <div className="flex flex-col h-full p-2">
-              <iframe src={signedUrl} title="drawing" className="w-full flex-1 border border-neutral-200" />
+              <PdfRenderer
+                url={signedUrl}
+                currentPage={pdfPage}
+                scale={1.5}
+                onPageCount={setPdfPageCount}
+                onPageRendered={(img) => setPdfImg(img)}
+              />
+              {pdfImg ? (
+                <img src={pdfImg} alt="drawing" className="w-full h-auto border border-neutral-200" />
+              ) : (
+                <div className="text-[10px] text-neutral-400 font-mono p-3">Rendering page {pdfPage}…</div>
+              )}
+              {pdfPageCount > 1 && (
+                <div className="flex items-center justify-between mt-2 text-[10px] font-mono">
+                  <button onClick={() => setPdfPage((p) => Math.max(1, p - 1))} disabled={pdfPage <= 1}
+                    className="px-2 py-1 border border-neutral-300 disabled:opacity-30">‹ Prev</button>
+                  <span className="text-neutral-500">Page {pdfPage} / {pdfPageCount}</span>
+                  <button onClick={() => setPdfPage((p) => Math.min(pdfPageCount, p + 1))} disabled={pdfPage >= pdfPageCount}
+                    className="px-2 py-1 border border-neutral-300 disabled:opacity-30">Next ›</button>
+                </div>
+              )}
               <a href={signedUrl} target="_blank" rel="noreferrer"
                 className="mt-2 text-[10px] font-mono uppercase tracking-wider text-blue-600 hover:underline text-center">
                 Open in new tab ↗
               </a>
             </div>
+          ) : (
+            <a href={signedUrl} target="_blank" rel="noreferrer"
+              className="block p-3 text-[10px] font-mono uppercase tracking-wider text-blue-600 hover:underline">
+              Open file in new tab ↗
+            </a>
           )}
         </div>
         {sel && (
