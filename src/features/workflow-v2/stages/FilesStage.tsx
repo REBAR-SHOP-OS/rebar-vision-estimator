@@ -3,10 +3,17 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { Upload, FileText, AlertTriangle, CheckCircle2, ImageIcon } from "lucide-react";
-import { StageHeader, Pill, type StageProps, EmptyState, GateBanner } from "./_shared";
+import { StageHeader, Pill, type StageProps, EmptyState } from "./_shared";
+import {
+  createProjectFileWithCanonicalBridge,
+  detectDiscipline,
+  ensureCurrentProjectRebarBridge,
+  inferRebarFileKind,
+} from "@/lib/rebar-intake";
 
 interface Row {
   id: string;
+  legacy_file_id?: string | null;
   file_name: string;
   file_path: string;
   created_at: string;
@@ -39,16 +46,58 @@ export default function FilesStage({ projectId, state }: StageProps) {
     const fl = e.target.files; if (!fl || !user) return;
     setUploading(true);
     let ok = 0;
+
+    try {
+      await ensureCurrentProjectRebarBridge(supabase, projectId);
+    } catch (bridgeErr) {
+      console.warn("Canonical project bridge check failed before V2 upload:", bridgeErr);
+      toast.error("Upload blocked until the canonical rebar project bridge is healthy.");
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = "";
+      return;
+    }
+
     for (const file of Array.from(fl)) {
       const path = `${user.id}/${projectId}/${Date.now()}_${file.name}`;
       const up = await supabase.storage.from("blueprints").upload(path, file);
-      if (up.error) { toast.error(`Upload failed: ${file.name}`); continue; }
-      await supabase.from("project_files").insert({
-        project_id: projectId, user_id: user.id,
-        file_name: file.name, file_path: path, file_type: file.type || null, file_size: file.size,
-      });
-      ok++;
+      if (up.error) {
+        toast.error(`Upload failed: ${file.name}`);
+        continue;
+      }
+
+      try {
+        const fileRow = await createProjectFileWithCanonicalBridge(supabase, {
+          projectId,
+          userId: user.id,
+          fileName: file.name,
+          filePath: path,
+          fileType: file.type || null,
+          fileSize: file.size,
+          fileKind: inferRebarFileKind(file.name, file.type || null),
+        });
+
+        try {
+          await supabase.from("document_versions").insert({
+            project_id: projectId,
+            user_id: user.id,
+            file_id: fileRow.id,
+            file_name: file.name,
+            file_path: path,
+            sha256: `pending_${Date.now()}_${fileRow.id}`,
+            source_system: "upload",
+            pdf_metadata: detectDiscipline(file.name) ? { discipline: detectDiscipline(file.name) } : {},
+          });
+        } catch (docVersionErr) {
+          console.warn(`document_versions insert failed for ${file.name}:`, docVersionErr);
+        }
+
+        ok++;
+      } catch (saveErr) {
+        console.warn(`Canonical V2 upload failed for ${file.name}:`, saveErr);
+        toast.error(`Upload failed during canonical intake: ${file.name}`);
+      }
     }
+
     setUploading(false);
     if (ok) toast.success(`${ok} file${ok > 1 ? "s" : ""} uploaded`);
     if (inputRef.current) inputRef.current.value = "";
@@ -75,7 +124,7 @@ export default function FilesStage({ projectId, state }: StageProps) {
               disabled={uploading}
               className="inline-flex items-center gap-2 px-3 h-8 text-[11px] font-semibold uppercase tracking-[0.12em] border border-primary text-primary hover:bg-primary/10 disabled:opacity-50"
             >
-              <Upload className="w-3.5 h-3.5" /> {uploading ? "Uploading…" : "Upload New Sheets"}
+              <Upload className="w-3.5 h-3.5" /> {uploading ? "Uploading..." : "Upload New Sheets"}
             </button>
           }
         />
