@@ -7,12 +7,12 @@ interface StatusBannerProps {
   drawingGenerationAllowed: boolean;
 }
 
-export default function StatusBanner({ blockedCount, needsReviewCount, pricingAllowed }: StatusBannerProps) {
-  if (blockedCount === 0 && needsReviewCount === 0) {
+export default function StatusBanner({ blockedCount, needsReviewCount, pricingAllowed, drawingGenerationAllowed }: StatusBannerProps) {
+  if (pricingAllowed && drawingGenerationAllowed) {
     return (
       <div className="flex items-center gap-2 px-4 py-2 bg-[hsl(var(--status-approved)/.08)] border border-[hsl(var(--status-approved)/.2)] rounded-lg text-sm">
         <CheckCircle2 className="h-4 w-4 text-[hsl(var(--status-approved))]" />
-        <span className="font-medium text-[hsl(var(--status-approved))]">All items approved — ready for pricing</span>
+        <span className="font-medium text-[hsl(var(--status-approved))]">All items approved — ready for pricing and drawings</span>
       </div>
     );
   }
@@ -31,10 +31,20 @@ export default function StatusBanner({ blockedCount, needsReviewCount, pricingAl
           {needsReviewCount} needs review
         </span>
       )}
-      {!pricingAllowed && (
-        <span className="flex items-center gap-1.5 text-muted-foreground ml-auto">
-          <Lock className="h-3.5 w-3.5" />
-          Pricing Locked
+      {(!pricingAllowed || !drawingGenerationAllowed) && (
+        <span className="flex items-center gap-3 text-muted-foreground ml-auto">
+          {!pricingAllowed && (
+            <span className="flex items-center gap-1.5">
+              <Lock className="h-3.5 w-3.5" />
+              Pricing Locked
+            </span>
+          )}
+          {!drawingGenerationAllowed && (
+            <span className="flex items-center gap-1.5">
+              <Lock className="h-3.5 w-3.5" />
+              Drawing Generation Locked
+            </span>
+          )}
         </span>
       )}
     </div>

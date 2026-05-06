@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { LanguageProvider } from "@/contexts/LanguageContext";
@@ -46,6 +46,11 @@ const AuthRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return user ? <Navigate to="/app" replace /> : <>{children}</>;
 };
 
+const LegacyProjectSubrouteRedirect: React.FC<{ subroute: string }> = ({ subroute }) => {
+  const { id } = useParams();
+  return <Navigate to={`/app/legacy/project/${id}/${subroute}`} replace />;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
@@ -63,6 +68,11 @@ const App = () => (
                 <Route path="/app" element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
                   <Route index element={<Dashboard />} />
                   <Route path="project/:id" element={<ProjectWorkspace />} />
+                  <Route path="project/:id/files" element={<LegacyProjectSubrouteRedirect subroute="files" />} />
+                  <Route path="project/:id/segments" element={<LegacyProjectSubrouteRedirect subroute="segments" />} />
+                  <Route path="project/:id/qa" element={<LegacyProjectSubrouteRedirect subroute="qa" />} />
+                  <Route path="project/:id/outputs" element={<LegacyProjectSubrouteRedirect subroute="outputs" />} />
+                  <Route path="project/:id/settings" element={<LegacyProjectSubrouteRedirect subroute="settings" />} />
                   <Route path="project/:id/segments/:segId" element={<SegmentDetail />} />
                   {/* Legacy archive — kept reachable but not the primary path */}
                   <Route path="legacy/project/:id" element={<LegacyProjectWorkspace />} />
