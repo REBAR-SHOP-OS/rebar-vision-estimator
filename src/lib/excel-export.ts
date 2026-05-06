@@ -59,19 +59,19 @@ const TITLE_FONT: Partial<ExcelJS.Font> = { bold: true, size: 14 };
 function buildEstimateSummarySheet(wb: ExcelJS.Workbook, params: ExportParams) {
   const ws = wb.addWorksheet("Estimate Summary");
   const { quoteResult, scopeData } = params;
-  const barList: unknown[] = (quoteResult.quote as Record<string, unknown>).bar_list as unknown[] || [];
+  const barList: any[] = (quoteResult.quote as Record<string, unknown>).bar_list as any[] || [];
   const sizeBreakdownKg: Record<string, number> = (quoteResult.quote as Record<string, unknown>).size_breakdown_kg as Record<string, number> || {};
   const sizeBreakdown: Record<string, number> = (quoteResult.quote as Record<string, unknown>).size_breakdown as Record<string, number> || {};
-  const rawMeshDetails: unknown[] = (quoteResult.quote as Record<string, unknown>).mesh_details as unknown[] || (scopeData as Record<string, unknown>)?.meshDetails as unknown[] || [];
+  const rawMeshDetails: any[] = (quoteResult.quote as Record<string, unknown>).mesh_details as any[] || (scopeData as Record<string, unknown>)?.meshDetails as any[] || [];
   // Extract WWM items from bar_list if mesh_details is empty
-  const meshDetails: unknown[] = rawMeshDetails.length > 0 ? rawMeshDetails : barList
-    .filter((b) => (b as Record<string, unknown>).size && /\d.*x.*\d.*W/i.test((b as Record<string, unknown>).size as string))
-    .map((b) => ({
-      location: (b as Record<string, unknown>).element_type || (b as Record<string, unknown>).sub_element || "—",
+  const meshDetails: any[] = rawMeshDetails.length > 0 ? rawMeshDetails : barList
+    .filter((b: any) => b.size && /\d.*x.*\d.*W/i.test(b.size as string))
+    .map((b: any) => ({
+      location: b.element_type || b.sub_element || "—",
       mesh_size: b.size,
       area_sqft: b.area_sqft || b.qty || "—",
     }));
-  const recon = quoteResult.quote.reconciliation || {};
+  const recon = (quoteResult.quote as any).reconciliation || {};
 
   // Compute weight-by-size from bar_list (same source as element breakdown)
   const sizeWeights: Record<string, number> = {};
