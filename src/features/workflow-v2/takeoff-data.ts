@@ -24,6 +24,10 @@ export interface WorkflowTakeoffRow {
   source_file_id: string | null;
   raw_id: string;        // raw DB id (without legacy:/canonical: prefix)
   raw_kind: "legacy" | "canonical";
+  // Geometry resolver state set by auto-estimate. UI must render UNRESOLVED
+  // rows as "—" not 0.
+  geometry_status: "resolved" | "partial" | "unresolved";
+  missing_refs: string[];
 }
 
 export interface WorkflowQaIssue {
@@ -80,7 +84,7 @@ async function getCanonicalTakeoffRuns(legacyProjectId: string) {
 async function loadLegacyTakeoffRows(projectId: string, files: WorkflowFileRef[]): Promise<WorkflowTakeoffRow[]> {
   const { data, error } = await supabase
     .from("estimate_items")
-    .select("id, bar_size, description, quantity_count, total_length, total_weight, status, confidence, source_file_id, segment_id")
+    .select("id, bar_size, description, quantity_count, total_length, total_weight, status, confidence, source_file_id, segment_id, assumptions_json")
     .eq("project_id", projectId)
     .limit(500);
 
@@ -121,6 +125,20 @@ async function loadLegacyTakeoffRows(projectId: string, files: WorkflowFileRef[]
       const mass = massForSize(row.bar_size || "");
       if (mass > 0) rawWgt = +(rawLen * mass).toFixed(2);
     }
+    const assum = (row.assumptions_json || {}) as Record<string, unknown>;
+    const geomRaw = String(assum.geometry_status || "").toLowerCase();
+    const geometry_status: WorkflowTakeoffRow["geometry_status"] =
+      geomRaw === "resolved" || geomRaw === "partial" ? geomRaw
+      : geomRaw === "unresolved" ? "unresolved"
+      // Legacy rows pre-resolver: infer from values
+      : (rawLen === 0 && (row.quantity_count || 0) === 0) ? "unresolved"
+      : rawLen > 0 ? "resolved" : "partial";
+    const missing_refs = Array.isArray(assum.missing_refs) ? (assum.missing_refs as string[]) : [];
+    const computedStatus: WorkflowTakeoffRow["status"] =
+      geometry_status === "unresolved" ? "blocked"
+      : row.status === "approved" ? "ready"
+      : Number(row.confidence) < 0.6 ? "blocked"
+      : "review";
     return {
       id: `legacy:${row.id}`,
       raw_id: row.id,
@@ -131,11 +149,13 @@ async function loadLegacyTakeoffRows(projectId: string, files: WorkflowFileRef[]
       count: row.quantity_count || 0,
       length: rawLen,
       weight: rawWgt,
-      status: (row.status === "approved" ? "ready" : Number(row.confidence) < 0.6 ? "blocked" : "review") as WorkflowTakeoffRow["status"],
+      status: computedStatus,
       source: file?.file_name || "Legacy estimate",
       segment_id: row.segment_id || null,
       segment_name: row.segment_id ? (segMap.get(row.segment_id) || "Unassigned") : "Unassigned",
       source_file_id: file?.id || row.source_file_id || null,
+      geometry_status,
+      missing_refs,
     };
   });
 }
@@ -163,6 +183,10 @@ async function loadCanonicalTakeoffRows(projectId: string): Promise<WorkflowTake
     const run = runById.get(row.takeoff_run_id) as Record<string, unknown> | undefined;
     const payload = coercePayload(row.extraction_payload);
     const confidence = Number(row.confidence || 0);
+    const len = Number(row.total_length_m || 0);
+    const qty = Number(row.quantity || 0);
+    const geometry_status: WorkflowTakeoffRow["geometry_status"] =
+      len > 0 ? "resolved" : qty > 0 ? "partial" : "unresolved";
     return {
       id: `canonical:${row.id}`,
       raw_id: row.id,
@@ -170,14 +194,16 @@ async function loadCanonicalTakeoffRows(projectId: string): Promise<WorkflowTake
       mark: `T${String(index + 1).padStart(3, "0")}`,
       size: row.bar_size || "-",
       shape: String(row.source_text || `${row.element_type || "Element"} / ${row.shape_type || "straight"}`).slice(0, 40),
-      count: Number(row.quantity || 0),
-      length: Number(row.total_length_m || 0),
+      count: qty,
+      length: len,
       weight: Number(row.total_weight_kg || 0),
-      status: (run?.status === "ready_for_review" ? "ready" : confidence < 0.6 ? "blocked" : "review") as WorkflowTakeoffRow["status"],
+      status: (geometry_status === "unresolved" ? "blocked" : run?.status === "ready_for_review" ? "ready" : confidence < 0.6 ? "blocked" : "review") as WorkflowTakeoffRow["status"],
       source: String(payload.source_file_name || row.drawing_reference || run?.source_revision_label || "Canonical takeoff"),
       segment_id: null,
       segment_name: String(row.element_type || "Canonical"),
       source_file_id: null,
+      geometry_status,
+      missing_refs: [],
     };
   });
 }
