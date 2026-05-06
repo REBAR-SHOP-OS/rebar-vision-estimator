@@ -93,10 +93,10 @@ export default function OrdersPage() {
               <div><Label className="text-xs">Order Number</Label><Input value={newOrderNum} onChange={e => setNewOrderNum(e.target.value)} placeholder="e.g. ORD-001" className="h-9 text-sm" /></div>
               <div><Label className="text-xs">Customer Name</Label><Input value={newCustomer} onChange={e => setNewCustomer(e.target.value)} placeholder="Optional" className="h-9 text-sm" /></div>
               <div><Label className="text-xs">Link to Project</Label>
-                <Select value={selectedProject} onValueChange={setSelectedProject}>
+                <Select value={selectedProject || "__none__"} onValueChange={(v) => setSelectedProject(v === "__none__" ? "" : v)}>
                   <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="None" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="" className="text-sm">None</SelectItem>
+                    <SelectItem value="__none__" className="text-sm">None</SelectItem>
                     {projects.map(p => <SelectItem key={p.id} value={p.id} className="text-sm">{p.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
