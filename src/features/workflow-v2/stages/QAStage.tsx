@@ -670,6 +670,18 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                         {sel.location_label && (
                           <div className="border-2 border-primary bg-primary/5 px-2 py-1.5 text-[10px] uppercase tracking-[0.1em] text-primary font-bold flex items-center gap-1.5"><span>📍</span><span className="truncate">{sel.location_label}</span></div>
                         )}
+                        <div className="text-[9px] uppercase tracking-[0.12em] flex items-center gap-1.5">
+                          {exactBbox ? (
+                            <span className="px-1.5 py-0.5 bg-primary/10 text-primary border border-primary/30">Anchor: exact</span>
+                          ) : approxBbox ? (
+                            <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 border border-amber-500/30" title={approxReason}>Anchor: approximate</span>
+                          ) : (
+                            <span className="px-1.5 py-0.5 bg-muted text-muted-foreground border border-border" title={approxReason}>Anchor: unavailable</span>
+                          )}
+                          {!exactBbox && approxReason && (
+                            <span className="text-muted-foreground normal-case tracking-normal text-[10px] italic truncate">{approxReason}</span>
+                          )}
+                        </div>
                         <div className="text-[11px] text-muted-foreground leading-relaxed">{sel.description || "No description provided."}</div>
                         {sel.location?.source_excerpt && (
                           <div className="text-[10px] italic text-muted-foreground border-l-2 border-border pl-2 mt-1">"{sel.location.source_excerpt}"</div>
