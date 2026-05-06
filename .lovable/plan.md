@@ -1,48 +1,75 @@
-# Make every QA question state the exact drawing location
+## Goal
+Reword every QA / unresolved-geometry question so it asks the estimator for **raw drawing inputs** (dimensions, counts, spacing as drawn) and never for derived values ("perimeter", "total length", "qty", "verify total"). The system performs the math.
 
-## What's already in place
-`takeoff-data.ts` already builds a `location` object and `location_label` for each `WorkflowQaIssue` from `validation_issues.source_refs[0]` plus `estimate_items.assumptions_json`, and prefixes `iss.title` with the label. `QAStage.tsx` shows the label inside a bordered box under the title. The pieces exist but are incomplete — the spoken **question text** (`description`) and the **list-row preview** still don't lead with the location, structured fields are not consistently extracted on the backend, and there's no source-excerpt fallback when no sheet/grid is known.
+## Where questions are generated
 
-## Changes (minimal patches only)
+1. **`supabase/functions/auto-estimate/index.ts`** (lines ~970–1014)
+   - Currently builds:
+     - `title = "Unresolved geometry: <description>"`
+     - `description = "Missing: perimeter; element dimensions\nDetailer notes: …"`
+   - This is the source string the user is seeing in the screenshot ("Missing: rebar callout; element dimensions").
 
-### 1. `src/features/workflow-v2/takeoff-data.ts`
-- Extend `extractLocationFromRef` to also pull `callout`, `area`, `wall`, `footing`, `pad`, `pad_name`, `wall_name`, `footing_name` into `element_reference`, and read `aj.location` / `ref.location` if backends already nest them.
-- Build an enriched `question_text` on each `WorkflowQaIssue`:
-  - Format: `"<location_label>: <original description or title>."`
-  - If `location_label` is null, fall back to `Page <n>` and finally to `source_excerpt` (truncated to ~120 chars, prefixed with `Source: "<excerpt>"`).
-- Always set `iss.description` to `question_text` so the QA panel (which renders `sel.description`) shows the location-led sentence. Keep the original message in `iss.raw_description` for debugging.
-- Make sure canonical (rebar.takeoff_warnings) issues also get a real `location_label` from `takeoff_items.drawing_reference` / `extraction_payload.sheet|page|grid|detail|element` (currently it only uses a sliced UUID). Pull that data in `loadCanonicalQaIssues` via a single follow-up select on `takeoff_items`.
-- Add the new structured fields onto `WorkflowQaIssue.location` type: `callout`, `wall_reference`, `footing_reference`, `pad_reference` (plus the existing six). All optional.
+2. **`src/features/workflow-v2/takeoff-data.ts`** — `buildQuestionText()`
+   - Currently prefixes the location and falls back to the original description verbatim. It does not rewrite the ask.
 
-### 2. `src/features/workflow-v2/stages/QAStage.tsx`
-- In the issue list (line 240) replace `it.description?.slice(0,50)` with `(it.location_label || "") + " — " + (it.description||"")` truncated, so each row in the left list also leads with the location.
-- In the right detail panel (line 535–539) keep the boxed `location_label`, but ensure the `description` shown below is the new location-prefixed `question_text`. Also render `source_excerpt` (italic, "Source: …") if present and no grid/detail was resolved.
-- The Modification mini-card (line 412) already concatenates `location_label` — keep as is.
-- Drawing review panel link is already keyed off `locator.page_number` / `linked_item.page_number`; no change needed.
+## Rewrite strategy (deterministic, no AI call)
 
-### 3. Backend persistence (so future issues carry structured fields natively)
+Add a small pure helper `buildRawInputAsk(ctx)` in `auto-estimate/index.ts` (and a mirror in `takeoff-data.ts` for legacy/canonical issues that already exist in the DB without the new wording). It maps:
 
-**`supabase/functions/auto-estimate/index.ts`** (and any helper that writes to `validation_issues` / `estimate_items.assumptions_json`):
-- When inserting a `validation_issues` row, populate `source_refs[0]` with the structured shape:
-  ```json
-  {
-    "estimate_item_id": "...",
-    "page_number": 12,
-    "sheet": "S-201",
-    "detail": "4",
-    "grid": "B-4",
-    "zone": "north foundation wall",
-    "element": "F-3",
-    "excerpt": "...verbatim line from drawing text..."
-  }
-  ```
-- When writing `estimate_items.assumptions_json`, mirror the same keys (`sheet`, `detail`, `grid`, `zone`, `element`, `excerpt`, `page_number`) so the loader can reconstruct location even if `source_refs` is empty.
-- No DB schema change required — both columns are already `jsonb`. Existing rows continue to work via the loader's `pickStr` fallbacks.
+- **element_type / callout keywords → element class**
+  - `slab edge`, `frost slab`, `slab on grade` → `slab_edge`
+  - `strip footing`, `cont footing`, `footing` → `strip_footing`
+  - `pad`, `housekeeping pad`, `equipment pad` → `pad`
+  - `wall`, `foundation wall`, `retaining wall` → `wall`
+  - `column`, `pier`, `cage` → `cage`
+  - else → `generic`
 
-### 4. Verify
-- Open `/app/project/3f840fa0-…` → Review → confirm each QA card's description now starts with `Sheet … · Page … · …:` and that rows without a real sheet show `Page N: …` or `Source: "…"`.
-- Confirm the right-side blueprint panel still scrolls to the same page/bbox.
+- **missing_refs token → required raw input phrase**
+  - `perimeter`, `edge_length`, `run_length`, `length` → "the run/length dimension shown on the drawing"
+  - `wall_height`, `height` → "the wall height shown on the drawing"
+  - `pad_length`, `pad_width`, `dimensions`, `element_dimensions` → "the pad/element length and width shown on the drawing"
+  - `spacing`, `o_c` → "the bar spacing shown on the drawing"
+  - `count`, `qty` → "the bar count shown on the callout"
+  - `rebar_callout`, `callout` → "the rebar callout text shown on the drawing"
+  - `cover` → "the concrete cover shown on the drawing"
+
+- **element class → what the system will compute** (closing clause):
+  - slab_edge → "so the system can calculate total edge run, qty, length, and weight"
+  - strip_footing → "so the system can calculate total length and weight"
+  - wall → "so the system can calculate bar length, qty, and weight"
+  - pad → "so the system can calculate qty and total length"
+  - cage → "so the system can calculate stirrup count, length, and weight"
+  - generic → "so the system can calculate qty, length, and weight"
+
+Format produced:
+```
+<location_label>, <element noun> at <callout/grid>: enter <raw input list> for "<callout text>" <closing clause>.
+```
+If callout text is missing, drop the `for "..."` segment. If element noun unknown, omit it.
+
+## Files to edit (minimal patch policy)
+
+1. **`supabase/functions/auto-estimate/index.ts`**
+   - Add `buildRawInputAsk()` helper near the unresolved-issues block.
+   - Replace `baseTitle` / `baseDesc` construction (lines 988–989) so:
+     - `title` = `<locLabel> — <element noun> at <where>` (short, no "Missing:")
+     - `description` = the raw-input ask sentence above.
+   - Keep `source_refs` shape unchanged.
+
+2. **`src/features/workflow-v2/takeoff-data.ts`**
+   - Add the same helper (or shared logic) and call it inside `buildQuestionText` *only when* the original description starts with `Missing:` or `Unresolved geometry` or the issue type is `unresolved_geometry`. This rewrites already-stored issues at read time so the user sees the new wording immediately without re-running auto-estimate.
+   - For issues that aren't unresolved-geometry (e.g., generic warnings), keep current behavior but strip leading verbs like "verify", "confirm", "find", "calculate" → replace with "enter <raw input>".
+
+3. **`src/features/workflow-v2/stages/QAStage.tsx`**
+   - No structural change. The list row and detail panel already render `description`. Just confirm the longer sentence wraps cleanly (it already does — `line-clamp` removed earlier). No edit needed unless wrapping breaks; in that case widen the description container only.
 
 ## Out of scope
-- No new tables, no migrations, no schema changes.
-- No edits to unrelated stages, no UI redesign, no rename of fields.
+- No DB schema changes.
+- No new tables, no migration.
+- No change to overlay/zoom behavior.
+- Canonical (rebar.takeoff_warnings) messages are kept as-is unless they match the unresolved-geometry pattern; the read-time rewrite handles cosmetic improvement.
+
+## QA after implementation
+- Reload `/app/project/3f840fa0-…` QA tab; verify the LEGACY:EF478A1E issue now reads e.g.:
+  > Page 12, frost slab edge at "2-15M TOP AND BOTTOM": enter the slab edge length and width shown on the drawing for "2-15M TOP AND BOTTOM" so the system can calculate total edge run, qty, length, and weight.
+- Confirm no question contains the words "verify total", "confirm total", "calculate", "find … length", "perimeter".
