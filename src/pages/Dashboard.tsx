@@ -112,7 +112,24 @@ const Dashboard: React.FC = () => {
       return;
     }
 
+    const projectBridgeHealthy = (project as Project & {
+      canonicalBridgeHealthy?: boolean;
+      canonicalBridgeError?: string;
+    }).canonicalBridgeHealthy !== false;
+
+    if (!projectBridgeHealthy) {
+      const projectBridgeError = (project as Project & {
+        canonicalBridgeError?: string;
+      }).canonicalBridgeError;
+      toast.warning(
+        projectBridgeError
+          ? `Project created with legacy fallback. Canonical sync will retry later: ${projectBridgeError}`
+          : "Project created with legacy fallback. Canonical sync will retry later.",
+      );
+    }
+
     let uploadedCount = 0;
+    let legacyFallbackFileCount = 0;
 
     for (const file of files) {
       const path = `${user.id}/${project.id}/${Date.now()}_${file.name}`;
@@ -131,7 +148,7 @@ const Dashboard: React.FC = () => {
       }
 
       try {
-        await createProjectFileWithCanonicalBridge(supabase, {
+        const fileRow = await createProjectFileWithCanonicalBridge(supabase, {
           projectId: project.id,
           userId: user.id,
           fileName: file.name,
@@ -142,6 +159,9 @@ const Dashboard: React.FC = () => {
           checksumSha256,
         });
         uploadedCount++;
+
+        const fileBridgeHealthy = (fileRow as { canonicalBridgeHealthy?: boolean }).canonicalBridgeHealthy !== false;
+        if (!fileBridgeHealthy) legacyFallbackFileCount++;
       } catch (fileErr) {
         console.warn(`Failed to complete canonical intake for ${file.name}:`, fileErr);
         toast.error(`Canonical file intake failed: ${file.name}`);
@@ -150,6 +170,11 @@ const Dashboard: React.FC = () => {
 
     if (uploadedCount > 0) {
       toast.success(`${uploadedCount} file${uploadedCount > 1 ? "s" : ""} uploaded`);
+      if (legacyFallbackFileCount > 0) {
+        toast.warning(
+          `${legacyFallbackFileCount} file${legacyFallbackFileCount > 1 ? "s were" : " was"} saved through the legacy fallback path while canonical sync is unavailable.`,
+        );
+      }
       supabase.functions.invoke("process-pipeline", { body: { project_id: project.id } }).catch(console.warn);
     } else {
       toast.error("No files were uploaded successfully");
