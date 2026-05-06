@@ -968,24 +968,51 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
     const unresolvedIssues = dedupedRows
       .map((r, idx) => ({ r, id: inserted?.[idx]?.id }))
       .filter((x) => (x.r as any).assumptions_json?.geometry_status === "unresolved")
-      .map((x) => ({
+      .map((x) => {
+        const aj: any = (x.r as any).assumptions_json || {};
+        const sheet = aj.sheet || aj.sheet_id || aj.source_sheet || null;
+        const detail = aj.detail || aj.detail_reference || null;
+        const grid = aj.grid || aj.grid_reference || null;
+        const zone = aj.zone || aj.zone_reference || aj.area || null;
+        const element = aj.element || aj.element_reference || aj.mark || aj.callout
+          || aj.wall_name || aj.footing_name || aj.pad_name || null;
+        const excerpt = aj.excerpt || aj.source_excerpt || null;
+        const locParts: string[] = [];
+        if (sheet) locParts.push(`Sheet ${sheet}`);
+        if (aj.page_number) locParts.push(`Page ${aj.page_number}`);
+        if (detail) locParts.push(`Detail ${detail}`);
+        if (grid) locParts.push(`Grid ${grid}`);
+        if (zone) locParts.push(String(zone));
+        if (element) locParts.push(String(element));
+        const locLabel = locParts.join(" · ");
+        const baseTitle = `Unresolved geometry: ${x.r.description.slice(0, 80)}`;
+        const baseDesc = `Missing: ${(aj.missing_refs || []).join("; ")}${graph.verifyNotes.length ? `\nDetailer notes: ${graph.verifyNotes.slice(0, 3).join(" | ")}` : ""}`;
+        return ({
         user_id: user.id,
         project_id,
         segment_id,
         source_file_id: (x.r as any).source_file_id || null,
         issue_type: "unresolved_geometry",
         severity: "error",
-        title: `Unresolved geometry: ${x.r.description.slice(0, 80)}`,
-        description: `Missing: ${((x.r as any).assumptions_json?.missing_refs || []).join("; ")}${graph.verifyNotes.length ? `\nDetailer notes: ${graph.verifyNotes.slice(0, 3).join(" | ")}` : ""}`,
+        title: locLabel ? `${locLabel}: ${baseTitle}` : baseTitle,
+        description: locLabel ? `${locLabel}: ${baseDesc}` : baseDesc,
+        sheet_id: sheet,
         status: "open",
         source_refs: [{
           estimate_item_id: x.id,
-          missing: (x.r as any).assumptions_json?.missing_refs || [],
-          page_number: (x.r as any).assumptions_json?.page_number || null,
+          missing: aj.missing_refs || [],
+          page_number: aj.page_number || null,
+          sheet,
+          detail,
+          grid,
+          zone,
+          element,
+          excerpt,
           bar_size: (x.r as any).bar_size || null,
           description: (x.r as any).description || null,
         }],
-      }));
+      });
+      });
     if (unresolvedIssues.length > 0) {
       const { error: viErr } = await supabase.from("validation_issues").insert(unresolvedIssues);
       if (viErr) console.warn("validation_issues insert failed:", viErr.message);
