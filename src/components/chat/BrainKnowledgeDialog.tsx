@@ -174,11 +174,25 @@ const BrainKnowledgeDialog: React.FC = () => {
         continue;
       }
 
+      // Extract text so the runtime (auto-estimate) can use this file as an
+      // assumption authority. Without extracted content, the file is invisible
+      // to the takeoff engine.
+      let extracted = "";
+      if (/\.pdf$/i.test(file.name)) {
+        extracted = await extractPdfText(file);
+      } else if (/\.(txt|md|csv)$/i.test(file.name)) {
+        try { extracted = (await file.text()).slice(0, 500_000); } catch { /* ignore */ }
+      }
+      if (!extracted) {
+        toast.warning(`${file.name}: text could not be extracted — file is stored but won't be used as a runtime authority.`);
+      }
+
       const { error } = await supabase.from("agent_knowledge").insert({
         user_id: user.id,
         title: file.name,
         file_path: filePath,
         file_name: file.name,
+        content: extracted || null,
         type: "file",
       });
 
@@ -189,6 +203,33 @@ const BrainKnowledgeDialog: React.FC = () => {
     loadItems();
     setUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // Re-parse a previously uploaded file to populate `content` on legacy rows.
+  const reparseFile = async (item: KnowledgeItem) => {
+    if (!item.file_path || !user) return;
+    try {
+      const { data: signed, error: sErr } = await supabase.storage
+        .from("blueprints")
+        .createSignedUrl(item.file_path, 60);
+      if (sErr || !signed?.signedUrl) throw sErr || new Error("No signed URL");
+      const resp = await fetch(signed.signedUrl);
+      const blob = await resp.blob();
+      const fakeFile = new File([blob], item.file_name || "file.pdf", { type: blob.type });
+      let extracted = "";
+      if (/\.pdf$/i.test(fakeFile.name)) extracted = await extractPdfText(fakeFile);
+      else if (/\.(txt|md|csv)$/i.test(fakeFile.name)) extracted = (await fakeFile.text()).slice(0, 500_000);
+      if (!extracted) { toast.error("Could not extract text"); return; }
+      const { error } = await supabase.from("agent_knowledge")
+        .update({ content: extracted })
+        .eq("id", item.id);
+      if (error) throw error;
+      toast.success(`Parsed ${fakeFile.name} (${(extracted.length / 1000).toFixed(0)}k chars)`);
+      loadItems();
+    } catch (err) {
+      console.warn("Re-parse failed:", err);
+      toast.error("Re-parse failed");
+    }
   };
 
   const deleteItem = async (item: KnowledgeItem) => {
