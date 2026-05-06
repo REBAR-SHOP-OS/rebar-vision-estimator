@@ -245,12 +245,14 @@ mcpServer.tool("update_project", {
 
 const transport = new StreamableHttpTransport();
 const httpHandler = transport.bind(mcpServer);
+const MCP_ALLOW_HEADERS = "authorization, x-api-key, content-type, accept, x-client-info, apikey";
 
 app.all("/*", async (c) => {
   if (c.req.method === "OPTIONS") {
     return new Response(null, {
       headers: {
         ...corsHeaders(c.req.raw),
+        "Access-Control-Allow-Headers": MCP_ALLOW_HEADERS,
         "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
       },
     });
