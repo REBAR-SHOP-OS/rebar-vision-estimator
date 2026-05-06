@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { StageHeader, Pill, EmptyState, GateBanner, type StageProps } from "./_shared";
 import { ArrowLeft, ArrowRight, Wand2 } from "lucide-react";
 import { loadWorkflowQaIssues, type WorkflowQaIssue } from "../takeoff-data";
