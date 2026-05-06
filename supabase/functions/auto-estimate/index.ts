@@ -248,6 +248,31 @@ Generate estimate items for this segment. Base quantities on the ACTUAL drawing 
       });
     }
 
+    // Mass lookup (kg/m for rebar, kg/m² for WWM) — used to backfill missing weights
+    const REBAR_MASS: Record<string, number> = {
+      "10M": 0.785, "15M": 1.570, "20M": 2.355, "25M": 3.925, "30M": 5.495, "35M": 7.850,
+      "#3": 0.561, "#4": 0.994, "#5": 1.552, "#6": 2.235, "#7": 3.042, "#8": 3.973,
+    };
+    const WWM_MASS: Record<string, number> = {
+      "6X6-W1.4/W1.4": 0.93, "6X6-W2.1/W2.1": 1.37, "6X6-W2.9/W2.9": 1.90,
+      "6X6-W4.0/W4.0": 2.63, "4X4-W2.1/W2.1": 2.05, "4X4-W4.0/W4.0": 3.94,
+    };
+    const massFor = (size: string, type: string): number => {
+      const k = String(size || "").toUpperCase().trim();
+      if (type === "wwm") return WWM_MASS[k] || 0;
+      const m = k.match(/^(10M|15M|20M|25M|30M|35M|#[3-8])/);
+      return m ? REBAR_MASS[m[1]] || 0 : 0;
+    };
+    // Backfill total_weight from total_length × mass when AI returned 0
+    for (const it of items) {
+      const len = Number(it.total_length) || 0;
+      const wgt = Number(it.total_weight) || 0;
+      if (wgt === 0 && len > 0) {
+        const mass = massFor(String(it.bar_size || ""), String(it.item_type || "rebar"));
+        if (mass > 0) it.total_weight = +(len * mass).toFixed(2);
+      }
+    }
+
     // Weight validation gate — flag outliers
     const totalAiWeight = items.reduce((s: number, i: any) => s + (Number(i.total_weight) || 0), 0);
     const segType = segment.segment_type;
