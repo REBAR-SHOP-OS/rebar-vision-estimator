@@ -151,24 +151,33 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const imgH = locator?.image_size?.h || imgSize?.h || 0;
   // Fallback: derive an approximate bbox by matching the issue's anchor text
   // (callout / element ref / source excerpt) against extracted PDF text items.
-  const approxBbox = useMemo<[number, number, number, number] | null>(() => {
-    if (exactBbox) return null;
-    if (!pageText || pageText.length === 0) return null;
+  const approxResult = useMemo<{ bbox: [number, number, number, number] | null; reason: string }>(() => {
+    if (exactBbox) return { bbox: null, reason: "" };
+    if (!pageText || pageText.length === 0) return { bbox: null, reason: "no OCR text on page" };
     const loc = sel?.location || {};
+    // Prioritise object-level anchors: quoted callout > detail > grid > element name.
     const anchors: string[] = [];
     const push = (v?: string | null) => {
       if (!v) return;
       const s = String(v).trim();
-      if (s.length >= 3) anchors.push(s);
+      if (s.length < 3) return;
+      if (/^page\s*\d+$/i.test(s)) return;
+      anchors.push(s);
     };
-    push(loc.element_reference); push(loc.detail_reference); push(loc.grid_reference);
-    push(loc.source_excerpt);
+    if (loc.source_excerpt) {
+      const m = String(loc.source_excerpt).match(/"([^"]{3,60})"/);
+      if (m) push(m[1]);
+    }
+    push(loc.detail_reference);
+    push(loc.grid_reference);
+    push(loc.element_reference);
     push(sel?.linked_item?.bar_size);
     if (loc.source_excerpt) {
-      const m = String(loc.source_excerpt).match(/"([^"]{3,60})"|([A-Z0-9][A-Z0-9 \-#@.\/]{3,60})/);
-      if (m) push(m[1] || m[2]);
+      const m2 = String(loc.source_excerpt).match(/([A-Z0-9][A-Z0-9 \-#@.\/]{5,60})/);
+      if (m2) push(m2[1]);
     }
-    if (anchors.length === 0) return null;
+    push(loc.source_excerpt);
+    if (anchors.length === 0) return { bbox: null, reason: "no specific callout, detail, grid, or element name to search for" };
 
     // Group text items into lines by y-band (median item height).
     const heights = pageText.map((t) => t.h).filter((h) => h > 0).sort((a, b) => a - b);
@@ -205,10 +214,10 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
         const needle = a.toLowerCase().replace(/\s+/g, " ");
         const tok = pageText.find((t) => t.str.toLowerCase().includes(needle));
         if (tok) {
-          return tightBox([tok], imgW, imgH);
+          return { bbox: tightBox([tok], imgW, imgH), reason: `token match on "${a}"` };
         }
       }
-      return null;
+      return { bbox: null, reason: "no OCR token matched the issue's callout/detail/element" };
     }
 
     // Restrict to the matched-token span within the line for tightest possible box.
@@ -229,8 +238,16 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
         }
       }
     }
-    return tightBox(span, imgW, imgH);
+    const xs = span.map((s) => s.x);
+    const xe = span.map((s) => s.x + s.w);
+    const spanW = Math.max(...xe) - Math.min(...xs);
+    if (imgW && spanW > imgW * 0.45) {
+      return { bbox: null, reason: `matched text "${bestAnchor}" appears in a wide page strip, not a specific object` };
+    }
+    return { bbox: tightBox(span, imgW, imgH), reason: `phrase match on "${bestAnchor}"` };
   }, [exactBbox, pageText, sel?.id, sel?.location, sel?.linked_item?.bar_size, imgW, imgH]);
+  const approxBbox = approxResult.bbox;
+  const approxReason = approxResult.reason;
   const bbox = exactBbox || approxBbox;
   const bboxIsApprox = !exactBbox && !!approxBbox;
   const center = bbox && imgW && imgH
