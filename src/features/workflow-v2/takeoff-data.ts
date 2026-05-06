@@ -40,6 +40,9 @@ export interface WorkflowQaIssue {
   issue_type: string;
   source_file_id?: string | null;
   source_refs?: any;
+  // Pinpoint locator + linked-row preview (filled by loader)
+  locator?: { page_number?: number | null; bbox?: [number, number, number, number] | null; image_size?: { w: number; h: number } | null } | null;
+  linked_item?: { id: string; description: string | null; bar_size: string | null; quantity_count: number; total_length: number; total_weight: number; missing_refs: string[] } | null;
 }
 
 const CLOSED_STATUSES = new Set(["resolved", "closed"]);
@@ -280,6 +283,43 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
   const legacyIssues = ((legacyRes.data || []) as WorkflowQaIssue[])
     .filter((issue) => isOpenStatus(issue.status))
     .map((issue) => ({ ...issue, id: `legacy:${issue.id}` }));
+
+  // Backfill locator + linked_item from estimate_items.assumptions_json
+  const itemIds: string[] = [];
+  for (const iss of legacyIssues) {
+    const ref = Array.isArray(iss.source_refs) ? iss.source_refs[0] : null;
+    const eid = ref?.estimate_item_id;
+    if (eid) itemIds.push(eid);
+  }
+  if (itemIds.length > 0) {
+    const { data: items } = await supabase
+      .from("estimate_items")
+      .select("id, description, bar_size, quantity_count, total_length, total_weight, assumptions_json")
+      .in("id", itemIds);
+    const byId = new Map<string, any>((items || []).map((r: any) => [r.id, r]));
+    for (const iss of legacyIssues) {
+      const ref = Array.isArray(iss.source_refs) ? iss.source_refs[0] : null;
+      const eid = ref?.estimate_item_id;
+      const item = eid ? byId.get(eid) : null;
+      const aj = (item?.assumptions_json || {}) as Record<string, any>;
+      iss.locator = {
+        page_number: ref?.page_number ?? aj.page_number ?? null,
+        bbox: ref?.bbox ?? aj.bbox ?? null,
+        image_size: ref?.image_size ?? aj.image_size ?? null,
+      };
+      if (item) {
+        iss.linked_item = {
+          id: item.id,
+          description: item.description,
+          bar_size: item.bar_size,
+          quantity_count: Number(item.quantity_count || 0),
+          total_length: Number(item.total_length || 0),
+          total_weight: Number(item.total_weight || 0),
+          missing_refs: Array.isArray(aj.missing_refs) ? aj.missing_refs : (ref?.missing || []),
+        };
+      }
+    }
+  }
 
   return [...legacyIssues, ...canonicalIssues];
 }

@@ -522,6 +522,36 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
     });
     items = enriched;
 
+    // Best-effort page locator: for each item, scan OCR pages for the bar mark
+    // / bar-size / strongest description token and attach the first matching
+    // page_number. No bbox available yet — UI degrades to a centered pin on
+    // that page (much better than rendering the wrong sheet).
+    {
+      const pages = (searchPages || [])
+        .filter((p: any) => p && (p.raw_text || "").length > 20)
+        .map((p: any) => ({ page_number: Number(p.page_number) || 1, text: String(p.raw_text || "").toUpperCase() }));
+      const pickPage = (it: any): number | null => {
+        if (pages.length === 0) return null;
+        const tokens: string[] = [];
+        const desc = String(it.description || "").toUpperCase();
+        const sz = String(it.bar_size || "").toUpperCase().trim();
+        const markMatch = desc.match(/\b(BS\d+|BS-\d+|F\d+|FW\d+|W\d+|P\d+|C\d+|GB\d+|B\d+|S\d+|PC\d+)\b/);
+        if (markMatch) tokens.push(markMatch[1]);
+        if (sz) tokens.push(sz);
+        const words = desc.split(/[^A-Z0-9#@.\-]+/).filter((w) => w.length >= 4).slice(0, 4);
+        tokens.push(...words);
+        for (const tok of tokens) {
+          const hit = pages.find((p) => p.text.includes(tok));
+          if (hit) return hit.page_number;
+        }
+        return null;
+      };
+      for (const it of items) {
+        const p = pickPage(it);
+        if (p) it._page_number = p;
+      }
+    }
+
     // Weight validation gate — flag outliers
     const totalAiWeight = items.reduce((s: number, i: any) => s + (Number(i.total_weight) || 0), 0);
     const segType = segment.segment_type;
@@ -561,6 +591,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         geometry_status: item._geometry_status || "unresolved",
         missing_refs: item._missing_refs || [],
         derivation: item._derivation || null,
+        page_number: item._page_number || null,
       },
     }));
 
@@ -602,7 +633,13 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         title: `Unresolved geometry: ${x.r.description.slice(0, 80)}`,
         description: `Missing: ${((x.r as any).assumptions_json?.missing_refs || []).join("; ")}${graph.verifyNotes.length ? `\nDetailer notes: ${graph.verifyNotes.slice(0, 3).join(" | ")}` : ""}`,
         status: "open",
-        source_refs: [{ estimate_item_id: x.id, missing: (x.r as any).assumptions_json?.missing_refs || [] }],
+        source_refs: [{
+          estimate_item_id: x.id,
+          missing: (x.r as any).assumptions_json?.missing_refs || [],
+          page_number: (x.r as any).assumptions_json?.page_number || null,
+          bar_size: (x.r as any).bar_size || null,
+          description: (x.r as any).description || null,
+        }],
       }));
     if (unresolvedIssues.length > 0) {
       const { error: viErr } = await supabase.from("validation_issues").insert(unresolvedIssues);
