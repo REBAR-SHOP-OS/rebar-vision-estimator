@@ -235,7 +235,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       // Check if mode was already selected
       const modeMsg = data.find((m) => m.metadata && (m.metadata as Record<string, unknown>).calculationMode);
       if (modeMsg) {
-        const mode = (modeMsg.metadata as Record<string, unknown>).calculationMode;
+        const mode = (modeMsg.metadata as Record<string, unknown>).calculationMode as "smart" | "step-by-step";
         setCalculationMode(mode);
         onModeChange?.(mode);
         onStepChange?.(1);
@@ -717,7 +717,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   }, [user]);
 
   // ── Atomic Truth Pipeline helpers ──
-  const extractAtomicTruthJSON = (content: string): Record<string, unknown> | null => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const extractAtomicTruthJSON = (content: string): any => {
     const startMarker = "%%%ATOMIC_TRUTH_JSON_START%%%";
     const endMarker = "%%%ATOMIC_TRUTH_JSON_END%%%";
     let startIdx = content.indexOf(startMarker);
@@ -867,11 +868,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   };
 
   const buildSyntheticQuote = (elements: any[], summary: any) => {
-    const barList = (elements as Record<string, unknown>[]).flatMap((e) => {
+    const barList: any[] = (elements as Record<string, unknown>[]).flatMap((e) => {
       const barLines = ((e.extraction as Record<string, unknown>)?.truth as Record<string, unknown>)?.bar_lines as Record<string, unknown>[] | undefined
         || e.bar_lines as Record<string, unknown>[] | undefined
         || [];
-      return barLines.map((b) => ({
+      return barLines.map((b: any) => ({
         ...b,
         element_type: e.element_type || e.type || "OTHER",
         element_id: e.element_id || e.id || "",
@@ -1629,10 +1630,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
     // Separate elements with and without spatial data
     const withBbox: OverlayElement[] = [];
-    const withoutBbox: Record<string, unknown>[] = [];
-    const quoteElements = ((quoteResult?.quote as Record<string, unknown>)?.elements as Record<string, unknown>[]) ?? [];
+    const withoutBbox: any[] = [];
+    const quoteElements: any[] = ((quoteResult?.quote as Record<string, unknown>)?.elements as any[]) ?? [];
 
-    (validationData.elements as Record<string, unknown>[]).forEach((el) => {
+    (validationData.elements as any[]).forEach((el: any) => {
       const bbox = el.regions?.tag_region?.bbox;
       const hasBbox = bbox && (bbox[2] - bbox[0]) > 10 && (bbox[3] - bbox[1]) > 10;
       if (hasBbox) {
@@ -1660,15 +1661,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       const gap = 60;
 
       // Group by type for organized placement
-      const grouped: Record<string, Record<string, unknown>[]> = {};
-      withoutBbox.forEach((el) => {
+      const grouped: Record<string, any[]> = {};
+      withoutBbox.forEach((el: any) => {
         const t = el.element_type || "OTHER";
         if (!grouped[t]) grouped[t] = [];
         grouped[t].push(el);
       });
 
       Object.values(grouped).forEach((group) => {
-        group.forEach((el) => {
+        group.forEach((el: any) => {
           if (curY + boxSize > imgH - 40) {
             curY = 80;
             curX += 200;
@@ -1879,7 +1880,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             </div>
           ) : (validationData || importedBarList) ? (() => {
             // Compute estimation group flags
-            const elements = (validationData?.elements as Record<string, unknown>[]) || [];
+            const elements = ((validationData?.elements as any[]) || []) as any[];
             const hasLoose = elements.some((e) => !e.estimation_group || e.estimation_group === "LOOSE_REBAR");
             const hasCage = elements.some((e) => e.estimation_group === "CAGE_ASSEMBLY");
             const hasBothGroups = hasLoose && hasCage;
@@ -1894,17 +1895,17 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 );
 
             // Filter bar list by group
-            const rawBarList = ((quoteResult?.quote as Record<string, unknown>)?.bar_list as Record<string, unknown>[]) || importedBarList || [];
+            const rawBarList: any[] = ((quoteResult?.quote as Record<string, unknown>)?.bar_list as any[]) || importedBarList || [];
             const filteredBarList = estimationGroupFilter === "all"
               ? rawBarList
-              : rawBarList.filter((b) =>
+              : rawBarList.filter((b: any) =>
                   estimationGroupFilter === "cage"
                     ? b.estimation_group === "CAGE_ASSEMBLY"
                     : !b.estimation_group || b.estimation_group === "LOOSE_REBAR"
                 );
 
             // Recompute summary from filtered elements
-            const filteredSummary = validationData?.summary
+            const filteredSummary: any = validationData?.summary
               ? {
                   ...(validationData.summary as Record<string, unknown>),
                   total_elements: filteredElements.length,
@@ -1915,7 +1916,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             const isCageOrBarListOnly = scopeData?.primaryCategory === "cage_only" || scopeData?.primaryCategory === "bar_list_only";
             const showCardsTab = !isCageOrBarListOnly && filteredElements.some((e) => !e.estimation_group || e.estimation_group === "LOOSE_REBAR");
             const showBarListTab = filteredBarList.length > 0;
-            const showBendingTab = filteredBarList.some((b) => b.shape_code && b.shape_code !== "straight" && b.shape_code !== "closed");
+            const showBendingTab = filteredBarList.some((b: any) => b.shape_code && b.shape_code !== "straight" && b.shape_code !== "closed");
 
             const defaultTab = isCageOrBarListOnly ? "barlist" : (showCardsTab ? "cards" : "barlist");
 
@@ -1964,10 +1965,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                         elements={filteredElements}
                         summary={filteredSummary}
                         questions={validationData.questions || []}
-                        quoteResult={quoteResult}
+                        quoteResult={quoteResult as any}
                         onAnswerQuestion={handleAnswerQuestion}
                         onRequestQuote={handleRequestQuote}
-                        scopeData={scopeData}
+                        scopeData={scopeData as any}
                         onShowOnDrawing={handleShowOnDrawing}
                         onToggleViewer={() => openBlueprintViewer()}
                         showViewer={showBlueprintViewer}
@@ -1986,7 +1987,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                         barList={filteredBarList}
                         onShowOnDrawing={handleShowOnDrawing}
                         selectedElementId={selectedElementId}
-                        onImport={(data) => setImportedBarList(data)}
+                        onImport={(data) => setImportedBarList(data as any)}
                       />
                     </TabsContent>
                   )}
@@ -2057,7 +2058,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                         {(quoteResult.excluded as Record<string, unknown>[]).map((ex, i) => <p key={i}>• {ex.element_id as string}: {ex.reason as string}</p>)}
                       </div>
                     )}
-                    <ExportButtons ref={(el) => { if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 300); }} quoteResult={quoteResult} elements={validationData?.elements || []} scopeData={scopeData} projectId={projectId} exportGate={exportGate} />
+                    <ExportButtons ref={(el) => { if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 300); }} quoteResult={quoteResult as any} elements={validationData?.elements || []} scopeData={scopeData as any} projectId={projectId} exportGate={exportGate} />
                   </div>
                 )}
 
@@ -2065,9 +2066,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 {quoteResult && (
                   <ApprovalWorkflow
                     projectId={projectId}
-                    quoteResult={quoteResult}
+                    quoteResult={quoteResult as any}
                     elements={validationData?.elements || []}
-                    scopeData={scopeData}
+                    scopeData={scopeData as any}
                   />
                 )}
               </div>
@@ -2166,11 +2167,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                     onClick={async () => {
                       if (card.action === 'exportExcel') {
                         if (!assertExportAllowed()) return;
-                        await exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData });
+                        await exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData: scopeData as any });
                         toast.success("Excel exported");
                       } else if (card.action === 'exportPdf') {
                         if (!assertExportAllowed()) return;
-                        await exportPdfFile({ quoteResult, elements: validationData?.elements || [], scopeData, projectId });
+                        await exportPdfFile({ quoteResult, elements: validationData?.elements || [], scopeData: scopeData as any, projectId });
                         toast.success("PDF exported");
                       }
                     }}
@@ -2240,7 +2241,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                             return;
                           }
                           if (!assertExportAllowed()) return;
-                          await exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData });
+                          await exportExcelFile({ quoteResult, elements: validationData?.elements || [], scopeData: scopeData as any });
                           toast.success("Excel exported");
                         } else if (card.action === 'exportPdf') {
                           if (!quoteResult?.quote) {
@@ -2248,7 +2249,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                             return;
                           }
                           if (!assertExportAllowed()) return;
-                          await exportPdfFile({ quoteResult, elements: validationData?.elements || [], scopeData, projectId });
+                          await exportPdfFile({ quoteResult, elements: validationData?.elements || [], scopeData: scopeData as any, projectId });
                           toast.success("PDF exported");
                         } else if (card.sendText) {
                           sendMessage(card.sendText);

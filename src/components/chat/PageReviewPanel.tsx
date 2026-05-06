@@ -216,7 +216,7 @@ const PageReviewPanel: React.FC<PageReviewPanelProps> = ({
             const needsConfirmation = confidence < 1.0;
             const answer = answers.get(el.element_id);
             const isEditing = editingElement === el.element_id;
-            const truth = el.extraction?.truth;
+            const truth = el.extraction?.truth as any;
 
             return (
               <div

@@ -73,7 +73,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
   const abortRef = useRef(false);
 
   const barList: unknown[] = (quoteResult?.quote as Record<string, unknown>)?.bar_list as unknown[] || [];
-  const sizeBreakdown: Record<string, number> = quoteResult?.quote?.size_breakdown || {};
+  const sizeBreakdown: Record<string, number> = (quoteResult?.quote as any)?.size_breakdown || {};
 
   const loadHistory = useCallback(async () => {
     if (!projectId) return;
@@ -85,7 +85,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
         .eq("project_id", projectId)
         .order("version", { ascending: false });
       if (error) throw error;
-      setHistory((data as HistoryEntry[]) || []);
+      setHistory((data as unknown as HistoryEntry[]) || []);
     } catch {
       // silent
     }

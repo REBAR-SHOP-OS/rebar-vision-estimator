@@ -162,12 +162,12 @@ const ElementCard: React.FC<ElementCardProps> = ({ el, weightInfo, onShowOnDrawi
         <span className="text-[10px] font-semibold text-foreground">{(el.extraction.confidence * 100).toFixed(0)}%</span>
       </div>
     )}
-    {el.extraction?.truth && (
+    {el.extraction?.truth && (() => { const t: any = el.extraction.truth; return (
       <div className="text-xs text-muted-foreground mt-1">
-        {el.extraction.truth.vertical_bars && <span className="mr-3">Vert: {el.extraction.truth.vertical_bars.qty}×{el.extraction.truth.vertical_bars.size}</span>}
-        {el.extraction.truth.ties && <span>Ties: {el.extraction.truth.ties.size} @{el.extraction.truth.ties.spacing_mm}mm</span>}
+        {t.vertical_bars && <span className="mr-3">Vert: {t.vertical_bars.qty}×{t.vertical_bars.size}</span>}
+        {t.ties && <span>Ties: {t.ties.size} @{t.ties.spacing_mm}mm</span>}
       </div>
-    )}
+    ); })()}
     {el.validation.errors.length > 0 && (
       <div className="mt-2 space-y-1">
         {el.validation.errors.map((err, i) => <p key={i} className="text-xs text-destructive">⛔ {err}</p>)}
@@ -198,7 +198,7 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
 
   const weightMap: Record<string, Record<string, unknown>> = {};
   if (quoteResult?.quote?.elements) {
-    for (const el of quoteResult.quote.elements) weightMap[el.element_id] = el;
+    for (const el of quoteResult.quote.elements as any[]) weightMap[el.element_id] = el;
   }
 
   const hasBboxData = (el: ValidationElement) => {
@@ -261,7 +261,7 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
       {(() => {
         const coatingCounts: Record<string, number> = {};
         for (const el of elements) {
-          const coating = el.extraction?.truth?.coating;
+          const coating = (el.extraction?.truth as any)?.coating as string | undefined;
           if (coating && coating !== "none" && coating !== "BLACK") {
             coatingCounts[coating] = (coatingCounts[coating] || 0) + 1;
           }
@@ -327,7 +327,7 @@ const ValidationResults: React.FC<ValidationResultsProps> = ({
             <AlertTriangle className="h-4 w-4 text-amber-500" />
             Questions ({questions.length})
           </p>
-          {questions.map((q, i) => <QuestionCard key={i} question={q} onAnswer={onAnswerQuestion} />)}
+          {questions.map((q, i) => <QuestionCard key={i} question={q as any} onAnswer={onAnswerQuestion} />)}
         </div>
       )}
 
