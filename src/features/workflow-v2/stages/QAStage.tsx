@@ -25,6 +25,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
   const [tab, setTab] = useState<TabKey>("change");
   const [zoomMode, setZoomMode] = useState<"tight" | "full">("tight");
+  const [zoomLevel, setZoomLevel] = useState(1);
   const [viewMode, setViewMode] = useState<"overlay" | "side" | "diff">("overlay");
   const [changedOnly, setChangedOnly] = useState(true);
   const [debug, setDebug] = useState(false);
@@ -59,7 +60,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.id, sel?.locator?.page_number]);
 
-  useEffect(() => { setZoomMode("tight"); setTab("change"); }, [sel?.id]);
+  useEffect(() => { setZoomMode("tight"); setZoomLevel(1); setTab("change"); }, [sel?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,6 +95,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
   useEffect(() => { bump(`view mode → ${viewMode}`); /* eslint-disable-next-line */ }, [viewMode]);
   useEffect(() => { bump(`zoom mode → ${zoomMode}`); /* eslint-disable-next-line */ }, [zoomMode]);
+  useEffect(() => { bump(`zoom level → ${zoomLevel.toFixed(2)}x`); /* eslint-disable-next-line */ }, [zoomLevel]);
   useEffect(() => { if (pdfImg) bump(`pdf rendered p${pdfPage}`); /* eslint-disable-next-line */ }, [pdfImg]);
 
   // Group issues by source sheet for the left navigator
@@ -127,7 +129,8 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const bboxH = bbox ? Math.max(1, bbox[3] - bbox[1]) : 0;
   const PAD = 1.3;
   const fitZoom = bbox && imgW && imgH ? Math.min(imgW / (bboxW * PAD), imgH / (bboxH * PAD)) : 1;
-  const zoom = zoomMode === "tight" && bbox ? Math.min(12, Math.max(2, fitZoom)) : 1;
+  const autoZoom = zoomMode === "tight" && bbox ? Math.min(12, Math.max(2, fitZoom)) : 1;
+  const zoom = Math.min(24, Math.max(0.5, autoZoom * zoomLevel));
   const tx = (0.5 - center.cx) * 100 * zoom;
   const ty = (0.5 - center.cy) * 100 * zoom;
 
