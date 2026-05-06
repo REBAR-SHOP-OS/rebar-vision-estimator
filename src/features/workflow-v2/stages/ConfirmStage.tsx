@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { StageHeader, EmptyState, type StageProps } from "./_shared";
 import { CheckCircle2, RotateCcw, Send, Pencil, Save, X, ChevronDown, ChevronRight } from "lucide-react";
+import PdfRenderer from "@/components/chat/PdfRenderer";
 import {
   clearWorkflowEstimatorSignoff,
   loadWorkflowTakeoffRows,
@@ -30,6 +31,9 @@ export default function ConfirmStage({ projectId, state, goToStage }: StageProps
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editPatch, setEditPatch] = useState<{ count?: number; length?: number; weight?: number; size?: string }>({});
+  const [pdfPage, setPdfPage] = useState(1);
+  const [pdfPageCount, setPdfPageCount] = useState(0);
+  const [pdfImg, setPdfImg] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -153,6 +157,13 @@ export default function ConfirmStage({ projectId, state, goToStage }: StageProps
   const fileId = selectedRow?.source_file_id || state.files[0]?.id;
   const file = state.files.find((f) => f.id === fileId);
   const isImg = file && /\.(png|jpe?g|webp|gif|svg)$/i.test(file.file_name);
+  const isPdf = file && /\.pdf$/i.test(file.file_name);
+
+  useEffect(() => {
+    setPdfPage(1);
+    setPdfPageCount(0);
+    setPdfImg(null);
+  }, [signedUrl]);
 
   // Group rows by segment_name
   const groups = (() => {
@@ -301,22 +312,43 @@ export default function ConfirmStage({ projectId, state, goToStage }: StageProps
         <div className="flex-1 overflow-auto p-3">
           {!signedUrl ? (
             <div className="h-full flex items-center justify-center text-xs text-neutral-400 font-mono uppercase tracking-widest text-center">
-              {selectedRow?.source_file_id ? "Loading…" : "No source drawing linked to this row"}
+              {file ? "Loading…" : "No drawings uploaded yet"}
             </div>
           ) : isImg ? (
             <img src={signedUrl} alt="" className="w-full h-auto border border-neutral-200" />
-          ) : (
+          ) : isPdf ? (
             <div className="flex flex-col h-full">
-              <iframe src={signedUrl} title="drawing" className="w-full flex-1 border border-neutral-200" />
-              <a
-                href={signedUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-2 text-[10px] font-mono uppercase tracking-wider text-blue-600 hover:underline"
-              >
-                Open drawing in new tab ↗
+              <PdfRenderer
+                url={signedUrl}
+                currentPage={pdfPage}
+                scale={1.5}
+                onPageCount={setPdfPageCount}
+                onPageRendered={(img) => setPdfImg(img)}
+              />
+              {pdfImg ? (
+                <img src={pdfImg} alt="drawing" className="w-full h-auto border border-neutral-200" />
+              ) : (
+                <div className="text-[10px] text-neutral-400 font-mono p-3">Rendering page {pdfPage}…</div>
+              )}
+              {pdfPageCount > 1 && (
+                <div className="flex items-center justify-between mt-2 text-[10px] font-mono">
+                  <button onClick={() => setPdfPage((p) => Math.max(1, p - 1))} disabled={pdfPage <= 1}
+                    className="px-2 py-1 border border-neutral-300 disabled:opacity-30">‹ Prev</button>
+                  <span className="text-neutral-500">Page {pdfPage} / {pdfPageCount}</span>
+                  <button onClick={() => setPdfPage((p) => Math.min(pdfPageCount, p + 1))} disabled={pdfPage >= pdfPageCount}
+                    className="px-2 py-1 border border-neutral-300 disabled:opacity-30">Next ›</button>
+                </div>
+              )}
+              <a href={signedUrl} target="_blank" rel="noreferrer"
+                className="mt-2 text-[10px] font-mono uppercase tracking-wider text-blue-600 hover:underline">
+                Open in new tab ↗
               </a>
             </div>
+          ) : (
+            <a href={signedUrl} target="_blank" rel="noreferrer"
+              className="text-[10px] font-mono uppercase tracking-wider text-blue-600 hover:underline">
+              Open file in new tab ↗
+            </a>
           )}
         </div>
       </div>

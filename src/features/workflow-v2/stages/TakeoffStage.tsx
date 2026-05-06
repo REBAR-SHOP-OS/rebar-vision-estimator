@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { StageHeader, Pill, EmptyState, type StageProps } from "./_shared";
 import { Sparkles, FileText, CheckCircle2, Loader2, Wand2, Pencil, Save, X, ChevronDown, ChevronRight } from "lucide-react";
+import PdfRenderer from "@/components/chat/PdfRenderer";
 import { loadWorkflowTakeoffRows, type WorkflowTakeoffRow } from "../takeoff-data";
 import { parseAndIndexFile } from "@/lib/parse-file";
 
@@ -26,11 +27,38 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   const [editPatch, setEditPatch] = useState<EditPatch>({});
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [pdfPage, setPdfPage] = useState(1);
+  const [pdfPageCount, setPdfPageCount] = useState(0);
+  const [pdfImg, setPdfImg] = useState<string | null>(null);
+  const [segRunning, setSegRunning] = useState<string | null>(null);
 
   const reload = async () => {
     const mapped = await loadWorkflowTakeoffRows(projectId, state.files);
     setRows(mapped);
     setSelectedId((current) => mapped.find((row) => row.id === current)?.id || mapped[0]?.id || null);
+  };
+
+  const runSingleSegment = async (segName: string) => {
+    // find segment_id from any row in the group (legacy rows carry segment_id)
+    const seg = rows.find((r) => r.segment_name === segName && r.segment_id)?.segment_id;
+    if (!seg) { toast.error("No segment id for this group."); return; }
+    setSegRunning(segName);
+    try {
+      const { data, error } = await supabase.functions.invoke("auto-estimate", {
+        body: { segment_id: seg, project_id: projectId },
+      });
+      if (error) throw error;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const created = (data as any)?.metadata?.items_created ?? (data as any)?.items_created ?? 0;
+      toast.success(`Segment "${segName}" re-run: ${created} item(s)`);
+      await reload();
+      state.refresh();
+    } catch (err) {
+      console.warn("Per-segment re-run failed:", err);
+      toast.error(`Re-run failed for "${segName}"`);
+    } finally {
+      setSegRunning(null);
+    }
   };
 
   useEffect(() => {
@@ -55,7 +83,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const fileId = focusRow?.source_file_id;
+      const fileId = focusRow?.source_file_id || state.files[0]?.id;
       const f = state.files.find((x) => x.id === fileId);
       if (!f) { setSignedUrl(null); return; }
       const { data } = await supabase.storage.from("blueprints").createSignedUrl(f.file_path, 3600);
@@ -63,6 +91,8 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
     })();
     return () => { cancelled = true; };
   }, [focusRow?.source_file_id, state.files]);
+
+  useEffect(() => { setPdfPage(1); setPdfPageCount(0); setPdfImg(null); }, [signedUrl]);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -191,7 +221,11 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   }), [rows]);
 
   const sel = focusRow;
-  const isImg = sel?.source_file_id ? /\.(png|jpe?g|webp|gif|svg)$/i.test(state.files.find((f) => f.id === sel.source_file_id)?.file_name || "") : false;
+  const previewFileId = sel?.source_file_id || state.files[0]?.id;
+  const previewFile = state.files.find((f) => f.id === previewFileId);
+  const previewName = previewFile?.file_name || "";
+  const isImg = /\.(png|jpe?g|webp|gif|svg)$/i.test(previewName);
+  const isPdf = /\.pdf$/i.test(previewName);
 
   return (
     <div className="grid h-full" style={{ gridTemplateColumns: "240px 1fr 380px" }}>
@@ -218,6 +252,16 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
               </div>
               <div className="text-[10px] text-muted-foreground font-mono mt-0.5">
                 {g.items.length} rows · {g.weight.toFixed(0)} kg
+              </div>
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); runSingleSegment(g.name); }}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); runSingleSegment(g.name); } }}
+                className={`mt-1.5 inline-flex items-center gap-1 text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 border ${segRunning === g.name ? "border-muted-foreground/30 text-muted-foreground" : "border-primary/40 text-primary hover:bg-primary/10"}`}
+              >
+                {segRunning === g.name ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Wand2 className="w-2.5 h-2.5" />}
+                {segRunning === g.name ? "Running…" : "Re-run segment"}
               </div>
             </button>
           ))}
@@ -347,20 +391,45 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
           <StageHeader kicker="Drawing Evidence" title={sel ? `${sel.segment_name} · ${sel.mark}` : "Hover a row"} />
         </div>
         <div className="flex-1 overflow-auto bg-white text-neutral-900">
-          {!sel ? <EmptyState title="No row selected" /> : !signedUrl ? (
+          {!previewFile ? <EmptyState title="No drawings uploaded" /> : !signedUrl ? (
             <div className="h-full flex items-center justify-center text-[10px] text-neutral-400 font-mono uppercase tracking-widest p-4 text-center">
-              {sel.source_file_id ? "Loading drawing…" : `No source drawing linked (source: ${sel.source})`}
+              Loading drawing…
             </div>
           ) : isImg ? (
             <img src={signedUrl} alt="" className="w-full h-auto" />
-          ) : (
+          ) : isPdf ? (
             <div className="flex flex-col h-full p-2">
-              <iframe src={signedUrl} title="drawing" className="w-full flex-1 border border-neutral-200" />
+              <PdfRenderer
+                url={signedUrl}
+                currentPage={pdfPage}
+                scale={1.5}
+                onPageCount={setPdfPageCount}
+                onPageRendered={(img) => setPdfImg(img)}
+              />
+              {pdfImg ? (
+                <img src={pdfImg} alt="drawing" className="w-full h-auto border border-neutral-200" />
+              ) : (
+                <div className="text-[10px] text-neutral-400 font-mono p-3">Rendering page {pdfPage}…</div>
+              )}
+              {pdfPageCount > 1 && (
+                <div className="flex items-center justify-between mt-2 text-[10px] font-mono">
+                  <button onClick={() => setPdfPage((p) => Math.max(1, p - 1))} disabled={pdfPage <= 1}
+                    className="px-2 py-1 border border-neutral-300 disabled:opacity-30">‹ Prev</button>
+                  <span className="text-neutral-500">Page {pdfPage} / {pdfPageCount}</span>
+                  <button onClick={() => setPdfPage((p) => Math.min(pdfPageCount, p + 1))} disabled={pdfPage >= pdfPageCount}
+                    className="px-2 py-1 border border-neutral-300 disabled:opacity-30">Next ›</button>
+                </div>
+              )}
               <a href={signedUrl} target="_blank" rel="noreferrer"
                 className="mt-2 text-[10px] font-mono uppercase tracking-wider text-blue-600 hover:underline text-center">
                 Open in new tab ↗
               </a>
             </div>
+          ) : (
+            <a href={signedUrl} target="_blank" rel="noreferrer"
+              className="block p-3 text-[10px] font-mono uppercase tracking-wider text-blue-600 hover:underline">
+              Open file in new tab ↗
+            </a>
           )}
         </div>
         {sel && (
