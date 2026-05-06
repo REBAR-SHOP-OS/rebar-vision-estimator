@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { StageHeader, Pill, EmptyState, type StageProps } from "./_shared";
 import { Sparkles, FileText, CheckCircle2, Loader2, Wand2 } from "lucide-react";
 import { loadWorkflowTakeoffRows, type WorkflowTakeoffRow } from "../takeoff-data";
-import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
+import { parseAndIndexFile } from "@/lib/parse-file";
 
 export default function TakeoffStage({ projectId, state, goToStage }: StageProps) {
   const [rows, setRows] = useState<WorkflowTakeoffRow[]>([]);
@@ -35,105 +35,27 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   const handleGenerate = async () => {
     setGenerating(true);
     try {
-      // ── Step 1: Ensure project files are parsed & indexed ──
+      // ── Step 1: Per-file idempotent parse + index ──
       const files = state.files || [];
-      if (files.length > 0) {
-        const { count: indexedCount } = await supabase
-          .from("drawing_search_index")
-          .select("id", { count: "exact", head: true })
-          .eq("project_id", projectId);
-
-        if (!indexedCount || indexedCount === 0) {
-          setGenStatus(`Parsing ${files.length} file(s)...`);
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) throw new Error("Not authenticated");
-
-          for (let i = 0; i < files.length; i++) {
-            const f = files[i];
-            setGenStatus(`Parsing ${i + 1}/${files.length}: ${f.file_name}`);
-            try {
-              const { data: urlData } = await supabase.storage
-                .from("blueprints")
-                .createSignedUrl(f.file_path, 3600);
-              if (!urlData?.signedUrl) continue;
-
-              // Ensure document_version row exists
-              const legacyFileId = f.legacy_file_id || f.id;
-              const { data: existingDv } = await supabase
-                .from("document_versions")
-                .select("id")
-                .eq("file_id", legacyFileId)
-                .maybeSingle();
-              let dvId = existingDv?.id;
-              if (!dvId) {
-                const { data: newDv } = await supabase.from("document_versions").insert({
-                  project_id: projectId,
-                  user_id: user.id,
-                  file_id: legacyFileId,
-                  file_name: f.file_name,
-                  file_path: f.file_path,
-                  sha256: `pending_${Date.now()}_${legacyFileId}`,
-                  source_system: "upload",
-                }).select("id").single();
-                dvId = newDv?.id;
-              }
-
-              const { data: extraction } = await supabase.functions.invoke("extract-pdf-text", {
-                body: { pdf_url: urlData.signedUrl, project_id: projectId },
-              });
-              let pages = extraction?.pages || [];
-              const sha256 = extraction?.sha256 || `file_${legacyFileId}`;
-              const hasText = pages.some((p: any) => p.raw_text && p.raw_text.trim().length > 20);
-
-              // Fallback: large/scanned PDFs need client-side render + OCR
-              if (!hasText) {
-                setGenStatus(`Rendering ${f.file_name}`);
-                try {
-                  const pageImages = await renderPdfPagesToImages(urlData.signedUrl, projectId, {
-                    maxPages: 50,
-                    scale: 1.5,
-                    onProgress: (cur, total) => setGenStatus(`Rendering ${cur}/${total}: ${f.file_name}`),
-                  });
-                  pages = [];
-                  for (let bi = 0; bi < pageImages.length; bi += 4) {
-                    const batch = pageImages.slice(bi, bi + 4);
-                    const results = await Promise.allSettled(batch.map(async (img) => {
-                      setGenStatus(`OCR ${img.pageNumber}/${pageImages.length}: ${f.file_name}`);
-                      const { data: ocrData } = await supabase.functions.invoke("ocr-image", {
-                        body: { image_url: img.signedUrl },
-                      });
-                      const fullText = (ocrData?.ocr_results || [])
-                        .map((r: any) => r.fullText || "")
-                        .filter((t: string) => t.length > 0)
-                        .sort((a: string, b: string) => b.length - a.length)[0] || "";
-                      return { page_number: img.pageNumber, raw_text: fullText };
-                    }));
-                    for (const r of results) {
-                      if (r.status === "fulfilled") pages.push(r.value);
-                    }
-                  }
-                } catch (ocrErr) {
-                  console.warn(`OCR fallback failed for ${f.file_name}:`, ocrErr);
-                }
-              }
-
-              if (pages.length > 0 && dvId) {
-                await supabase.functions.invoke("populate-search-index", {
-                  body: {
-                    project_id: projectId,
-                    document_version_id: dvId,
-                    pages,
-                    file_name: f.file_name,
-                    sha256,
-                    pipeline_file_id: legacyFileId,
-                  },
-                });
-              }
-            } catch (parseErr) {
-              console.warn(`Parse failed for ${f.file_name}:`, parseErr);
-            }
-          }
-        }
+      let parsedNow = 0, alreadyIndexed = 0, parseFails = 0;
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        setGenStatus(`File ${i + 1}/${files.length}: ${f.file_name}`);
+        const res = await parseAndIndexFile(projectId, {
+          id: f.id,
+          legacy_file_id: f.legacy_file_id,
+          file_name: f.file_name,
+          file_path: f.file_path,
+        }, (msg) => setGenStatus(msg));
+        if (res.skipped) alreadyIndexed++;
+        else if (res.status === "indexed") parsedNow++;
+        else parseFails++;
+      }
+      if (parseFails > 0) {
+        toast.warning(`${parseFails} file(s) failed to parse. Estimation will use whatever was indexed.`);
+      }
+      if (parsedNow > 0 || alreadyIndexed > 0) {
+        console.log(`[Takeoff] parsed ${parsedNow} new, ${alreadyIndexed} already indexed, ${parseFails} failed`);
       }
 
       setGenStatus("Generating takeoff...");
