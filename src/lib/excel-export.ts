@@ -7,9 +7,9 @@ import { getMassKgPerM } from "@/lib/rebar-weights";
 import { getLogoBuffer } from "@/lib/logo-base64";
 
 interface ExportParams {
-  quoteResult: Record<string, unknown>;
-  elements: unknown[];
-  scopeData?: Record<string, unknown>;
+  quoteResult: any;
+  elements: any[];
+  scopeData?: any;
 }
 
 // ── helpers ──────────────────────────────────────────────────────
