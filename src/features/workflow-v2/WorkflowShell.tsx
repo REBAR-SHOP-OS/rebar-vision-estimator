@@ -11,7 +11,17 @@ import { useWorkflowState } from "./useWorkflowState";
 
 interface Props {
   projectId: string;
-  project: { name?: string; client_name?: string; project_type?: string };
+  project: {
+    name?: string;
+    client_name?: string;
+    customer_name?: string;
+    project_name?: string;
+    project_type?: string;
+    canonicalProject?: {
+      projectName?: string;
+      customerName?: string | null;
+    } | null;
+  };
 }
 
 const STAGE_ICONS: Record<StageKey, React.ComponentType<{ className?: string }>> = {
@@ -26,6 +36,9 @@ const STAGE_ICONS: Record<StageKey, React.ComponentType<{ className?: string }>>
 export default function WorkflowShell({ projectId, project }: Props) {
   const [active, setActive] = useState<StageKey>("files");
   const state = useWorkflowState(projectId);
+
+  const displayProjectName = project.project_name || project.canonicalProject?.projectName || project.name || "Untitled Project";
+  const displayCustomerName = project.customer_name || project.canonicalProject?.customerName || project.client_name;
 
   const status = useMemo(() => ({
     files: state.fileCount > 0 ? "complete" : "pending",
@@ -103,8 +116,8 @@ export default function WorkflowShell({ projectId, project }: Props) {
         <header className="flex items-center justify-between px-5 py-2.5 border-b border-border" style={{ background: "hsl(var(--card))" }}>
           <div className="flex items-baseline gap-3 min-w-0">
             <span className="ip-kicker">Project</span>
-            <span className="text-[14px] font-semibold tracking-tight truncate">{project.name || "Untitled Project"}</span>
-            {project.client_name && <span className="text-[11px] text-muted-foreground truncate">· {project.client_name}</span>}
+            <span className="text-[14px] font-semibold tracking-tight truncate">{displayProjectName}</span>
+            {displayCustomerName && <span className="text-[11px] text-muted-foreground truncate">· {displayCustomerName}</span>}
             {project.project_type && <span className="text-[10px] uppercase tracking-wider text-muted-foreground">· {project.project_type}</span>}
           </div>
           <div className="flex items-center gap-2">

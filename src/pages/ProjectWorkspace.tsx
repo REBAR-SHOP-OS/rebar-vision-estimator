@@ -1,8 +1,9 @@
-import { useParams, Link } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2 } from "lucide-react";
 import WorkflowShell from "@/features/workflow-v2/WorkflowShell";
+import { getCanonicalProjectByLegacyId } from "@/lib/rebar-read-model";
 
 export default function ProjectWorkspace() {
   const { id } = useParams<{ id: string }>();
@@ -11,11 +12,57 @@ export default function ProjectWorkspace() {
 
   useEffect(() => {
     if (!id) return;
-    setLoading(true);
-    supabase.from("projects").select("*").eq("id", id).single().then(({ data }) => {
-      if (data) setProject(data);
-      setLoading(false);
-    });
+
+    let cancelled = false;
+
+    const loadProject = async (withLoading = true) => {
+      if (withLoading) setLoading(true);
+
+      const { data: legacyProject, error: legacyError } = await supabase
+        .from("projects")
+        .select("*")
+        .eq("id", id)
+        .single();
+
+      if (legacyError) {
+        console.warn("Failed to load legacy project:", legacyError);
+      }
+
+      let canonicalProject = null;
+      if (legacyProject) {
+        try {
+          canonicalProject = await getCanonicalProjectByLegacyId(supabase, id);
+        } catch (error) {
+          console.warn("Failed to load canonical project:", error);
+        }
+      }
+
+      if (cancelled) return;
+
+      if (legacyProject) {
+        setProject({
+          ...legacyProject,
+          canonicalProject,
+          project_name: canonicalProject?.projectName || legacyProject.name,
+          customer_name: canonicalProject?.customerName ?? legacyProject.client_name,
+          location: canonicalProject?.location ?? legacyProject.address ?? null,
+          rebar_project_id: canonicalProject?.rebarProjectId || null,
+          status: canonicalProject?.status || legacyProject.status,
+        });
+      } else if (withLoading) {
+        setProject(null);
+      }
+
+      if (withLoading && !cancelled) {
+        setLoading(false);
+      }
+    };
+
+    loadProject(true);
+
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   if (loading) {
