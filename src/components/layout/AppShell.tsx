@@ -3,6 +3,7 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import AppSidebar from "./AppSidebar";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { getCanonicalProjectByLegacyId } from "@/lib/rebar-read-model";
 
 export default function AppShell() {
   const location = useLocation();
@@ -14,10 +15,58 @@ export default function AppShell() {
   }, [location.pathname]);
 
   useEffect(() => {
-    if (!activeProjectId) { setProjectName(""); return; }
-    supabase.from("projects").select("name").eq("id", activeProjectId).single().then(({ data }) => {
-      setProjectName(data?.name || "");
-    });
+    if (!activeProjectId) {
+      setProjectName("");
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadProjectName = async () => {
+      try {
+        const canonicalProject = await getCanonicalProjectByLegacyId(supabase, activeProjectId);
+        if (!cancelled && canonicalProject?.projectName) {
+          setProjectName(canonicalProject.projectName);
+          return;
+        }
+      } catch (error) {
+        console.warn("Failed to load canonical project name:", error);
+      }
+
+      const { data: legacyProject, error: legacyError } = await supabase
+        .from("projects")
+        .select("name")
+        .eq("id", activeProjectId)
+        .single();
+
+      if (legacyError) {
+        console.warn("Failed to load legacy project name:", legacyError);
+      }
+
+      if (!cancelled) {
+        setProjectName(legacyProject?.name || "");
+      }
+    };
+
+    loadProjectName();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectId]);
+
+  useEffect(() => {
+    const handleProjectUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string; projectName?: string }>).detail;
+      if (detail?.projectId === activeProjectId && detail.projectName) {
+        setProjectName(detail.projectName);
+      }
+    };
+
+    window.addEventListener("project-updated", handleProjectUpdated as EventListener);
+    return () => {
+      window.removeEventListener("project-updated", handleProjectUpdated as EventListener);
+    };
   }, [activeProjectId]);
 
   return (
