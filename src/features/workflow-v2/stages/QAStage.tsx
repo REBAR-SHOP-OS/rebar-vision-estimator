@@ -373,7 +373,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                             imgH={imgH}
                             zoom={zoom}
                             title={sel?.title || "Modification"}
-                            description={sel?.description || "Is this element correct as detected?"}
+                            description={[sel?.location_label, sel?.description || "Is this element correct as detected?"].filter(Boolean).join(" — ")}
                             onFix={jumpToTakeoff}
                             onImpact={() => setTab("impact")}
                           />
