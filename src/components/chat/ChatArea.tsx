@@ -1630,10 +1630,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
     // Separate elements with and without spatial data
     const withBbox: OverlayElement[] = [];
-    const withoutBbox: Record<string, unknown>[] = [];
-    const quoteElements = ((quoteResult?.quote as Record<string, unknown>)?.elements as Record<string, unknown>[]) ?? [];
+    const withoutBbox: any[] = [];
+    const quoteElements: any[] = ((quoteResult?.quote as Record<string, unknown>)?.elements as any[]) ?? [];
 
-    (validationData.elements as Record<string, unknown>[]).forEach((el) => {
+    (validationData.elements as any[]).forEach((el: any) => {
       const bbox = el.regions?.tag_region?.bbox;
       const hasBbox = bbox && (bbox[2] - bbox[0]) > 10 && (bbox[3] - bbox[1]) > 10;
       if (hasBbox) {
@@ -1661,15 +1661,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       const gap = 60;
 
       // Group by type for organized placement
-      const grouped: Record<string, Record<string, unknown>[]> = {};
-      withoutBbox.forEach((el) => {
+      const grouped: Record<string, any[]> = {};
+      withoutBbox.forEach((el: any) => {
         const t = el.element_type || "OTHER";
         if (!grouped[t]) grouped[t] = [];
         grouped[t].push(el);
       });
 
       Object.values(grouped).forEach((group) => {
-        group.forEach((el) => {
+        group.forEach((el: any) => {
           if (curY + boxSize > imgH - 40) {
             curY = 80;
             curX += 200;
