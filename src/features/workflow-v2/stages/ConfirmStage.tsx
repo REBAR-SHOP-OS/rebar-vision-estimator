@@ -76,8 +76,12 @@ export default function ConfirmStage({ projectId, state, goToStage }: StageProps
   };
 
   const finalize = async () => {
+    if (rows.length === 0) {
+      toast.error("No takeoff rows to confirm. Complete Takeoff stage first.");
+      return;
+    }
     const pending = rows.filter((r) => r.decision === "pending").length;
-    if (rows.length > 0 && pending > 0) {
+    if (pending > 0) {
       toast.error(`${pending} rows still pending`);
       return;
     }
@@ -102,8 +106,12 @@ export default function ConfirmStage({ projectId, state, goToStage }: StageProps
 
   const returnToQA = async () => {
     setSaving(true);
-    await clearWorkflowEstimatorSignoff(projectId);
+    const { error } = await clearWorkflowEstimatorSignoff(projectId);
     setSaving(false);
+    if (error) {
+      toast.error("Failed to clear signoff");
+      return;
+    }
     state.setLocal({ estimatorConfirmed: false });
     toast.message("Returned to QA Gate");
     state.refresh();
@@ -203,7 +211,17 @@ export default function ConfirmStage({ projectId, state, goToStage }: StageProps
           ) : isImg ? (
             <img src={signedUrl} alt="" className="w-full h-auto border border-neutral-200" />
           ) : (
-            <iframe src={signedUrl} title="drawing" className="w-full h-full border border-neutral-200" />
+            <div className="flex flex-col h-full">
+              <iframe src={signedUrl} title="drawing" className="w-full flex-1 border border-neutral-200" />
+              <a
+                href={signedUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 text-[10px] font-mono uppercase tracking-wider text-blue-600 hover:underline"
+              >
+                Open drawing in new tab ↗
+              </a>
+            </div>
           )}
         </div>
       </div>
