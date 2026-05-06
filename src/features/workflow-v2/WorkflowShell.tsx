@@ -111,9 +111,9 @@ export default function WorkflowShell({ projectId, project }: Props) {
       </aside>
 
       {/* Main column */}
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col overflow-x-auto">
         {/* Top header */}
-        <header className="flex items-center justify-between px-5 py-2.5 border-b border-border" style={{ background: "hsl(var(--card))" }}>
+        <header className="flex min-w-[1100px] items-center justify-between px-5 py-2.5 border-b border-border" style={{ background: "hsl(var(--card))" }}>
           <div className="flex items-baseline gap-3 min-w-0">
             <span className="ip-kicker">Project</span>
             <span className="text-[14px] font-semibold tracking-tight truncate">{displayProjectName}</span>
@@ -132,7 +132,7 @@ export default function WorkflowShell({ projectId, project }: Props) {
         </header>
 
         {/* KPI Strip */}
-        <div className="grid grid-cols-6 border-b border-border" style={{ background: "hsl(var(--background))" }}>
+        <div className="grid min-w-[1100px] grid-cols-6 border-b border-border" style={{ background: "hsl(var(--background))" }}>
           {kpis.map((k) => (
             <div key={k.label} className="px-4 py-2.5 border-r border-border last:border-r-0">
               <div className="ip-kicker truncate">{k.label}</div>
@@ -147,7 +147,7 @@ export default function WorkflowShell({ projectId, project }: Props) {
         </div>
 
         {/* Stage rail (numbered steps) */}
-        <div className="flex items-stretch border-b border-border" style={{ background: "hsl(var(--card))" }}>
+        <div className="flex min-w-[1100px] items-stretch border-b border-border" style={{ background: "hsl(var(--card))" }}>
           {STAGES.map((s) => {
             const st = status[s.key];
             const isActive = active === s.key;
@@ -184,12 +184,14 @@ export default function WorkflowShell({ projectId, project }: Props) {
         </div>
 
         {/* Body */}
-        <div className="flex-1 min-h-0 overflow-hidden" style={{ background: "hsl(var(--background))" }}>
-          <StageBody />
+        <div className="flex-1 min-h-0 overflow-auto" style={{ background: "hsl(var(--background))" }}>
+          <div className="h-full min-w-[1200px]">
+            <StageBody />
+          </div>
         </div>
 
         {/* Footer telemetry */}
-        <footer className="flex items-center justify-between px-5 py-1.5 border-t border-border text-[10px] uppercase tracking-[0.18em] text-muted-foreground" style={{ background: "hsl(var(--card))" }}>
+        <footer className="flex min-w-[1100px] items-center justify-between px-5 py-1.5 border-t border-border text-[10px] uppercase tracking-[0.18em] text-muted-foreground" style={{ background: "hsl(var(--card))" }}>
           <div className="flex gap-5 tabular-nums">
             <span>SYNC <span className="text-[hsl(var(--status-supported))]">● ACTIVE</span></span>
             <span>OCR <span className="text-foreground">99.4%</span></span>
