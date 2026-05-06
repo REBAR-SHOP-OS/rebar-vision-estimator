@@ -113,16 +113,26 @@ serve(async (req) => {
       }
     }
 
-    // Detect scope coverage from file disciplines
+    // Detect scope coverage from file names AND OCR drawing tokens (5 construction buckets).
+    // Buckets are universal across project types — never hard-code a single project's scope.
     const fileNames = files.map((f: any) => (f.file_name || "").toUpperCase());
-    const hasStructuralFoundation = fileNames.some((n: string) => /FOUND|FTG|FOOT|PIER|PILE/.test(n));
-    const hasStructuralSuper = fileNames.some((n: string) => /SLAB|BEAM|COL|WALL|FRAME|SUPER/.test(n));
-    const hasArchitectural = fileNames.some((n: string) => /^A[-_]|ARCH/.test(n));
+    const ocrUpper = (drawingTextContext || "").toUpperCase();
+    const corpus = `${fileNames.join(" ")} ${ocrUpper}`;
+    const BUCKET_TOKENS: Record<string, RegExp> = {
+      FOUNDATION: /FOOTING|FOUND|FTG|PILE|CAISSON|RAFT|MAT|PILE.?CAP|GRADE.?BEAM|FROST.?WALL/,
+      VERTICAL:   /\bWALL\b|\bCOLUMN\b|\bCOL\b|PIER|SHEAR|RETAINING|CMU|ICF/,
+      HORIZONTAL: /\bBEAM\b|GIRDER|JOIST|LINTEL|BOND.?BEAM/,
+      SLAB:       /\bSLAB\b|\bSOG\b|SLAB.?ON.?GRADE|SUSPENDED|TOPPING|DECK/,
+      MISC:       /STAIR|LEDGE|CURB|STOOP|EQUIPMENT.?PAD|ELEVATOR.?PIT|SUMP|TRANSFORMER/,
+    };
+    const bucketsPresent = Object.entries(BUCKET_TOKENS)
+      .filter(([_, rx]) => rx.test(corpus)).map(([k]) => k);
+    const bucketsAbsent = Object.keys(BUCKET_TOKENS).filter((k) => !bucketsPresent.includes(k));
     const scopeHint = project?.scope_items?.length
       ? project.scope_items.join(", ")
-      : (hasStructuralFoundation && !hasStructuralSuper)
-        ? "FOUNDATION SCOPE ONLY — do NOT estimate superstructure elements"
-        : "";
+      : (bucketsPresent.length
+          ? `BUCKETS PRESENT: ${bucketsPresent.join(", ")}. BUCKETS ABSENT (do NOT estimate): ${bucketsAbsent.join(", ") || "none"}`
+          : "");
 
     if (!segment) {
       return new Response(JSON.stringify({ error: "Segment not found" }), {
@@ -150,6 +160,7 @@ Rules:
 - CRITICAL: If drawing text is provided below, use the ACTUAL bar sizes, quantities, and lengths from the drawings — do NOT guess or inflate. Parse footing schedules, bar schedules, and rebar callouts directly.
 - CRITICAL: Parse bar list tables from the drawing text. Each row typically has: Bar Mark, Qty, Size, Total Length, Type, and shape dimensions (A, B, C, D, E). Use these EXACT values for quantity_count and total_length.
 - CRITICAL: Only estimate items that belong to THIS segment type. Do NOT add superstructure items to foundation segments or vice versa.
+- CONCRETE = REBAR AXIOM (universal): every concrete element (footing, pier, pile cap, wall, column, beam, slab, SOG, suspended slab, stair, grade beam, frost wall, ledge, curb, equipment pad, retaining wall, mat, raft, stoop, …) MUST yield at least one rebar (or WWM) line. If the OCR mentions a concrete element with no rebar callout, emit ONE placeholder line with description "<element> — UNRESOLVED rebar (verify drawings)", quantity_count 0, total_length 0, total_weight 0, confidence 0.1, item_type "rebar".
 - ${scopeHint ? `SCOPE RESTRICTION: ${scopeHint}` : ""}
 - Do NOT duplicate items already estimated: ${existingDesc || "none yet"}.`;
 

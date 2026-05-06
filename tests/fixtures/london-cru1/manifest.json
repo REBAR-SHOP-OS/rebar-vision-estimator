@@ -1,0 +1,24 @@
+{
+  "project_type": "Commercial Restaurant — single-storey CRU",
+  "buckets_present": ["FOUNDATION", "VERTICAL", "SLAB", "MISC"],
+  "buckets_absent": ["HORIZONTAL"],
+  "element_ids": {
+    "FOUNDATION": ["F1", "F2", "F3", "F4", "F5"],
+    "VERTICAL":   ["W1", "W2", "W3", "FW1"],
+    "MISC":       ["P1", "P2", "P3", "STEP-ON-GRADE"],
+    "SLAB":       ["SOG"]
+  },
+  "canonical_positions": [
+    "TOP CONT.", "TOP ADD'L", "BOT. CONT.",
+    "D/V", "TIES", "TOP TIES",
+    "VERT.", "DIAG.", "DWL.", "SLAB DWL.", "COR."
+  ],
+  "bend_prefixes": { "straight": "BS", "bent": "B" },
+  "callout_grammar": "<qty> <size>M <prefix><mark> @<spacing> <position>",
+  "expected_excel_columns": [
+    "SL.No.", "Identification", "Multiplier", "Qty", "Bar Dia",
+    "Length ft-in", "Length mm", "Bend", "Info 1", "Info 2/@",
+    "Total Length (Mtr.)", "Total Wgt kg", "Notes"
+  ],
+  "notes": "Sample lives only as test data — engine paths must NOT hard-code any of these values."
+}
