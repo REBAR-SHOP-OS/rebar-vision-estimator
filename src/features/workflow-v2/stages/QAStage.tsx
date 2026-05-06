@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { StageHeader, Pill, EmptyState, GateBanner, type StageProps } from "./_shared";
 import {
   ArrowLeft, ArrowRight, Wand2, Filter, Layers, Columns2, GitCompare,
@@ -10,6 +10,96 @@ import { supabase } from "@/integrations/supabase/client";
 import PdfRenderer from "@/components/chat/PdfRenderer";
 
 type TabKey = "change" | "impact" | "evidence" | "action";
+
+type PageTextItem = { str: string; x: number; y: number; w: number; h: number };
+type TextLine = { items: PageTextItem[]; y: number; text: string };
+
+const MIN_ANCHOR_CONFIDENCE = 0.75;
+
+function normalizeText(value: string | null | undefined): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9#./\-\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function clampBbox(
+  bbox: [number, number, number, number] | null,
+  imgW: number,
+  imgH: number,
+): [number, number, number, number] | null {
+  if (!bbox || !imgW || !imgH) return bbox;
+  const x1 = Math.max(0, Math.min(imgW, bbox[0]));
+  const y1 = Math.max(0, Math.min(imgH, bbox[1]));
+  const x2 = Math.max(x1, Math.min(imgW, bbox[2]));
+  const y2 = Math.max(y1, Math.min(imgH, bbox[3]));
+  return x2 > x1 && y2 > y1 ? [x1, y1, x2, y2] : null;
+}
+
+function buildTextLines(pageText: PageTextItem[]): TextLine[] {
+  const heights = pageText.map((t) => t.h).filter((h) => h > 0).sort((a, b) => a - b);
+  const medH = heights.length ? heights[Math.floor(heights.length / 2)] : 8;
+  const yTol = Math.max(4, medH * 0.6);
+  const sorted = [...pageText].sort((a, b) => a.y - b.y || a.x - b.x);
+  const lines: TextLine[] = [];
+  for (const it of sorted) {
+    const last = lines[lines.length - 1];
+    if (last && Math.abs(it.y - last.y) <= yTol) {
+      last.items.push(it);
+    } else {
+      lines.push({ items: [it], y: it.y, text: "" });
+    }
+  }
+  for (const ln of lines) {
+    ln.items.sort((a, b) => a.x - b.x);
+    ln.text = normalizeText(ln.items.map((i) => i.str).join(" "));
+  }
+  return lines;
+}
+
+function findSpanInLine(items: PageTextItem[], needle: string): PageTextItem[] | null {
+  const target = normalizeText(needle);
+  if (!target) return null;
+  const lower = items.map((i) => normalizeText(i.str));
+  let best: PageTextItem[] | null = null;
+  for (let i = 0; i < lower.length; i++) {
+    let acc = "";
+    for (let j = i; j < lower.length; j++) {
+      acc = normalizeText(`${acc} ${lower[j]}`);
+      if (!acc) continue;
+      if (acc.includes(target)) {
+        const candidate = items.slice(i, j + 1);
+        if (!best || candidate.length < best.length) best = candidate;
+        break;
+      }
+    }
+  }
+  return best;
+}
+
+function isLocalizedSpan(items: PageTextItem[], imgW: number, imgH: number): boolean {
+  if (!items.length) return false;
+  const x1 = Math.min(...items.map((s) => s.x));
+  const y1 = Math.min(...items.map((s) => s.y));
+  const x2 = Math.max(...items.map((s) => s.x + s.w));
+  const y2 = Math.max(...items.map((s) => s.y + s.h));
+  const spanW = Math.max(1, x2 - x1);
+  const spanH = Math.max(1, y2 - y1);
+  const widthOk = !imgW || spanW <= imgW * 0.45;
+  const heightOk = !imgH || spanH <= imgH * 0.18;
+  const areaOk = !imgW || !imgH || spanW * spanH <= imgW * imgH * 0.12;
+  return widthOk && heightOk && areaOk;
+}
+
+function getExcerptTokens(value: string | null | undefined): string[] {
+  const stop = new Set(["look", "sheet", "page", "find", "enter", "drawing", "from", "note"]);
+  return Array.from(new Set(
+    normalizeText(value)
+      .split(" ")
+      .filter((tok) => tok && !stop.has(tok) && (tok.length >= 4 || /\d/.test(tok)))
+  )).slice(0, 8);
+}
 
 function tightBox(
   items: Array<{ x: number; y: number; w: number; h: number }>,
@@ -57,12 +147,34 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [redrawCount, setRedrawCount] = useState(0);
   const [lastTrigger, setLastTrigger] = useState<string>("init");
   const [renderedPage, setRenderedPage] = useState<number | null>(null);
+  const [renderStatus, setRenderStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [renderError, setRenderError] = useState<string | null>(null);
   // Text items extracted from the rendered PDF page (image-pixel space).
-  const [pageText, setPageText] = useState<Array<{ str: string; x: number; y: number; w: number; h: number }>>([]);
+  const [pageText, setPageText] = useState<PageTextItem[]>([]);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [pageBox, setPageBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
   const bump = (reason: string) => {
     setRedrawCount((c) => c + 1);
     setLastTrigger(reason);
+  };
+
+  const updatePageBox = () => {
+    const host = canvasRef.current;
+    if (!host) return;
+    const img = host.querySelector('img[data-qa-preview="true"]') as HTMLImageElement | null;
+    if (!img || !img.naturalWidth || !img.naturalHeight) return;
+    const parent = img.parentElement;
+    if (!parent) return;
+    const scale = Math.min(parent.clientWidth / img.naturalWidth, parent.clientHeight / img.naturalHeight);
+    const width = img.naturalWidth * scale;
+    const height = img.naturalHeight * scale;
+    setPageBox({
+      left: (parent.clientWidth - width) / 2,
+      top: (parent.clientHeight - height) / 2,
+      width,
+      height,
+    });
   };
 
   useEffect(() => {
@@ -93,6 +205,8 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     let cancelled = false;
     setPreviewUrl(null); setPreviewKind(null); setPdfImg(null);
     setPdfPageCount(1); setPreviewName("");
+    setImgSize(null); setPageText([]); setRenderedPage(null); setRenderError(null); setPageBox(null);
+    setRenderStatus(sel ? "loading" : "idle");
     // Initialize page from the issue locator (do NOT force back to 1, that
     // was the bug that caused the cover sheet to always appear).
     const initialPage = sel?.locator?.page_number;
@@ -107,7 +221,12 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
         .select("file_name,file_path,file_type")
         .eq("id", fileId)
         .maybeSingle();
-      if (cancelled || !file?.file_path) { setPreviewLoading(false); return; }
+      if (cancelled || !file?.file_path) {
+        setRenderStatus("error");
+        setRenderError(`Drawing source is missing for ${file?.file_name || "this issue"}.`);
+        setPreviewLoading(false);
+        return;
+      }
       const { data: signed } = await supabase.storage.from("blueprints").createSignedUrl(file.file_path, 3600);
       if (cancelled) return;
       const url = signed?.signedUrl || null;
@@ -115,15 +234,49 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
       setPreviewUrl(url);
       setPreviewKind(url ? (isPdf ? "pdf" : "image") : null);
       setPreviewName(file.file_name || "");
+      if (!url) {
+        setRenderStatus("error");
+        setRenderError(`Could not load ${file.file_name || "the source file"} page ${initialPage || sel?.locator?.page_number || 1}.`);
+      } else if (!isPdf) {
+        setRenderStatus("loading");
+      }
       setPreviewLoading(false);
     })();
     return () => { cancelled = true; };
   }, [sel?.source_file_id, sel?.id]);
 
+  useEffect(() => {
+    if (previewKind !== "pdf" || !previewUrl) return;
+    setRenderStatus("loading");
+    setRenderError(null);
+    setPdfImg(null);
+    setPageText([]);
+    setRenderedPage(null);
+    setPageBox(null);
+  }, [previewKind, previewUrl, pdfPage]);
+
+  useEffect(() => {
+    if (previewKind !== "image" || !previewUrl) return;
+    setRenderError(null);
+    setRenderedPage(null);
+    setPageText([]);
+    setPageBox(null);
+  }, [previewKind, previewUrl]);
+
   useEffect(() => { bump(`view mode → ${viewMode}`); /* eslint-disable-next-line */ }, [viewMode]);
   useEffect(() => { bump(`zoom mode → ${zoomMode}`); /* eslint-disable-next-line */ }, [zoomMode]);
   useEffect(() => { bump(`zoom level → ${zoomLevel.toFixed(2)}x`); /* eslint-disable-next-line */ }, [zoomLevel]);
   useEffect(() => { if (pdfImg) bump(`pdf rendered p${pdfPage}`); /* eslint-disable-next-line */ }, [pdfImg]);
+
+  useEffect(() => {
+    if (renderStatus !== "ready") return;
+    updatePageBox();
+    const host = canvasRef.current;
+    if (!host || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => updatePageBox());
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, [renderStatus, imgSize?.w, imgSize?.h, viewMode, pdfImg, previewUrl]);
 
   // Group issues by source sheet for the left navigator
   const sheets = useMemo(() => {
@@ -151,105 +304,72 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const imgH = locator?.image_size?.h || imgSize?.h || 0;
   // Fallback: derive an approximate bbox by matching the issue's anchor text
   // (callout / element ref / source excerpt) against extracted PDF text items.
-  const approxResult = useMemo<{ bbox: [number, number, number, number] | null; reason: string }>(() => {
-    if (exactBbox) return { bbox: null, reason: "" };
-    if (!pageText || pageText.length === 0) return { bbox: null, reason: "no OCR text on page" };
+  const approxResult = useMemo<{ bbox: [number, number, number, number] | null; reason: string; confidence: number; mode: "exact" | "approximate" | "unavailable" }>(() => {
+    if (exactBbox) return { bbox: null, reason: "", confidence: 1, mode: "exact" };
+    if (!pageText || pageText.length === 0) return { bbox: null, reason: "no OCR text on page", confidence: 0, mode: "unavailable" };
     const loc = sel?.location || {};
-    // Prioritise object-level anchors: quoted callout > detail > grid > element name.
-    const anchors: string[] = [];
+    const lines = buildTextLines(pageText);
+    const candidates: Array<{ value: string; kind: "detail" | "element" | "excerpt" | "ocr"; score: number }> = [];
     const push = (v?: string | null) => {
       if (!v) return;
       const s = String(v).trim();
       if (s.length < 3) return;
       if (/^page\s*\d+$/i.test(s)) return;
-      anchors.push(s);
+      candidates.push({ value: s, kind: "ocr", score: 0.55 });
     };
+    if (loc.detail_reference) candidates.unshift({ value: String(loc.detail_reference), kind: "detail", score: 0.98 });
+    if (loc.element_reference) candidates.push({ value: String(loc.element_reference), kind: "element", score: 0.92 });
+    for (const tok of getExcerptTokens(loc.source_excerpt)) {
+      candidates.push({ value: tok, kind: "excerpt", score: 0.82 });
+    }
     if (loc.source_excerpt) {
-      const m = String(loc.source_excerpt).match(/"([^"]{3,60})"/);
-      if (m) push(m[1]);
+      const quoted = String(loc.source_excerpt).match(/"([^"]{3,60})"/);
+      if (quoted?.[1]) candidates.push({ value: quoted[1], kind: "ocr", score: 0.68 });
+      push(loc.source_excerpt);
     }
-    push(loc.detail_reference);
-    push(loc.grid_reference);
-    push(loc.element_reference);
-    push(sel?.linked_item?.bar_size);
-    if (loc.source_excerpt) {
-      const m2 = String(loc.source_excerpt).match(/([A-Z0-9][A-Z0-9 \-#@.\/]{5,60})/);
-      if (m2) push(m2[1]);
-    }
-    push(loc.source_excerpt);
-    if (anchors.length === 0) return { bbox: null, reason: "no specific callout, detail, grid, or element name to search for" };
-
-    // Group text items into lines by y-band (median item height).
-    const heights = pageText.map((t) => t.h).filter((h) => h > 0).sort((a, b) => a - b);
-    const medH = heights.length ? heights[Math.floor(heights.length / 2)] : 8;
-    const yTol = Math.max(4, medH * 0.6);
-    const sorted = [...pageText].sort((a, b) => a.y - b.y || a.x - b.x);
-    type Line = { items: typeof pageText; y: number; text: string };
-    const lines: Line[] = [];
-    for (const it of sorted) {
-      const last = lines[lines.length - 1];
-      if (last && Math.abs(it.y - last.y) <= yTol) {
-        last.items.push(it);
-      } else {
-        lines.push({ items: [it], y: it.y, text: "" });
-      }
-    }
-    for (const ln of lines) {
-      ln.items.sort((a, b) => a.x - b.x);
-      ln.text = ln.items.map((i) => i.str).join(" ").toLowerCase().replace(/\s+/g, " ");
+    if (sel?.linked_item?.bar_size) candidates.push({ value: String(sel.linked_item.bar_size), kind: "excerpt", score: 0.78 });
+    if (candidates.length === 0) {
+      return { bbox: null, reason: "no specific detail, label, or excerpt to match on this page", confidence: 0, mode: "unavailable" };
     }
 
-    // Find the best matching line: prefer the longest anchor that hits.
-    anchors.sort((a, b) => b.length - a.length);
-    let bestLine: Line | null = null;
-    let bestAnchor = "";
-    for (const a of anchors) {
-      const needle = a.toLowerCase().replace(/\s+/g, " ");
-      const hit = lines.find((ln) => ln.text.includes(needle));
-      if (hit) { bestLine = hit; bestAnchor = needle; break; }
-    }
-    // Fallback: token-level match on the longest anchor.
-    if (!bestLine) {
-      for (const a of anchors) {
-        const needle = a.toLowerCase().replace(/\s+/g, " ");
-        const tok = pageText.find((t) => t.str.toLowerCase().includes(needle));
-        if (tok) {
-          return { bbox: tightBox([tok], imgW, imgH), reason: `token match on "${a}"` };
-        }
+    const deduped = candidates.filter((cand, idx, arr) => arr.findIndex((c) => `${c.kind}:${normalizeText(c.value)}` === `${cand.kind}:${normalizeText(cand.value)}`) === idx);
+
+    for (const candidate of deduped) {
+      const normalized = normalizeText(candidate.value);
+      if (!normalized) continue;
+      const lineHit = lines.find((ln) => ln.text.includes(normalized));
+      const span = lineHit ? findSpanInLine(lineHit.items, candidate.value) : null;
+      if (span && isLocalizedSpan(span, imgW, imgH)) {
+        return {
+          bbox: clampBbox(tightBox(span, imgW, imgH), imgW, imgH),
+          reason: `${candidate.kind === "detail" ? "detail" : candidate.kind === "element" ? "element label" : candidate.kind === "excerpt" ? "source excerpt" : "OCR phrase"} match on "${candidate.value}"`,
+          confidence: candidate.score,
+          mode: candidate.score >= 0.9 ? "exact" : "approximate",
+        };
       }
-      return { bbox: null, reason: "no OCR token matched the issue's callout/detail/element" };
+      const tokenHit = pageText.find((t) => normalizeText(t.str).includes(normalized));
+      if (tokenHit && isLocalizedSpan([tokenHit], imgW, imgH)) {
+        return {
+          bbox: clampBbox(tightBox([tokenHit], imgW, imgH), imgW, imgH),
+          reason: `${candidate.kind === "detail" ? "detail" : candidate.kind === "element" ? "element label" : candidate.kind === "excerpt" ? "source excerpt" : "OCR phrase"} token match on "${candidate.value}"`,
+          confidence: Math.max(0.55, candidate.score - 0.1),
+          mode: candidate.score >= 0.9 ? "exact" : "approximate",
+        };
+      }
     }
 
-    // Restrict to the matched-token span within the line for tightest possible box.
-    const line = bestLine;
-    let span = line.items;
-    if (bestAnchor) {
-      // Walk items and find contiguous run whose joined text covers the anchor.
-      const lower = line.items.map((i) => i.str.toLowerCase());
-      for (let i = 0; i < lower.length; i++) {
-        let acc = "";
-        for (let j = i; j < lower.length; j++) {
-          acc = (acc + " " + lower[j]).trim();
-          if (acc.replace(/\s+/g, " ").includes(bestAnchor)) {
-            span = line.items.slice(i, j + 1);
-            i = lower.length; // break outer
-            break;
-          }
-        }
-      }
-    }
-    const xs = span.map((s) => s.x);
-    const xe = span.map((s) => s.x + s.w);
-    const spanW = Math.max(...xe) - Math.min(...xs);
-    if (imgW && spanW > imgW * 0.45) {
-      return { bbox: null, reason: `matched text "${bestAnchor}" appears in a wide page strip, not a specific object` };
-    }
-    return { bbox: tightBox(span, imgW, imgH), reason: `phrase match on "${bestAnchor}"` };
+    return { bbox: null, reason: "no exact drawing object matched on the rendered page", confidence: 0, mode: "unavailable" };
   }, [exactBbox, pageText, sel?.id, sel?.location, sel?.linked_item?.bar_size, imgW, imgH]);
   const approxBbox = approxResult.bbox;
   const approxReason = approxResult.reason;
-  const bbox = exactBbox || approxBbox;
-  const bboxIsApprox = !exactBbox && !!approxBbox;
+  const exactAnchorConfidence = Number((sel?.source_refs?.[0] as { anchor_confidence?: number } | undefined)?.anchor_confidence ?? sel?.locator?.anchor_confidence ?? 1);
+  const exactAnchorMode = String((sel?.source_refs?.[0] as { anchor_mode?: string } | undefined)?.anchor_mode ?? sel?.locator?.anchor_mode ?? "exact");
+  const exactBboxValid = !!exactBbox && exactAnchorConfidence >= MIN_ANCHOR_CONFIDENCE && exactAnchorMode !== "approximate";
+  const safeApproxBbox = approxResult.confidence >= MIN_ANCHOR_CONFIDENCE ? approxBbox : null;
+  const bbox = clampBbox(exactBboxValid ? exactBbox : safeApproxBbox, imgW, imgH);
+  const bboxIsApprox = !exactBboxValid && !!bbox;
+  const anchorStatus: "exact" | "approximate" | "unavailable" = exactBboxValid ? "exact" : bbox ? "approximate" : "unavailable";
+  const anchorReason = exactBboxValid ? "" : approxReason || (exactBbox ? "saved anchor confidence is too low for a precise box" : "no trusted drawing object was found on this page");
   const center = bbox && imgW && imgH
     ? { cx: ((bbox[0] + bbox[2]) / 2) / imgW, cy: ((bbox[1] + bbox[3]) / 2) / imgH }
     : { cx: 0.5, cy: 0.5 };
@@ -431,6 +551,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
           {/* Canvas */}
           <div
+            ref={canvasRef}
             className="flex-1 overflow-hidden relative blueprint-bg cursor-grab active:cursor-grabbing select-none"
             onWheel={(e) => {
               if (!sel) return;
@@ -478,8 +599,19 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                       setPdfImg(dataUrl);
                       setImgSize({ w, h });
                       setRenderedPage(pdfPage);
+                      setRenderStatus("ready");
+                      setRenderError(null);
                     }}
                     onPageText={setPageText}
+                    onRenderStateChange={(state) => {
+                      setRenderStatus(state.status);
+                      setRenderError(state.error ?? null);
+                      if (state.status === "loading") {
+                        setPdfImg(null);
+                        setRenderedPage(null);
+                        setPageBox(null);
+                      }
+                    }}
                     scale={2}
                   />
                 )}
@@ -507,36 +639,36 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                       <img
                         src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")}
                         alt={previewName}
+                        data-qa-preview="true"
                         onLoad={(e) => {
+                          const t = e.currentTarget;
+                          const naturalW = t.naturalWidth;
+                          const naturalH = t.naturalHeight;
+                          if (!naturalW || !naturalH) return;
                           if (previewKind === "image") {
-                            const t = e.currentTarget;
-                            setImgSize({ w: t.naturalWidth, h: t.naturalHeight });
+                            setImgSize({ w: naturalW, h: naturalH });
+                            setRenderedPage(sel?.locator?.page_number ?? 1);
+                            setRenderStatus("ready");
+                            setRenderError(null);
                           }
+                          updatePageBox();
                         }}
                         className="absolute inset-0 w-full h-full object-contain"
                         style={viewMode === "diff" ? { mixBlendMode: "difference", filter: "invert(1) hue-rotate(180deg)" } : undefined}
                         draggable={false}
                       />
                     )}
-                    {viewMode !== "side" && bbox && imgW && imgH && (
+                    {viewMode !== "side" && renderStatus === "ready" && renderedPage === pdfPage && bbox && imgW && imgH && pageBox && (
                       <>
-                        {/* Wrapper that mirrors the object-contain placement of the image so
-                            the pointer aligns with the actual rendered drawing region. */}
                         <div
                           className="absolute inset-0 pointer-events-none"
-                          style={{
-                            // Compute letterbox: image is contained in the container
-                            // preserving aspect ratio. We don't know container px size
-                            // here, but using percentage of imgW/imgH against the same
-                            // object-contain box keeps overlay aligned because bbox is
-                            // also expressed in image pixel space.
-                          }}
                         >
                           <BBoxPointer
                             bbox={bbox}
                             imgW={imgW}
                             imgH={imgH}
                             zoom={zoom}
+                            pageBox={pageBox}
                             approximate={bboxIsApprox}
                             title={sel?.title || "Modification"}
                             description={[sel?.location_label, sel?.description || "Is this element correct as detected?"].filter(Boolean).join(" — ")}
@@ -589,14 +721,22 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                 {previewLoading && (
                   <div className="absolute inset-0 grid place-items-center text-[10px] uppercase tracking-widest text-muted-foreground">Loading drawing…</div>
                 )}
-                {!bbox && previewUrl && (
-                  <div className="absolute top-14 right-4 z-10 text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--status-inferred))] border border-[hsl(var(--status-inferred))]/30 bg-[hsl(var(--status-inferred))]/10 px-2 py-1">
-                    Page-linked · exact element region not yet pinned
+                {renderStatus === "error" && (
+                  <div className="absolute inset-0 grid place-items-center px-6 text-center">
+                    <div className="border border-border bg-card px-4 py-3 text-sm text-foreground max-w-md">
+                      <div className="font-bold mb-1">Could not render {previewName || "drawing"}</div>
+                      <div className="text-muted-foreground text-xs">{renderError || `Page ${pdfPage} could not be displayed.`}</div>
+                    </div>
                   </div>
                 )}
-                {bboxIsApprox && previewUrl && (
+                {renderStatus === "ready" && !bbox && previewUrl && (
+                  <div className="absolute top-14 right-4 z-10 text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--status-inferred))] border border-[hsl(var(--status-inferred))]/30 bg-[hsl(var(--status-inferred))]/10 px-2 py-1">
+                    Page linked · no trusted object box on this page
+                  </div>
+                )}
+                {anchorStatus === "approximate" && renderStatus === "ready" && previewUrl && (
                   <div className="absolute top-14 right-4 z-10 text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--status-inferred))] border border-[hsl(var(--status-inferred))]/40 bg-[hsl(var(--status-inferred))]/10 px-2 py-1">
-                    Approximate anchor · matched from text
+                    Approximate anchor · review source excerpt before measuring
                   </div>
                 )}
               </>
@@ -671,15 +811,15 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                           <div className="border-2 border-primary bg-primary/5 px-2 py-1.5 text-[10px] uppercase tracking-[0.1em] text-primary font-bold flex items-center gap-1.5"><span>📍</span><span className="truncate">{sel.location_label}</span></div>
                         )}
                         <div className="text-[9px] uppercase tracking-[0.12em] flex items-center gap-1.5">
-                          {exactBbox ? (
+                          {anchorStatus === "exact" ? (
                             <span className="px-1.5 py-0.5 bg-primary/10 text-primary border border-primary/30">Anchor: exact</span>
-                          ) : approxBbox ? (
-                            <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 border border-amber-500/30" title={approxReason}>Anchor: approximate</span>
+                          ) : anchorStatus === "approximate" ? (
+                            <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 border border-amber-500/30" title={anchorReason}>Anchor: approximate</span>
                           ) : (
-                            <span className="px-1.5 py-0.5 bg-muted text-muted-foreground border border-border" title={approxReason}>Anchor: unavailable</span>
+                            <span className="px-1.5 py-0.5 bg-muted text-muted-foreground border border-border" title={anchorReason}>Anchor: unavailable</span>
                           )}
-                          {!exactBbox && approxReason && (
-                            <span className="text-muted-foreground normal-case tracking-normal text-[10px] italic truncate">{approxReason}</span>
+                          {anchorStatus !== "exact" && anchorReason && (
+                            <span className="text-muted-foreground normal-case tracking-normal text-[10px] italic truncate">{anchorReason}</span>
                           )}
                         </div>
                         <div className="text-[11px] text-muted-foreground leading-relaxed">{sel.description || "No description provided."}</div>
@@ -780,12 +920,13 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 }
 
 function BBoxPointer({
-  bbox, imgW, imgH, zoom, title, description, onFix, onImpact, approximate,
+  bbox, imgW, imgH, zoom, pageBox, title, description, onFix, onImpact, approximate,
 }: {
   bbox: [number, number, number, number];
   imgW: number;
   imgH: number;
   zoom: number;
+  pageBox: { left: number; top: number; width: number; height: number };
   title: string;
   description: string;
   onFix: () => void;
@@ -799,6 +940,10 @@ function BBoxPointer({
   const top = (bbox[1] / imgH) * 100;
   const width = ((bbox[2] - bbox[0]) / imgW) * 100;
   const height = ((bbox[3] - bbox[1]) / imgH) * 100;
+  const leftPx = pageBox.left + (left / 100) * pageBox.width;
+  const topPx = pageBox.top + (top / 100) * pageBox.height;
+  const widthPx = (width / 100) * pageBox.width;
+  const heightPx = (height / 100) * pageBox.height;
   const z = Math.max(1, zoom);
   const stroke = approximate ? "#f59e0b" : "#ff7a1a";
   const fillBg = approximate ? "rgba(245,158,11,0.12)" : "rgba(34,197,94,0.18)";
@@ -806,7 +951,10 @@ function BBoxPointer({
     <div
       className="absolute pointer-events-auto"
       style={{
-        left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%`,
+        left: `${leftPx}px`,
+        top: `${topPx}px`,
+        width: `${widthPx}px`,
+        height: `${heightPx}px`,
         border: `${Math.max(2, 6 / z)}px ${approximate ? "dashed" : "solid"} ${stroke}`,
         background: fillBg,
         boxShadow: `0 0 0 ${Math.max(1, 4 / z)}px ${stroke}55`,

@@ -9,6 +9,7 @@ interface PdfRendererProps {
   currentPage: number;
   onPageCount: (count: number) => void;
   onPageRendered: (imageDataUrl: string, width: number, height: number) => void;
+  onRenderStateChange?: (state: { status: "loading" | "ready" | "error"; error?: string | null }) => void;
   /** Optional: emit text items with image-pixel bboxes for the rendered page.
    *  Coordinates are in the same image-pixel space as the rendered raster
    *  returned by onPageRendered (pre-scale, top-left origin). */
@@ -16,7 +17,7 @@ interface PdfRendererProps {
   scale?: number;
 }
 
-const PdfRenderer: React.FC<PdfRendererProps> = ({ url, currentPage, onPageCount, onPageRendered, onPageText, scale = 2 }) => {
+const PdfRenderer: React.FC<PdfRendererProps> = ({ url, currentPage, onPageCount, onPageRendered, onRenderStateChange, onPageText, scale = 2 }) => {
   const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +51,7 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({ url, currentPage, onPageCount
   useEffect(() => {
     if (!pdfDocRef.current || loading) return;
     let cancelled = false;
+    onRenderStateChange?.({ status: "loading", error: null });
 
     const renderPage = async () => {
       try {
@@ -67,6 +69,7 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({ url, currentPage, onPageCount
 
         const dataUrl = canvas.toDataURL("image/png");
         onPageRendered(dataUrl, viewport.width / scale, viewport.height / scale);
+        onRenderStateChange?.({ status: "ready", error: null });
 
         // Emit text items (positions in image-pixel space, pre-scale).
         if (onPageText) {
@@ -101,6 +104,7 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({ url, currentPage, onPageCount
         }
       } catch (err) {
         console.error("PDF render error:", err);
+        onRenderStateChange?.({ status: "error", error: `Failed to render page ${currentPage}.` });
       }
     };
 
