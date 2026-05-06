@@ -9,10 +9,14 @@ interface PdfRendererProps {
   currentPage: number;
   onPageCount: (count: number) => void;
   onPageRendered: (imageDataUrl: string, width: number, height: number) => void;
+  /** Optional: emit text items with image-pixel bboxes for the rendered page.
+   *  Coordinates are in the same image-pixel space as the rendered raster
+   *  returned by onPageRendered (pre-scale, top-left origin). */
+  onPageText?: (items: Array<{ str: string; x: number; y: number; w: number; h: number }>) => void;
   scale?: number;
 }
 
-const PdfRenderer: React.FC<PdfRendererProps> = ({ url, currentPage, onPageCount, onPageRendered, scale = 2 }) => {
+const PdfRenderer: React.FC<PdfRendererProps> = ({ url, currentPage, onPageCount, onPageRendered, onPageText, scale = 2 }) => {
   const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +67,38 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({ url, currentPage, onPageCount
 
         const dataUrl = canvas.toDataURL("image/png");
         onPageRendered(dataUrl, viewport.width / scale, viewport.height / scale);
+
+        // Emit text items (positions in image-pixel space, pre-scale).
+        if (onPageText) {
+          try {
+            const tc = await page.getTextContent();
+            if (cancelled) return;
+            // PDF text items: transform = [a,b,c,d,e,f]; position = (e, f)
+            // in PDF user-space, origin BOTTOM-left. Convert via viewport, then
+            // un-scale so coords match the dataUrl/imgSize space we report.
+            const items: Array<{ str: string; x: number; y: number; w: number; h: number }> = [];
+            for (const it of (tc.items as any[])) {
+              const str = String(it.str || "");
+              if (!str.trim()) continue;
+              const tx = (pdfjsLib as any).Util.transform(viewport.transform, it.transform);
+              const fontHeight = Math.hypot(tx[2], tx[3]);
+              const widthPx = Number(it.width) * Math.hypot(tx[0], tx[1]) / Math.max(1e-6, Math.hypot(it.transform[0], it.transform[1]));
+              const xCanvas = tx[4];
+              const yCanvas = tx[5] - fontHeight; // top edge
+              items.push({
+                str,
+                x: xCanvas / scale,
+                y: yCanvas / scale,
+                w: (widthPx || fontHeight * str.length * 0.5) / scale,
+                h: fontHeight / scale,
+              });
+            }
+            onPageText(items);
+          } catch (e) {
+            console.warn("PDF text extraction failed:", e);
+            onPageText([]);
+          }
+        }
       } catch (err) {
         console.error("PDF render error:", err);
       }
@@ -70,7 +106,7 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({ url, currentPage, onPageCount
 
     renderPage();
     return () => { cancelled = true; };
-  }, [currentPage, loading, scale]);
+  }, [currentPage, loading, scale, url]);
 
   if (error) {
     return (

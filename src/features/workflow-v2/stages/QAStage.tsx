@@ -33,6 +33,8 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [redrawCount, setRedrawCount] = useState(0);
   const [lastTrigger, setLastTrigger] = useState<string>("init");
   const [renderedPage, setRenderedPage] = useState<number | null>(null);
+  // Text items extracted from the rendered PDF page (image-pixel space).
+  const [pageText, setPageText] = useState<Array<{ str: string; x: number; y: number; w: number; h: number }>>([]);
 
   const bump = (reason: string) => {
     setRedrawCount((c) => c + 1);
@@ -120,9 +122,52 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
   // Bbox-driven crop
   const locator = sel?.locator || null;
-  const bbox = locator?.bbox || null;
+  const exactBbox = locator?.bbox || null;
   const imgW = locator?.image_size?.w || imgSize?.w || 0;
   const imgH = locator?.image_size?.h || imgSize?.h || 0;
+  // Fallback: derive an approximate bbox by matching the issue's anchor text
+  // (callout / element ref / source excerpt) against extracted PDF text items.
+  const approxBbox = useMemo<[number, number, number, number] | null>(() => {
+    if (exactBbox) return null;
+    if (!pageText || pageText.length === 0) return null;
+    const loc = sel?.location || {};
+    const anchors: string[] = [];
+    const push = (v?: string | null) => { if (v && String(v).trim().length >= 2) anchors.push(String(v).trim()); };
+    push(loc.element_reference); push(loc.detail_reference); push(loc.grid_reference);
+    push(loc.source_excerpt);
+    push(sel?.linked_item?.bar_size);
+    if (loc.source_excerpt) {
+      // Also try the longest "quoted" or capitalized run from the excerpt.
+      const m = String(loc.source_excerpt).match(/"([^"]{2,40})"|([A-Z0-9][A-Z0-9 \-#@.\/]{3,40})/);
+      if (m) push(m[1] || m[2]);
+    }
+    if (anchors.length === 0) return null;
+    // Find first matching item per anchor; prefer longest anchor first.
+    anchors.sort((a, b) => b.length - a.length);
+    const matches: typeof pageText = [];
+    for (const a of anchors) {
+      const needle = a.toLowerCase().replace(/\s+/g, " ");
+      const hits = pageText.filter((t) => t.str.toLowerCase().replace(/\s+/g, " ").includes(needle));
+      if (hits.length > 0) {
+        // Take up to first 6 hits to bound the region.
+        matches.push(...hits.slice(0, 6));
+        if (matches.length >= 3) break;
+      }
+    }
+    if (matches.length === 0) return null;
+    const xs = matches.map((m) => m.x);
+    const ys = matches.map((m) => m.y);
+    const xe = matches.map((m) => m.x + m.w);
+    const ye = matches.map((m) => m.y + m.h);
+    const x1 = Math.min(...xs), y1 = Math.min(...ys);
+    const x2 = Math.max(...xe), y2 = Math.max(...ye);
+    // Pad 30px on each side for visual breathing room.
+    const padX = Math.max(20, (x2 - x1) * 0.25);
+    const padY = Math.max(20, (y2 - y1) * 0.6);
+    return [Math.max(0, x1 - padX), Math.max(0, y1 - padY), x2 + padX, y2 + padY];
+  }, [exactBbox, pageText, sel?.id, sel?.location, sel?.linked_item?.bar_size]);
+  const bbox = exactBbox || approxBbox;
+  const bboxIsApprox = !exactBbox && !!approxBbox;
   const center = bbox && imgW && imgH
     ? { cx: ((bbox[0] + bbox[2]) / 2) / imgW, cy: ((bbox[1] + bbox[3]) / 2) / imgH }
     : { cx: 0.5, cy: 0.5 };
@@ -352,6 +397,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                       setImgSize({ w, h });
                       setRenderedPage(pdfPage);
                     }}
+                    onPageText={setPageText}
                     scale={2}
                   />
                 )}
@@ -409,6 +455,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                             imgW={imgW}
                             imgH={imgH}
                             zoom={zoom}
+                            approximate={bboxIsApprox}
                             title={sel?.title || "Modification"}
                             description={[sel?.location_label, sel?.description || "Is this element correct as detected?"].filter(Boolean).join(" — ")}
                             onFix={jumpToTakeoff}
@@ -463,6 +510,11 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                 {!bbox && previewUrl && (
                   <div className="absolute top-14 right-4 z-10 text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--status-inferred))] border border-[hsl(var(--status-inferred))]/30 bg-[hsl(var(--status-inferred))]/10 px-2 py-1">
                     Page-linked · exact element region not yet pinned
+                  </div>
+                )}
+                {bboxIsApprox && previewUrl && (
+                  <div className="absolute top-14 right-4 z-10 text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--status-inferred))] border border-[hsl(var(--status-inferred))]/40 bg-[hsl(var(--status-inferred))]/10 px-2 py-1">
+                    Approximate anchor · matched from text
                   </div>
                 )}
               </>
@@ -634,7 +686,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 }
 
 function BBoxPointer({
-  bbox, imgW, imgH, zoom, title, description, onFix, onImpact,
+  bbox, imgW, imgH, zoom, title, description, onFix, onImpact, approximate,
 }: {
   bbox: [number, number, number, number];
   imgW: number;
@@ -644,6 +696,7 @@ function BBoxPointer({
   description: string;
   onFix: () => void;
   onImpact: () => void;
+  approximate?: boolean;
 }) {
   // Bbox is in image-pixel space; the image is rendered with object-contain
   // so percentages of imgW/imgH applied within the same containing box align
@@ -653,18 +706,20 @@ function BBoxPointer({
   const width = ((bbox[2] - bbox[0]) / imgW) * 100;
   const height = ((bbox[3] - bbox[1]) / imgH) * 100;
   const z = Math.max(1, zoom);
+  const stroke = approximate ? "#f59e0b" : "#ff7a1a";
+  const fillBg = approximate ? "rgba(245,158,11,0.12)" : "rgba(34,197,94,0.18)";
   return (
     <div
       className="absolute pointer-events-auto"
       style={{
         left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%`,
-        border: `${Math.max(2, 6 / z)}px solid #ff7a1a`,
-        background: "rgba(34,197,94,0.18)",
-        boxShadow: `0 0 0 ${Math.max(1, 4 / z)}px rgba(255,122,26,0.3)`,
+        border: `${Math.max(2, 6 / z)}px ${approximate ? "dashed" : "solid"} ${stroke}`,
+        background: fillBg,
+        boxShadow: `0 0 0 ${Math.max(1, 4 / z)}px ${stroke}55`,
       }}
     >
-      <div className="absolute -top-3 -right-3 w-6 h-6 rounded-full grid place-items-center text-white shadow-lg" style={{ background: "#ff7a1a", transform: `scale(${1 / z})`, transformOrigin: "center" }}>
-        <span className="text-[10px] font-bold">!</span>
+      <div className="absolute -top-3 -right-3 w-6 h-6 rounded-full grid place-items-center text-white shadow-lg" style={{ background: stroke, transform: `scale(${1 / z})`, transformOrigin: "center" }}>
+        <span className="text-[10px] font-bold">{approximate ? "≈" : "!"}</span>
       </div>
       <div
         className="absolute left-1/2 bg-card border border-border shadow-2xl px-3 py-2 w-56 z-30"
