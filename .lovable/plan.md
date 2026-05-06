@@ -111,3 +111,7 @@ src/features/workflow-v2/stages/TakeoffStage.tsx — exclude unresolved from tot
 3. Delete manual → re-run → engine returns `MANUAL_NOT_LOADED` blocker, no rows.
 4. Run takeoff with only architectural PDFs → empty items, blocker `NO_SHOP_OR_STRUCTURAL_SOURCE`.
 5. Run takeoff where lap not in manual → row marked `UNRESOLVED`, no fabricated `40*db`.
+
+
+---
+Status: implemented 2026-05-06T20:20Z
