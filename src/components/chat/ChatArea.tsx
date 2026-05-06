@@ -45,11 +45,21 @@ interface Message {
   files?: MessageFile[];
 }
 
+interface OcrPass {
+  pass?: string;
+  engine?: string;
+  preprocess?: string;
+  fullText?: string;
+  blocks?: unknown[];
+}
+interface OcrResult { image_name: string; ocr_results: OcrPass[]; }
+type KnowledgeContext = { rules: string[]; fileUrls: string[]; trainingExamples: { title: string; answerText: string }[]; learnedRules: string[] };
+
 interface PreComputedPdfData {
   effectiveImageUrls: string[];
-  effectivePreExtracted: any[];
-  trimmedOcrResults: any[];
-  knowledgeContext: any;
+  effectivePreExtracted: Record<string, unknown>[];
+  trimmedOcrResults: OcrResult[];
+  knowledgeContext: KnowledgeContext;
 }
 
 interface ChatAreaProps {
@@ -125,8 +135,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadProgress, setUploadProgress] = useState<{ fileName: string; progress: number } | null>(null);
   const messageCountSinceLastLearn = useRef(0);
-  const [validationData, setValidationData] = useState<any>(null);
-  const [quoteResult, setQuoteResult] = useState<any>(null);
+  const [validationData, setValidationData] = useState<Record<string, unknown> | null>(null);
+  const [quoteResult, setQuoteResult] = useState<Record<string, unknown> | null>(null);
   const [exportGate, setExportGate] = useState<ExportGateResult | null>(null);
   const [userAnswers, setUserAnswers] = useState<{ element_id: string; field: string; value: string }[]>([]);
   const [showScopePanel, setShowScopePanel] = useState(false);
@@ -141,7 +151,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   const [finderPassCandidates, setFinderPassCandidates] = useState<FinderCandidate[]>([]);
   const [finderReviewMode, setFinderReviewMode] = useState(false);
   const [confirmedFinderCandidates, setConfirmedFinderCandidates] = useState<ReviewedCandidate[]>([]);
-  const [importedBarList, setImportedBarList] = useState<any[] | null>(null);
+  const [importedBarList, setImportedBarList] = useState<Record<string, unknown>[] | null>(null);
   const [estimationGroupFilter, setEstimationGroupFilter] = useState<"all" | "loose" | "cage">("all");
   const [subStep, setSubStep] = useState<string | null>(null);
   const isMobile = useIsMobile();
@@ -223,15 +233,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     if (!error && data) {
       setMessages(data as Message[]);
       // Check if mode was already selected
-      const modeMsg = data.find((m: any) => m.metadata && (m.metadata as any).calculationMode);
+      const modeMsg = data.find((m) => m.metadata && (m.metadata as Record<string, unknown>).calculationMode);
       if (modeMsg) {
-        const mode = (modeMsg.metadata as any).calculationMode;
+        const mode = (modeMsg.metadata as Record<string, unknown>).calculationMode;
         setCalculationMode(mode);
         onModeChange?.(mode);
         onStepChange?.(1);
       }
       // P0: Restore validation state + quote result from last assistant message containing ATOMIC_TRUTH markers
-      const atomicMsg = [...data].reverse().find((m: any) => m.role === "assistant" && m.content?.includes("%%%ATOMIC_TRUTH_JSON_START%%%"));
+      const atomicMsg = [...data].reverse().find((m) => m.role === "assistant" && m.content?.includes("%%%ATOMIC_TRUTH_JSON_START%%%"));
       if (atomicMsg) {
         const atomicData = extractAtomicTruthJSON(atomicMsg.content);
         if (atomicData?.elements && atomicData.elements.length > 0) {
@@ -280,7 +290,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     
     // Fetch knowledge items (filtered by user_id to prevent cross-user contamination)
     const { data } = await supabase
-      .from("agent_knowledge" as any)
+      .from("agent_knowledge")
       .select("*")
       .eq("user_id", user.id);
 
@@ -289,7 +299,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     const learnedRules: string[] = [];
 
     if (data && data.length > 0) {
-      for (const item of data as any[]) {
+      for (const item of data) {
         if (item.type === "rule" && item.content) {
           rules.push(item.title ? `[${item.title}]: ${item.content}` : item.content);
         } else if (item.type === "learned" && item.content) {
@@ -305,12 +315,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
     // Fetch training examples
     const { data: trainingData } = await supabase
-      .from("agent_training_examples" as any)
+      .from("agent_training_examples")
       .select("*");
 
     const trainingExamples: { title: string; answerText: string }[] = [];
     if (trainingData && trainingData.length > 0) {
-      for (const ex of trainingData as any[]) {
+      for (const ex of trainingData) {
         if (ex.answer_text) {
           trainingExamples.push({ title: ex.title, answerText: ex.answer_text });
         }
@@ -332,9 +342,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       opts?: { preComputed?: PreComputedPdfData; scopeOverride?: ScopeData & { focusCategory?: string }; silent?: boolean }
     ) => {
       let effectiveImageUrls: string[];
-      let effectivePreExtracted: any[];
-      let trimmedOcrResults: any[];
-      let knowledgeContext: any;
+      let effectivePreExtracted: Record<string, unknown>[];
+      let trimmedOcrResults: OcrResult[];
+      let knowledgeContext: KnowledgeContext;
 
       if (opts?.preComputed) {
         // Reuse pre-computed PDF extraction data (scope-by-scope loop)
@@ -357,10 +367,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         }
       }
 
-      const preExtractedText: any[] = [];
+      const preExtractedText: Record<string, unknown>[] = [];
       const scannedPdfPageImageUrls: string[] = [];
-      // Vision OCR text collected client-side (one image at a time via ocr-image function)
-      const clientOcrResults: { image_name: string; ocr_results: any[] }[] = [];
+      const clientOcrResults: OcrResult[] = [];
 
       if (pdfUrls.length > 0) {
         console.log(`Pre-extracting text from ${pdfUrls.length} PDF(s) sequentially...`);
@@ -414,7 +423,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                            image_name: `page_${result.value.pageNumber}.png`,
                            ocr_results: result.value.ocrData.ocr_results,
                          });
-                         console.log(`[OCR Routing] OCR page ${result.value.pageNumber} done — ${result.value.ocrData.ocr_results.reduce((s: number, r: any) => s + (r.blocks?.length || 0), 0)} blocks`);
+                         console.log(`[OCR Routing] OCR page ${result.value.pageNumber} done — ${(result.value.ocrData.ocr_results as OcrPass[]).reduce((s: number, r) => s + ((r.blocks?.length) || 0), 0)} blocks`);
                        } else {
                          console.error(`[OCR Routing] OCR failed for batch page:`, result.status === 'rejected' ? result.reason : 'no results');
                          ocrFailCount++;
@@ -443,7 +452,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         : 4000;
       trimmedOcrResults = clientOcrResults.map(item => ({
         image_name: item.image_name,
-        ocr_results: item.ocr_results.map((pass: any) => ({
+        ocr_results: item.ocr_results.map((pass) => ({
           pass: pass.pass,
           engine: pass.engine,
           preprocess: pass.preprocess,
@@ -496,7 +505,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               pass.fullText = pass.fullText.substring(0, Math.max(500, pass.fullText.length - charsToTrim));
             }
             // Drop blocks array to save space
-            delete (pass as any).blocks;
+            delete (pass as Record<string, unknown>)["blocks"];
           }
         }
         payloadStr = JSON.stringify(payloadObj);
@@ -578,10 +587,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 ? delta.content
                 : Array.isArray(delta.content)
                 ? delta.content
-                    .map((part: any) =>
+                    .map((part: unknown) =>
                       typeof part === "string"
                         ? part
-                        : part?.text ?? part?.content ?? ""
+                        : (part as Record<string, unknown>)?.text ?? (part as Record<string, unknown>)?.content ?? ""
                     )
                     .join("")
                 : undefined;
@@ -651,10 +660,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 ? delta.content
                 : Array.isArray(delta.content)
                 ? delta.content
-                    .map((part: any) =>
+                    .map((part: unknown) =>
                       typeof part === "string"
                         ? part
-                        : part?.text ?? part?.content ?? ""
+                        : (part as Record<string, unknown>)?.text ?? (part as Record<string, unknown>)?.content ?? ""
                     )
                     .join("")
                 : undefined;
@@ -669,7 +678,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                 prev.map((m) => (m.id === assistantId ? { ...m, content: flushDisplay } : m))
               );
             }
-          } catch {}
+          } catch (_err) {
+            // ignore JSON parse errors in stream chunks
+          }
         }
       }
 
@@ -706,7 +717,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
   }, [user]);
 
   // ── Atomic Truth Pipeline helpers ──
-  const extractAtomicTruthJSON = (content: string): any | null => {
+  const extractAtomicTruthJSON = (content: string): Record<string, unknown> | null => {
     const startMarker = "%%%ATOMIC_TRUTH_JSON_START%%%";
     const endMarker = "%%%ATOMIC_TRUTH_JSON_END%%%";
     let startIdx = content.indexOf(startMarker);
@@ -774,7 +785,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     return candidates;
   };
 
-  const runValidation = async (elements: any[], answers?: any[]) => {
+  const runValidation = async (elements: unknown[], answers?: unknown[]) => {
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess?.session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
@@ -790,22 +801,22 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       const data = await resp.json();
       setValidationData(data);
       return data;
-    } catch (err: any) {
-      toast.error("Validation failed: " + (err.message || "Unknown error"));
+    } catch (err) {
+      toast.error("Validation failed: " + ((err as Error).message || "Unknown error"));
       return null;
     }
   };
 
-  const runPricing = async (elements: any[], mode: "ai_express" | "verified") => {
+  const runPricing = async (elements: unknown[], mode: "ai_express" | "verified") => {
     try {
-      const truthElements = elements
-        .filter((e: any) => mode === "ai_express" ? e.status === "READY" : true)
-        .map((e: any) => ({
+      const truthElements = (elements as Record<string, unknown>[])
+        .filter((e) => mode === "ai_express" ? e.status === "READY" : true)
+        .map((e) => ({
           element_id: e.element_id,
           element_type: e.element_type,
-          truth: e.extraction?.truth || {},
-          sources: e.extraction?.sources || { identity_sources: [] },
-          confidence: e.extraction?.confidence || 0,
+          truth: (e.extraction as Record<string, unknown>)?.truth || {},
+          sources: (e.extraction as Record<string, unknown>)?.sources || { identity_sources: [] },
+          confidence: (e.extraction as Record<string, unknown>)?.confidence || 0,
           status: e.status,
         }));
 
@@ -834,8 +845,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           usedFallbackJson: false,
         }).then(setExportGate);
       }
-    } catch (err: any) {
-      toast.error("Pricing failed: " + (err.message || "Unknown error"));
+    } catch (err) {
+      toast.error("Pricing failed: " + ((err as Error).message || "Unknown error"));
     }
   };
 
@@ -855,15 +866,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     }
   };
 
-  const buildSyntheticQuote = (elements: any[], summary: any) => {
-    const barList = elements.flatMap((e: any) =>
-      (e.extraction?.truth?.bar_lines || e.bar_lines || []).map((b: any) => ({
+  const buildSyntheticQuote = (elements: unknown[], summary: unknown) => {
+    const barList = (elements as Record<string, unknown>[]).flatMap((e) => {
+      const barLines = ((e.extraction as Record<string, unknown>)?.truth as Record<string, unknown>)?.bar_lines as Record<string, unknown>[] | undefined
+        || e.bar_lines as Record<string, unknown>[] | undefined
+        || [];
+      return barLines.map((b) => ({
         ...b,
         element_type: e.element_type || e.type || "OTHER",
         element_id: e.element_id || e.id || "",
         sub_element: b.sub_element || e.sub_element || b.description || "",
-      }))
-    );
+      }));
+    });
     const sizeBreakdownKg: Record<string, number> = {};
     let totalKg = 0;
     for (const b of barList) {
@@ -885,6 +899,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       const sz = b.size || "unknown";
       sizeBreakdownKg[sz] = (sizeBreakdownKg[sz] || 0) + wt;
     }
+    const s = summary as Record<string, unknown> | null | undefined;
     return {
       bar_list: barList,
       size_breakdown_kg: sizeBreakdownKg,
@@ -893,13 +908,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       total_weight_lbs: totalKg / 0.453592,
       total_weight_tonnes: totalKg / 1000,
       total_weight_tons: (totalKg / 0.453592) / 2000,
-      mesh_details: summary?.mesh_details || [],
-      reconciliation: summary?.reconciliation || {},
-      risk_flags: summary?.risk_flags || [],
+      mesh_details: s?.mesh_details || [],
+      reconciliation: s?.reconciliation || {},
+      risk_flags: s?.risk_flags || [],
     };
   };
 
-  const persistEstimateVersion = async (elements: any[], quote: any) => {
+  const persistEstimateVersion = async (elements: unknown[], quote: Record<string, unknown>) => {
     if (!user) return;
     try {
       const scopeSource = scopeDataRef.current;
@@ -1015,7 +1030,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     return false;
   };
 
-  const extractFallbackElements = (content: string): any[] | null => {
+  const extractFallbackElements = (content: string): unknown[] | null => {
     // Try ```json blocks
     try {
       const jsonBlockMatch = content.match(/```json\s*([\s\S]*?)```/);
@@ -1214,12 +1229,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           await handlePostStream(accumulatedContent, finalChatHistory, mode, mode === "smart");
         }
       }
-    } catch (err: any) {
+    } catch (err) {
       setSubStep(null);
-      if (err.name === "AbortError") {
+      if ((err as Error & { name?: string }).name === "AbortError") {
         toast.error("AI analysis timed out after 5 minutes. Please retry.");
       } else {
-        toast.error(err.message || "AI analysis failed");
+        toast.error((err as Error).message || "AI analysis failed");
       }
     }
 
@@ -1272,7 +1287,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     // If user clicks "Yes, Proceed" and we already have validation data, skip re-analysis and go to pricing
     if (validationData?.elements && /yes.*proceed|proceed.*next/i.test(msgContent)) {
       try {
-        const readyCount = validationData.elements.filter((e: any) => e.status === "READY").length;
+        const readyCount = (validationData.elements as { status?: string }[]).filter((e) => e.status === "READY").length;
         if (readyCount > 0) {
           const sysMsg: Message = {
             id: crypto.randomUUID(),
@@ -1285,8 +1300,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         } else {
           toast.error("No elements are ready. Please resolve blocked elements first.");
         }
-      } catch (err: any) {
-        toast.error(err.message || "Pricing failed");
+      } catch (err) {
+        toast.error((err as Error).message || "Pricing failed");
       }
       setLoading(false);
       return;
@@ -1316,12 +1331,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         const expectStructured = calculationMode === "smart" && estimationIntent && !aiIsAskingQuestion;
         console.debug("[SendMessage] intent check:", { msgContent: msgContent.slice(0, 80), estimationIntent, aiIsAskingQuestion, expectStructured });
         await handlePostStream(result.fullContent, chatHistory, calculationMode, expectStructured);
-      } catch (err: any) {
+      } catch (err) {
         setSubStep(null);
-        if (err.name === "AbortError") {
+        if ((err as Error & { name?: string }).name === "AbortError") {
           toast.error("AI analysis timed out after 5 minutes. Please retry.");
         } else {
-          toast.error(err.message || "AI analysis failed");
+          toast.error((err as Error).message || "AI analysis failed");
         }
       }
     }
@@ -1614,9 +1629,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
     // Separate elements with and without spatial data
     const withBbox: OverlayElement[] = [];
-    const withoutBbox: any[] = [];
+    const withoutBbox: Record<string, unknown>[] = [];
+    const quoteElements = ((quoteResult?.quote as Record<string, unknown>)?.elements as Record<string, unknown>[]) ?? [];
 
-    validationData.elements.forEach((el: any) => {
+    (validationData.elements as Record<string, unknown>[]).forEach((el) => {
       const bbox = el.regions?.tag_region?.bbox;
       const hasBbox = bbox && (bbox[2] - bbox[0]) > 10 && (bbox[3] - bbox[1]) > 10;
       if (hasBbox) {
@@ -1626,7 +1642,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           status: el.status,
           bbox: el.regions.tag_region.bbox as [number, number, number, number],
           confidence: el.extraction?.confidence,
-          weight_lbs: quoteResult?.quote?.elements?.find((qe: any) => qe.element_id === el.element_id)?.weight_lbs,
+          weight_lbs: quoteElements.find((qe) => qe.element_id === el.element_id)?.weight_lbs as number | undefined,
           page_number: el.regions?.tag_region?.page_number,
         });
       } else {
@@ -1644,7 +1660,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       const gap = 60;
 
       // Group by type for organized placement
-      const grouped: Record<string, any[]> = {};
+      const grouped: Record<string, Record<string, unknown>[]> = {};
       withoutBbox.forEach((el) => {
         const t = el.element_type || "OTHER";
         if (!grouped[t]) grouped[t] = [];
@@ -1663,7 +1679,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             status: el.status,
             bbox: [curX, curY, curX + boxSize, curY + boxSize] as [number, number, number, number],
             confidence: el.extraction?.confidence,
-            weight_lbs: quoteResult?.quote?.elements?.find((qe: any) => qe.element_id === el.element_id)?.weight_lbs,
+            weight_lbs: quoteElements.find((qe) => qe.element_id === el.element_id)?.weight_lbs as number | undefined,
             page_number: el.regions?.tag_region?.page_number,
           });
           curY += gap;
@@ -1863,25 +1879,25 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             </div>
           ) : (validationData || importedBarList) ? (() => {
             // Compute estimation group flags
-            const elements = validationData?.elements || [];
-            const hasLoose = elements.some((e: any) => !e.estimation_group || e.estimation_group === "LOOSE_REBAR");
-            const hasCage = elements.some((e: any) => e.estimation_group === "CAGE_ASSEMBLY");
+            const elements = (validationData?.elements as Record<string, unknown>[]) || [];
+            const hasLoose = elements.some((e) => !e.estimation_group || e.estimation_group === "LOOSE_REBAR");
+            const hasCage = elements.some((e) => e.estimation_group === "CAGE_ASSEMBLY");
             const hasBothGroups = hasLoose && hasCage;
 
             // Filter elements by active group
             const filteredElements = estimationGroupFilter === "all"
               ? elements
-              : elements.filter((e: any) =>
+              : elements.filter((e) =>
                   estimationGroupFilter === "cage"
                     ? e.estimation_group === "CAGE_ASSEMBLY"
                     : !e.estimation_group || e.estimation_group === "LOOSE_REBAR"
                 );
 
             // Filter bar list by group
-            const rawBarList = quoteResult?.quote?.bar_list || importedBarList || [];
+            const rawBarList = ((quoteResult?.quote as Record<string, unknown>)?.bar_list as Record<string, unknown>[]) || importedBarList || [];
             const filteredBarList = estimationGroupFilter === "all"
               ? rawBarList
-              : rawBarList.filter((b: any) =>
+              : rawBarList.filter((b) =>
                   estimationGroupFilter === "cage"
                     ? b.estimation_group === "CAGE_ASSEMBLY"
                     : !b.estimation_group || b.estimation_group === "LOOSE_REBAR"
@@ -1890,16 +1906,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             // Recompute summary from filtered elements
             const filteredSummary = validationData?.summary
               ? {
-                  ...validationData.summary,
+                  ...(validationData.summary as Record<string, unknown>),
                   total_elements: filteredElements.length,
-                  total_weight_kg: filteredElements.reduce((sum: number, e: any) => sum + (e.weight_kg || 0), 0),
+                  total_weight_kg: filteredElements.reduce((sum: number, e) => sum + ((e.weight_kg as number) || 0), 0),
                 }
               : null;
 
             const isCageOrBarListOnly = scopeData?.primaryCategory === "cage_only" || scopeData?.primaryCategory === "bar_list_only";
-            const showCardsTab = !isCageOrBarListOnly && filteredElements.some((e: any) => !e.estimation_group || e.estimation_group === "LOOSE_REBAR");
+            const showCardsTab = !isCageOrBarListOnly && filteredElements.some((e) => !e.estimation_group || e.estimation_group === "LOOSE_REBAR");
             const showBarListTab = filteredBarList.length > 0;
-            const showBendingTab = filteredBarList.some((b: any) => b.shape_code && b.shape_code !== "straight" && b.shape_code !== "closed");
+            const showBendingTab = filteredBarList.some((b) => b.shape_code && b.shape_code !== "straight" && b.shape_code !== "closed");
 
             const defaultTab = isCageOrBarListOnly ? "barlist" : (showCardsTab ? "cards" : "barlist");
 
@@ -2038,7 +2054,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                     {quoteResult.excluded && quoteResult.excluded.length > 0 && (
                       <div className="mt-3 text-xs text-muted-foreground">
                         <p className="font-semibold">Excluded ({quoteResult.excluded_count}):</p>
-                        {quoteResult.excluded.map((ex: any, i: number) => <p key={i}>• {ex.element_id}: {ex.reason}</p>)}
+                        {(quoteResult.excluded as Record<string, unknown>[]).map((ex, i) => <p key={i}>• {ex.element_id as string}: {ex.reason as string}</p>)}
                       </div>
                     )}
                     <ExportButtons ref={(el) => { if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 300); }} quoteResult={quoteResult} elements={validationData?.elements || []} scopeData={scopeData} projectId={projectId} exportGate={exportGate} />
@@ -2071,7 +2087,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                       project_type: scope.projectType || null,
                       scope_items: scope.scopeItems,
                       deviations: scope.deviations || null,
-                    } as any).eq("id", projectId);
+                    } as Record<string, unknown>).eq("id", projectId);
                   }
                   setShowModePicker(true);
                 }}

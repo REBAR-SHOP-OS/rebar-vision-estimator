@@ -23,7 +23,8 @@ export interface ReferenceDiffSummary {
 export function normalizeReferenceKey(mark: string | null | undefined, description: string | null | undefined): string {
   const a = (mark || "").trim().toUpperCase().replace(/\s+/g, "");
   const b = (description || "").trim().toUpperCase().replace(/\s+/g, "").slice(0, 80);
-  return `${a}|${b}` || b || "unknown";
+  const combined = `${a}|${b}`;
+  return combined !== "|" ? combined : b || "unknown";
 }
 
 export function diffReferenceVsCanonical(

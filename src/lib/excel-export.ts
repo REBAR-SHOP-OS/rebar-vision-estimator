@@ -7,9 +7,9 @@ import { getMassKgPerM } from "@/lib/rebar-weights";
 import { getLogoBuffer } from "@/lib/logo-base64";
 
 interface ExportParams {
-  quoteResult: any;
-  elements: any[];
-  scopeData?: any;
+  quoteResult: Record<string, unknown>;
+  elements: unknown[];
+  scopeData?: Record<string, unknown>;
 }
 
 // ── helpers ──────────────────────────────────────────────────────
@@ -59,15 +59,15 @@ const TITLE_FONT: Partial<ExcelJS.Font> = { bold: true, size: 14 };
 function buildEstimateSummarySheet(wb: ExcelJS.Workbook, params: ExportParams) {
   const ws = wb.addWorksheet("Estimate Summary");
   const { quoteResult, scopeData } = params;
-  const barList: any[] = quoteResult.quote.bar_list || [];
-  const sizeBreakdownKg: Record<string, number> = quoteResult.quote.size_breakdown_kg || {};
-  const sizeBreakdown: Record<string, number> = quoteResult.quote.size_breakdown || {};
-  const rawMeshDetails: any[] = quoteResult.quote.mesh_details || scopeData?.meshDetails || [];
+  const barList: unknown[] = (quoteResult.quote as Record<string, unknown>).bar_list as unknown[] || [];
+  const sizeBreakdownKg: Record<string, number> = (quoteResult.quote as Record<string, unknown>).size_breakdown_kg as Record<string, number> || {};
+  const sizeBreakdown: Record<string, number> = (quoteResult.quote as Record<string, unknown>).size_breakdown as Record<string, number> || {};
+  const rawMeshDetails: unknown[] = (quoteResult.quote as Record<string, unknown>).mesh_details as unknown[] || (scopeData as Record<string, unknown>)?.meshDetails as unknown[] || [];
   // Extract WWM items from bar_list if mesh_details is empty
-  const meshDetails: any[] = rawMeshDetails.length > 0 ? rawMeshDetails : barList
-    .filter((b) => b.size && /\d.*x.*\d.*W/i.test(b.size))
+  const meshDetails: unknown[] = rawMeshDetails.length > 0 ? rawMeshDetails : barList
+    .filter((b) => (b as Record<string, unknown>).size && /\d.*x.*\d.*W/i.test((b as Record<string, unknown>).size as string))
     .map((b) => ({
-      location: b.element_type || b.sub_element || "—",
+      location: (b as Record<string, unknown>).element_type || (b as Record<string, unknown>).sub_element || "—",
       mesh_size: b.size,
       area_sqft: b.area_sqft || b.qty || "—",
     }));

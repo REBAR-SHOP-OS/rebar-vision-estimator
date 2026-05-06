@@ -23,8 +23,8 @@ export default function QAStage({ projectId }: StageProps) {
       const { data } = await supabase.from("validation_issues")
         .select("id,title,description,severity,status,sheet_id,issue_type")
         .eq("project_id", projectId).order("severity", { ascending: true });
-      setIssues((data as any) || []);
-      setSelectedId((data?.[0] as any)?.id || null);
+      setIssues((data as Issue[]) || []);
+      setSelectedId((data?.[0] as Issue | undefined)?.id || null);
       setLoading(false);
     })();
   }, [projectId]);

@@ -27,7 +27,7 @@ export default function TakeoffStage({ projectId, state }: StageProps) {
         .select("id, bar_size, description, quantity_count, total_length, total_weight, status, confidence")
         .eq("project_id", projectId).limit(500);
       if (cancelled) return;
-      const mapped: Row[] = (data || []).map((d: any, i: number) => ({
+      const mapped: Row[] = (data || []).map((d, i: number) => ({
         id: d.id,
         mark: `M${String(i + 1).padStart(3, "0")}`,
         size: d.bar_size || "—",

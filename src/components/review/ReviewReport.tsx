@@ -1,8 +1,38 @@
 import React from "react";
 import { Badge } from "@/components/ui/badge";
 
+interface BarItem {
+  element_type?: string;
+  element_id?: string;
+  bar_mark?: string;
+  size?: string;
+  shape_code?: string;
+  qty?: number;
+  length_ft?: number;
+  weight_lbs?: number;
+}
+
+interface ReviewData {
+  bar_list?: BarItem[];
+  size_breakdown?: Record<string, number>;
+  scope?: {
+    projectName?: string;
+    clientName?: string;
+    projectType?: string;
+    coatingType?: string;
+    scopeItems?: string[];
+    deviations?: string;
+  };
+  methodology?: string;
+  total_weight_lbs?: number;
+  total_weight_tons?: number | string;
+  elements_count?: number;
+  ready_count?: number;
+  flagged_count?: number;
+}
+
 interface ReviewReportProps {
-  reviewData: any;
+  reviewData: ReviewData;
 }
 
 // Weight tables removed — use canonical source in @/lib/rebar-weights.ts if needed
@@ -16,7 +46,7 @@ const ReviewReport: React.FC<ReviewReportProps> = ({ reviewData }) => {
   const methodology = reviewData.methodology || "";
 
   // Group bar list by element type
-  const grouped: Record<string, any[]> = {};
+  const grouped: Record<string, BarItem[]> = {};
   for (const b of barList) {
     const t = b.element_type || "OTHER";
     if (!grouped[t]) grouped[t] = [];
@@ -26,7 +56,7 @@ const ReviewReport: React.FC<ReviewReportProps> = ({ reviewData }) => {
   const sortedSizes = Object.entries(sizeBreakdown).sort(
     (a, b) => parseInt(String(a[0]).replace("#", "")) - parseInt(String(b[0]).replace("#", ""))
   );
-  const sizeTotal: number = Object.values(sizeBreakdown).reduce((a: number, b: any) => a + Number(b), 0 as number) as number;
+  const sizeTotal: number = Object.values(sizeBreakdown).reduce((a: number, b) => a + Number(b), 0);
 
   return (
     <div className="space-y-6">
@@ -156,7 +186,7 @@ const ReviewReport: React.FC<ReviewReportProps> = ({ reviewData }) => {
                           {type}
                         </td>
                       </tr>
-                      {bars.map((b: any, i: number) => (
+                      {bars.map((b, i: number) => (
                         <tr key={`${type}-${i}`} className="border-b border-border/30">
                           <td className="py-1">{b.element_id}</td>
                           <td className="py-1">{b.bar_mark || "—"}</td>

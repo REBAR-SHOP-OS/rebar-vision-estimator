@@ -14,8 +14,8 @@ import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 
 interface Props {
-  project: any;
-  onUpdate: (updated: any) => void;
+  project: Record<string, unknown>;
+  onUpdate: (updated: Record<string, unknown>) => void;
 }
 
 export default function ProjectSettingsTab({ project, onUpdate }: Props) {

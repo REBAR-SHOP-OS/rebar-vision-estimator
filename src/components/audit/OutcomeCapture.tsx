@@ -16,13 +16,35 @@ interface OutcomeCaptureProps {
   projects: { id: string; name: string }[];
 }
 
+interface OutcomeRecord {
+  id: string;
+  project_id?: string;
+  award_status?: string;
+  quoted_price?: number;
+  actual_cost?: number;
+  quoted_weight_kg?: number;
+  actual_weight_kg?: number;
+  change_orders_total?: number;
+  notes?: string;
+}
+interface AnalysisRule {
+  condition: string;
+  correction: string;
+  confidence: number;
+}
+interface AnalysisResult {
+  stats?: { total_outcomes?: number; won?: number; lost?: number; avg_delta_pct?: number };
+  analysis?: string;
+  rules?: AnalysisRule[];
+}
+
 const OutcomeCapture: React.FC<OutcomeCaptureProps> = ({ projects }) => {
   const { user } = useAuth();
-  const [outcomes, setOutcomes] = useState<any[]>([]);
+  const [outcomes, setOutcomes] = useState<OutcomeRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState<any>(null);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     project_id: "",
@@ -98,7 +120,7 @@ const OutcomeCapture: React.FC<OutcomeCaptureProps> = ({ projects }) => {
     setAnalyzing(false);
   };
 
-  const editOutcome = (o: any) => {
+  const editOutcome = (o: OutcomeRecord) => {
     setEditingId(o.id);
     setForm({
       project_id: o.project_id || "",
@@ -223,7 +245,7 @@ const OutcomeCapture: React.FC<OutcomeCaptureProps> = ({ projects }) => {
             {analysisResult.rules?.length > 0 && (
               <div className="space-y-1">
                 <p className="text-xs font-semibold">Learned Rules:</p>
-                {analysisResult.rules.map((r: any, i: number) => (
+                {analysisResult.rules.map((r, i) => (
                   <div key={i} className="rounded border border-border p-2 text-xs space-y-0.5">
                     <p className="font-medium">{r.condition}</p>
                     <p className="text-muted-foreground">{r.correction}</p>

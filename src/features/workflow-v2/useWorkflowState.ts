@@ -18,20 +18,20 @@ const LS_KEY = (pid: string) => `rvev2:${pid}`;
 function readLocal(pid: string) {
   try { return JSON.parse(localStorage.getItem(LS_KEY(pid)) || "{}"); } catch { return {}; }
 }
-function writeLocal(pid: string, patch: Record<string, any>) {
+function writeLocal(pid: string, patch: Record<string, unknown>) {
   const cur = readLocal(pid);
   localStorage.setItem(LS_KEY(pid), JSON.stringify({ ...cur, ...patch }));
 }
 
 export function useWorkflowState(projectId: string): WorkflowState & {
-  setLocal: (patch: Record<string, any>) => void;
-  local: Record<string, any>;
+  setLocal: (patch: Record<string, unknown>) => void;
+  local: Record<string, unknown>;
 } {
   const [files, setFiles] = useState<WorkflowState["files"]>([]);
   const [qaOpen, setQaOpen] = useState(0);
   const [qaCriticalOpen, setQaCriticalOpen] = useState(0);
   const [takeoffRows, setTakeoffRows] = useState(0);
-  const [local, setLocalState] = useState<Record<string, any>>(() => readLocal(projectId));
+  const [local, setLocalState] = useState<Record<string, unknown>>(() => readLocal(projectId));
   const [tick, setTick] = useState(0);
 
   const refresh = useCallback(() => setTick((t) => t + 1), []);
@@ -46,9 +46,9 @@ export function useWorkflowState(projectId: string): WorkflowState & {
       ]);
       if (cancelled) return;
       setFiles(f.data || []);
-      const open = (vi.data || []).filter((i: any) => i.status !== "resolved" && i.status !== "closed");
+      const open = (vi.data || []).filter((i) => (i as Record<string, unknown>).status !== "resolved" && (i as Record<string, unknown>).status !== "closed");
       setQaOpen(open.length);
-      setQaCriticalOpen(open.filter((i: any) => i.severity === "critical" || i.severity === "error").length);
+      setQaCriticalOpen(open.filter((i) => (i as Record<string, unknown>).severity === "critical" || (i as Record<string, unknown>).severity === "error").length);
       setTakeoffRows(ei.count || 0);
     })();
     return () => { cancelled = true; };
@@ -56,7 +56,7 @@ export function useWorkflowState(projectId: string): WorkflowState & {
 
   useEffect(() => { setLocalState(readLocal(projectId)); }, [projectId, tick]);
 
-  const setLocal = useCallback((patch: Record<string, any>) => {
+  const setLocal = useCallback((patch: Record<string, unknown>) => {
     writeLocal(projectId, patch);
     setLocalState((s) => ({ ...s, ...patch }));
   }, [projectId]);

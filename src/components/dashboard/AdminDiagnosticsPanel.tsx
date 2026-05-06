@@ -41,11 +41,36 @@ const CANONICAL_TABLE_GROUPS: { title: string; items: string[] }[] = [
   },
 ];
 
+interface AuditLogEntry {
+  id: string;
+  action: string;
+  details: Record<string, unknown> | null;
+  created_at: string;
+}
+
+interface ReconciliationRecord {
+  id: string;
+  resolved: boolean;
+  issue_type: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+interface ProcessingJobEntry {
+  id: string;
+  status: string;
+  job_type: string;
+  created_at: string;
+  progress: number;
+  error_message: string | null;
+  result: Record<string, unknown> | null;
+}
+
 const AdminDiagnosticsPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { user } = useAuth();
-  const [auditLogs, setAuditLogs] = useState<any[]>([]);
-  const [reconciliations, setReconciliations] = useState<any[]>([]);
-  const [processingJobs, setProcessingJobs] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
+  const [reconciliations, setReconciliations] = useState<ReconciliationRecord[]>([]);
+  const [processingJobs, setProcessingJobs] = useState<ProcessingJobEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

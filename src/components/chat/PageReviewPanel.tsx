@@ -11,7 +11,7 @@ interface ReviewElement {
   status: string;
   extraction?: {
     confidence?: number;
-    truth?: Record<string, any>;
+    truth?: Record<string, unknown>;
   };
   regions?: {
     tag_region?: {

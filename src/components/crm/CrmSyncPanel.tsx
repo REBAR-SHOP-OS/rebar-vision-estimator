@@ -88,7 +88,7 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose, onStartE
         console.error("Failed to fetch pipeline leads:", error);
         toast.error("Failed to fetch pipeline leads");
       } else {
-        setLeads((data?.leads || []).map((l: any) => ({ ...l, attachments: l.attachments || [] })));
+        setLeads((data?.leads || []).map((l) => ({ ...l, attachments: l.attachments || [] })));
       }
     } catch (err) {
       console.error("Error:", err);
@@ -105,7 +105,7 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose, onStartE
         user_id: user.id,
         project_id: projectId,
         crm_deal_id: leadId,
-      }, { onConflict: "user_id,project_id" } as any);
+      }, { onConflict: "user_id,project_id" });
 
     if (error) {
       toast.error("Failed to link lead");

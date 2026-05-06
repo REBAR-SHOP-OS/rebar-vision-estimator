@@ -16,7 +16,7 @@ interface Row {
 }
 
 function inferRevision(name: string): string {
-  const m = name.match(/[_\s\-](rev|r|v)[_\-\s]?([0-9]+)/i);
+  const m = name.match(/[_\s-](rev|r|v)[_\-\s]?([0-9]+)/i);
   return m ? `R${m[2]}` : "R0";
 }
 
