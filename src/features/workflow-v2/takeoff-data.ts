@@ -107,6 +107,26 @@ export function buildLocationLabel(loc: WorkflowQaIssue["location"], fallbackShe
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+// Build the location-led question text shown in the QA panel.
+// Always lead with the most specific location available; fall back to source excerpt.
+function buildQuestionText(
+  label: string | null,
+  loc: WorkflowQaIssue["location"],
+  originalDescription: string | null | undefined,
+  fallbackTitle: string | null | undefined,
+): string {
+  const body = (originalDescription && String(originalDescription).trim())
+    || (fallbackTitle && String(fallbackTitle).trim())
+    || "Confirm this item against the drawing.";
+  if (label) return `${label}: ${body}`;
+  if (loc?.page_number) return `Page ${loc.page_number}: ${body}`;
+  if (loc?.source_excerpt) {
+    const ex = String(loc.source_excerpt).slice(0, 120);
+    return `Source: "${ex}" — ${body}`;
+  }
+  return body;
+}
+
 function extractLocationFromRef(ref: any, aj: Record<string, any>, fallback: { sheet_id?: string | null }) {
   const r = ref || {};
   const nestedR = (r.location && typeof r.location === "object") ? r.location : {};
