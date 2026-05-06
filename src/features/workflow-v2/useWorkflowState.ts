@@ -12,6 +12,7 @@ export interface WorkflowState {
     created_at: string;
     file_size?: number | null;
   }>;
+  approvedScopeItems: string[];
   scopeCandidates: number;
   scopeAccepted: number;
   takeoffRows: number;
@@ -81,6 +82,7 @@ export function useWorkflowState(projectId: string): WorkflowState & {
   const [qaOpen, setQaOpen] = useState(0);
   const [qaCriticalOpen, setQaCriticalOpen] = useState(0);
   const [takeoffRows, setTakeoffRows] = useState(0);
+  const [approvedScopeItems, setApprovedScopeItems] = useState<string[]>([]);
   const [local, setLocalState] = useState<Record<string, unknown>>(() => readLocal(projectId));
   const [tick, setTick] = useState(0);
 
@@ -89,7 +91,7 @@ export function useWorkflowState(projectId: string): WorkflowState & {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [canonicalFiles, f, vi, ei] = await Promise.all([
+      const [canonicalFiles, f, vi, ei, projectRes] = await Promise.all([
         getCanonicalProjectFiles(supabase, projectId).catch((error) => {
           console.warn("Failed to load canonical workflow files:", error);
           return [] as CanonicalProjectFileView[];
@@ -97,9 +99,14 @@ export function useWorkflowState(projectId: string): WorkflowState & {
         supabase.from("project_files").select("id,file_name,file_path,created_at,file_size").eq("project_id", projectId).order("created_at", { ascending: false }),
         supabase.from("validation_issues").select("severity,status").eq("project_id", projectId),
         supabase.from("estimate_items").select("id", { count: "exact", head: true }).eq("project_id", projectId),
+        supabase.from("projects").select("scope_items").eq("id", projectId).maybeSingle(),
       ]);
       if (cancelled) return;
       setFiles(mergeWorkflowFiles(canonicalFiles, f.data || []));
+      const serverScopeItems = Array.isArray(projectRes.data?.scope_items)
+        ? projectRes.data.scope_items.map((item: unknown) => String(item)).filter(Boolean)
+        : [];
+      setApprovedScopeItems(serverScopeItems);
       const open = (vi.data || []).filter((i) => (i as Record<string, unknown>).status !== "resolved" && (i as Record<string, unknown>).status !== "closed");
       setQaOpen(open.length);
       setQaCriticalOpen(open.filter((i) => (i as Record<string, unknown>).severity === "critical" || (i as Record<string, unknown>).severity === "error").length);
@@ -116,12 +123,14 @@ export function useWorkflowState(projectId: string): WorkflowState & {
   }, [projectId]);
 
   const scope = (local.scope || {}) as Record<string, "accept" | "hold" | "reroute">;
-  const scopeCandidates = Math.max(files.length, Object.keys(scope).length);
-  const scopeAccepted = Object.values(scope).filter((v) => v === "accept").length;
+  const localAccepted = Object.values(scope).filter((v) => v === "accept").length;
+  const scopeCandidates = Math.max(files.length, Object.keys(scope).length, approvedScopeItems.length);
+  const scopeAccepted = Math.max(localAccepted, approvedScopeItems.length);
 
   return {
     fileCount: files.length,
     files,
+    approvedScopeItems,
     scopeCandidates,
     scopeAccepted,
     takeoffRows,
