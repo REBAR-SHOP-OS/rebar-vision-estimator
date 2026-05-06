@@ -1,60 +1,57 @@
-## Goal
+# Fix: Data doesn't flow from Stage 2 → Stage 3
 
-Apply the **Industrial Precision** visual language (uploaded `stitch_precision_rebar_estimating_system_6.zip`) to the new estimator workflow (`src/features/workflow-v2/*`). Mix and match the strongest layouts from the mockups into our existing 6 stages — without rebuilding logic, routes, or data plumbing.
+## Root cause
 
-## Visual Language (locked)
+Stage 3 (`TakeoffStage`) only **reads** existing `estimate_items` and canonical `rebar.takeoff_items` for the project. For project `6d0fcbf5…`:
 
-- **Sharp 0px corners**, 1px hairline dividers, no shadows/gradients
-- **Inter** everywhere; ALL CAPS 11px labels; tabular numeric font for data
-- **Color tokens** (added to `src/index.css` dark theme):
-  - `--surface 220 14% 8%`, `--surface-container 220 13% 12%`, `--surface-container-high 220 12% 16%`
-  - `--primary 220 100% 84%` (Industrial blue `#adc6ff`)
-  - `--status-direct` blue, `--status-inferred` amber, `--status-supported` green, `--status-blocked` red
-- 32px table row height, 24px input height, 4px base unit
-- Status pills: 2px radius only; everything else sharp
+- `project_files`: 2
+- `scope_items` on `projects`: NULL
+- `segments`: 0
+- `estimate_items`: 0
 
-## Stage-by-Stage Mix
+Stage 2 (`ScopeStage`) currently only:
+1. Updates the local `scope` map in localStorage.
+2. Appends the candidate label to `projects.scope_items`.
+3. Sets `workflow_status = 'scope_detected'`.
 
-| Stage | Source mockup | What we adopt |
-|---|---|---|
-| **Files** | `files_revisions` | Document Register table (file/discipline/rev/status/parse/sheets/upload), right-side Preview + Metadata + Revisions History panel, sheet-completeness warning bar |
-| **Scope** | `scope_review` | Two-column Candidate Scope Items (left) → vertical Approve/Reject/Merge/Split rail (center) → Approved Scope buckets grid (right) with totals header |
-| **Takeoff** | `takeoff_workspace_traceability_pro` + `takeoff_control_room_final_production_state` | Three-pane: left Estimator Copilot + Issue Queue, center Sheet viewer + Production Takeoff Data table, right Quantity Inspector tabs (Proof / History / Warnings / RFI) with sticky "Confirm Takeoff Data" CTA |
-| **QA** | `qa_issue_management` | Red "Approval Gate Blocked" banner with Resolve/Override CTAs, grouped issue table (Critical Blockers / Review Warnings / Revision Conflicts), right Linked Source Review panel with isometric drawing + Recommended Fix |
-| **Confirm** (Estimator Confirmation) | `revision_compare_production_audit_desk` action panel | Single-column signoff sheet: precondition checklist, signature block, "Confirm Takeoff Data" primary CTA, secondary "Mark for Review" / "Request Override" |
-| **Outputs** | `project_deliverables_export_control` | Export Blocked banner (when applicable), 4 deliverable cards (Estimate Workbook / Quote Package / Review Draft / Fabrication Output) each with status pill + Generate/Download, Output Generation History table |
+It **never creates `segments`** and **never invokes `auto-estimate`** (or any takeoff producer). Because of that, Stage 3 always finds zero rows even after the user approves scope items.
 
-## Shell (`WorkflowShell.tsx`)
+The `auto-estimate` edge function exists and writes to `estimate_items`, but it requires a `segment_id` — which the V2 workflow never creates.
 
-Mix `project_operations_dashboard` chrome:
-- Left rail keeps stage list but switches to **icon + caps label** style with active state = filled primary bar on the left edge
-- Top header gets the **6 KPI cards** strip (Files / Scope Approved / Takeoff Rows / QA Critical / QA Open / Outputs Ready) using Industrial cards
-- Footer status bar reformatted as monospaced telemetry strip (already close — just retype + colors)
-- Stage rail gets the "Stage 0X" kicker + sharp square step indicators (already close, just restyle)
+## Fix (minimum patch)
 
-## Files Touched (minimum patch)
+Two small, surgical changes — no rewrites, no UI redesign:
 
-1. `src/index.css` — append Industrial Precision tokens to `.dark` block + add `.font-tabular` and `.hairline` utilities (no removals)
-2. `src/features/workflow-v2/WorkflowShell.tsx` — restyle header/rail/footer; KPI strip insert
-3. `src/features/workflow-v2/stages/_shared.tsx` — extend `Pill` tones (direct/inferred/supported/blocked), add `<DataTable>`, `<KpiCell>`, `<SectionHeader>` primitives
-4. `src/features/workflow-v2/stages/FilesStage.tsx` — relayout to Document Register + Preview/Metadata
-5. `src/features/workflow-v2/stages/ScopeStage.tsx` — three-zone candidate/rail/approved layout
-6. `src/features/workflow-v2/stages/TakeoffStage.tsx` — three-pane Copilot/Viewer+Table/Inspector
-7. `src/features/workflow-v2/stages/QAStage.tsx` — gate banner + grouped table + Linked Source Review panel
-8. `src/features/workflow-v2/stages/ConfirmStage.tsx` — signoff sheet
-9. `src/features/workflow-v2/stages/OutputsStage.tsx` — deliverable cards + history table
+### 1. `ScopeStage.tsx` — create a segment when a candidate is approved
 
-## Out of Scope
+In the existing `setDecision(id, "accept")` branch (the same block that writes `scope_items`), also upsert a `segments` row:
 
-- No data model / Supabase changes
-- No router changes (workflow-v2 already primary)
-- No new dependencies
-- Legacy workspace under `src/pages/legacy/` untouched
-- No copy edits to existing audit/persistence logic
+- `project_id = projectId`
+- `user_id = auth.uid()`
+- `name = candidate.label`
+- `segment_type = 'miscellaneous'` (default)
+- `status = 'draft'`
+- Idempotent: skip insert if a segment with the same `(project_id, name)` already exists.
 
-## Acceptance
+On reject (`hold` / `reroute`), do **not** delete the segment (preserves any downstream work). Existing `scope_items` array logic is unchanged.
 
-- All 6 stages render with the Industrial Precision look & feel
-- Existing state hook (`useWorkflowState`) and persistence untouched
-- No regressions in build / typecheck / tests
-- Stage gating (locked / blocked / active) still functions exactly as today
+### 2. `TakeoffStage.tsx` — add a "Generate Takeoff" action when no rows exist
+
+Currently the empty state just says *"Accept scope candidates and run extraction to populate."* Replace the hint with a button that:
+
+1. Fetches `segments` for this project that have no `estimate_items` yet.
+2. For each, calls `supabase.functions.invoke("auto-estimate", { body: { segment_id, project_id }})` sequentially (small N, typically ≤ 7).
+3. Shows a toast with progress and on success calls `state.refresh()` + reloads rows.
+
+No schema changes. No new edge functions. Reuses the existing `auto-estimate` function that already writes `estimate_items` rows that `loadLegacyTakeoffRows` consumes.
+
+## Files touched
+
+- `src/features/workflow-v2/stages/ScopeStage.tsx` — add segment upsert inside existing `setDecision` accept branch (~15 lines).
+- `src/features/workflow-v2/stages/TakeoffStage.tsx` — add "Generate Takeoff" button + handler in the existing empty-state slot (~30 lines).
+
+## Out of scope
+
+- No redesign of layout, no new tables, no canonical `rebar.takeoff_runs` writes (those continue to come from the existing canonical pipeline if/when it runs).
+- No changes to `auto-estimate` itself.
+- No deletion of segments on reject (safer default).
