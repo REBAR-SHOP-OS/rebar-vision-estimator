@@ -26,6 +26,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [tab, setTab] = useState<TabKey>("change");
   const [zoomMode, setZoomMode] = useState<"tight" | "full">("tight");
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [pan, setPan] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
   const [viewMode, setViewMode] = useState<"overlay" | "side" | "diff">("overlay");
   const [changedOnly, setChangedOnly] = useState(true);
   const [debug, setDebug] = useState(false);
@@ -60,7 +61,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.id, sel?.locator?.page_number]);
 
-  useEffect(() => { setZoomMode("tight"); setZoomLevel(1); setTab("change"); }, [sel?.id]);
+  useEffect(() => { setZoomMode("tight"); setZoomLevel(1); setPan({ dx: 0, dy: 0 }); setTab("change"); }, [sel?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,8 +132,10 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const fitZoom = bbox && imgW && imgH ? Math.min(imgW / (bboxW * PAD), imgH / (bboxH * PAD)) : 1;
   const autoZoom = zoomMode === "tight" && bbox ? Math.min(12, Math.max(2, fitZoom)) : 1;
   const zoom = Math.min(24, Math.max(0.5, autoZoom * zoomLevel));
-  const tx = (0.5 - center.cx) * 100 * zoom;
-  const ty = (0.5 - center.cy) * 100 * zoom;
+  const txBase = (0.5 - center.cx) * 100 * zoom;
+  const tyBase = (0.5 - center.cy) * 100 * zoom;
+  const tx = txBase + pan.dx;
+  const ty = tyBase + pan.dy;
 
   const TABS: Array<{ k: TabKey; label: string }> = [
     { k: "change", label: "Change" },
@@ -300,7 +303,41 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
           </div>
 
           {/* Canvas */}
-          <div className="flex-1 overflow-hidden relative blueprint-bg">
+          <div
+            className="flex-1 overflow-hidden relative blueprint-bg cursor-grab active:cursor-grabbing select-none"
+            onWheel={(e) => {
+              if (!sel) return;
+              e.preventDefault();
+              const delta = -e.deltaY;
+              const factor = delta > 0 ? 1.1 : 1 / 1.1;
+              setZoomLevel((z) => Math.min(8, Math.max(0.25, Number((z * factor).toFixed(3)))));
+              bump(`wheel zoom ${delta > 0 ? "in" : "out"}`);
+            }}
+            onPointerDown={(e) => {
+              if (e.button !== 0) return;
+              const el = e.currentTarget;
+              el.setPointerCapture(e.pointerId);
+              const startX = e.clientX, startY = e.clientY;
+              const startPan = { ...pan };
+              const rect = el.getBoundingClientRect();
+              const move = (ev: PointerEvent) => {
+                const ddx = ((ev.clientX - startX) / rect.width) * 100;
+                const ddy = ((ev.clientY - startY) / rect.height) * 100;
+                setPan({ dx: startPan.dx + ddx, dy: startPan.dy + ddy });
+              };
+              const up = (ev: PointerEvent) => {
+                el.releasePointerCapture(ev.pointerId);
+                el.removeEventListener("pointermove", move);
+                el.removeEventListener("pointerup", up);
+                el.removeEventListener("pointercancel", up);
+                bump("drag end");
+              };
+              el.addEventListener("pointermove", move);
+              el.addEventListener("pointerup", up);
+              el.addEventListener("pointercancel", up);
+            }}
+            onDoubleClick={() => { setPan({ dx: 0, dy: 0 }); setZoomLevel(1); bump("dbl click reset"); }}
+          >
             {!sel ? (
               <div className="absolute inset-0 grid place-items-center text-[10px] uppercase tracking-widest text-muted-foreground">Select an issue from the navigator</div>
             ) : (
@@ -324,18 +361,18 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                     style={viewMode === "side" ? undefined : {
                       transform: `translate(${tx}%, ${ty}%) scale(${zoom})`,
                       transformOrigin: "center center",
-                      transition: "transform 0.35s ease-out",
+                      transition: "transform 0.05s linear",
                     }}
                   >
                     {viewMode === "side" ? (
                       <>
                         <div className="relative w-full h-full bg-background overflow-hidden">
                           <div className="absolute top-1 left-1 z-10 px-1.5 py-0.5 bg-card/90 border border-border text-[9px] uppercase tracking-[0.12em] font-bold">Rev 2 (Base)</div>
-                          <img src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")} alt={previewName} className="w-full h-full object-contain" style={{ transform: `translate(${tx}%, ${ty}%) scale(${zoom})`, transformOrigin: "center center", transition: "transform 0.35s ease-out" }} draggable={false} />
+                          <img src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")} alt={previewName} className="w-full h-full object-contain" style={{ transform: `translate(${tx}%, ${ty}%) scale(${zoom})`, transformOrigin: "center center", transition: "transform 0.05s linear" }} draggable={false} />
                         </div>
                         <div className="relative w-full h-full bg-background overflow-hidden">
                           <div className="absolute top-1 left-1 z-10 px-1.5 py-0.5 bg-primary/20 border border-primary/50 text-[9px] uppercase tracking-[0.12em] font-bold text-primary">Rev 3 (Target)</div>
-                          <img src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")} alt={`${previewName} target`} className="w-full h-full object-contain" style={{ filter: "sepia(1) hue-rotate(150deg) saturate(2.2) contrast(1.1)", transform: `translate(${tx}%, ${ty}%) scale(${zoom})`, transformOrigin: "center center", transition: "transform 0.35s ease-out" }} draggable={false} />
+                          <img src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")} alt={`${previewName} target`} className="w-full h-full object-contain" style={{ filter: "sepia(1) hue-rotate(150deg) saturate(2.2) contrast(1.1)", transform: `translate(${tx}%, ${ty}%) scale(${zoom})`, transformOrigin: "center center", transition: "transform 0.05s linear" }} draggable={false} />
                         </div>
                       </>
                     ) : (
