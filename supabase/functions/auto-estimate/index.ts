@@ -451,8 +451,8 @@ Output the JSON array now. Every object MUST have non-zero quantity_count AND to
       });
     }
 
-    // Update segment confidence to avg of its estimate items
-    const avgConf = rows.reduce((s, r) => s + (r.confidence as number), 0) / (rows.length || 1);
+    // Update segment confidence to avg of its estimate items (deduped set)
+    const avgConf = dedupedRows.reduce((s, r) => s + (r.confidence as number), 0) / (dedupedRows.length || 1);
     await supabase.from("segments").update({ confidence: Math.round(avgConf * 100) / 100 }).eq("id", segment_id);
 
     // Audit log
