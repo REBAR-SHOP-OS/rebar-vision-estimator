@@ -1,58 +1,93 @@
-## Problem (from CRU-1 screenshot + audit)
+## Problem
 
-Stage 02 shows the same archetypes ("Footings — Strip & Pad", "Walls — Foundation/Retaining", "Slabs on Grade") **once per uploaded PDF** (Structural (4).pdf AND Architectural.pdf). That is the root cause of the overlap you flagged. The candidates are not coming from OCR — `src/features/workflow-v2/stages/ScopeStage.tsx` (lines 20–40) generates them synthetically by crossing a fixed `archetypes` array with `state.files`. The real candidate generator (`supabase/functions/auto-segments`) is never invoked from Stage 02, and it already enforces "structural shows rebar; architectural shows dimensions/hidden scope" — we just aren't using its output.
+Current `auto-estimate` is OCR-token → AI → estimate row. It works for explicit bar list tables but collapses on SD06–SD08 style packages where bar marks (`BS31`, `B2035`, `BS80`) reference upstream geometry (footing schedules, wall elevations, lap tables, CONT/IF logic). When the AI cannot find a number, it emits `length=0, weight=0` rows that look broken instead of honestly flagging "geometry unresolved — needs engineer".
 
-`auto-estimate` already encodes the **Concrete = Rebar axiom** and a structural-first source picker (lines 174, 386), but it feeds OCR from `drawing_search_index` without weighting by discipline, so when structural pages are noisy it can silently rely on architectural numbers without flagging it.
-
-`auto-bar-schedule` and `generate-shop-drawing` both read from `estimate_items` only — so any duplication upstream is replicated downstream into the SD callouts and bar schedule.
+The detailer's own warnings on these sheets ("VERIFY FOOTING DIM", "VERIFY STEP LOCATIONS", "VERIFY ELEVATION") confirm this is a coordination-stage package, not a fab-ready one.
 
 ## Goal
 
-1. Stage 02 candidates come from real OCR (structural primary, architectural fallback / hidden-scope), de-duplicated by element identity, never per-file.
-2. `auto-estimate` ranks structural OCR first, only consults architectural to recover *missing* concrete elements (Concrete = Rebar axiom), and tags each line with the discipline it was confirmed against.
-3. `auto-bar-schedule` and `generate-shop-drawing` consume the de-duplicated estimate set so SD callouts/schedules can't double-count.
-4. No regressions to existing London CRU-1 fixture (`tests/fixtures/london-cru1/manifest.json`) or `concrete-rebar-gate` test.
+1. Stop pretending. Replace `length=0` zero rows with an explicit `UNRESOLVED_GEOMETRY` state surfaced in the UI.
+2. Add the missing middle layer: a structural reference graph (bar mark → shape → host element → geometry) before the AI is asked to compute.
+3. Use AI only for token extraction + final assembly. Geometry math runs deterministically.
+4. Hard-block use of architectural OCR for rebar geometry (only allowed to flag a missing concrete element).
 
-## Changes (minimum patch)
+## Scope of changes (minimal-patch, additive)
 
-### A. Real Stage 02 candidates — `src/features/workflow-v2/stages/ScopeStage.tsx`
-- Drop the synthetic `archetypes` × `files` cross-product.
-- On mount (when `state.files.length > 0` and no candidates cached), call `supabase.functions.invoke("auto-segments", { body: { projectId } })` once and persist the result in `state.local.scopeCandidates`.
-- Map suggestions → `Candidate { id: name, label: name, source: notes (drawing refs), confidence, evidence: notes }`. One candidate per unique `name` — no per-file duplication.
-- Keep the existing approve/reject UI and `segments` upsert path unchanged.
-- Empty-state hint becomes: "Run scope detection — no concrete elements surfaced yet."
+```text
+SD OCR ──► [1] Token extractor (existing)
+            │
+            ▼
+        [2] Structural Graph builder  (NEW)
+            • grids, footings, walls, schedules, lap table
+            • bar-mark dictionary (BSxx → shape, host)
+            ▼
+        [3] Reference resolver       (NEW)
+            • CONT / IF / DWL / TOP / BOT chaining
+            • step-footing transitions
+            ▼
+        [4] Geometry engine          (NEW, deterministic)
+            • cut length, hooks, laps, cover deductions
+            • returns { value, status: RESOLVED | UNRESOLVED, missing:[...] }
+            ▼
+        [5] Estimate assembler       (refactored auto-estimate)
+            • inserts row with provenance + status
+            ▼
+        [6] UI + validation queue    (existing, extended)
+```
 
-### B. Discipline-weighted OCR — `supabase/functions/auto-estimate/index.ts`
-- When fetching `drawing_search_index`, also pull `extracted_entities->title_block->discipline` (already stored).
-- Build two text buffers: `structuralOCR` and `architecturalOCR`. Concatenate as `structuralOCR` first, then a clearly delimited `=== ARCHITECTURAL FALLBACK (use only to recover missing concrete elements) ===` block, then architectural.
-- Extend the system prompt: "Prefer values from structural pages. Only use the architectural block to add a line for a concrete element that has no structural rebar callout, and tag its description with `(arch-fallback)`. Never overwrite a structural number with an architectural one."
-- Source-file picker (line 386) already prefers structural — leave intact.
+### Files to touch
 
-### C. De-dup gate before insert — `supabase/functions/auto-estimate/index.ts`
-- Before `supabase.from("estimate_items").insert(rows)`, collapse rows on `(segment_id, normalize(description), bar_size)` keeping the highest-confidence row and summing identical-geometry duplicates only when both are sourced from the same discipline.
-- Re-query existing `estimate_items` for this segment and skip rows whose normalized key already exists (the current `existingDesc` is only passed to the prompt — make it an actual hard filter).
+1. `supabase/functions/auto-estimate/index.ts` — refactor: stop forcing non-zero, route every line through the new resolver, write `assumptions_json.geometry_status = 'unresolved' | 'resolved' | 'partial'` and `assumptions_json.missing_refs = [...]`.
+2. `supabase/functions/_shared/structural-graph.ts` — NEW. Pure TS module:
+   - `buildGraph(ocrPages)` → `{ grids, footings[], walls[], schedules{}, barMarks{BS80:{shape,host,size}}, lapTable{} }`.
+   - `resolveBar(mark, graph)` → `{ size, shape, hostId, qty?, devLength?, status, missing[] }`.
+   - `computeDevelopedLength(shape, host, lapTable, cover)` → meters or `null`.
+3. `supabase/functions/_shared/rebar-formulas.ts` — NEW. Hooks (90°/135°/180°), lap = 40·db default, cover deductions, shape-code library (Type 1/2/3/T1…T9 RSIC).
+4. `supabase/functions/auto-bar-schedule/index.ts` — read `geometry_status`, do NOT silently zero-fill.
+5. `src/features/workflow-v2/takeoff-data.ts` — surface `geometry_status` on each row.
+6. `src/features/workflow-v2/stages/TakeoffStage.tsx` (or equivalent grid) — render badge:
+   - `RESOLVED` → green, value shown.
+   - `PARTIAL` → amber, value shown with asterisk + tooltip listing missing refs.
+   - `UNRESOLVED_GEOMETRY` → red chip, value cell shows "—" not "0", row is auto-pushed into review queue.
+7. `validation_issues` insert: one issue per `UNRESOLVED_GEOMETRY` row with `issue_type='unresolved_geometry'`, `source_refs=[{mark, host, missing}]`, severity from existing rules.
 
-### D. Shop-drawing & bar-schedule consume the same de-duplicated set
-- `supabase/functions/auto-bar-schedule/index.ts`: add the same normalization step on its `estimate_items` read (line 95) so a stray duplicate row from older runs cannot produce two BS marks.
-- `supabase/functions/generate-shop-drawing/shop-drawing-template.ts`: no logic change — already iterates over what it's given. Verified via existing `src/test/shop-drawing-template.test.ts`.
+### Key behavioural rules
 
-### E. Tests
-- Extend `src/test/concrete-rebar-gate.test.ts` (or add `auto-estimate-dedup.test.ts`) to assert: given OCR with `WALL W1` on both structural and architectural pages, only one `WALL W1` line is produced and it is tagged structural.
-- Re-run `tests/fixtures/london-cru1/manifest.json` regression — bucket presence/absence must remain identical.
+- Architectural OCR is **never** a geometry source for a rebar line. It can only emit a placeholder concrete element flag.
+- AI prompt is reduced to: "extract bar marks, callouts, schedules, dimensions as structured JSON". No more `MANDATORY COMPUTATION` clause that drives hallucinated math.
+- Geometry math lives in `rebar-formulas.ts` and is unit-testable.
+- A row with `quantity_count=0 AND total_length=0` is **invalid** and must be persisted with `geometry_status='unresolved'`. Storing `0` as a real value is forbidden — the UI must read the status, not the number.
+- `confidence` for unresolved rows = `0.0` (not 0.2) so they can never auto-approve.
 
-## Out of scope
+### Resolver contract (sketch)
 
-- No DB schema changes.
-- No UI redesign of Stage 02 beyond swapping the data source.
-- Excel / PDF exporters untouched (last week's wiring stays).
+```ts
+type ResolveResult =
+  | { status: 'RESOLVED'; qty: number; devLengthM: number; weightKg: number; sources: SourceRef[] }
+  | { status: 'PARTIAL'; qty?: number; devLengthM?: number; missing: string[]; sources: SourceRef[] }
+  | { status: 'UNRESOLVED'; missing: string[]; sources: SourceRef[] };
+```
 
-## Files touched
+Missing-ref tokens are human-readable: `"BS80 shape definition"`, `"wall W-3 height"`, `"footing F-12 step elevation"`, `"lap class for 20M"`, etc. These flow straight into the validation queue.
 
-- `src/features/workflow-v2/stages/ScopeStage.tsx` (replace candidate source)
-- `supabase/functions/auto-estimate/index.ts` (discipline weighting + dedup gate)
-- `supabase/functions/auto-bar-schedule/index.ts` (dedup read)
-- `src/test/concrete-rebar-gate.test.ts` (add dedup assertion) or new test file
+### Tests (Deno)
 
-## Risk
+- `supabase/functions/_shared/structural-graph.test.ts` — given a SD08 OCR fixture, builds graph and resolves `BS80`, leaves `B2035` PARTIAL with `missing=['wall W-3 height']`.
+- `supabase/functions/_shared/rebar-formulas.test.ts` — Type 1 straight, Type 7 standee, hook + lap math vs RSIC table.
+- `auto-estimate` regression: ensure no row is inserted with `total_length=0` AND `geometry_status!='unresolved'`.
 
-Low. Stage 02 already has an empty-state branch, so if `auto-segments` returns `[]` the screen degrades gracefully instead of showing fake archetypes. All other paths are additive filters.
+## Out of scope (explicit)
+
+- No PDF re-OCR. We work off existing `drawing_search_index`.
+- No new tables. `assumptions_json` already exists on `estimate_items` and is used for status + missing refs.
+- No prompt change to `draft-shop-drawing-ai` or `generate-shop-drawing` in this round.
+- No grid auto-detection from raster — graph is built from OCR text only for this pass; raster grid extraction is a follow-up.
+
+## Acceptance
+
+- Re-running estimation on CRU-1 produces three populated columns in the takeoff:
+  1. RESOLVED rows with real qty/length/weight derived from the structural graph.
+  2. PARTIAL rows with values + amber tooltip listing what's missing.
+  3. UNRESOLVED rows showing "—" and auto-listed in the validation queue with clear missing-ref text.
+- Zero rows from architectural-only sources disappear.
+- Validation queue contains one issue per unresolved bar mark with the detailer's own "VERIFY …" notes attached when present.

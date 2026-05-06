@@ -339,24 +339,32 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
                                     {editing ? (
                                       <input type="number" className="w-16 bg-background border border-border px-1 text-[11px] text-right"
                                         value={editPatch.count ?? 0} onChange={(e) => setEditPatch((p) => ({ ...p, count: Number(e.target.value) }))} />
-                                    ) : r.count}
+                                    ) : r.geometry_status === "unresolved" ? <span className="text-muted-foreground">—</span> : r.count}
                                   </td>
                                   <td className="px-3 text-right">
                                     {editing ? (
                                       <input type="number" step="0.01" className="w-20 bg-background border border-border px-1 text-[11px] text-right"
                                         value={editPatch.length ?? 0} onChange={(e) => setEditPatch((p) => ({ ...p, length: Number(e.target.value) }))} />
-                                    ) : r.length.toFixed(2)}
+                                    ) : r.geometry_status === "unresolved" ? <span className="text-muted-foreground">—</span> : r.length.toFixed(2)}
                                   </td>
                                   <td className="px-3 text-right font-semibold">
                                     {editing ? (
                                       <input type="number" step="0.1" className="w-20 bg-background border border-border px-1 text-[11px] text-right"
                                         value={editPatch.weight ?? 0} onChange={(e) => setEditPatch((p) => ({ ...p, weight: Number(e.target.value) }))} />
-                                    ) : r.weight.toFixed(1)}
+                                    ) : r.geometry_status === "unresolved" ? <span className="text-muted-foreground">—</span> : r.weight.toFixed(1)}
                                   </td>
                                   <td className="px-3">
-                                    {r.status === "ready" && <Pill tone="direct" solid>Direct</Pill>}
-                                    {r.status === "review" && <Pill tone="inferred" solid>Inferred</Pill>}
-                                    {r.status === "blocked" && <Pill tone="blocked" solid>Blocked</Pill>}
+                                    {r.geometry_status === "unresolved" ? (
+                                      <Pill tone="blocked" solid>
+                                        <span title={r.missing_refs.length ? `Missing: ${r.missing_refs.join("; ")}` : "Geometry unresolved"}>Unresolved</span>
+                                      </Pill>
+                                    ) : r.geometry_status === "partial" ? (
+                                      <Pill tone="inferred" solid>
+                                        <span title={r.missing_refs.length ? `Missing: ${r.missing_refs.join("; ")}` : "Partial geometry"}>Partial</span>
+                                      </Pill>
+                                    ) : r.status === "ready" ? <Pill tone="direct" solid>Resolved</Pill>
+                                      : r.status === "blocked" ? <Pill tone="blocked" solid>Blocked</Pill>
+                                      : <Pill tone="direct" solid>Resolved</Pill>}
                                   </td>
                                   <td className="px-3 text-right" onClick={(e) => e.stopPropagation()}>
                                     {editing ? (
