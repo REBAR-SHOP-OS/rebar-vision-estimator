@@ -164,14 +164,14 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     if (!host) return;
     const img = host.querySelector('img[data-qa-preview="true"]') as HTMLImageElement | null;
     if (!img || !img.naturalWidth || !img.naturalHeight) return;
-    const parent = img.parentElement?.getBoundingClientRect();
+    const parent = img.parentElement;
     if (!parent) return;
-    const scale = Math.min(parent.width / img.naturalWidth, parent.height / img.naturalHeight);
+    const scale = Math.min(parent.clientWidth / img.naturalWidth, parent.clientHeight / img.naturalHeight);
     const width = img.naturalWidth * scale;
     const height = img.naturalHeight * scale;
     setPageBox({
-      left: (parent.width - width) / 2,
-      top: (parent.height - height) / 2,
+      left: (parent.clientWidth - width) / 2,
+      top: (parent.clientHeight - height) / 2,
       width,
       height,
     });
@@ -940,6 +940,10 @@ function BBoxPointer({
   const top = (bbox[1] / imgH) * 100;
   const width = ((bbox[2] - bbox[0]) / imgW) * 100;
   const height = ((bbox[3] - bbox[1]) / imgH) * 100;
+  const leftPx = pageBox.left + (left / 100) * pageBox.width;
+  const topPx = pageBox.top + (top / 100) * pageBox.height;
+  const widthPx = (width / 100) * pageBox.width;
+  const heightPx = (height / 100) * pageBox.height;
   const z = Math.max(1, zoom);
   const stroke = approximate ? "#f59e0b" : "#ff7a1a";
   const fillBg = approximate ? "rgba(245,158,11,0.12)" : "rgba(34,197,94,0.18)";
@@ -947,10 +951,10 @@ function BBoxPointer({
     <div
       className="absolute pointer-events-auto"
       style={{
-        left: `calc(${pageBox.left}px + ${left}% * ${pageBox.width / 100})`,
-        top: `calc(${pageBox.top}px + ${top}% * ${pageBox.height / 100})`,
-        width: `${(width / 100) * pageBox.width}px`,
-        height: `${(height / 100) * pageBox.height}px`,
+        left: `${leftPx}px`,
+        top: `${topPx}px`,
+        width: `${widthPx}px`,
+        height: `${heightPx}px`,
         border: `${Math.max(2, 6 / z)}px ${approximate ? "dashed" : "solid"} ${stroke}`,
         background: fillBg,
         boxShadow: `0 0 0 ${Math.max(1, 4 / z)}px ${stroke}55`,
