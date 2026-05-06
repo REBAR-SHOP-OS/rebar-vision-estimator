@@ -74,6 +74,7 @@ export default function ProjectSettingsTab({ project, onUpdate }: Props) {
       if (canonicalError) {
         console.warn("Failed to sync canonical project fields:", canonicalError);
         toast.warning("Saved project details, but the canonical project record did not sync.");
+        updatedCanonicalProject = null;
       } else if (canonicalData) {
         canonicalSyncSucceeded = true;
         updatedCanonicalProject = {
