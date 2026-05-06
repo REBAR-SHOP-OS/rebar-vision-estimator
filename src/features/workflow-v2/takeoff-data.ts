@@ -196,7 +196,9 @@ function rewriteToRawInputAsk(
   const looksUnresolved = /^(missing\b|unresolved geometry)/i.test(desc.trim())
     || /unresolved geometry|missing\s+(refs?|dimensions?|callout)/i.test(text);
   const looksDerivedAsk = /\b(verify|confirm|find|calculate|compute)\b.*\b(total|length|run|perimeter|qty|quantity|count|weight)\b/i.test(text);
-  if (!looksUnresolved && !looksDerivedAsk) return null;
+  // Also catch the legacy "at the <noun>: enter … so the system can calculate …" wording.
+  const looksLegacyAsk = /so the system can calculate|^at the \w/i.test(text);
+  if (!looksUnresolved && !looksDerivedAsk && !looksLegacyAsk) return null;
 
   const missingMatch = desc.match(/missing\s*:\s*([^\n]+)/i);
   const tokens = missingMatch
