@@ -86,17 +86,25 @@ function pickStr(...vals: any[]): string | null {
   return null;
 }
 
+// "p12", "page 12", "12" → null (page tag, not a real sheet id)
+function isPageTag(v: string | null | undefined): boolean {
+  if (!v) return true;
+  return /^(p|page)?\s*\d+$/i.test(String(v).trim());
+}
+
 export function buildLocationLabel(loc: WorkflowQaIssue["location"], fallbackSheet?: string | null): string | null {
-  if (!loc) return fallbackSheet ? `Sheet ${fallbackSheet}` : null;
+  if (!loc && !fallbackSheet) return null;
   const parts: string[] = [];
-  if (loc.source_sheet) parts.push(`Sheet ${loc.source_sheet}`);
-  else if (fallbackSheet) parts.push(`Sheet ${fallbackSheet}`);
-  if (loc.page_number) parts.push(`p.${loc.page_number}`);
-  if (loc.detail_reference) parts.push(`Detail ${loc.detail_reference}`);
-  if (loc.grid_reference) parts.push(`Grid ${loc.grid_reference}`);
-  if (loc.zone_reference) parts.push(loc.zone_reference);
-  if (loc.element_reference) parts.push(loc.element_reference);
-  return parts.length > 0 ? parts.join(", ") : null;
+  const sheet = (loc?.source_sheet && !isPageTag(loc.source_sheet)) ? loc.source_sheet
+              : (fallbackSheet && !isPageTag(fallbackSheet)) ? fallbackSheet
+              : null;
+  if (sheet) parts.push(`Sheet ${sheet}`);
+  if (loc?.page_number) parts.push(`Page ${loc.page_number}`);
+  if (loc?.detail_reference) parts.push(`Detail ${loc.detail_reference}`);
+  if (loc?.grid_reference) parts.push(`Grid ${loc.grid_reference}`);
+  if (loc?.zone_reference) parts.push(loc.zone_reference);
+  if (loc?.element_reference) parts.push(loc.element_reference);
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 function extractLocationFromRef(ref: any, aj: Record<string, any>, fallback: { sheet_id?: string | null }) {
