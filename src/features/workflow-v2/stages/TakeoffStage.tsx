@@ -190,7 +190,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
         entity_id: r.raw_id,
         action: "ocr_correction",
         metadata: { original, corrected: next, source: "takeoff_stage", file_id: r.source_file_id },
-      });
+      } as any);
     }
 
     setRows((prev) => prev.map((row) => row.id === r.id ? { ...row, ...(next as Partial<WorkflowTakeoffRow>) } as WorkflowTakeoffRow : row));

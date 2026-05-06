@@ -14,8 +14,8 @@ import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
 
 interface Props {
-  project: Record<string, unknown>;
-  onUpdate: (updated: Record<string, unknown>) => void;
+  project: any;
+  onUpdate: (updated: any) => void;
 }
 
 export default function ProjectSettingsTab({ project, onUpdate }: Props) {
@@ -58,7 +58,7 @@ export default function ProjectSettingsTab({ project, onUpdate }: Props) {
     let canonicalSyncSucceeded = false;
 
     if (project.rebar_project_id) {
-      const { data: canonicalData, error: canonicalError } = await supabase
+      const { data: canonicalData, error: canonicalError } = await (supabase as any)
         .schema("rebar")
         .from("projects")
         .update({

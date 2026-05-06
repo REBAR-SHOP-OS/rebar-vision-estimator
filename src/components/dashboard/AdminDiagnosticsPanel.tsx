@@ -44,7 +44,7 @@ const CANONICAL_TABLE_GROUPS: { title: string; items: string[] }[] = [
 interface AuditLogEntry {
   id: string;
   action: string;
-  details: Record<string, unknown> | null;
+  details: any;
   created_at: string;
 }
 
@@ -63,7 +63,7 @@ interface ProcessingJobEntry {
   created_at: string;
   progress: number;
   error_message: string | null;
-  result: Record<string, unknown> | null;
+  result: any;
 }
 
 const AdminDiagnosticsPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {

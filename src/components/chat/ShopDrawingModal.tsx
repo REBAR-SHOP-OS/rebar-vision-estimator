@@ -167,7 +167,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
             options: options as unknown,
             html_content: data.html,
             version: nextVersion,
-          });
+          } as any);
         }
       }
 

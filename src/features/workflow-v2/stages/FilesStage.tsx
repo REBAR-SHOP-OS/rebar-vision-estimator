@@ -114,7 +114,7 @@ export default function FilesStage({ projectId, state }: StageProps) {
   };
 
   const setStatus = (id: string, status: Row["status"]) => {
-    const cur = state.local.fileStatus || {};
+    const cur = (state.local.fileStatus as any) || {};
     state.setLocal({ fileStatus: { ...cur, [id]: status } });
   };
 
