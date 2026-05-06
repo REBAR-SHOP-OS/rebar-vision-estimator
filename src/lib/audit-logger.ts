@@ -17,6 +17,6 @@ export async function logAuditEvent(
     project_id: projectId || undefined,
     segment_id: segmentId || undefined,
     metadata: metadata || {},
-  });
+  } as any);
   if (error) console.error("Audit log failed:", error.message);
 }
