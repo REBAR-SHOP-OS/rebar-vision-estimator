@@ -224,6 +224,27 @@ function inferSegmentType(label: string): string {
   return "miscellaneous";
 }
 
+function itemMatchesSegment(item: { description?: string; source_excerpt?: string | null }, segType: string, segName: string): boolean {
+  if (segType === "miscellaneous") return true;
+  const text = `${item.description || ""} ${item.source_excerpt || ""}`.toUpperCase();
+  const name = String(segName || "").toUpperCase();
+  const tests: Record<string, RegExp> = {
+    footing: /\b(FOOTING|FTG|F-\d|WF-\d|LEVELING PAD|PILE\s?CAP|PILE|CAISSON|GRADE\s?BEAM|RAFT|MAT)\b/,
+    slab: /\b(SLAB|SOG|SLAB[-\s]?ON[-\s]?GRADE|FROST SLAB|WWM|W\.W\.M|MESH|6X6|HOUSEKEEPING PAD|PAD EDGE)\b/,
+    wall: /\b(WALL|FOUNDATION WALL|RETAINING WALL|BRICK LEDGE|DOOR OPENINGS|VERTICAL BARS|STAGGERED)\b/,
+    retaining_wall: /\b(RETAINING|RETAINING WALL)\b/,
+    column: /\b(COLUMN|COL\b|C-\d)\b/,
+    pier: /\b(PIER|P-\d)\b/,
+    beam: /\b(BEAM|GIRDER|JOIST|LINTEL|BOND BEAM|GB-\d|B-\d{2,})\b/,
+    stair: /\b(STAIR)\b/,
+    pit: /\b(PIT|SUMP|ELEVATOR PIT)\b/,
+    curb: /\b(CURB|STOOP|LEDGE|HOUSEKEEPING PAD|EQUIPMENT PAD)\b/,
+  };
+  const rx = tests[segType];
+  if (rx?.test(text)) return true;
+  return !!(name && name.length >= 4 && text.includes(name));
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
