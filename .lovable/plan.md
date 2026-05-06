@@ -1,82 +1,78 @@
-## Goal
-Make Stage 03 generate segment-specific takeoff rows from the correct drawings, with correct evidence links, and replace the current bad rows so the workspace reflects reality.
+Implement a focused QA viewer fix plus a temporary debug mode so the drawing compare area becomes inspectable and the broken behavior is visible instead of silent.
 
-## What I’ll change
+What I’ll change
 
-### 1. Fix scope-to-segment typing at approval time
-Update the scope approval flow so approved segments keep a meaningful `segment_type` instead of always being saved as `miscellaneous`.
+1. Fix the PDF page reset bug
+- Preserve the issue’s linked `page_number` when a new QA issue is selected.
+- Remove the current reset sequence that sets `pdfPage` back to 1 after selection.
+- Ensure the preview loader initializes to the locator page instead of always showing the cover/first page.
 
-Why this matters:
-- your current project has `SOG Slab-on-Grade`, `Footings`, and `Walls`, but all 3 were stored as `miscellaneous`
-- `auto-estimate` uses `segment.segment_type` for prompt context and validation gates
-- bad segment typing makes the estimator treat unrelated elements too loosely
+2. Fix pointer placement so it points to the exact element
+- Rework the overlay positioning to anchor against the actual rendered image bounds, not the full container.
+- Stop using percentage placement over an `object-contain` image without accounting for letterboxing.
+- Use the same pattern as the working drawing overlay viewer: render the image in a measurable wrapper and place the bbox overlay relative to that wrapper.
+- Keep the “ask question / fix / impact” callout attached to the bbox.
 
-Files:
-- `src/features/workflow-v2/stages/ScopeStage.tsx`
+3. Make Overlay / Side-by-Side / Difference visibly update
+- Right now all three modes use the same single image, so Difference is effectively a no-op and Side-by-Side looks fake.
+- Add explicit mode behavior:
+  - Overlay: current drawing + bbox/callout.
+  - Side-by-Side: two labeled panes with visible per-pane styling and pointer shown on the active pane.
+  - Difference: visible diff treatment only when a second source exists; otherwise show a clear “compare source missing” notice instead of pretending it works.
+- If the data only has one revision source, the UI will say that clearly in debug mode and in the status area.
 
-### 2. Restrict `auto-estimate` to the right OCR context for each segment
-Refactor the edge function so it no longer estimates each segment from the full mixed project OCR corpus.
+4. Add a QA debug mode
+- Add a small “Debug” toggle in the QA canvas toolbar.
+- When enabled, show:
+  - container bounds
+  - rendered image bounds
+  - bbox bounds and normalized coordinates
+  - current `viewMode`, `zoom`, `tx`, `ty`
+  - requested page vs rendered page
+  - current blend/filter settings
+  - redraw counters / last redraw trigger
+  - source file id, issue id, and whether a compare layer exists
+- Draw colored rectangles for:
+  - canvas container
+  - rendered image area
+  - bbox target
+- Add a compact debug panel pinned to the canvas so you can verify why a mode did or didn’t redraw.
 
-Current problem confirmed in this project:
-- the function reads all indexed pages for the project
-- architectural and structural pages are mixed into one prompt
-- the same wall/frost slab/housekeeping-pad lines are being extracted into multiple segments
-- all three segments ended up with mostly the same unresolved rows
+5. Improve redraw observability
+- Track redraw triggers from:
+  - issue selection changes
+  - page changes
+  - PDF render callback
+  - image load
+  - view mode changes
+  - zoom mode changes
+- Show a monotonic redraw count and last trigger reason in debug mode.
+- This makes it obvious whether the buttons are failing to update state or the renderer is reusing the same visual source.
 
-Fix:
-- load drawing index rows with `document_version_id` in addition to page text
-- build per-file / per-discipline page groups
-- choose pages relevant to the segment:
-  - `slab` / SOG -> slab-on-grade, WWM, slab detail pages
-  - `footing` -> footing schedule/detail pages
-  - `wall` -> foundation wall / wall detail pages
-- keep architectural sheets as optional context only, never as a quantity source
-- prefer structural/shop pages that actually mention the segment tokens
+6. Handle missing locator / compare data safely
+- If an issue only has page-level linkage and no bbox, show that clearly in the debug panel and status rail.
+- If canonical compare data fails to load, surface that state instead of leaving the compare tools looking broken.
 
-Files:
-- `supabase/functions/auto-estimate/index.ts`
+Likely root causes already identified
+- `pdfPage` is being set from the issue locator, then immediately reset to 1 by the preview-loading effect. That explains why you keep seeing the first page.
+- The bbox overlay is drawn against the full transformed container while the image is rendered with `object-contain`, so the pointer can land in the wrong place or appear disconnected from the actual element.
+- Side-by-Side and Difference currently reuse the same source image, so the buttons change state but do not produce a meaningful visual comparison.
+- There is also a backend warning in the console for missing `rebar_project_links`, which can prevent canonical compare data from loading. I won’t change backend schema in this patch unless necessary, but I’ll make the UI report that compare data is unavailable instead of silently failing.
 
-### 3. Fix row evidence and preview linking
-Right now evidence is misleading because the estimator only has `page_number` and guessed `source_sheet`, so it falls back to the structural PDF even when page numbers overlap across files.
+Files to update
+- `src/features/workflow-v2/stages/QAStage.tsx`
+- Possibly `src/components/chat/PdfRenderer.tsx` for render-cycle metadata callbacks if needed
+- Possibly `src/features/workflow-v2/takeoff-data.ts` only for safer compare-data/status shaping, with a minimal patch
 
-Fix:
-- use `document_version_id` from `drawing_search_index` to resolve the actual source file for each extracted row
-- attach the correct `source_file_id` and page metadata to `estimate_items`
-- propagate that same source file to generated QA issues so the right sheet opens in the preview panel
+Validation after implementation
+- Select a QA issue with a linked page and confirm the viewer opens on that exact page, not page 1.
+- Toggle Overlay / Side-by-Side / Difference and confirm the canvas state and debug panel both update.
+- Confirm the pointer box sits on the exact drawing region, not on the page margin or unrelated area.
+- Confirm the debug panel shows redraw reasons when switching issues, pages, and modes.
+- Confirm the UI clearly reports when compare data is missing, instead of acting like the buttons work.
 
-Files:
-- `supabase/functions/auto-estimate/index.ts`
-- possibly `src/features/workflow-v2/takeoff-data.ts` if a small loader adjustment is needed
-
-### 4. Replace stale bad rows on re-run
-The current project already contains bad rows, and the existing de-dup logic will otherwise preserve them.
-
-Fix:
-- on segment re-run, replace stale auto-generated unresolved/draft rows for that segment before inserting the fresh result set
-- clear related unresolved QA issues for that same segment so QA reflects the new run
-
-This avoids keeping the current polluted dataset after the estimator is corrected.
-
-Files:
-- `supabase/functions/auto-estimate/index.ts`
-
-### 5. Re-validate on this exact project
-After patching, I’ll verify the real outcome by checking that:
-- rows differ meaningfully by segment instead of repeating across all groups
-- `SOG Slab-on-Grade` shows slab/mesh-related items
-- `Footings` shows footing-related items
-- `Walls` shows wall-related items
-- evidence links point to the correct PDF and page
-- QA blockers drop from “everything unresolved” to only genuinely unresolved rows
-
-## Technical notes
-- Confirmed from data: all current segments are saved as `miscellaneous`
-- Confirmed from data: all 25 current rows are unresolved and repeated across segments
-- Confirmed from code: `auto-estimate` queries `drawing_search_index` without `document_version_id`, so file provenance is lost during takeoff generation
-- Confirmed from code: unresolved QA issues are inserted with `source_file_id: null`, which weakens traceability
-- Confirmed from DB: this project has two indexed PDFs with overlapping page numbers, so page-only matching is not reliable
-
-## Expected result
-After implementation, takeoff should stop cloning the same OCR snippets into every segment and instead produce segment-specific rows tied to the correct source drawing.
-
-Approve this plan and I’ll implement the minimal patch.
+Technical details
+- Keep the patch minimal and isolated to the QA drawing viewer.
+- No broad refactor.
+- No changes to generated backend client files.
+- If compare mode depends on unavailable compare assets, the UI will degrade honestly and expose that in debug mode rather than fabricating a diff.
