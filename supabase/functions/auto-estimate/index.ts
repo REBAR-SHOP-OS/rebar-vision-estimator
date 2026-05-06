@@ -269,12 +269,16 @@ serve(async (req) => {
     // refuse to estimate — return a blocker the UI can render.
     // ============================================================
     const allKnowledge = (knowledgeRes.data || []) as Array<{ title?: string; content?: string; file_name?: string }>;
-    const manualEntry = allKnowledge.find((k) => {
+    // Manual is often ingested as multiple chunks (one per chapter). Aggregate
+    // every entry whose title OR file_name matches the manual, then require the
+    // combined parsed text to exceed 1000 chars.
+    const manualChunks = allKnowledge.filter((k) => {
       const hay = `${k.title || ""} ${k.file_name || ""}`.toLowerCase();
-      return /manual.*standard.*practice.*2018|standard.?practice.?2018/.test(hay)
-        && (k.content || "").length > 1000;
+      return /manual.*standard.*practice.*2018|standard.?practice.?2018|rsic.*manual/.test(hay)
+        && (k.content || "").length > 0;
     });
-    if (!manualEntry) {
+    const manualCombined = manualChunks.map((k) => k.content || "").join("\n\n").trim();
+    if (manualChunks.length === 0 || manualCombined.length < 1000) {
       console.warn("[auto-estimate] BLOCKED: Manual-Standard-Practice-2018 not loaded into Brain (or not parsed).");
       return new Response(JSON.stringify({
         success: false,
@@ -287,7 +291,7 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const manualText = (manualEntry.content || "").slice(0, 12000);
+    const manualText = manualCombined.slice(0, 12000);
 
     // Build drawing text from search index (OCR), with strict source priority for
     // production rebar quantities:
