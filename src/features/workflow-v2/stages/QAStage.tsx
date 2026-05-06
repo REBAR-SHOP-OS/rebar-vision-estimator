@@ -307,24 +307,50 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                     />
                     {bbox && imgW && imgH && (
                       <>
-                        {/* Active selection box (Modified — amber) */}
+                        {/* Active selection box — orange pointer */}
                         <div
-                          className="absolute border-2 ring-4"
+                          className="absolute"
                           style={{
                             left: `${(bbox[0] / imgW) * 100}%`,
                             top: `${(bbox[1] / imgH) * 100}%`,
                             width: `${((bbox[2] - bbox[0]) / imgW) * 100}%`,
                             height: `${((bbox[3] - bbox[1]) / imgH) * 100}%`,
-                            borderColor: "hsl(var(--status-inferred))",
-                            background: "hsl(var(--status-inferred) / 0.08)",
-                            boxShadow: "0 0 0 2px hsl(var(--status-inferred) / 0.2)",
+                            border: `${Math.max(3, 6 / zoom)}px solid #ff7a1a`,
+                            background: "rgba(34,197,94,0.18)",
+                            boxShadow: `0 0 0 ${Math.max(2, 4 / zoom)}px rgba(255,122,26,0.25)`,
                           }}
                         >
                           <div
                             className="absolute -top-3 -right-3 w-6 h-6 rounded-full grid place-items-center text-white shadow-lg"
-                            style={{ background: "hsl(var(--status-inferred))" }}
+                            style={{ background: "#ff7a1a" }}
                           >
                             <Edit3 className="w-3 h-3" />
+                          </div>
+                          {/* Ask-question callout */}
+                          <div
+                            className="absolute left-1/2 -translate-x-1/2 bg-card border border-border shadow-2xl px-3 py-2 w-56 z-30"
+                            style={{ top: "calc(100% + 8px)", transform: `translateX(-50%) scale(${1 / Math.max(1, zoom * 0.6)})`, transformOrigin: "top center" }}
+                          >
+                            <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-foreground mb-1.5 truncate">
+                              {sel?.title || "Modification"}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground leading-snug mb-2 line-clamp-3">
+                              {sel?.description || "Is this element correct as detected?"}
+                            </div>
+                            <div className="grid grid-cols-2 gap-1">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); jumpToTakeoff(); }}
+                                className="py-1 bg-primary text-primary-foreground text-[10px] font-bold uppercase tracking-[0.1em] hover:opacity-90"
+                              >
+                                Fix
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setTab("impact"); }}
+                                className="py-1 bg-card border border-border text-foreground text-[10px] font-bold uppercase tracking-[0.1em] hover:bg-accent/40"
+                              >
+                                Impact
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </>
