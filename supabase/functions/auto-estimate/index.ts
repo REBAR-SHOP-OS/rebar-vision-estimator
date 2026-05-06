@@ -306,6 +306,66 @@ Output the JSON array now. Every object MUST have non-zero quantity_count AND to
       }
     }
 
+    // GEOMETRIC BACKFILL: if AI emitted a line with no length/qty, try to derive
+    // numbers from description tokens (spacing, wall length/height, bar length).
+    // This guarantees the takeoff rows are not all zero when OCR has dimensions.
+    const num = (s: string) => {
+      const m = s.replace(/[, ]/g, "").match(/(\d+(?:\.\d+)?)/);
+      return m ? Number(m[1]) : 0;
+    };
+    const ocrText = (drawingTextContext || "").toUpperCase();
+    // Try to read a representative wall length & height from OCR once
+    const wallLenMatch = ocrText.match(/WALL[^\n]{0,40}?(\d{3,5})\s*MM/);
+    const wallHgtMatch = ocrText.match(/(?:HEIGHT|HGT|HIGH)[^\n]{0,20}?(\d{3,5})\s*MM/);
+    const defaultWallLenMm = wallLenMatch ? Number(wallLenMatch[1]) : 0;
+    const defaultWallHgtMm = wallHgtMatch ? Number(wallHgtMatch[1]) : 0;
+
+    for (const it of items) {
+      const qty = Number(it.quantity_count) || 0;
+      const len = Number(it.total_length) || 0;
+      if (qty > 0 && len > 0) continue;
+      const desc: string = String(it.description || "").toUpperCase();
+      if (desc.startsWith("UNRESOLVED:")) continue;
+
+      const size = String(it.bar_size || "").toUpperCase();
+      const mass = massFor(size, String(it.item_type || "rebar"));
+
+      // pick spacing (mm) from desc or OCR
+      const spMatch = desc.match(/@\s*(\d{2,4})\s*MM/) || ocrText.match(new RegExp(size.replace(/[^A-Z0-9#]/g, "") + "[^\n]{0,40}?@\\s*(\\d{2,4})\\s*MM"));
+      const spacing = spMatch ? Number(spMatch[1]) : 0;
+
+      // pick bar length (mm) from desc e.g. "457mm long"
+      const barLenMatch = desc.match(/(\d{3,5})\s*MM\s*LONG/);
+      let barLenM = barLenMatch ? num(barLenMatch[1]) / 1000 : 0;
+
+      let q = qty;
+      let totalLen = 0;
+
+      if (spacing > 0 && defaultWallLenMm > 0) {
+        const computedQty = Math.ceil(defaultWallLenMm / spacing) + 1;
+        if (q === 0) q = computedQty;
+        if (barLenM === 0 && defaultWallHgtMm > 0) {
+          const lapMm = /15M/.test(size) ? 640 : /20M/.test(size) ? 800 : /10M/.test(size) ? 400 : 500;
+          barLenM = (defaultWallHgtMm + lapMm) / 1000;
+        }
+        if (barLenM > 0) totalLen = +(q * barLenM).toFixed(2);
+      } else if (q > 0 && barLenM > 0) {
+        totalLen = +(q * barLenM).toFixed(2);
+      }
+
+      if (q > 0) it.quantity_count = q;
+      if (totalLen > 0) {
+        it.total_length = totalLen;
+        if (mass > 0) it.total_weight = +(totalLen * mass).toFixed(2);
+      } else if (q === 0 || totalLen === 0) {
+        // Mark as UNRESOLVED so user can see the OCR genuinely lacks geometry
+        if (!desc.startsWith("UNRESOLVED:")) {
+          it.description = `UNRESOLVED: ${it.description}`;
+          it.confidence = Math.min(Number(it.confidence) || 0.2, 0.2);
+        }
+      }
+    }
+
     // Weight validation gate — flag outliers
     const totalAiWeight = items.reduce((s: number, i: any) => s + (Number(i.total_weight) || 0), 0);
     const segType = segment.segment_type;
