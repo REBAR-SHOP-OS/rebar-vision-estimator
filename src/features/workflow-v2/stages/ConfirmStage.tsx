@@ -67,7 +67,7 @@ export default function ConfirmStage({ projectId, state, goToStage }: StageProps
 
   const setDecision = (id: string, decision: ConfirmRow["decision"]) => {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, decision } : r)));
-    state.setLocal({ confirmRows: { ...(state.local.confirmRows || {}), [id]: decision } });
+    state.setLocal({ confirmRows: { ...((state.local.confirmRows as any) || {}), [id]: decision } });
   };
 
   const beginEdit = (r: ConfirmRow) => {
@@ -93,12 +93,12 @@ export default function ConfirmStage({ projectId, state, goToStage }: StageProps
         user_id: user.id, project_id: projectId, segment_id: r.raw.segment_id,
         entity_type: "estimate_item", entity_id: r.raw.raw_id, action: "ocr_correction",
         metadata: { original, corrected: next, source: "confirm_stage", file_id: r.raw.source_file_id },
-      });
+      } as any);
     }
     setRows((prev) => prev.map((row) => row.id === r.id
       ? { ...row, raw: { ...row.raw, ...(next as Partial<WorkflowTakeoffRow>) } as WorkflowTakeoffRow, decision: "corrected" }
       : row));
-    state.setLocal({ confirmRows: { ...(state.local.confirmRows || {}), [r.id]: "corrected" } });
+    state.setLocal({ confirmRows: { ...((state.local.confirmRows as any) || {}), [r.id]: "corrected" } });
     cancelEdit();
     toast.success("Correction saved & logged");
   };
