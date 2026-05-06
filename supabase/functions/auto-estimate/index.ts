@@ -152,6 +152,17 @@ Rules:
 - If the drawing text section is present, extract ONLY what is explicitly supported; do not invent quantities.
 - If drawing text is absent or insufficient, return an empty JSON array [] — do NOT fabricate "typical practice" items.
 - Weight must be consistent with bar size and length using standard rebar weights. Use these mass values (kg/m): 10M=0.785, 15M=1.570, 20M=2.355, 25M=3.925, 30M=5.495, 35M=7.850, #3=0.561, #4=0.994, #5=1.552, #6=2.235, #7=3.042, #8=3.973.
+- MANDATORY COMPUTATION: For every line you MUST compute non-zero quantity_count, total_length (m) and total_weight (kg) from the OCR. Use these formulas when explicit bar list rows are not present:
+  * Vertical wall bars: qty = ceil(wall_length_mm / spacing_mm) + 1; bar_length_m = (wall_height_mm + lap_mm) / 1000; total_length = qty * bar_length_m.
+  * Horizontal wall bars: qty = ceil(wall_height_mm / spacing_mm) + 1; bar_length_m = (wall_length_mm + lap_mm) / 1000; total_length = qty * bar_length_m.
+  * Footing/grade-beam continuous bars: qty = number_of_continuous_bars (from schedule, default 2 top + 2 bot if a section view shows it); total_length = qty * footing_length_m.
+  * Slab bars EW: per direction qty = ceil(slab_dim_perp_mm / spacing_mm) + 1; total_length = qty * (slab_dim_parallel_m + lap_m).
+  * Dowels: qty = ceil(perimeter_mm / spacing_mm); total_length = qty * (dowel_length_mm / 1000).
+  * total_weight = total_length * mass_per_m for the bar size.
+  Lap default = 40 * bar_dia_mm if lap not stated (10M=400, 15M=640, 20M=800, 25M=1000).
+  Use spacing/lengths from the OCR (e.g. "@406 mm O.C.", "203mm wall", "457mm long"). Treat dimension callouts as authoritative.
+- ZERO-VALUE RULE: A line with quantity_count=0 AND total_length=0 is FORBIDDEN unless the OCR truly has no geometry. Prefer computing from inferred geometry over emitting zeros. If you must emit a zero line, set confidence ≤ 0.2 and prefix description with "UNRESOLVED:".
+- Output raw JSON numbers only — no thousands separators, no units inside number fields.
 - WIRE MESH (WWM) DETECTION: If drawing text mentions "WWM", "welded wire mesh", "wire mesh", "W2.9", "W4.0", "MW9.1", mesh designations like "6x6-W2.9/W2.9" or "152x152 MW9.1/MW9.1", generate items with item_type "wwm" instead of "rebar".
   - For WWM items: bar_size = mesh designation (e.g. "6x6-W2.9"), total_length = area in m², quantity_count = number of sheets (standard sheet = 5'×10' = 4.65 m², add 150mm overlap).
   - WWM mass references (kg/m²): 6x6-W1.4/W1.4=0.93, 6x6-W2.1/W2.1=1.37, 6x6-W2.9/W2.9=1.90, 6x6-W4.0/W4.0=2.63, 4x4-W2.1/W2.1=2.05, 4x4-W4.0/W4.0=3.94.
@@ -206,6 +217,7 @@ Generate estimate items for this segment. Base quantities on the ACTUAL drawing 
           { role: "user", content: userPrompt },
         ],
         temperature: 0,
+        max_tokens: 16000,
       }),
     });
 
@@ -233,11 +245,21 @@ Generate estimate items for this segment. Base quantities on the ACTUAL drawing 
 
     const aiData = await aiResponse.json();
     const rawContent = aiData.choices?.[0]?.message?.content || "";
+    const finishReason = aiData.choices?.[0]?.finish_reason;
+    if (finishReason === "length") {
+      console.warn("[auto-estimate] AI response truncated (finish_reason=length)");
+    }
 
     // Parse JSON from response (strip markdown fences if present)
     let items: any[];
     try {
-      const jsonStr = rawContent.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+      let jsonStr = rawContent.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+      // Slice from first '[' to last ']' to drop any prose preamble/postamble
+      const start = jsonStr.indexOf("[");
+      const end = jsonStr.lastIndexOf("]");
+      if (start !== -1 && end > start) jsonStr = jsonStr.slice(start, end + 1);
+      // Strip trailing commas before ] or }
+      jsonStr = jsonStr.replace(/,\s*([\]}])/g, "$1");
       items = JSON.parse(jsonStr);
       if (!Array.isArray(items)) throw new Error("Not an array");
     } catch {
