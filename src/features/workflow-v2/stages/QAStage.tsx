@@ -686,7 +686,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 }
 
 function BBoxPointer({
-  bbox, imgW, imgH, zoom, title, description, onFix, onImpact,
+  bbox, imgW, imgH, zoom, title, description, onFix, onImpact, approximate,
 }: {
   bbox: [number, number, number, number];
   imgW: number;
@@ -696,6 +696,7 @@ function BBoxPointer({
   description: string;
   onFix: () => void;
   onImpact: () => void;
+  approximate?: boolean;
 }) {
   // Bbox is in image-pixel space; the image is rendered with object-contain
   // so percentages of imgW/imgH applied within the same containing box align
@@ -705,18 +706,20 @@ function BBoxPointer({
   const width = ((bbox[2] - bbox[0]) / imgW) * 100;
   const height = ((bbox[3] - bbox[1]) / imgH) * 100;
   const z = Math.max(1, zoom);
+  const stroke = approximate ? "#f59e0b" : "#ff7a1a";
+  const fillBg = approximate ? "rgba(245,158,11,0.12)" : "rgba(34,197,94,0.18)";
   return (
     <div
       className="absolute pointer-events-auto"
       style={{
         left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%`,
-        border: `${Math.max(2, 6 / z)}px solid #ff7a1a`,
-        background: "rgba(34,197,94,0.18)",
-        boxShadow: `0 0 0 ${Math.max(1, 4 / z)}px rgba(255,122,26,0.3)`,
+        border: `${Math.max(2, 6 / z)}px ${approximate ? "dashed" : "solid"} ${stroke}`,
+        background: fillBg,
+        boxShadow: `0 0 0 ${Math.max(1, 4 / z)}px ${stroke}55`,
       }}
     >
-      <div className="absolute -top-3 -right-3 w-6 h-6 rounded-full grid place-items-center text-white shadow-lg" style={{ background: "#ff7a1a", transform: `scale(${1 / z})`, transformOrigin: "center" }}>
-        <span className="text-[10px] font-bold">!</span>
+      <div className="absolute -top-3 -right-3 w-6 h-6 rounded-full grid place-items-center text-white shadow-lg" style={{ background: stroke, transform: `scale(${1 / z})`, transformOrigin: "center" }}>
+        <span className="text-[10px] font-bold">{approximate ? "≈" : "!"}</span>
       </div>
       <div
         className="absolute left-1/2 bg-card border border-border shadow-2xl px-3 py-2 w-56 z-30"
