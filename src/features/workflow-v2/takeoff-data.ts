@@ -28,6 +28,7 @@ export interface WorkflowTakeoffRow {
   // rows as "—" not 0.
   geometry_status: "resolved" | "partial" | "unresolved";
   missing_refs: string[];
+  page_number?: number | null;
 }
 
 export interface WorkflowQaIssue {
@@ -42,7 +43,7 @@ export interface WorkflowQaIssue {
   source_refs?: any;
   // Pinpoint locator + linked-row preview (filled by loader)
   locator?: { page_number?: number | null; bbox?: [number, number, number, number] | null; image_size?: { w: number; h: number } | null } | null;
-  linked_item?: { id: string; description: string | null; bar_size: string | null; quantity_count: number; total_length: number; total_weight: number; missing_refs: string[] } | null;
+  linked_item?: { id: string; description: string | null; bar_size: string | null; quantity_count: number; total_length: number; total_weight: number; missing_refs: string[]; source_file_id?: string | null; segment_id?: string | null; page_number?: number | null } | null;
 }
 
 const CLOSED_STATUSES = new Set(["resolved", "closed"]);
@@ -161,6 +162,7 @@ async function loadLegacyTakeoffRows(projectId: string, files: WorkflowFileRef[]
       source_file_id: file?.id || row.source_file_id || null,
       geometry_status,
       missing_refs,
+      page_number: Number(assum.page_number || 0) || null,
     };
   });
 }
@@ -316,8 +318,12 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
           total_length: Number(item.total_length || 0),
           total_weight: Number(item.total_weight || 0),
           missing_refs: Array.isArray(aj.missing_refs) ? aj.missing_refs : (ref?.missing || []),
+          source_file_id: item.source_file_id || iss.source_file_id || null,
+          segment_id: item.segment_id || null,
+          page_number: Number(ref?.page_number ?? aj.page_number ?? 0) || null,
         };
       }
+      if (!iss.source_file_id && item?.source_file_id) iss.source_file_id = item.source_file_id;
     }
   }
 
