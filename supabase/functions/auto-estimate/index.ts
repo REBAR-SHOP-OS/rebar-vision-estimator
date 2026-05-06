@@ -555,6 +555,57 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       });
     }
 
+    const extractionTools = [{
+      type: "function",
+      function: {
+        name: "return_estimate_items",
+        description: "Return extracted rebar estimate items for the current segment.",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  description: { type: "string" },
+                  bar_size: { type: "string" },
+                  quantity_count: { type: "number" },
+                  total_length: { type: "number" },
+                  total_weight: { type: "number" },
+                  confidence: { type: "number" },
+                  item_type: { type: "string", enum: ["rebar", "wwm"] },
+                  source_sheet: { type: ["string", "null"] },
+                  source_excerpt: { type: ["string", "null"] },
+                  authority_section: { type: ["string", "null"] },
+                  authority_page: { type: ["number", "null"] },
+                  authority_quote: { type: ["string", "null"] },
+                },
+                required: [
+                  "description",
+                  "bar_size",
+                  "quantity_count",
+                  "total_length",
+                  "total_weight",
+                  "confidence",
+                  "item_type",
+                  "source_sheet",
+                  "source_excerpt",
+                  "authority_section",
+                  "authority_page",
+                  "authority_quote"
+                ],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ["items"],
+          additionalProperties: false,
+        },
+      },
+    }];
+
     const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -567,6 +618,8 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
+        tools: extractionTools,
+        tool_choice: { type: "function", function: { name: "return_estimate_items" } },
         temperature: 0,
         max_tokens: 32000,
       }),
@@ -595,7 +648,28 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
     }
 
     const aiData = await aiResponse.json();
-    const rawContent = aiData.choices?.[0]?.message?.content || "";
+    const aiMessage = aiData.choices?.[0]?.message || {};
+    const toolArgs = aiMessage.tool_calls?.[0]?.function?.arguments;
+    const content = aiMessage.content;
+    const rawContent = typeof toolArgs === "string"
+      ? toolArgs
+      : typeof content === "string"
+        ? content
+        : Array.isArray(content)
+          ? content.map((part: any) => {
+            if (typeof part === "string") return part;
+            if (typeof part?.text === "string") return part.text;
+            if (typeof part?.content === "string") return part.content;
+            if (Array.isArray(part?.content)) {
+              return part.content.map((nested: any) => nested?.text || nested?.content || "").join("");
+            }
+            return "";
+          }).join("")
+          : Array.isArray(content?.items) || Array.isArray(content)
+            ? JSON.stringify(content)
+            : content && typeof content === "object"
+              ? JSON.stringify(content)
+              : "";
     const finishReason = aiData.choices?.[0]?.finish_reason;
     if (finishReason === "length") {
       console.warn("[auto-estimate] AI response truncated (finish_reason=length)");
@@ -604,6 +678,13 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
     // Parse JSON from response (strip markdown fences if present)
     let items: any[];
     try {
+      if (typeof toolArgs === "string") {
+        const parsed = JSON.parse(toolArgs);
+        items = Array.isArray(parsed) ? parsed : parsed.items;
+        if (!Array.isArray(items)) throw new Error("Tool output missing items array");
+      } else if (Array.isArray(content) && content.every((item: any) => item && typeof item === "object" && !("type" in item))) {
+        items = content;
+      } else {
       let jsonStr = rawContent.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
       // Slice from first '[' to last ']' to drop any prose preamble/postamble
       const start = jsonStr.indexOf("[");
@@ -613,6 +694,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       jsonStr = jsonStr.replace(/,\s*([\]}])/g, "$1");
       items = JSON.parse(jsonStr);
       if (!Array.isArray(items)) throw new Error("Not an array");
+      }
     } catch {
       // Repair truncated JSON: keep only complete top-level objects in the array
       try {
