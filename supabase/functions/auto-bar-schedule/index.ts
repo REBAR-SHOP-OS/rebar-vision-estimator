@@ -92,7 +92,7 @@ serve(async (req) => {
     const [segRes, projRes, estRes, existingRes, stdRes, searchIndexRes] = await Promise.all([
       supabase.from("segments").select("*").eq("id", segment_id).single(),
       supabase.from("projects").select("name, project_type, scope_items").eq("id", project_id).single(),
-      supabase.from("estimate_items").select("id, description, bar_size, quantity_count, total_length, total_weight").eq("segment_id", segment_id).limit(50),
+      supabase.from("estimate_items").select("id, description, bar_size, quantity_count, total_length, total_weight, assumptions_json").eq("segment_id", segment_id).limit(50),
       supabase.from("bar_items").select("mark, size").eq("segment_id", segment_id).limit(50),
       supabase.from("standards_profiles").select("*").eq("user_id", user.id).eq("is_default", true).limit(1),
       supabase.from("drawing_search_index").select("raw_text, page_number").eq("project_id", project_id).limit(50),
@@ -346,6 +346,12 @@ Generate the bar schedule. NEVER invent quantities or lengths — if not in OCR 
         total_length: Math.round(totalLengthM * 100) / 100,
         total_weight: Math.round(totalWeight * 100) / 100,
         bar_size: agg.size || ei.bar_size,
+        // Bar-schedule consensus is a deterministic source — promote status.
+        assumptions_json: {
+          ...(ei.assumptions_json || {}),
+          geometry_status: "resolved",
+          resolver: "bar_schedule_consensus",
+        },
       }).eq("id", ei.id);
       if (!upErr) backfilled++;
     }
