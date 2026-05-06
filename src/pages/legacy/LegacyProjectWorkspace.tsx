@@ -10,6 +10,7 @@ import QATab from "@/components/workspace/QATab";
 import EstimateTab from "@/components/workspace/EstimateTab";
 import ShopDrawingsTab from "@/components/workspace/ShopDrawingsTab";
 import ProjectSettingsTab from "@/components/workspace/ProjectSettingsTab";
+import { getCanonicalProjectByLegacyId } from "@/lib/rebar-read-model";
 
 const TAB_SUFFIXES: Record<string, string> = {
   "": "overview", "/files": "files", "/segments": "segments", "/qa": "qa",
@@ -27,13 +28,44 @@ export default function LegacyProjectWorkspace() {
   const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  const loadProject = (withLoading = false) => {
+  const loadProject = async (withLoading = false) => {
     if (!id) return;
     if (withLoading) setLoading(true);
-    supabase.from("projects").select("*").eq("id", id).single().then(({ data }) => {
-      if (data) setProject(data);
-      if (withLoading) setLoading(false);
-    });
+
+    const { data: legacyProject, error: legacyError } = await supabase
+      .from("projects")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (legacyError) {
+      console.warn("Failed to load legacy project:", legacyError);
+    }
+
+    let canonicalProject = null;
+    if (legacyProject) {
+      try {
+        canonicalProject = await getCanonicalProjectByLegacyId(supabase, id);
+      } catch (error) {
+        console.warn("Failed to load canonical project:", error);
+      }
+    }
+
+    if (legacyProject) {
+      setProject({
+        ...legacyProject,
+        canonicalProject,
+        project_name: canonicalProject?.projectName || legacyProject.name,
+        customer_name: canonicalProject?.customerName ?? legacyProject.client_name,
+        location: canonicalProject?.location ?? legacyProject.address ?? null,
+        rebar_project_id: canonicalProject?.rebarProjectId || null,
+        status: canonicalProject?.status || legacyProject.status,
+      });
+    } else if (withLoading) {
+      setProject(null);
+    }
+
+    if (withLoading) setLoading(false);
   };
 
   useEffect(() => { loadProject(true); }, [id]);
