@@ -145,15 +145,21 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
             .eq("project_id", projectId)
             .eq("name", candidate.label)
             .maybeSingle();
+          const nextType = inferSegmentType(candidate.label);
           if (!existingSeg?.id) {
             await supabase.from("segments").insert({
               project_id: projectId,
               user_id: user.id,
               name: candidate.label,
-              segment_type: inferSegmentType(candidate.label),
+              segment_type: nextType,
               status: "draft",
               confidence: candidate.confidence,
             });
+          } else {
+            await supabase
+              .from("segments")
+              .update({ segment_type: nextType, confidence: candidate.confidence })
+              .eq("id", existingSeg.id);
           }
         } catch (segErr) {
           console.warn("Failed to upsert segment for approved scope:", segErr);
