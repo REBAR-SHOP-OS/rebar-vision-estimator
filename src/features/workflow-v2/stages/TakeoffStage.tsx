@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { StageHeader, Pill, EmptyState, type StageProps } from "./_shared";
 import { Sparkles, FileText, CheckCircle2, Loader2, Wand2 } from "lucide-react";
 import { loadWorkflowTakeoffRows, type WorkflowTakeoffRow } from "../takeoff-data";
+import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 
 export default function TakeoffStage({ projectId, state, goToStage }: StageProps) {
   const [rows, setRows] = useState<WorkflowTakeoffRow[]>([]);
@@ -80,8 +81,42 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
               const { data: extraction } = await supabase.functions.invoke("extract-pdf-text", {
                 body: { pdf_url: urlData.signedUrl, project_id: projectId },
               });
-              const pages = extraction?.pages || [];
+              let pages = extraction?.pages || [];
               const sha256 = extraction?.sha256 || `file_${legacyFileId}`;
+              const hasText = pages.some((p: any) => p.raw_text && p.raw_text.trim().length > 20);
+
+              // Fallback: large/scanned PDFs need client-side render + OCR
+              if (!hasText) {
+                setGenStatus(`Rendering ${f.file_name}`);
+                try {
+                  const pageImages = await renderPdfPagesToImages(urlData.signedUrl, projectId, {
+                    maxPages: 50,
+                    scale: 1.5,
+                    onProgress: (cur, total) => setGenStatus(`Rendering ${cur}/${total}: ${f.file_name}`),
+                  });
+                  pages = [];
+                  for (let bi = 0; bi < pageImages.length; bi += 4) {
+                    const batch = pageImages.slice(bi, bi + 4);
+                    const results = await Promise.allSettled(batch.map(async (img) => {
+                      setGenStatus(`OCR ${img.pageNumber}/${pageImages.length}: ${f.file_name}`);
+                      const { data: ocrData } = await supabase.functions.invoke("ocr-image", {
+                        body: { image_url: img.signedUrl },
+                      });
+                      const fullText = (ocrData?.ocr_results || [])
+                        .map((r: any) => r.fullText || "")
+                        .filter((t: string) => t.length > 0)
+                        .sort((a: string, b: string) => b.length - a.length)[0] || "";
+                      return { page_number: img.pageNumber, raw_text: fullText };
+                    }));
+                    for (const r of results) {
+                      if (r.status === "fulfilled") pages.push(r.value);
+                    }
+                  }
+                } catch (ocrErr) {
+                  console.warn(`OCR fallback failed for ${f.file_name}:`, ocrErr);
+                }
+              }
+
               if (pages.length > 0 && dvId) {
                 await supabase.functions.invoke("populate-search-index", {
                   body: {
