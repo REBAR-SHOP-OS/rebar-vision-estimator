@@ -357,7 +357,9 @@ serve(async (req) => {
       pit:            /\b(PIT|SUMP|ELEVATOR\s?PIT)\b/,
       curb:           /\b(CURB|STOOP|LEDGE|HOUSEKEEPING\s?PAD|EQUIPMENT\s?PAD)\b/,
     };
-    const segTypeKey = String(segment?.segment_type || "miscellaneous").toLowerCase();
+    const storedSegType = String(segment?.segment_type || "miscellaneous").toLowerCase();
+    const inferredSegType = inferSegmentType(String(segment?.name || ""));
+    const segTypeKey = storedSegType !== "miscellaneous" ? storedSegType : inferredSegType;
     const segNameUpper = String(segment?.name || "").toUpperCase();
     const segRelevance = SEGMENT_TOKENS[segTypeKey] || null;
     const isPageRelevant = (text: string): boolean => {
@@ -389,16 +391,20 @@ serve(async (req) => {
         if (text.length <= 20) continue;
         if (!isPageRelevant(text)) continue;
         const tb = (page.extracted_entities as any)?.title_block || {};
+        const dvFileId = page.document_version_id ? dvToFileId.get(String(page.document_version_id)) : null;
+        const dvFileName = dvFileId
+          ? String((files as any[]).find((f: any) => f.id === dvFileId)?.file_name || "")
+          : "";
         const disc = String(tb.discipline || "").toLowerCase();
         const sheetTag = (page.extracted_entities as any)?.title_block?.sheet_id || `p${page.page_number}`;
         const snip = `[SHEET ${sheetTag} · Page ${page.page_number}] ${text.substring(0, 2000)}`;
         relevantPages.push({ snip, document_version_id: page.document_version_id || null, page_number: Number(page.page_number) || 0, sheetTag: String(sheetTag) });
-        if (disc.includes("shop") || /\bSD\b|SHOP DRAWING/i.test(text.slice(0, 200))) shop.push(snip);
-        else if (disc.includes("struct")) structural.push(snip);
-        else if (disc.includes("arch")) architectural.push(snip);
+        if (disc.includes("shop") || isShopName(dvFileName) || /\bSD\b|SHOP DRAWING/i.test(text.slice(0, 200))) shop.push(snip);
+        else if (disc.includes("struct") || isStructName(dvFileName) || /\bS-\d|FOUNDATION PLAN|ELEVATIONS|CONCRETE REINFORCING|LEVELING PAD|F-\d|WF-\d/i.test(text.slice(0, 400))) structural.push(snip);
+        else if (disc.includes("arch") || isArchName(dvFileName)) architectural.push(snip);
         else other.push(snip);
       }
-      console.log(`[auto-estimate] segment="${segment?.name}" type=${segTypeKey} relevant_pages=${relevantPages.length}/${searchPages.length}`);
+      console.log(`[auto-estimate] segment="${segment?.name}" stored_type=${storedSegType} effective_type=${segTypeKey} relevant_pages=${relevantPages.length}/${searchPages.length}`);
       const parts: string[] = [];
       if (shop.length > 0) {
         parts.push("=== SHOP DRAWING OCR (PRIMARY — production quantities come from here) ===\n" + shop.join("\n\n"));
