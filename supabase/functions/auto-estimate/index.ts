@@ -252,7 +252,7 @@ serve(async (req) => {
       supabase.from("standards_profiles").select("*").eq("user_id", user.id).eq("is_default", true).limit(1),
       supabase.from("estimate_items").select("id, description, bar_size, quantity_count, total_length, total_weight, confidence").eq("segment_id", segment_id).limit(200),
       supabase.from("drawing_search_index").select("raw_text, page_number, extracted_entities").eq("project_id", project_id).limit(50),
-      supabase.from("agent_knowledge").select("title, content").eq("user_id", user.id).limit(10),
+      supabase.from("agent_knowledge").select("title, content, file_name").eq("user_id", user.id).limit(50),
     ]);
 
     const segment = segRes.data;
@@ -261,11 +261,51 @@ serve(async (req) => {
     const standard = stdRes.data?.[0];
     const existing = existingRes.data || [];
 
-    // Build drawing text from search index (OCR), separating structural (primary)
-    // from architectural (fallback for hidden/missing concrete elements).
+    // ============================================================
+    // MANUAL-ONLY AUTHORITY GATE
+    // Manual-Standard-Practice-2018 (uploaded into Brain) is the
+    // ONLY allowed source of assumptions (lap, splice, hook, bend).
+    // If the manual is not present and parsed (content > 1000 chars),
+    // refuse to estimate — return a blocker the UI can render.
+    // ============================================================
+    const allKnowledge = (knowledgeRes.data || []) as Array<{ title?: string; content?: string; file_name?: string }>;
+    const manualEntry = allKnowledge.find((k) => {
+      const hay = `${k.title || ""} ${k.file_name || ""}`.toLowerCase();
+      return /manual.*standard.*practice.*2018|standard.?practice.?2018/.test(hay)
+        && (k.content || "").length > 1000;
+    });
+    if (!manualEntry) {
+      console.warn("[auto-estimate] BLOCKED: Manual-Standard-Practice-2018 not loaded into Brain (or not parsed).");
+      return new Response(JSON.stringify({
+        success: false,
+        blocked: true,
+        reason: "MANUAL_NOT_LOADED",
+        message: "Manual-Standard-Practice-2018 must be uploaded to Brain (with extracted text) before takeoff can run. No assumptions are allowed without manual citations.",
+        items_created: 0,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const manualText = (manualEntry.content || "").slice(0, 12000);
+
+    // Build drawing text from search index (OCR), with strict source priority for
+    // production rebar quantities:
+    //   1. SHOP DRAWINGS  — PRIMARY quantity source
+    //   2. STRUCTURAL     — SECONDARY verification / gap-fill
+    //   3. ARCHITECTURAL  — CONTEXT ONLY, never quantified from
     let drawingTextContext = "";
     const searchPages = searchIndexRes.data || [];
+    // Build a per-page → file map so the model can cite source sheet
+    const fileByName = new Map<string, { id: string; file_name: string }>();
+    for (const f of files as Array<{ id: string; file_name?: string }>) {
+      if (f.file_name) fileByName.set(f.file_name.toUpperCase(), { id: f.id, file_name: f.file_name });
+    }
+    const isShopName = (n: string) => /\bSHOP\b|^SD[\s_-]?\d|\bSD\d/i.test(n || "");
+    const isStructName = (n: string) => /\bSTRUCT|^S[\s_-]?\d|\bSTR[-_\s]/i.test(n || "");
+    const isArchName = (n: string) => /\bARCH|^A[\s_-]?\d/i.test(n || "");
     if (searchPages.length > 0) {
+      const shop: string[] = [];
       const structural: string[] = [];
       const architectural: string[] = [];
       const other: string[] = [];
@@ -274,20 +314,27 @@ serve(async (req) => {
         if (text.length <= 20) continue;
         const tb = (page.extracted_entities as any)?.title_block || {};
         const disc = String(tb.discipline || "").toLowerCase();
-        const snip = `[Page ${page.page_number}] ${text.substring(0, 2000)}`;
-        if (disc.includes("struct")) structural.push(snip);
+        const sheetTag = (page.extracted_entities as any)?.title_block?.sheet_id || `p${page.page_number}`;
+        const snip = `[SHEET ${sheetTag} · Page ${page.page_number}] ${text.substring(0, 2000)}`;
+        if (disc.includes("shop") || /\bSD\b|SHOP DRAWING/i.test(text.slice(0, 200))) shop.push(snip);
+        else if (disc.includes("struct")) structural.push(snip);
         else if (disc.includes("arch")) architectural.push(snip);
         else other.push(snip);
       }
       const parts: string[] = [];
+      if (shop.length > 0) {
+        parts.push("=== SHOP DRAWING OCR (PRIMARY — production quantities come from here) ===\n" + shop.join("\n\n"));
+      }
       if (structural.length > 0) {
-        parts.push("=== STRUCTURAL OCR (PRIMARY — use these numbers) ===\n" + structural.join("\n\n"));
+        parts.push("=== STRUCTURAL OCR (SECONDARY — verify shop quantities, fill gaps) ===\n" + structural.join("\n\n"));
       }
       if (other.length > 0) {
         parts.push("=== UNCLASSIFIED OCR ===\n" + other.join("\n\n"));
       }
       if (architectural.length > 0) {
-        parts.push("=== ARCHITECTURAL OCR (FALLBACK — only to recover concrete elements missing from structural; tag those lines '(arch-fallback)') ===\n" + architectural.join("\n\n"));
+        // Architectural is CONTEXT ONLY — never feed body text to quantity prompt.
+        const archTitles = architectural.slice(0, 6).map((s) => s.split("\n")[0]).join("\n");
+        parts.push("=== ARCHITECTURAL OCR (CONTEXT ONLY — DO NOT QUANTIFY FROM) ===\n" + archTitles);
       }
       drawingTextContext = parts.join("\n\n").slice(0, 14000);
     } else {
