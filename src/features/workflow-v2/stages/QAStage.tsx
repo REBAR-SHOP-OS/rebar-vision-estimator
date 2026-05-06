@@ -497,7 +497,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                         </div>
                         <div className="text-[12px] font-medium">{sel.title}</div>
                         {sel.location_label && (
-                          <div className="text-[10px] uppercase tracking-[0.1em] text-primary font-bold">📍 {sel.location_label}</div>
+                          <div className="border-2 border-primary bg-primary/5 px-2 py-1.5 text-[10px] uppercase tracking-[0.1em] text-primary font-bold flex items-center gap-1.5"><span>📍</span><span className="truncate">{sel.location_label}</span></div>
                         )}
                         <div className="text-[11px] text-muted-foreground leading-relaxed">{sel.description || "No description provided."}</div>
                         {sel.location?.source_excerpt && (
