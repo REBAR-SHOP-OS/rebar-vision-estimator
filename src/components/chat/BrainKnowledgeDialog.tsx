@@ -242,8 +242,11 @@ const BrainKnowledgeDialog: React.FC = () => {
       let extracted = "";
       if (/\.pdf$/i.test(file.name)) {
         extracted = await extractPdfText(file);
+        if (!extracted) extracted = await ocrPdfFile(file, user.id);
       } else if (/\.(txt|md|csv)$/i.test(file.name)) {
         try { extracted = (await file.text()).slice(0, 500_000); } catch { /* ignore */ }
+      } else if (/\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(file.name)) {
+        extracted = await ocrImageFile(file, user.id);
       }
       if (!extracted) {
         toast.warning(`${file.name}: text could not be extracted — file is stored but won't be used as a runtime authority.`);
@@ -279,8 +282,14 @@ const BrainKnowledgeDialog: React.FC = () => {
       const blob = await resp.blob();
       const fakeFile = new File([blob], item.file_name || "file.pdf", { type: blob.type });
       let extracted = "";
-      if (/\.pdf$/i.test(fakeFile.name)) extracted = await extractPdfText(fakeFile);
-      else if (/\.(txt|md|csv)$/i.test(fakeFile.name)) extracted = (await fakeFile.text()).slice(0, 500_000);
+      if (/\.pdf$/i.test(fakeFile.name)) {
+        extracted = await extractPdfText(fakeFile);
+        if (!extracted) extracted = await ocrPdfFile(fakeFile, user.id);
+      } else if (/\.(txt|md|csv)$/i.test(fakeFile.name)) {
+        extracted = (await fakeFile.text()).slice(0, 500_000);
+      } else if (/\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(fakeFile.name)) {
+        extracted = await ocrImageFile(fakeFile, user.id);
+      }
       if (!extracted) { toast.error("Could not extract text"); return; }
       const { error } = await supabase.from("agent_knowledge")
         .update({ content: extracted })
