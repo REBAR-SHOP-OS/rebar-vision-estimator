@@ -132,50 +132,80 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     if (!pageText || pageText.length === 0) return null;
     const loc = sel?.location || {};
     const anchors: string[] = [];
-    const push = (v?: string | null) => { if (v && String(v).trim().length >= 2) anchors.push(String(v).trim()); };
+    const push = (v?: string | null) => {
+      if (!v) return;
+      const s = String(v).trim();
+      if (s.length >= 3) anchors.push(s);
+    };
     push(loc.element_reference); push(loc.detail_reference); push(loc.grid_reference);
     push(loc.source_excerpt);
     push(sel?.linked_item?.bar_size);
     if (loc.source_excerpt) {
-      // Also try the longest "quoted" or capitalized run from the excerpt.
-      const m = String(loc.source_excerpt).match(/"([^"]{2,40})"|([A-Z0-9][A-Z0-9 \-#@.\/]{3,40})/);
+      const m = String(loc.source_excerpt).match(/"([^"]{3,60})"|([A-Z0-9][A-Z0-9 \-#@.\/]{3,60})/);
       if (m) push(m[1] || m[2]);
     }
     if (anchors.length === 0) return null;
-    // Prefer longest/most-specific anchor first; pick the single best hit and
-    // cluster only nearby items so we don't union opposite ends of the sheet.
+
+    // Group text items into lines by y-band (median item height).
+    const heights = pageText.map((t) => t.h).filter((h) => h > 0).sort((a, b) => a - b);
+    const medH = heights.length ? heights[Math.floor(heights.length / 2)] : 8;
+    const yTol = Math.max(4, medH * 0.6);
+    const sorted = [...pageText].sort((a, b) => a.y - b.y || a.x - b.x);
+    type Line = { items: typeof pageText; y: number; text: string };
+    const lines: Line[] = [];
+    for (const it of sorted) {
+      const last = lines[lines.length - 1];
+      if (last && Math.abs(it.y - last.y) <= yTol) {
+        last.items.push(it);
+      } else {
+        lines.push({ items: [it], y: it.y, text: "" });
+      }
+    }
+    for (const ln of lines) {
+      ln.items.sort((a, b) => a.x - b.x);
+      ln.text = ln.items.map((i) => i.str).join(" ").toLowerCase().replace(/\s+/g, " ");
+    }
+
+    // Find the best matching line: prefer the longest anchor that hits.
     anchors.sort((a, b) => b.length - a.length);
-    let seed: { x: number; y: number; w: number; h: number } | null = null;
+    let bestLine: Line | null = null;
+    let bestAnchor = "";
     for (const a of anchors) {
       const needle = a.toLowerCase().replace(/\s+/g, " ");
-      const hit = pageText.find((t) => t.str.toLowerCase().replace(/\s+/g, " ").includes(needle));
-      if (hit) { seed = hit; break; }
+      const hit = lines.find((ln) => ln.text.includes(needle));
+      if (hit) { bestLine = hit; bestAnchor = needle; break; }
     }
-    if (!seed) return null;
-    const cx = seed.x + seed.w / 2;
-    const cy = seed.y + seed.h / 2;
-    // Cluster radius: ~250px — keeps the bbox local to the callout area.
-    const R = 250;
-    const cluster = pageText.filter((t) => {
-      const tx = t.x + t.w / 2, ty = t.y + t.h / 2;
-      return Math.abs(tx - cx) <= R && Math.abs(ty - cy) <= R;
-    });
-    const matches = cluster.length ? cluster : [seed];
-    const x1 = Math.min(...matches.map((m) => m.x));
-    const y1 = Math.min(...matches.map((m) => m.y));
-    const x2 = Math.max(...matches.map((m) => m.x + m.w));
-    const y2 = Math.max(...matches.map((m) => m.y + m.h));
-    // Modest padding; clamp to image bounds when known.
-    const padX = 30;
-    const padY = 30;
-    const maxW = imgW || Number.POSITIVE_INFINITY;
-    const maxH = imgH || Number.POSITIVE_INFINITY;
-    return [
-      Math.max(0, x1 - padX),
-      Math.max(0, y1 - padY),
-      Math.min(maxW, x2 + padX),
-      Math.min(maxH, y2 + padY),
-    ];
+    // Fallback: token-level match on the longest anchor.
+    if (!bestLine) {
+      for (const a of anchors) {
+        const needle = a.toLowerCase().replace(/\s+/g, " ");
+        const tok = pageText.find((t) => t.str.toLowerCase().includes(needle));
+        if (tok) {
+          return tightBox([tok], imgW, imgH);
+        }
+      }
+      return null;
+    }
+
+    // Restrict to the matched-token span within the line for tightest possible box.
+    const line = bestLine;
+    let span = line.items;
+    if (bestAnchor) {
+      // Walk items and find contiguous run whose joined text covers the anchor.
+      const lower = line.items.map((i) => i.str.toLowerCase());
+      for (let i = 0; i < lower.length; i++) {
+        let acc = "";
+        for (let j = i; j < lower.length; j++) {
+          acc = (acc + " " + lower[j]).trim();
+          if (acc.replace(/\s+/g, " ").includes(bestAnchor)) {
+            span = line.items.slice(i, j + 1);
+            i = lower.length; // break outer
+            break;
+          }
+        }
+      }
+    }
+    return tightBox(span, imgW, imgH);
   }, [exactBbox, pageText, sel?.id, sel?.location, sel?.linked_item?.bar_size, imgW, imgH]);
   const bbox = exactBbox || approxBbox;
   const bboxIsApprox = !exactBbox && !!approxBbox;
