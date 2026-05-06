@@ -1,8 +1,10 @@
 import type { WorkflowStateFull } from "../useWorkflowState";
+import type { StageKey } from "../types";
 
 export interface StageProps {
   projectId: string;
   state: WorkflowStateFull;
+  goToStage?: (stage: StageKey) => void;
 }
 
 export function StageHeader({ kicker, title, subtitle, right }: { kicker: string; title: string; subtitle?: string; right?: React.ReactNode }) {

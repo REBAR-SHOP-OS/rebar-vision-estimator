@@ -50,7 +50,7 @@ export default function WorkflowShell({ projectId, project }: Props) {
   }) as Record<StageKey, "complete" | "active" | "locked" | "blocked" | "pending">, [state]);
 
   const StageBody = () => {
-    const props = { projectId, state };
+    const props = { projectId, state, goToStage: (stage: StageKey) => setActive(stage) };
     switch (active) {
       case "files": return <FilesStage {...props} />;
       case "scope": return <ScopeStage {...props} />;

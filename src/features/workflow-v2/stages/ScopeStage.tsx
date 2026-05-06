@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { StageHeader, Pill, EmptyState, type StageProps } from "./_shared";
-import { Check, X, GitMerge, Split, Layers } from "lucide-react";
+import { ArrowRight, Check, X, GitMerge, Split, Layers, Loader2 } from "lucide-react";
 
 type Decision = "accept" | "hold" | "reroute";
 
@@ -12,7 +13,8 @@ interface Candidate {
   evidence: string;
 }
 
-export default function ScopeStage({ state }: StageProps) {
+export default function ScopeStage({ projectId, state, goToStage }: StageProps) {
+  const [savingId, setSavingId] = useState<string | null>(null);
   const candidates: Candidate[] = useMemo(() => {
     if (state.files.length === 0) return [];
     const archetypes = [
@@ -39,11 +41,63 @@ export default function ScopeStage({ state }: StageProps) {
   const [selectedId, setSelectedId] = useState<string | null>(candidates[0]?.id || null);
   const sel = candidates.find((c) => c.id === selectedId) || null;
 
-  const setDecision = (id: string, d: Decision) => {
+  useEffect(() => {
+    if (candidates.length === 0) {
+      if (selectedId) setSelectedId(null);
+      return;
+    }
+    if (!selectedId || !candidates.some((candidate) => candidate.id === selectedId)) {
+      setSelectedId(candidates[0].id);
+    }
+  }, [candidates, selectedId]);
+
+  const setDecision = async (id: string, d: Decision) => {
+    const candidate = candidates.find((c) => c.id === id);
     state.setLocal({ scope: { ...decisions, [id]: d } });
+    if (!candidate) return;
+
+    setSavingId(id);
+    try {
+      const { data, error } = await supabase
+        .from("projects")
+        .select("scope_items")
+        .eq("id", projectId)
+        .maybeSingle();
+      if (error) throw error;
+
+      const current = Array.isArray(data?.scope_items)
+        ? data.scope_items.map((item: unknown) => String(item)).filter(Boolean)
+        : [];
+      const nextScopeItems = d === "accept"
+        ? Array.from(new Set([...current, candidate.label]))
+        : current.filter((item) => item !== candidate.label);
+
+      const update: Record<string, unknown> = {
+        scope_items: nextScopeItems,
+      };
+      if (nextScopeItems.length > 0) {
+        update.workflow_status = "scope_detected";
+        update.intake_complete = true;
+      }
+
+      const { error: updateError } = await supabase
+        .from("projects")
+        .update(update)
+        .eq("id", projectId);
+      if (updateError) throw updateError;
+      state.refresh();
+    } catch (error) {
+      console.warn("Failed to persist V2 scope decision:", error);
+    } finally {
+      setSavingId(null);
+    }
   };
 
-  const accepted = candidates.filter((c) => decisions[c.id] === "accept");
+  const serverApprovedLabels = useMemo(() => new Set(state.approvedScopeItems), [state.approvedScopeItems]);
+  const getDecision = (candidate: Candidate) =>
+    decisions[candidate.id] || (serverApprovedLabels.has(candidate.label) ? "accept" : undefined);
+
+  const accepted = candidates.filter((c) => getDecision(c) === "accept");
   // Group accepted by archetype label for "Approved Scope" buckets
   const buckets = useMemo(() => {
     const m = new Map<string, Candidate[]>();
@@ -54,7 +108,7 @@ export default function ScopeStage({ state }: StageProps) {
     });
     return Array.from(m.entries());
   }, [accepted]);
-  const newCount = candidates.filter((c) => !decisions[c.id]).length;
+  const newCount = candidates.filter((c) => !getDecision(c)).length;
 
   return (
     <div className="grid h-full" style={{ gridTemplateColumns: "360px 64px 1fr" }}>
@@ -70,7 +124,7 @@ export default function ScopeStage({ state }: StageProps) {
         ) : (
           <div className="flex-1 overflow-auto p-3 space-y-2">
             {candidates.map((c) => {
-              const d = decisions[c.id];
+              const d = getDecision(c);
               const isSel = selectedId === c.id;
               return (
                 <button key={c.id} onClick={() => setSelectedId(c.id)}
@@ -97,20 +151,20 @@ export default function ScopeStage({ state }: StageProps) {
 
       {/* Action rail */}
       <div className="border-r border-border flex flex-col items-center justify-start py-4 gap-2" style={{ background: "hsl(var(--background))" }}>
-        <RailBtn title="Approve" tone="primary" onClick={() => sel && setDecision(sel.id, "accept")} disabled={!sel}>
-          <Check className="w-4 h-4" />
+        <RailBtn title="Approve" tone="primary" onClick={() => sel && setDecision(sel.id, "accept")} disabled={!sel || savingId === sel?.id}>
+          {savingId === sel?.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
         </RailBtn>
-        <RailBtn title="Reject" tone="muted" onClick={() => sel && setDecision(sel.id, "hold")} disabled={!sel}>
+        <RailBtn title="Reject" tone="muted" onClick={() => sel && setDecision(sel.id, "hold")} disabled={!sel || savingId === sel?.id}>
           <X className="w-4 h-4" />
         </RailBtn>
         <div className="h-2" />
-        <RailBtn title="Merge" tone="muted" onClick={() => sel && setDecision(sel.id, "reroute")} disabled={!sel}>
+        <RailBtn title="Merge" tone="muted" onClick={() => sel && setDecision(sel.id, "reroute")} disabled={!sel || savingId === sel?.id}>
           <GitMerge className="w-4 h-4" />
         </RailBtn>
-        <RailBtn title="Split" tone="muted" onClick={() => sel && setDecision(sel.id, "reroute")} disabled={!sel}>
+        <RailBtn title="Split" tone="muted" onClick={() => sel && setDecision(sel.id, "reroute")} disabled={!sel || savingId === sel?.id}>
           <Split className="w-4 h-4" />
         </RailBtn>
-        <RailBtn title="Bucket" tone="muted" onClick={() => sel && setDecision(sel.id, "reroute")} disabled={!sel}>
+        <RailBtn title="Bucket" tone="muted" onClick={() => sel && setDecision(sel.id, "reroute")} disabled={!sel || savingId === sel?.id}>
           <Layers className="w-4 h-4" />
         </RailBtn>
       </div>
@@ -121,9 +175,18 @@ export default function ScopeStage({ state }: StageProps) {
           kicker="Approved Scope"
           title="Construction Buckets"
           right={
-            <div className="flex gap-4 text-[11px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
-              <span>Total Tonnage <span className="text-foreground font-semibold ml-1">{(accepted.length * 14.2).toFixed(1)} TN</span></span>
-              <span>Items <span className="text-foreground font-semibold ml-1">{accepted.length}</span></span>
+            <div className="flex items-center gap-3">
+              <div className="flex gap-4 text-[11px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+                <span>Total Tonnage <span className="text-foreground font-semibold ml-1">{(accepted.length * 14.2).toFixed(1)} TN</span></span>
+                <span>Items <span className="text-foreground font-semibold ml-1">{accepted.length}</span></span>
+              </div>
+              <button
+                disabled={accepted.length === 0}
+                onClick={() => goToStage?.("takeoff")}
+                className="inline-flex h-8 items-center justify-center gap-1.5 border border-primary/60 bg-primary/15 px-3 text-[10px] font-mono uppercase tracking-wider text-primary transition-colors hover:bg-primary/25 disabled:cursor-not-allowed disabled:border-border disabled:bg-transparent disabled:text-muted-foreground"
+              >
+                Continue <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
           }
         />
