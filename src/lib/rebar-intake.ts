@@ -27,6 +27,11 @@ export const inferRebarFileKind = (fileName: string, mimeType: string | null): s
   return "other";
 };
 
+function formatBridgeError(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
 export async function ensureRebarProjectBridge(
   supabase: any,
   legacyProjectId: string,
@@ -157,12 +162,20 @@ export async function createProjectWithCanonicalBridge(
       params.projectName,
       params.customerName ?? null,
     );
-  } catch (bridgeError) {
-    await cleanupLegacyProjectUpload(supabase, { legacyProjectId: data.id });
-    throw bridgeError;
-  }
 
-  return data;
+    return {
+      ...data,
+      canonicalBridgeHealthy: true,
+    };
+  } catch (bridgeError) {
+    console.warn("Canonical project bridge sync failed, continuing with legacy project:", bridgeError);
+
+    return {
+      ...data,
+      canonicalBridgeHealthy: false,
+      canonicalBridgeError: formatBridgeError(bridgeError),
+    };
+  }
 }
 
 export async function createProjectFileWithCanonicalBridge(
@@ -189,18 +202,31 @@ export async function createProjectFileWithCanonicalBridge(
 
     legacyFileId = data.id;
 
-    await ensureRebarProjectFileBridge(supabase, {
-      legacyFileId: data.id,
-      legacyProjectId: params.projectId,
-      storagePath: params.filePath,
-      originalFilename: params.fileName,
-      fileKind: params.fileKind,
-      revisionLabel: params.revisionLabel ?? null,
-      checksumSha256: params.checksumSha256 ?? null,
-      pageCount: params.pageCount ?? null,
-    });
+    try {
+      await ensureRebarProjectFileBridge(supabase, {
+        legacyFileId: data.id,
+        legacyProjectId: params.projectId,
+        storagePath: params.filePath,
+        originalFilename: params.fileName,
+        fileKind: params.fileKind,
+        revisionLabel: params.revisionLabel ?? null,
+        checksumSha256: params.checksumSha256 ?? null,
+        pageCount: params.pageCount ?? null,
+      });
 
-    return data;
+      return {
+        ...data,
+        canonicalBridgeHealthy: true,
+      };
+    } catch (bridgeError) {
+      console.warn("Canonical project file bridge sync failed, continuing with legacy file:", bridgeError);
+
+      return {
+        ...data,
+        canonicalBridgeHealthy: false,
+        canonicalBridgeError: formatBridgeError(bridgeError),
+      };
+    }
   } catch (error) {
     await cleanupLegacyProjectUpload(supabase, {
       legacyFileId,
