@@ -33,6 +33,8 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [redrawCount, setRedrawCount] = useState(0);
   const [lastTrigger, setLastTrigger] = useState<string>("init");
   const [renderedPage, setRenderedPage] = useState<number | null>(null);
+  // Text items extracted from the rendered PDF page (image-pixel space).
+  const [pageText, setPageText] = useState<Array<{ str: string; x: number; y: number; w: number; h: number }>>([]);
 
   const bump = (reason: string) => {
     setRedrawCount((c) => c + 1);
@@ -352,6 +354,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                       setImgSize({ w, h });
                       setRenderedPage(pdfPage);
                     }}
+                    onPageText={setPageText}
                     scale={2}
                   />
                 )}
