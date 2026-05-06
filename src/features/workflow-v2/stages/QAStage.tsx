@@ -285,9 +285,9 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
               );
             })}
             <div className="w-px h-6 bg-border mx-1 my-0.5" />
-            <button onClick={() => setZoomMode("tight")} className="p-1.5 text-muted-foreground hover:text-foreground"><ZoomIn className="w-4 h-4" /></button>
-            <button onClick={() => setZoomMode("full")} className="p-1.5 text-muted-foreground hover:text-foreground"><ZoomOut className="w-4 h-4" /></button>
-            <button onClick={() => setZoomMode((m) => m === "tight" ? "full" : "tight")} className="p-1.5 text-muted-foreground hover:text-foreground"><Maximize2 className="w-4 h-4" /></button>
+            <button onClick={() => setZoomLevel((z) => Math.min(4, Number((z * 1.25).toFixed(2))))} className="p-1.5 text-muted-foreground hover:text-foreground" title="Zoom in"><ZoomIn className="w-4 h-4" /></button>
+            <button onClick={() => setZoomLevel((z) => Math.max(0.5, Number((z / 1.25).toFixed(2))))} className="p-1.5 text-muted-foreground hover:text-foreground" title="Zoom out"><ZoomOut className="w-4 h-4" /></button>
+            <button onClick={() => { setZoomMode((m) => m === "tight" ? "full" : "tight"); setZoomLevel(1); }} className="p-1.5 text-muted-foreground hover:text-foreground" title="Toggle fit mode"><Maximize2 className="w-4 h-4" /></button>
             <div className="w-px h-6 bg-border mx-1 my-0.5" />
             <button className="p-1.5 text-muted-foreground hover:text-foreground"><Eye className="w-4 h-4" /></button>
             <button
@@ -331,11 +331,11 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                       <>
                         <div className="relative w-full h-full bg-background overflow-hidden">
                           <div className="absolute top-1 left-1 z-10 px-1.5 py-0.5 bg-card/90 border border-border text-[9px] uppercase tracking-[0.12em] font-bold">Rev 2 (Base)</div>
-                          <img src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")} alt={previewName} className="w-full h-full object-contain" draggable={false} />
+                          <img src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")} alt={previewName} className="w-full h-full object-contain" style={{ transform: `translate(${tx}%, ${ty}%) scale(${zoom})`, transformOrigin: "center center", transition: "transform 0.35s ease-out" }} draggable={false} />
                         </div>
                         <div className="relative w-full h-full bg-background overflow-hidden">
                           <div className="absolute top-1 left-1 z-10 px-1.5 py-0.5 bg-primary/20 border border-primary/50 text-[9px] uppercase tracking-[0.12em] font-bold text-primary">Rev 3 (Target)</div>
-                          <img src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")} alt={`${previewName} target`} className="w-full h-full object-contain" style={{ filter: "sepia(1) hue-rotate(150deg) saturate(2.2) contrast(1.1)" }} draggable={false} />
+                          <img src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")} alt={`${previewName} target`} className="w-full h-full object-contain" style={{ filter: "sepia(1) hue-rotate(150deg) saturate(2.2) contrast(1.1)", transform: `translate(${tx}%, ${ty}%) scale(${zoom})`, transformOrigin: "center center", transition: "transform 0.35s ease-out" }} draggable={false} />
                         </div>
                       </>
                     ) : (
@@ -390,7 +390,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                       <span>#{redrawCount}</span>
                     </div>
                     <div>last: <span className="text-foreground">{lastTrigger}</span></div>
-                    <div>view: <span className="text-primary">{viewMode}</span> · zoom: {zoomMode} ({Math.round(zoom * 100)}%)</div>
+                    <div>view: <span className="text-primary">{viewMode}</span> · zoom: {zoomMode} × {zoomLevel.toFixed(2)} ({Math.round(zoom * 100)}%)</div>
                     <div>blend: {viewMode === "diff" ? "difference / invert(1)" : viewMode === "side" ? "sepia+hue (rev3)" : "none"}</div>
                     <div>tx/ty: {tx.toFixed(1)}% / {ty.toFixed(1)}%</div>
                     <div>page req: {pdfPage} · rendered: {renderedPage ?? "—"} / {pdfPageCount}</div>
