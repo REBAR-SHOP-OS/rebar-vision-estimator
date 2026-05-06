@@ -38,6 +38,16 @@ export interface WorkflowQaIssue {
 
 const CLOSED_STATUSES = new Set(["resolved", "closed"]);
 
+const REBAR_MASS_KG_PER_M: Record<string, number> = {
+  "10M": 0.785, "15M": 1.570, "20M": 2.355, "25M": 3.925, "30M": 5.495, "35M": 7.850,
+  "#3": 0.561, "#4": 0.994, "#5": 1.552, "#6": 2.235, "#7": 3.042, "#8": 3.973,
+};
+function massForSize(size: string): number {
+  const k = String(size || "").toUpperCase().trim();
+  const m = k.match(/^(10M|15M|20M|25M|30M|35M|#[3-8])/);
+  return m ? REBAR_MASS_KG_PER_M[m[1]] || 0 : 0;
+}
+
 function isOpenStatus(status?: string | null) {
   return !CLOSED_STATUSES.has(String(status || "").toLowerCase());
 }
