@@ -5,7 +5,7 @@ import { loadWorkflowQaIssues, type WorkflowQaIssue } from "../takeoff-data";
 import { supabase } from "@/integrations/supabase/client";
 import PdfRenderer from "@/components/chat/PdfRenderer";
 
-export default function QAStage({ projectId, goToStage }: StageProps) {
+export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [issues, setIssues] = useState<WorkflowQaIssue[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,7 +110,7 @@ export default function QAStage({ projectId, goToStage }: StageProps) {
 
   const jumpToTakeoff = () => {
     const linked = sel?.linked_item;
-    (state as StageProps["state"]).setLocal({
+    state.setLocal({
       takeoffFocus: linked
         ? {
             raw_id: linked.id,
