@@ -1,0 +1,1 @@
+UPDATE public.segments SET dimensions_status = 'complete', dimensions_locked_at = now() WHERE id IN ('44476831-c629-4dbf-883c-82f16850cd93','1b95092b-3959-4056-81d7-01c88f59ab4b','ee6b4b90-1c4f-4417-b028-aa8c9d32c31a');
