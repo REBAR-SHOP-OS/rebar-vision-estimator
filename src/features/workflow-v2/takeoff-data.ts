@@ -347,9 +347,12 @@ function rewriteToRawInputAsk(
   const lookAt = label && label.trim().length > 0
     ? label.trim()
     : (loc?.page_number ? `Page ${loc.page_number}` : "the drawing");
-  const findPart = calloutText
-    ? `the ${noun} marked "${calloutText}"`
-    : `the ${noun}`;
+  const elementId = (loc?.element_id || "").trim();
+  const findPart = elementId
+    ? `${noun} ${elementId}`
+    : calloutText
+      ? `the ${noun} marked "${calloutText}"`
+      : `the ${noun}`;
   return `Look at ${lookAt}. Find ${findPart}. Enter ${inputList} from the drawing.`;
 }
 
