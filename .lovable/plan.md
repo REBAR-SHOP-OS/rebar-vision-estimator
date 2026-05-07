@@ -1,38 +1,59 @@
+# Fix Dimension Problem — Project + Going Forward
+
 ## Goal
-Make the P12 "MISSING: HOST ELEMENT LENGTH" card go away without inventing new numbers, while keeping a clear audit trail that the value is an assumption (not a measured drawing dimension).
+Stop inventing `10 m × 3 m` placeholder dimensions. Extract real dimensions from drawings using OCR + Vision, persist them in `agent_knowledge` per project, and gate `auto-estimate` until dimensions are real.
 
-## Current state (verified in DB)
-Row id `7de0ca57-2bc7-434c-aa7a-a1bc822a0722` (project `cd42ebfe…4593e3`):
-- `description`: "2-15M TOP AND BOTTOM (Frost Slab Edge)"
-- `quantity_count=33`, `total_length=330`, `total_weight=518.1`
-- `assumptions_json.linear_geometry.lengthMm = null`  ← the actual blocker
-- `assumptions_json.synthetic_estimate = true`, `assumed_slab_side_m = 10`
-- `assumptions_json.missing_refs = ["host element length"]`
+---
 
-The QA card reads `missing_refs` and `linear_geometry.lengthMm`. As long as `lengthMm` is null and `missing_refs` contains "host element length", the card stays red.
+## Part A — Repair current project (`cd42ebfe…` LONDON_CRU1-7)
 
-## Fix (one-row data patch, no code change)
+1. **Revert synthetic patches** (data migration via insert tool):
+   - For the 14 estimate items touched by `accept_synthetic_dims_bulk`:
+     - Remove `linear_geometry.lengthMm = 10000` and `heightMm = 3000` defaults where `confirmation_source = "user_accept_synthetic_bulk"` or `"user_accept_synthetic"`.
+     - Restore `missing_refs` from `audit_events.metadata.previous_missing_refs`.
+     - Set `geometry_status = "partial"`, clear `confirmed_at`, clear `confirmation_source`.
+   - Flip the 8 segments back to `dimensions_status = 'pending'`.
+   - Log one `audit_events` row per item: `revert_synthetic_host_length`.
 
-Update that single `estimate_items` row:
+2. **Run `extract-dimensions` edge function** on this project:
+   - OCR sweep all sheets for scale + schedule dimensions.
+   - **Vision pass** on plan/elevation/section sheets for host lengths + heights OCR can't see (P9, P11, P13, P16, frost slab, brick ledge, shear walls, housekeeping pads).
+   - Persist a single `agent_knowledge` row keyed by project (type=`project_dimensions`, file_path=`projects/{id}/dimensions.json`) — same shape as the existing CRU-1 row.
 
-1. Set `assumptions_json.linear_geometry.lengthMm = 10000` (10 m, matching the synthetic basis already used for the weight).
-2. Clear `assumptions_json.missing_refs` to `[]`.
-3. Set `assumptions_json.geometry_status = "assumed_confirmed"` and add `confirmation_source = "user_accept_synthetic"` + `confirmed_at = now()` so the audit trail is honest.
-4. Leave `quantity_count`, `total_length`, `total_weight` unchanged (they already match this assumption).
-5. Keep `status = 'draft'` so it still shows up in review, but it will no longer carry the "missing host element length" blocker.
-6. Insert one `audit_events` row: `entity_type='estimate_item'`, `action='accept_synthetic_host_length'`, `metadata={ item_id, prior_missing:["host element length"], assumed_length_mm:10000 }`.
+3. **Re-run `auto-estimate`** — items resolve from real `agent_knowledge` dimensions. Genuine gaps remain as `MISSING:` chips for human review (no synthetic fill).
 
-## Why this and not "enter real dimensions"
-- The drawing-derived host length isn't in the DB; OCR didn't pull it for that slab edge.
-- Re-running OCR for the frost slab sheet is a much bigger job (re-extraction + segment relinking) and may still fail to find a clean dimension since it wasn't picked up the first time.
-- Accepting the synthetic value with an explicit audit flag is the **smallest safe patch** that unblocks the workflow and preserves traceability — matches your Minimum Patch policy.
+---
 
-## What you'll see after
-- The P12 card loses the red `MISSING: HOST ELEMENT LENGTH` chip.
-- It shows as "Assumed (10 m frost slab edge)" so a reviewer can still spot it.
-- Estimate totals don't change.
+## Part B — Going forward (all projects)
 
-## If you'd rather not assume
-Tell me the actual frost slab edge length from your drawings and I'll write that exact value in step 1 instead of 10000 mm — same patch, real number.
+4. **Pipeline gate** (`auto-estimate` edge function):
+   - Before estimating, require either:
+     - `agent_knowledge` row of type `project_dimensions` for `project_id`, OR
+     - All `segments.dimensions_status IN ('complete','na')`.
+   - If neither, auto-invoke `extract-dimensions` first. Never fall through to `10000 mm` defaults.
 
-Approve and I'll apply it.
+5. **Remove synthetic-default code paths**:
+   - In `auto-estimate` and any synthetic-quote helper, delete the `lengthMm ?? 10000` / `heightMm ?? 3000` fallbacks. On missing dim, emit `MISSING:` and skip that item, do not synthesize.
+
+6. **`extract-dimensions` improvements**:
+   - Always run Vision on plan + elevation + section sheets (not just OCR).
+   - Write dimensions to `agent_knowledge` (project-scoped) at end of every run, so estimator loads them on every prompt going forward.
+   - Add audit log entry `dimensions_extracted` with source breakdown (OCR vs Vision per dimension).
+
+7. **Backfill sweep** (one-shot script via edge function):
+   - For every project with synthetic-marked items (`assumptions_json->>'confirmation_source' LIKE 'user_accept_synthetic%'`):
+     - Apply Part A steps 1–3.
+   - Idempotent — safe to re-run.
+
+---
+
+## Technical Notes
+
+- All schema unchanged. Only data + edge function logic.
+- Migration tool used only for any new index / no DDL needed here — data ops via insert tool.
+- Edge functions touched: `auto-estimate`, `extract-dimensions`, new `backfill-dimensions` (one-shot).
+- Respects FAIL-CLOSED rule: missing dim → `MISSING:` chip, never invented value.
+- Respects Trust-First / Never-invent-values core rules.
+
+## Out of scope
+- No UI changes. QA cards already render `MISSING:` chips correctly once data is honest.
