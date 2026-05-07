@@ -1096,7 +1096,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 }
 
 function BBoxPointer({
-  bbox, imgW, imgH, zoom, pageBox, title, description, onFix, onImpact, approximate,
+  bbox, imgW, imgH, zoom, pageBox, title, onFix, onImpact, approximate,
 }: {
   bbox: BBox;
   imgW: number;
@@ -1126,11 +1126,20 @@ function BBoxPointer({
   const haloPx = Math.max(0.5, 1.5 / z);
   const isShortBox = heightPx * z < 26 || widthPx * z < 42;
   const labelScale = Math.min(1, Math.max(0.72, 1 / z));
-  const popoverOnRight = leftPx + widthPx + 280 < pageBox.left + pageBox.width;
+  const chipOnRight = leftPx + widthPx + 116 < pageBox.left + pageBox.width;
+  const chipAbove = topPx - 34 > pageBox.top;
   const fillBg = approximate ? "rgba(245,158,11,0.035)" : "rgba(255,122,26,0.025)";
+  const chipStyle = chipOnRight
+    ? { left: "calc(100% + 12px)", top: "50%", transform: `translateY(-50%) scale(${labelScale})`, transformOrigin: "left center" }
+    : chipAbove
+      ? { left: "50%", bottom: "calc(100% + 12px)", transform: `translateX(-50%) scale(${labelScale})`, transformOrigin: "bottom center" }
+      : { left: "50%", top: "calc(100% + 12px)", transform: `translateX(-50%) scale(${labelScale})`, transformOrigin: "top center" };
+  const tooltipStyle = chipOnRight
+    ? { left: "calc(100% + 12px)", bottom: "calc(100% + 8px)", transform: `scale(${labelScale})`, transformOrigin: "left bottom" }
+    : { left: "50%", bottom: "calc(100% + 38px)", transform: `translateX(-50%) scale(${labelScale})`, transformOrigin: "bottom center" };
   return (
     <div
-      className="absolute pointer-events-auto"
+      className="absolute pointer-events-auto group"
       style={{
         left: `${leftPx}px`,
         top: `${topPx}px`,
@@ -1156,17 +1165,17 @@ function BBoxPointer({
         />
       )}
       <div
-        className="absolute bg-card border border-border shadow-2xl px-3 py-2 w-56 z-30"
-        style={popoverOnRight
-          ? { left: "calc(100% + 28px)", top: "50%", transform: `translateY(-50%) scale(${labelScale})`, transformOrigin: "left center" }
-          : { left: "50%", top: "calc(100% + 28px)", transform: `translateX(-50%) scale(${labelScale})`, transformOrigin: "top center" }}
+        className="absolute z-30 flex items-center gap-1 border border-border bg-card/95 shadow-lg px-1 py-1"
+        style={chipStyle}
       >
-        <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-foreground mb-1.5 truncate">{title}</div>
-        <div className="text-[10px] text-muted-foreground leading-snug mb-2 line-clamp-3">{description}</div>
-        <div className="grid grid-cols-2 gap-1">
-          <button onClick={(e) => { e.stopPropagation(); onFix(); }} className="py-1 bg-primary text-primary-foreground text-[10px] font-bold uppercase tracking-[0.1em] hover:opacity-90">Fix</button>
-          <button onClick={(e) => { e.stopPropagation(); onImpact(); }} className="py-1 bg-card border border-border text-foreground text-[10px] font-bold uppercase tracking-[0.1em] hover:bg-accent/40">Impact</button>
-        </div>
+        <button onClick={(e) => { e.stopPropagation(); onFix(); }} className="px-2 py-1 bg-primary text-primary-foreground text-[9px] font-bold uppercase tracking-[0.1em] hover:opacity-90">Answer</button>
+        <button onClick={(e) => { e.stopPropagation(); onImpact(); }} className="px-2 py-1 bg-card border border-border text-foreground text-[9px] font-bold uppercase tracking-[0.1em] hover:bg-accent/40">Impact</button>
+      </div>
+      <div
+        className="absolute z-20 pointer-events-none opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity max-w-52 bg-card/95 border border-border shadow-xl px-2 py-1.5 text-[10px] text-foreground"
+        style={tooltipStyle}
+      >
+        <div className="font-bold uppercase tracking-[0.1em] truncate">{title}</div>
       </div>
     </div>
   );
