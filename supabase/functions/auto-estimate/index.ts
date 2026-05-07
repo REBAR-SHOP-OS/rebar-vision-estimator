@@ -969,16 +969,22 @@ function hasUsableProjectDimensionKnowledge(
   projectName: string,
 ) {
   const normalizedProjectName = projectName.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const projectCode = (projectName.match(/[A-Z]{2,}(?:[-\s]?\d+)+/i)?.[0] || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
   return entries.some((entry) => {
     const title = String(entry.title || "");
     const fileName = String(entry.file_name || "");
     const content = String(entry.content || "");
+    const normalizedEntryText = `${title} ${content.slice(0, 4000)}`.toLowerCase().replace(/[^a-z0-9]+/g, " ");
     const contentHead = content.slice(0, 4000);
     const matchesProjectScopedJson = fileName === "dimensions.json" && content.includes(projectId);
     const matchesProjectName = normalizedProjectName.length >= 4
-      && `${title} ${contentHead}`.toLowerCase().includes(normalizedProjectName);
+      && normalizedEntryText.includes(normalizedProjectName);
+    const matchesProjectCode = projectCode.length >= 4 && normalizedEntryText.includes(projectCode);
     const matchesLockedRule = /locked dimensions/i.test(title)
-      && matchesProjectName
+      && (matchesProjectName || matchesProjectCode)
       && /footing schedule|building envelope|foundation wall|piers?:|slab on grade/i.test(contentHead);
     return matchesProjectScopedJson || matchesLockedRule;
   });
