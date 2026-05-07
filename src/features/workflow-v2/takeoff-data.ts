@@ -37,6 +37,7 @@ export interface WorkflowQaIssue {
   description?: string | null;
   severity: string;
   status: string;
+  resolution_note?: string | null;
   sheet_id?: string | null;
   issue_type: string;
   source_file_id?: string | null;
@@ -702,7 +703,7 @@ async function enrichCanonicalIssueLocations(issues: WorkflowQaIssue[]) {
 export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQaIssue[]> {
   const legacyReq = supabase
     .from("validation_issues")
-    .select("id,title,description,severity,status,sheet_id,issue_type,source_file_id,source_refs")
+    .select("id,title,description,severity,status,resolution_note,sheet_id,issue_type,source_file_id,source_refs")
     .eq("project_id", projectId)
     .order("severity", { ascending: true });
 

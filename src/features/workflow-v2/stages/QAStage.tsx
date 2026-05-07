@@ -13,6 +13,7 @@ import {
   normalizeBboxToImagePixels,
   type BBox,
 } from "./qa-overlay-geometry";
+import { inferEngineerAnswerFields, summarizeEngineerAnswer } from "./qa-answer-fields";
 
 type TabKey = "change" | "impact" | "evidence" | "action";
 
@@ -181,6 +182,9 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [viewMode, setViewMode] = useState<"overlay" | "side" | "diff">("overlay");
   const [changedOnly, setChangedOnly] = useState(true);
   const [debug, setDebug] = useState(false);
+  const [answerValues, setAnswerValues] = useState<Record<string, string>>({});
+  const [answerSaving, setAnswerSaving] = useState(false);
+  const [answerError, setAnswerError] = useState<string | null>(null);
   const [redrawCount, setRedrawCount] = useState(0);
   const [lastTrigger, setLastTrigger] = useState<string>("init");
   const [renderedPage, setRenderedPage] = useState<number | null>(null);
@@ -239,6 +243,12 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   }, [sel?.id, sel?.locator?.page_number]);
 
   useEffect(() => { setZoomMode("tight"); setZoomLevel(1); setPan({ dx: 0, dy: 0 }); setTab("change"); }, [sel?.id]);
+  useEffect(() => {
+    setAnswerError(null);
+    const refs = Array.isArray(sel?.source_refs) ? sel?.source_refs : [];
+    const existing = refs.find((ref: any) => ref?.engineer_answer)?.engineer_answer;
+    setAnswerValues((existing?.values && typeof existing.values === "object") ? existing.values : {});
+  }, [sel?.id, sel?.source_refs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -348,6 +358,65 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const staleOutputs = issues.filter((i) => ["critical", "error"].includes(i.severity?.toLowerCase())).length;
 
   const visibleSheets = changedOnly ? sheets.filter((s) => s.items.length > 0) : sheets;
+  const missingRefs = sel?.linked_item?.missing_refs || [];
+  const answerFields = useMemo(
+    () => inferEngineerAnswerFields(missingRefs, `${sel?.title || ""}\n${sel?.description || ""}`),
+    [missingRefs, sel?.title, sel?.description],
+  );
+  const objectIdentity = [
+    sel?.location?.element_reference,
+    sel?.location?.element_id,
+    sel?.location?.pad_id,
+    sel?.location?.footing_id,
+    sel?.location?.wall_id,
+    sel?.location?.slab_zone_id,
+    sel?.location?.callout_tag,
+    sel?.location?.detail_reference,
+    sel?.location?.grid_reference,
+  ].find(Boolean);
+
+  const updateSelectedIssue = (patch: Partial<WorkflowQaIssue>) => {
+    if (!sel) return;
+    setIssues((current) => current.map((issue) => issue.id === sel.id ? { ...issue, ...patch } : issue));
+  };
+
+  const persistIssueStatus = async (status: string, note: string, values: Record<string, string> = answerValues) => {
+    if (!sel) return;
+    setAnswerSaving(true);
+    setAnswerError(null);
+    const now = new Date().toISOString();
+    const refs = Array.isArray(sel.source_refs) ? [...sel.source_refs] : [];
+    const nextRefs = refs.filter((ref: any) => !ref?.engineer_answer);
+    nextRefs.push({
+      engineer_answer: {
+        values,
+        note,
+        status,
+        answered_at: now,
+        location_label: sel.location_label || null,
+        issue_id: sel.id,
+      },
+    });
+
+    try {
+      if (sel.id.startsWith("legacy:")) {
+        const { error } = await supabase
+          .from("validation_issues")
+          .update({ status, resolution_note: note, source_refs: nextRefs, updated_at: now })
+          .eq("id", sel.id.replace(/^legacy:/, ""));
+        if (error) throw error;
+      }
+      updateSelectedIssue({ status, resolution_note: note, source_refs: nextRefs });
+    } catch (err) {
+      setAnswerError(err instanceof Error ? err.message : "Could not save engineer answer.");
+    } finally {
+      setAnswerSaving(false);
+    }
+  };
+
+  const saveEngineerAnswer = async (status = "answered") => {
+    await persistIssueStatus(status, summarizeEngineerAnswer(answerValues));
+  };
 
   // Bbox-driven crop
   const locator = sel?.locator || null;
@@ -710,7 +779,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                             approximate={bboxIsApprox}
                             title={sel?.title || "Modification"}
                             description={[sel?.location_label, sel?.description || "Is this element correct as detected?"].filter(Boolean).join(" - ")}
-                            onFix={jumpToTakeoff}
+                            onFix={() => setTab("action")}
                             onImpact={() => setTab("impact")}
                           />
                         )}
@@ -927,10 +996,70 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                 )}
 
                 {tab === "action" && (
-                  <section className="space-y-2">
+                  <section className="space-y-3">
                     <div className="bg-background/60 p-3 border border-border">
                       <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.12em] mb-1.5 flex items-center gap-1.5"><Wand2 className="w-3 h-3" /> Recommended Fix</div>
                       <div className="text-[11px] italic text-muted-foreground">Review element source and apply standard correction per project spec, then re-run takeoff for this row.</div>
+                    </div>
+                    <div className="bg-background/60 p-3 border border-primary/40 space-y-3">
+                      <div>
+                        <div className="text-[10px] font-bold text-primary uppercase tracking-[0.12em] mb-1.5">Engineer Answer</div>
+                        <div className="text-[11px] text-muted-foreground leading-relaxed">{sel.description || "Enter the missing drawing values for this issue."}</div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-[10px]">
+                        <div className="border border-border bg-card/60 p-2">
+                          <div className="uppercase tracking-[0.12em] text-muted-foreground mb-1">Location</div>
+                          <div className="font-bold text-foreground truncate">{sel.location_label || `P${sel.locator?.page_number || pdfPage}`}</div>
+                        </div>
+                        <div className="border border-border bg-card/60 p-2">
+                          <div className="uppercase tracking-[0.12em] text-muted-foreground mb-1">Object</div>
+                          <div className="font-bold text-foreground truncate">{objectIdentity || "Drawing target"}</div>
+                        </div>
+                      </div>
+                      {sel.location?.source_excerpt && (
+                        <div className="text-[10px] italic text-muted-foreground border-l-2 border-primary/40 pl-2">"{sel.location.source_excerpt}"</div>
+                      )}
+                      {missingRefs.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {missingRefs.map((m, i) => (
+                            <span key={i} className="text-[9px] uppercase tracking-[0.1em] px-1.5 py-0.5 bg-[hsl(var(--status-blocked))]/15 text-[hsl(var(--status-blocked))] border border-[hsl(var(--status-blocked))]/30">missing: {m}</span>
+                          ))}
+                        </div>
+                      )}
+                      <div className="space-y-2">
+                        {answerFields.map((field) => (
+                          <label key={field.key} className="block">
+                            <span className="block text-[9px] font-bold uppercase tracking-[0.12em] text-muted-foreground mb-1">{field.label}</span>
+                            {field.key === "notes" || field.key === "answer" ? (
+                              <textarea
+                                value={answerValues[field.key] || ""}
+                                onChange={(e) => setAnswerValues((v) => ({ ...v, [field.key]: e.target.value }))}
+                                placeholder={field.placeholder}
+                                rows={field.key === "notes" ? 2 : 3}
+                                className="w-full bg-card border border-border px-2 py-2 text-[12px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary"
+                              />
+                            ) : (
+                              <input
+                                value={answerValues[field.key] || ""}
+                                onChange={(e) => setAnswerValues((v) => ({ ...v, [field.key]: e.target.value }))}
+                                placeholder={field.placeholder}
+                                className="w-full bg-card border border-border px-2 py-2 text-[12px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary"
+                              />
+                            )}
+                          </label>
+                        ))}
+                      </div>
+                      {sel.resolution_note && (
+                        <div className="text-[10px] text-muted-foreground bg-card/50 border border-border p-2">Saved: {sel.resolution_note}</div>
+                      )}
+                      {answerError && (
+                        <div className="text-[10px] text-[hsl(var(--status-blocked))] border border-[hsl(var(--status-blocked))]/30 bg-[hsl(var(--status-blocked))]/10 p-2">{answerError}</div>
+                      )}
+                      <div className="grid grid-cols-3 gap-2">
+                        <button disabled={answerSaving} onClick={() => saveEngineerAnswer("answered")} className="py-2 bg-primary text-primary-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:opacity-90 disabled:opacity-50">Save Answer</button>
+                        <button disabled={answerSaving} onClick={() => saveEngineerAnswer("resolved")} className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40 disabled:opacity-50">Mark Resolved</button>
+                        <button disabled={answerSaving} onClick={() => persistIssueStatus("review", "Engineer marked this issue for review.", answerValues)} className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40 disabled:opacity-50">Needs Review</button>
+                      </div>
                     </div>
                   </section>
                 )}
@@ -945,17 +1074,17 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                 onClick={jumpToTakeoff}
                 className="w-full py-2.5 bg-primary text-primary-foreground font-bold text-[11px] uppercase tracking-[0.14em] flex items-center justify-center gap-2 hover:opacity-90"
               >
-                <RefreshCw className="w-4 h-4" /> Re-run Affected Items
+                <RefreshCw className="w-4 h-4" /> Open Takeoff / Re-run
               </button>
               <div className="grid grid-cols-2 gap-2">
-                <button className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40">
+                <button onClick={() => persistIssueStatus("answered", "Engineer accepted this issue unchanged.", answerValues)} disabled={answerSaving} className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40 disabled:opacity-50">
                   Accept Unchanged
                 </button>
-                <button className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40">
+                <button onClick={() => persistIssueStatus("review", "Engineer marked this issue for review.", answerValues)} disabled={answerSaving} className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40 disabled:opacity-50">
                   Mark for Review
                 </button>
               </div>
-              <button className="w-full py-1.5 text-muted-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:text-foreground">
+              <button onClick={() => persistIssueStatus("resolved", "Engineer marked this issue as no impact.", answerValues)} disabled={answerSaving} className="w-full py-1.5 text-muted-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:text-foreground disabled:opacity-50">
                 Mark No Impact
               </button>
             </div>

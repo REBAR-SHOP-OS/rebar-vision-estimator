@@ -1,0 +1,24 @@
+import { describe, expect, it } from "vitest";
+import { inferEngineerAnswerFields, summarizeEngineerAnswer } from "@/features/workflow-v2/stages/qa-answer-fields";
+
+describe("qa answer fields", () => {
+  it("asks for length and bar callout from unresolved geometry text", () => {
+    const fields = inferEngineerAnswerFields(
+      ["rebar_callout", "element_dimensions"],
+      "Enter the dimensions and bar callout from the drawing.",
+    ).map((field) => field.key);
+
+    expect(fields).toContain("length");
+    expect(fields).toContain("bar_callout");
+    expect(fields).toContain("notes");
+  });
+
+  it("falls back to a generic answer when no specific field is implied", () => {
+    expect(inferEngineerAnswerFields([], "Check the source.").map((field) => field.key)).toEqual(["answer", "notes"]);
+  });
+
+  it("summarizes non-empty values for storage", () => {
+    expect(summarizeEngineerAnswer({ length: "3000mm", notes: "", bar_callout: "15M @ 406mm O.C." }))
+      .toBe("Length: 3000mm; Bar callout: 15M @ 406mm O.C.");
+  });
+});
