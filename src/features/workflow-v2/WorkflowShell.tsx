@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import { STAGES, type StageKey } from "./types";
 import { Lock, CheckCircle2, Circle, AlertTriangle, FolderOpen, Layers, Ruler, ShieldCheck, Stamp, FileSpreadsheet, Search, Bell, HelpCircle, MessageSquareText } from "lucide-react";
 import FilesStage from "./stages/FilesStage";
