@@ -207,9 +207,46 @@ function formatMm(value: number): string {
   return `${Math.round(value)}mm`;
 }
 
+function isBrickLedgeDetailNote(text: string): boolean {
+  const t = text.toLowerCase();
+  return /brick\s+ledge/.test(t)
+    && (/\breinforcement\b|\bvertical\s+bars?\b|\bcont\.?\b|\bmax\b|\b115\s*mm\b|\b4-?1\/2\b/.test(t));
+}
+
+function buildBrickLedgeDetailDraft(loc: string): EngineerAnswerDraft {
+  const draftAnswer = [
+    "Brick ledge dimensions per detail:",
+    "- 115mm (4-1/2\") brick ledge typical",
+    "- Use 152mm (6\") brick ledge where wall height exceeds 300mm and is less than 900mm",
+    "- Max ledge height = 300mm (12\")",
+    "- 10M vertical bars @ 300mm (12\") O.C. typical",
+  ].join("\n");
+
+  return {
+    question: `On ${loc}, find the brick ledge. The drawing note already defines the brick ledge dimensions and reinforcement. Confirm or correct these values.`,
+    draftAnswer,
+    confidence: "high",
+    needsConfirmation: true,
+    structuredValues: {
+      width: "115mm (4-1/2\") typical; 152mm (6\") where wall height exceeds 300mm and is less than 900mm",
+      height: "Max ledge height = 300mm (12\")",
+      bar_callout: "10M vertical bars @ 300mm (12\") O.C. typical",
+      notes: "Use the brick ledge detail note as the source of truth for ledge dimensions.",
+    },
+  };
+}
+
 export function inferEngineerAnswerFields(missingRefs: string[] = [], text = ""): EngineerAnswerField[] {
   const haystack = `${missingRefs.join(" ")} ${text}`.toLowerCase().replace(/[^a-z0-9@.]+/g, " ");
   const keys = new Set<string>();
+
+  if (isBrickLedgeDetailNote(`${missingRefs.join(" ")} ${text}`)) {
+    addField(keys, "width");
+    addField(keys, "height");
+    addField(keys, "bar_callout");
+    addField(keys, "notes");
+    return Array.from(keys).map((key) => FIELD_DEFS[key]);
+  }
 
   if (isLevelingPadDowelCallout(`${missingRefs.join(" ")} ${text}`)) {
     addField(keys, "length");
@@ -253,6 +290,10 @@ export function buildEngineerAnswerDraft(input: SmartQuestionInput): EngineerAns
   const excerpt = String(input.sourceExcerpt || "").trim();
   const wallGeometry = input.wallGeometry;
   const linearGeometry = input.linearGeometry;
+
+  if (isBrickLedgeDetailNote(sourceText)) {
+    return buildBrickLedgeDetailDraft(loc);
+  }
 
   if (linearGeometry && (linearGeometry.lengthMm || linearGeometry.heightMm || linearGeometry.barCallout)) {
     const object = linearGeometry.objectLabel || inferDrawingObject(sourceText, input.objectIdentity);

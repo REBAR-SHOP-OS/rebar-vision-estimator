@@ -138,12 +138,40 @@ describe("qa answer fields", () => {
       title: "P17: brick ledge",
     });
 
-    expect(fields).toContain("length");
+    expect(fields).toContain("width");
     expect(fields).toContain("height");
     expect(fields).toContain("bar_callout");
-    expect(draft.question).toBe('On P17, find the brick ledge. The drawing shows brick ledge with 10M vertical bars @ 300mm O.C. typical. What brick ledge length and bar height should be used?');
-    expect(draft.draftAnswer).toBe("Found: brick ledge; rebar 10M vertical bars @ 300mm O.C. typical. Please confirm the brick ledge length and bar height.");
-    expect(draft.structuredValues.bar_callout).toBe("10M vertical bars @ 300mm O.C. typical");
+    expect(draft.question).toBe("On P17, find the brick ledge. The drawing note already defines the brick ledge dimensions and reinforcement. Confirm or correct these values.");
+    expect(draft.draftAnswer).toContain("115mm (4-1/2\") brick ledge typical");
+    expect(draft.structuredValues.bar_callout).toBe("10M vertical bars @ 300mm (12\") O.C. typical");
+  });
+
+  it("prefills brick ledge detail-note answers instead of asking from scratch", () => {
+    const excerpt = "15M CONT. REINFORCEMENT @ TOP OF BRICK LEDGE";
+    const fields = inferEngineerAnswerFields(["rebar_callout", "element_dimensions"], `P17 brick ledge ${excerpt}`).map((field) => field.key);
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P17",
+      objectIdentity: "brick ledge",
+      missingRefs: ["rebar_callout", "element_dimensions"],
+      sourceExcerpt: excerpt,
+      title: "P17: brick ledge",
+    });
+
+    expect(fields).toEqual(["width", "height", "bar_callout", "notes"]);
+    expect(draft.confidence).toBe("high");
+    expect(draft.question).toBe("On P17, find the brick ledge. The drawing note already defines the brick ledge dimensions and reinforcement. Confirm or correct these values.");
+    expect(draft.draftAnswer).toBe([
+      "Brick ledge dimensions per detail:",
+      "- 115mm (4-1/2\") brick ledge typical",
+      "- Use 152mm (6\") brick ledge where wall height exceeds 300mm and is less than 900mm",
+      "- Max ledge height = 300mm (12\")",
+      "- 10M vertical bars @ 300mm (12\") O.C. typical",
+    ].join("\n"));
+    expect(draft.structuredValues).toMatchObject({
+      width: "115mm (4-1/2\") typical; 152mm (6\") where wall height exceeds 300mm and is less than 900mm",
+      height: "Max ledge height = 300mm (12\")",
+      bar_callout: "10M vertical bars @ 300mm (12\") O.C. typical",
+    });
   });
 
   it("drafts scale-backed linear geometry when available", () => {
