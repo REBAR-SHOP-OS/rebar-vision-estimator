@@ -1283,6 +1283,14 @@ Standards: ${standard ? `${standard.name} (${standard.code_family}, ${standard.u
 Cover defaults: ${standard?.cover_defaults ? JSON.stringify(standard.cover_defaults) : "Standard"}
 Lap defaults: ${standard?.lap_defaults ? JSON.stringify(standard.lap_defaults) : "Standard"}
 
+=== PROJECT SPEC PRECEDENCE (use FIRST, before standards/CSA fallback) ===
+Source for LAP rules:   ${lapSourceLabel}${hasProjectLap ? ` -> ${JSON.stringify(projectSpecs.lap)}` : ""}
+Source for COVER rules: ${coverSourceLabel}${hasProjectCover ? ` -> ${JSON.stringify(projectSpecs.cover)}` : ""}
+Source for GRADE rules: ${gradeSourceLabel}${hasProjectGrade ? ` -> ${JSON.stringify(projectSpecs.grade)}` : ""}
+Spec extractor pages:   ${projectSpecs.source_pages.join(", ") || "none"}
+RULE: If a project_spec_extracted value exists, USE IT and cite the page in authority_quote (e.g. "Spec sheet p${projectSpecs.source_pages[0] ?? "?"}: tension lap = Xdb"). Only fall back to standards/CSA if the project value is missing for that field.
+=== END PROJECT SPEC PRECEDENCE ===
+
 ${knowledgeContext}
 
 === ASSUMPTION AUTHORITY (Manual-Standard-Practice-2018) ===
