@@ -8,6 +8,7 @@ import PdfRenderer from "@/components/chat/PdfRenderer";
 import { loadWorkflowTakeoffRows, type WorkflowTakeoffRow } from "../takeoff-data";
 import { parseAndIndexFile } from "@/lib/parse-file";
 import { buildEngineerAnswerDraft } from "./qa-answer-fields";
+import { computeSyntheticEstimate } from "../lib/synthetic-estimate";
 import {
   CANADIAN_BAR_MASS_KG_PER_M,
   estimateCanadianLine,
@@ -116,6 +117,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   const [pdfPageCount, setPdfPageCount] = useState(0);
   const [pdfImg, setPdfImg] = useState<string | null>(null);
   const [segRunning, setSegRunning] = useState<string | null>(null);
+  const [bestGuessRunning, setBestGuessRunning] = useState(false);
 
   const reload = async () => {
     const mapped = await loadWorkflowTakeoffRows(projectId, state.files);
@@ -201,6 +203,57 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
     setPdfPageCount(0);
     setPdfImg(null);
   }, [signedUrl, state.local.takeoffFocus]);
+
+  const computeBestGuessAll = async () => {
+    setBestGuessRunning(true);
+    try {
+      const targets = rows.filter((r) => r.raw_kind === "legacy" && r.geometry_status !== "resolved");
+      if (targets.length === 0) { toast.info("Nothing to estimate."); return; }
+      let updated = 0, skipped = 0;
+      for (const r of targets) {
+        const synth = computeSyntheticEstimate({
+          description: r.shape,
+          bar_size: r.size === "-" ? null : r.size,
+          source_text: r.missing_refs.join(" "),
+        });
+        if (!synth) { skipped++; continue; }
+        const { data: item } = await supabase
+          .from("estimate_items").select("assumptions_json").eq("id", r.raw_id).maybeSingle();
+        const assumptions = (item?.assumptions_json && typeof item.assumptions_json === "object" && !Array.isArray(item.assumptions_json))
+          ? item.assumptions_json as Record<string, unknown> : {};
+        const { error } = await supabase.from("estimate_items").update({
+          quantity_count: synth.quantity_count,
+          total_length: synth.total_length,
+          total_weight: synth.total_weight,
+          assumptions_json: {
+            ...assumptions,
+            synthetic_estimate: true,
+            assumed_dimensions: synth.assumed_dimensions,
+            synthetic_basis: synth.basis,
+            synthetic_computed_at: new Date().toISOString(),
+          },
+        }).eq("id", r.raw_id);
+        if (!error) updated++;
+        if (user) {
+          await supabase.from("audit_events").insert({
+            user_id: user.id, project_id: projectId, segment_id: r.segment_id,
+            entity_type: "estimate_item", entity_id: r.raw_id,
+            action: "synthetic_best_guess",
+            metadata: { basis: synth.basis, assumed: synth.assumed_dimensions, qty: synth.quantity_count, length: synth.total_length, weight: synth.total_weight },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } as any);
+        }
+      }
+      toast.success(`Best-guess applied to ${updated} row(s)${skipped ? ` (${skipped} skipped — unknown bar size)` : ""}. Values are ASSUMED.`);
+      await reload();
+      state.refresh();
+    } catch (err) {
+      console.warn("Best-guess failed:", err);
+      toast.error("Best-guess estimate failed");
+    } finally {
+      setBestGuessRunning(false);
+    }
+  };
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -419,6 +472,15 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
             <Pill tone="direct">{totals.rows} ROWS</Pill>
             <Pill tone="supported">{totals.weight.toFixed(0)} KG</Pill>
             {totals.blocked > 0 && <Pill tone="blocked" solid>{totals.blocked} BLOCKED</Pill>}
+            <button
+              onClick={computeBestGuessAll}
+              disabled={bestGuessRunning || generating}
+              title="Apply industry-standard assumed dimensions to all Partial/Unresolved rows. Values tagged ASSUMED."
+              className="inline-flex items-center gap-1.5 h-7 px-2.5 border border-amber-500 text-amber-500 text-[10px] font-mono uppercase tracking-wider hover:bg-amber-500/10 disabled:opacity-50"
+            >
+              {bestGuessRunning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+              {bestGuessRunning ? "Estimating…" : "Best-Guess Estimate"}
+            </button>
             <button
               onClick={handleGenerate}
               disabled={generating}
