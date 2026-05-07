@@ -368,6 +368,7 @@ function extractLocationFromRef(ref: any, aj: Record<string, any>, fallback: { s
     detail_reference: pickStr(nestedR.detail, nestedA.detail, r.detail, r.detail_reference, aj.detail, aj.detail_reference, inferred.callout_tag && /^T?D\.?/i.test(inferred.callout_tag) ? inferred.callout_tag : null),
     section_reference: pickStr(nestedR.section, nestedA.section, r.section, r.section_reference, aj.section, aj.section_reference, inferred.section_reference),
     callout_tag: pickStr(r.callout_tag, aj.callout_tag, inferred.callout_tag),
+    element_id: pickStr(r.element_id, aj.element_id, inferred.element_id),
     grid_reference: pickStr(nestedR.grid, nestedA.grid, r.grid, r.grid_reference, aj.grid, aj.grid_reference, inferred.grid_reference),
     zone_reference: pickStr(nestedR.zone, nestedA.zone, r.zone, r.zone_reference, aj.zone, aj.zone_reference, aj.area, r.area, nestedR.area, nestedA.area, inferred.zone_reference),
     element_reference: pickStr(
