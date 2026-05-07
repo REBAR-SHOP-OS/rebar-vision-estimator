@@ -391,7 +391,7 @@ Return ONLY a JSON array of objects with fields:
         const t = String(s.segment_type || "").toLowerCase();
         const n = String(s.name || "").toLowerCase();
         if (forbiddenTypeSet.has(t)) return false;
-        for (const f of forbiddenTypeSet) if (n.includes(f)) return false;
+        for (const f of Array.from(forbiddenTypeSet)) if (n.includes(f)) return false;
         return true;
       })
       .map((s: any) => ({
