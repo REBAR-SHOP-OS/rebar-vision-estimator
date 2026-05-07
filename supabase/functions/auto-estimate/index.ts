@@ -1760,6 +1760,60 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
     }
     const dedupedRows = Array.from(dedupMap.values());
 
+    // ───────────────────────────────────────────────────────────────
+    // OUTLIER GUARD (MAD check on length-per-piece, grouped by bar_size)
+    // Catches OCR errors like "10'-0"" parsed as "100'-0"" inflating a
+    // whole segment. Threshold: |x - median| / MAD > 3.5  (≈ 3σ).
+    // Flagged rows: status='unresolved', confidence capped 0.3,
+    // and a validation_issue is queued (severity: error).
+    // ───────────────────────────────────────────────────────────────
+    const outlierFlags = new Map<number, { lpp: number; median: number; mad: number; bar_size: string }>();
+    {
+      const bySize = new Map<string, Array<{ idx: number; lpp: number }>>();
+      dedupedRows.forEach((r: any, idx: number) => {
+        const qty = Number(r.quantity_count) || 0;
+        const len = Number(r.total_length) || 0;
+        if (qty <= 0 || len <= 0) return;
+        const size = String(r.bar_size || "").toUpperCase();
+        if (!size) return;
+        const lpp = len / qty;
+        if (!isFinite(lpp) || lpp <= 0) return;
+        const arr = bySize.get(size) || [];
+        arr.push({ idx, lpp });
+        bySize.set(size, arr);
+      });
+      for (const [size, arr] of bySize) {
+        if (arr.length < 4) continue; // need a meaningful sample
+        const sorted = [...arr].map((a) => a.lpp).sort((a, b) => a - b);
+        const median = sorted[Math.floor(sorted.length / 2)];
+        const devs = sorted.map((v) => Math.abs(v - median)).sort((a, b) => a - b);
+        const mad = devs[Math.floor(devs.length / 2)] || (median * 0.05);
+        if (mad <= 0) continue;
+        for (const { idx, lpp } of arr) {
+          const score = Math.abs(lpp - median) / mad;
+          if (score > 3.5) outlierFlags.set(idx, { lpp, median, mad, bar_size: size });
+        }
+      }
+      if (outlierFlags.size > 0) {
+        for (const [idx, info] of outlierFlags) {
+          const row: any = dedupedRows[idx];
+          row.status = "unresolved";
+          row.confidence = Math.min(Number(row.confidence) || 0, 0.3);
+          row.assumptions_json = {
+            ...(row.assumptions_json || {}),
+            outlier_flag: {
+              kind: "length_per_piece_mad",
+              length_per_piece_m: Math.round(info.lpp * 100) / 100,
+              median_m: Math.round(info.median * 100) / 100,
+              mad_m: Math.round(info.mad * 100) / 100,
+              bar_size: info.bar_size,
+            },
+          };
+        }
+        console.warn(`[auto-estimate] outlier-guard flagged ${outlierFlags.size} row(s) for segment ${segment_id}`);
+      }
+    }
+
     const { data: inserted, error: insertErr } = await supabase
       .from("estimate_items")
       .insert(dedupedRows)
@@ -1771,6 +1825,27 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // Queue validation_issues for every outlier-flagged row.
+    if (outlierFlags.size > 0 && inserted && inserted.length === dedupedRows.length) {
+      const outlierIssues: any[] = [];
+      for (const [idx, info] of outlierFlags) {
+        const row: any = dedupedRows[idx];
+        outlierIssues.push({
+          user_id: user.id,
+          project_id,
+          segment_id,
+          issue_type: "outlier_length",
+          severity: "error",
+          title: `Outlier cut length on ${info.bar_size}`,
+          description: `Length-per-piece ${info.lpp.toFixed(2)}m deviates from segment median ${info.median.toFixed(2)}m (MAD=${info.mad.toFixed(2)}m). Likely OCR misread (e.g. "10'-0"" → "100'-0""). Verify on source drawing before approval.`,
+          status: "open",
+          source_refs: [{ estimate_item_id: inserted[idx]?.id, source_sheet: row.assumptions_json?.source_sheet || null, page_number: row.assumptions_json?.page_number || null }],
+        });
+      }
+      const { error: oiErr } = await supabase.from("validation_issues").insert(outlierIssues);
+      if (oiErr) console.warn("[auto-estimate] outlier issue insert failed:", oiErr.message);
     }
 
     // Open a validation_issue for every unresolved row so the QA queue surfaces them.
