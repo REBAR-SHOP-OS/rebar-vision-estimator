@@ -99,10 +99,19 @@ function pickStr(...vals: any[]): string | null {
   return null;
 }
 
-// "p12", "page 12", "12" → null (page tag, not a real sheet id)
+// "p12", "page 12", "12" are page tags, not real object anchors.
 function isPageTag(v: string | null | undefined): boolean {
   if (!v) return true;
   return /^(p|page)?\s*\d+$/i.test(String(v).trim());
+}
+
+function pickAnchorStr(...vals: any[]): string | null {
+  for (const v of vals) {
+    if (v === null || v === undefined) continue;
+    const s = String(v).trim();
+    if (s && !isPageTag(s)) return s;
+  }
+  return null;
 }
 
 export function buildLocationLabel(loc: WorkflowQaIssue["location"], fallbackSheet?: string | null): string | null {
@@ -115,13 +124,19 @@ export function buildLocationLabel(loc: WorkflowQaIssue["location"], fallbackShe
   // Pick the most specific *object* anchor (detail > section > callout > grid > schedule).
   const callout = loc?.callout_tag && !isPageTag(loc.callout_tag) ? loc.callout_tag : null;
   const elementId = loc?.element_id && !isPageTag(loc.element_id) ? loc.element_id : null;
+  const detail = loc?.detail_reference && !isPageTag(loc.detail_reference) ? loc.detail_reference : null;
+  const section = loc?.section_reference && !isPageTag(loc.section_reference) ? loc.section_reference : null;
+  const grid = loc?.grid_reference && !isPageTag(loc.grid_reference) ? loc.grid_reference : null;
+  const schedule = loc?.schedule_row_identity && !isPageTag(loc.schedule_row_identity) ? loc.schedule_row_identity : null;
+  const elementReference = loc?.element_reference && !isPageTag(loc.element_reference) ? loc.element_reference : null;
+  const zoneReference = loc?.zone_reference && !isPageTag(loc.zone_reference) ? loc.zone_reference : null;
   // Element ID (HKP1, F12, W3) wins over generic detail/section refs.
   const obj = elementId
-    || loc?.detail_reference
-    || loc?.section_reference
+    || detail
+    || section
     || callout
-    || loc?.grid_reference
-    || loc?.schedule_row_identity
+    || grid
+    || schedule
     || null;
 
   const parts: string[] = [];
@@ -141,8 +156,8 @@ export function buildLocationLabel(loc: WorkflowQaIssue["location"], fallbackShe
     push(page);
     push(obj);
   }
-  if (loc?.element_reference) push(loc.element_reference);
-  else if (loc?.zone_reference) push(loc.zone_reference);
+  if (elementReference) push(elementReference);
+  else if (zoneReference) push(zoneReference);
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
@@ -160,7 +175,15 @@ function titleCase(value: string | null | undefined): string | null {
   return s.toLowerCase().replace(/\b([a-z])/g, (m) => m.toUpperCase());
 }
 
+function normalizeDetailReference(value: string | null | undefined): string | null {
+  const s = pickAnchorStr(value);
+  if (!s) return null;
+  const td = s.match(/^(?:T\.?\s*D\.?|TD)[\s#:.-]*([A-Z0-9][A-Z0-9./-]*)$/i);
+  return td ? `T.D.${td[1]}` : s;
+}
+
 function inferObjectAnchor(...vals: Array<string | null | undefined>): {
+  detail_reference?: string | null;
   section_reference?: string | null;
   callout_tag?: string | null;
   element_id?: string | null;
@@ -198,19 +221,25 @@ function inferObjectAnchor(...vals: Array<string | null | undefined>): {
   }
   if (!elementReference && zoneReference) elementReference = zoneReference.toLowerCase();
 
-  const sectionReference = cleanPhrase(text.match(/\bSECTION\s+([A-Z0-9.\-\/]+)/i)?.[1] || null);
-  const detailReference = cleanPhrase(text.match(/\b(?:DETAIL|DET\.?|T\.D\.?|TD\.?)[\s#:]*([A-Z0-9.\-\/]+)/i)?.[1] || null);
-  const ELEMENT_ID_RX = /\b(HKP\d+|EQP\d+|FW\d+|WF\d+|SF\d+|SOG\d+|SL\d+|FZ\d+|COL\d+|PIER\d+|PR\d+|BS?\d{2,4}|B\d{4}|F\d{1,3}|W\d{1,3}|GB\d{1,3}|D\d{2}(?:-\d+)?|P\d{1,3}|S-\d+|TD-?\d+)\b/i;
-  const calloutTag = cleanPhrase(text.match(ELEMENT_ID_RX)?.[1] || null);
-  const elementId = calloutTag ? calloutTag.toUpperCase() : null;
-  const scheduleRowIdentity = cleanPhrase(
-    text.match(/\b(?:SCHEDULE|ROW)\s+([A-Z0-9.\-\/]+)/i)?.[1] || calloutTag || null
+  const sectionReference = pickAnchorStr(text.match(/\bSECTION\s+([A-Z0-9./-]+)/i)?.[1] || null);
+  const detailReference = normalizeDetailReference(
+    text.match(/\b(?:DETAIL|DET\.?)[\s#:]*((?:T\.?\s*D\.?|TD)[\s#:.-]*[A-Z0-9][A-Z0-9./-]*|[A-Z0-9][A-Z0-9./-]*)/i)?.[1]
+      || text.match(/\b((?:T\.?\s*D\.?|TD)[\s#:.-]*[A-Z0-9][A-Z0-9./-]*)\b/i)?.[1]
+      || null
   );
-  const gridReference = cleanPhrase(
+  const ELEMENT_ID_RX = /\b(HKP\d+|EQP\d+|FW\d+|WF\d+|SF\d+|SOG\d+|SL\d+|FZ\d+|COL\d+|PIER\d+|PR\d+|BS?\d{2,4}|B\d{4}|F\d{1,3}|W\d{1,3}|GB\d{1,3}|D\d{2}(?:-\d+)?|S-\d+)\b/i;
+  const calloutTag = pickAnchorStr(text.match(ELEMENT_ID_RX)?.[1] || null);
+  const elementId = calloutTag ? calloutTag.toUpperCase() : null;
+  const scheduleRowIdentity = pickAnchorStr(
+    text.match(/\b(?:SCHEDULE|ROW)\s+([A-Z0-9./-]+)/i)?.[1],
+    calloutTag,
+  );
+  const gridReference = pickAnchorStr(
     text.match(/\bGRID\s+([A-Z]+-?\d+[A-Z]?)\b/i)?.[1] || null
   );
 
   return {
+    detail_reference: detailReference,
     section_reference: sectionReference,
     callout_tag: calloutTag,
     element_id: elementId,
@@ -368,20 +397,20 @@ function extractLocationFromRef(ref: any, aj: Record<string, any>, fallback: { s
   return {
     source_sheet: pickStr(nestedR.sheet, nestedA.sheet, r.sheet, r.sheet_id, r.source_sheet, aj.sheet, aj.sheet_id, aj.source_sheet, fallback.sheet_id),
     page_number: Number(nestedR.page_number ?? nestedA.page_number ?? r.page_number ?? aj.page_number ?? 0) || null,
-    detail_reference: pickStr(nestedR.detail, nestedA.detail, r.detail, r.detail_reference, aj.detail, aj.detail_reference, inferred.callout_tag && /^T?D\.?/i.test(inferred.callout_tag) ? inferred.callout_tag : null),
-    section_reference: pickStr(nestedR.section, nestedA.section, r.section, r.section_reference, aj.section, aj.section_reference, inferred.section_reference),
-    callout_tag: pickStr(r.callout_tag, aj.callout_tag, inferred.callout_tag),
-    element_id: pickStr(r.element_id, aj.element_id, inferred.element_id),
-    grid_reference: pickStr(nestedR.grid, nestedA.grid, r.grid, r.grid_reference, aj.grid, aj.grid_reference, inferred.grid_reference),
-    zone_reference: pickStr(nestedR.zone, nestedA.zone, r.zone, r.zone_reference, aj.zone, aj.zone_reference, aj.area, r.area, nestedR.area, nestedA.area, inferred.zone_reference),
-    element_reference: pickStr(
+    detail_reference: normalizeDetailReference(pickAnchorStr(nestedR.detail, nestedA.detail, r.detail, r.detail_reference, aj.detail, aj.detail_reference, inferred.detail_reference)),
+    section_reference: pickAnchorStr(nestedR.section, nestedA.section, r.section, r.section_reference, aj.section, aj.section_reference, inferred.section_reference),
+    callout_tag: pickAnchorStr(r.callout_tag, aj.callout_tag, inferred.callout_tag),
+    element_id: pickAnchorStr(r.element_id, aj.element_id, inferred.element_id),
+    grid_reference: pickAnchorStr(nestedR.grid, nestedA.grid, r.grid, r.grid_reference, aj.grid, aj.grid_reference, inferred.grid_reference),
+    zone_reference: pickAnchorStr(nestedR.zone, nestedA.zone, r.zone, r.zone_reference, aj.zone, aj.zone_reference, aj.area, r.area, nestedR.area, nestedA.area, inferred.zone_reference),
+    element_reference: pickAnchorStr(
       nestedR.element, nestedA.element, r.element, r.element_reference, r.mark, r.callout,
       r.wall, r.wall_name, r.footing, r.footing_name, r.pad, r.pad_name,
       aj.element, aj.element_reference, aj.mark, aj.callout,
       aj.wall, aj.wall_name, aj.footing, aj.footing_name, aj.pad, aj.pad_name,
       inferred.element_reference,
     ),
-    schedule_row_identity: pickStr(r.schedule_row_identity, aj.schedule_row_identity, inferred.schedule_row_identity),
+    schedule_row_identity: pickAnchorStr(r.schedule_row_identity, aj.schedule_row_identity, inferred.schedule_row_identity),
     source_excerpt: pickStr(nestedR.excerpt, nestedA.excerpt, r.excerpt, r.source_excerpt, aj.excerpt, aj.source_excerpt),
   };
 }
