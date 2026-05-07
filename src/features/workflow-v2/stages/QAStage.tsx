@@ -8,6 +8,11 @@ import {
 import { loadWorkflowQaIssues, type WorkflowQaIssue } from "../takeoff-data";
 import { supabase } from "@/integrations/supabase/client";
 import PdfRenderer from "@/components/chat/PdfRenderer";
+import {
+  computeFocusTransformForImage,
+  normalizeBboxToImagePixels,
+  type BBox,
+} from "./qa-overlay-geometry";
 
 type TabKey = "change" | "impact" | "evidence" | "action";
 
@@ -25,10 +30,10 @@ function normalizeText(value: string | null | undefined): string {
 }
 
 function clampBbox(
-  bbox: [number, number, number, number] | null,
+  bbox: BBox | null,
   imgW: number,
   imgH: number,
-): [number, number, number, number] | null {
+): BBox | null {
   if (!bbox || !imgW || !imgH) return bbox;
   const x1 = Math.max(0, Math.min(imgW, bbox[0]));
   const y1 = Math.max(0, Math.min(imgH, bbox[1]));
@@ -137,7 +142,7 @@ function tightBox(
   items: Array<{ x: number; y: number; w: number; h: number }>,
   imgW: number,
   imgH: number,
-): [number, number, number, number] | null {
+): BBox | null {
   if (!items || items.length === 0) return null;
   const x1 = Math.min(...items.map((m) => m.x));
   const y1 = Math.min(...items.map((m) => m.y));
@@ -185,6 +190,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [pageText, setPageText] = useState<PageTextItem[]>([]);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [pageBox, setPageBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
 
   const bump = (reason: string) => {
     setRedrawCount((c) => c + 1);
@@ -194,6 +200,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const updatePageBox = () => {
     const host = canvasRef.current;
     if (!host) return;
+    setCanvasSize({ width: host.clientWidth, height: host.clientHeight });
     const img = host.querySelector('img[data-qa-preview="true"]') as HTMLImageElement | null;
     if (!img || !img.naturalWidth || !img.naturalHeight) return;
     const parent = img.parentElement;
@@ -346,12 +353,17 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
   // Bbox-driven crop
   const locator = sel?.locator || null;
-  const exactBbox = locator?.bbox || null;
+  const exactBboxRaw = (locator?.bbox || null) as BBox | null;
   const imgW = locator?.image_size?.w || imgSize?.w || 0;
   const imgH = locator?.image_size?.h || imgSize?.h || 0;
+  const exactBboxNormalized = useMemo(
+    () => normalizeBboxToImagePixels(exactBboxRaw, imgW, imgH),
+    [exactBboxRaw, imgW, imgH],
+  );
+  const exactBbox = exactBboxNormalized.bbox;
   // Fallback: derive an approximate bbox by matching the issue's anchor text
   // (callout / element ref / source excerpt) against extracted PDF text items.
-  const approxResult = useMemo<{ bbox: [number, number, number, number] | null; reason: string; confidence: number; mode: "exact" | "approximate" | "unavailable" }>(() => {
+  const approxResult = useMemo<{ bbox: BBox | null; reason: string; confidence: number; mode: "exact" | "approximate" | "unavailable" }>(() => {
     if (exactBbox) return { bbox: null, reason: "", confidence: 1, mode: "exact" };
     if (!pageText || pageText.length === 0) return { bbox: null, reason: "no OCR text on page", confidence: 0, mode: "unavailable" };
     const lines = buildTextLines(pageText);
@@ -396,20 +408,24 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const bbox = clampBbox(exactBboxValid ? exactBbox : safeApproxBbox, imgW, imgH);
   const bboxIsApprox = !exactBboxValid && !inferredExact && !!bbox;
   const anchorStatus: "exact" | "approximate" | "unavailable" = exactBboxValid || inferredExact ? "exact" : bbox ? "approximate" : "unavailable";
-  const anchorReason = exactBboxValid ? "" : approxReason || (exactBbox ? "saved anchor confidence is too low for a precise box" : "no trusted drawing object was found on this page");
-  const center = bbox && imgW && imgH
-    ? { cx: ((bbox[0] + bbox[2]) / 2) / imgW, cy: ((bbox[1] + bbox[3]) / 2) / imgH }
-    : { cx: 0.5, cy: 0.5 };
+  const anchorReason = exactBboxValid ? "" : approxReason || (exactBboxRaw ? exactBboxNormalized.reason || "saved anchor confidence is too low for a precise box" : "no trusted drawing object was found on this page");
   const bboxW = bbox ? Math.max(1, bbox[2] - bbox[0]) : 0;
   const bboxH = bbox ? Math.max(1, bbox[3] - bbox[1]) : 0;
   const PAD = 1.3;
   const fitZoom = bbox && imgW && imgH ? Math.min(imgW / (bboxW * PAD), imgH / (bboxH * PAD)) : 1;
-  const autoZoom = zoomMode === "tight" && bbox ? Math.min(12, Math.max(2, fitZoom)) : 1;
+  const autoZoom = zoomMode === "tight" && bbox ? Math.min(8, Math.max(1.5, fitZoom)) : 1;
   const zoom = Math.min(24, Math.max(0.5, autoZoom * zoomLevel));
-  const txBase = (0.5 - center.cx) * 100 * zoom;
-  const tyBase = (0.5 - center.cy) * 100 * zoom;
-  const tx = txBase + pan.dx;
-  const ty = tyBase + pan.dy;
+  const focusTransform = computeFocusTransformForImage({
+    bbox,
+    imgW,
+    imgH,
+    pageBox,
+    canvas: canvasSize,
+    zoom,
+    pan,
+  });
+  const tx = focusTransform.x;
+  const ty = focusTransform.y;
 
   const TABS: Array<{ k: TabKey; label: string }> = [
     { k: "change", label: "Change" },
@@ -594,10 +610,9 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
               el.setPointerCapture(e.pointerId);
               const startX = e.clientX, startY = e.clientY;
               const startPan = { ...pan };
-              const rect = el.getBoundingClientRect();
               const move = (ev: PointerEvent) => {
-                const ddx = ((ev.clientX - startX) / rect.width) * 100;
-                const ddy = ((ev.clientY - startY) / rect.height) * 100;
+                const ddx = ev.clientX - startX;
+                const ddy = ev.clientY - startY;
                 setPan({ dx: startPan.dx + ddx, dy: startPan.dy + ddy });
               };
               const up = (ev: PointerEvent) => {
@@ -646,8 +661,8 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                   <div
                     className={`absolute inset-0 ${viewMode === "side" ? "grid grid-cols-2 gap-px bg-border" : ""}`}
                     style={viewMode === "side" ? undefined : {
-                      transform: `translate(${tx}%, ${ty}%) scale(${zoom})`,
-                      transformOrigin: "center center",
+                      transform: `translate(${tx}px, ${ty}px) scale(${zoom})`,
+                      transformOrigin: "0 0",
                       transition: "transform 0.05s linear",
                     }}
                   >
@@ -655,58 +670,54 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                       <>
                         <div className="relative w-full h-full bg-background overflow-hidden">
                           <div className="absolute top-1 left-1 z-10 px-1.5 py-0.5 bg-card/90 border border-border text-[9px] uppercase tracking-[0.12em] font-bold">Rev 2 (Base)</div>
-                          <img src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")} alt={previewName} className="w-full h-full object-contain" style={{ transform: `translate(${tx}%, ${ty}%) scale(${zoom})`, transformOrigin: "center center", transition: "transform 0.05s linear" }} draggable={false} />
+                          <img src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")} alt={previewName} className="w-full h-full object-contain" style={{ transform: `scale(${zoom})`, transformOrigin: "center center", transition: "transform 0.05s linear" }} draggable={false} />
                         </div>
                         <div className="relative w-full h-full bg-background overflow-hidden">
                           <div className="absolute top-1 left-1 z-10 px-1.5 py-0.5 bg-primary/20 border border-primary/50 text-[9px] uppercase tracking-[0.12em] font-bold text-primary">Rev 3 (Target)</div>
-                          <img src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")} alt={`${previewName} target`} className="w-full h-full object-contain" style={{ filter: "sepia(1) hue-rotate(150deg) saturate(2.2) contrast(1.1)", transform: `translate(${tx}%, ${ty}%) scale(${zoom})`, transformOrigin: "center center", transition: "transform 0.05s linear" }} draggable={false} />
+                          <img src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")} alt={`${previewName} target`} className="w-full h-full object-contain" style={{ filter: "sepia(1) hue-rotate(150deg) saturate(2.2) contrast(1.1)", transform: `scale(${zoom})`, transformOrigin: "center center", transition: "transform 0.05s linear" }} draggable={false} />
                         </div>
                       </>
                     ) : (
-                      <img
-                        src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")}
-                        alt={previewName}
-                        data-qa-preview="true"
-                        onLoad={(e) => {
-                          const t = e.currentTarget;
-                          const naturalW = t.naturalWidth;
-                          const naturalH = t.naturalHeight;
-                          if (!naturalW || !naturalH) return;
-                          if (previewKind === "image") {
-                            setImgSize({ w: naturalW, h: naturalH });
-                            setRenderedPage(sel?.locator?.page_number ?? 1);
-                            setRenderStatus("ready");
-                            setRenderError(null);
-                          }
-                          updatePageBox();
-                        }}
-                        className="absolute inset-0 w-full h-full object-contain"
-                        style={viewMode === "diff" ? { mixBlendMode: "difference", filter: "invert(1) hue-rotate(180deg)" } : undefined}
-                        draggable={false}
-                      />
+                      <>
+                        <img
+                          src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")}
+                          alt={previewName}
+                          data-qa-preview="true"
+                          onLoad={(e) => {
+                            const t = e.currentTarget;
+                            const naturalW = t.naturalWidth;
+                            const naturalH = t.naturalHeight;
+                            if (!naturalW || !naturalH) return;
+                            if (previewKind === "image") {
+                              setImgSize({ w: naturalW, h: naturalH });
+                              setRenderedPage(sel?.locator?.page_number ?? 1);
+                              setRenderStatus("ready");
+                              setRenderError(null);
+                            }
+                            updatePageBox();
+                          }}
+                          className="absolute inset-0 w-full h-full object-contain"
+                          style={viewMode === "diff" ? { mixBlendMode: "difference", filter: "invert(1) hue-rotate(180deg)" } : undefined}
+                          draggable={false}
+                        />
+                        {bbox && imgW && imgH && pageBox && (
+                          <BBoxPointer
+                            bbox={bbox}
+                            imgW={imgW}
+                            imgH={imgH}
+                            zoom={zoom}
+                            pageBox={pageBox}
+                            approximate={bboxIsApprox}
+                            title={sel?.title || "Modification"}
+                            description={[sel?.location_label, sel?.description || "Is this element correct as detected?"].filter(Boolean).join(" - ")}
+                            onFix={jumpToTakeoff}
+                            onImpact={() => setTab("impact")}
+                          />
+                        )}
+                      </>
                     )}
                   </div>
                 )}
-                {/* Dedicated overlay layer — stays mounted independent of the
-                    PDF raster lifecycle. Only its positioning/graphics update
-                    when bbox / pageBox / zoom change. Never tears down the
-                    image below. */}
-                <div className="absolute inset-0 pointer-events-none z-20" data-qa-overlay-layer="true">
-                  {viewMode !== "side" && bbox && imgW && imgH && pageBox && (
-                    <BBoxPointer
-                      bbox={bbox}
-                      imgW={imgW}
-                      imgH={imgH}
-                      zoom={zoom}
-                      pageBox={pageBox}
-                      approximate={bboxIsApprox}
-                      title={sel?.title || "Modification"}
-                      description={[sel?.location_label, sel?.description || "Is this element correct as detected?"].filter(Boolean).join(" — ")}
-                      onFix={jumpToTakeoff}
-                      onImpact={() => setTab("impact")}
-                    />
-                  )}
-                </div>
                 {/* DEBUG OVERLAY */}
                 {debug && (
                   <div className="absolute top-14 right-4 z-30 w-[300px] bg-card/95 border border-primary/60 shadow-2xl text-[10px] font-mono p-2 space-y-0.5 pointer-events-auto">
@@ -717,9 +728,11 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                     <div>last: <span className="text-foreground">{lastTrigger}</span></div>
                     <div>view: <span className="text-primary">{viewMode}</span> · zoom: {zoomMode} × {zoomLevel.toFixed(2)} ({Math.round(zoom * 100)}%)</div>
                     <div>blend: {viewMode === "diff" ? "difference / invert(1)" : viewMode === "side" ? "sepia+hue (rev3)" : "none"}</div>
-                    <div>tx/ty: {tx.toFixed(1)}% / {ty.toFixed(1)}%</div>
+                    <div>tx/ty: {tx.toFixed(1)}px / {ty.toFixed(1)}px</div>
                     <div>page req: {pdfPage} · rendered: {renderedPage ?? "—"} / {pdfPageCount}</div>
                     <div>imgSize: {imgW || "?"}×{imgH || "?"}</div>
+                    <div>canvas: {canvasSize.width || "?"}x{canvasSize.height || "?"}</div>
+                    <div>bbox mode: {exactBboxNormalized.mode}{exactBboxNormalized.reason ? ` (${exactBboxNormalized.reason})` : ""}</div>
                     <div>bbox: {bbox ? `[${bbox.map((v) => Math.round(v)).join(",")}]` : "none"}</div>
                     <div>file: <span className="truncate inline-block max-w-[220px] align-bottom">{previewName || "—"}</span></div>
                     <div>kind: {previewKind || "—"} · loading: {String(previewLoading)}</div>
@@ -732,7 +745,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                   <>
                     <div className="absolute inset-0 pointer-events-none border-2 border-dashed border-[hsl(var(--status-inferred))]/70 z-20" />
                     {bbox && imgW && imgH && (
-                      <div className="absolute inset-0 pointer-events-none z-20" style={{ transform: viewMode === "side" ? undefined : `translate(${tx}%, ${ty}%) scale(${zoom})`, transformOrigin: "center center" }}>
+                      <div className="absolute inset-0 pointer-events-none z-20" style={{ transform: viewMode === "side" ? undefined : `translate(${tx}px, ${ty}px) scale(${zoom})`, transformOrigin: "0 0" }}>
                         <div className="absolute" style={{
                           left: `${(bbox[0] / imgW) * 100}%`, top: `${(bbox[1] / imgH) * 100}%`,
                           width: `${((bbox[2] - bbox[0]) / imgW) * 100}%`, height: `${((bbox[3] - bbox[1]) / imgH) * 100}%`,
@@ -949,7 +962,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 function BBoxPointer({
   bbox, imgW, imgH, zoom, pageBox, title, description, onFix, onImpact, approximate,
 }: {
-  bbox: [number, number, number, number];
+  bbox: BBox;
   imgW: number;
   imgH: number;
   zoom: number;
