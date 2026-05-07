@@ -1743,6 +1743,8 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         authority_quote: item.authority_quote || null,
         assumption_rule_id: item.assumption_rule_id || null,
         citation_missing: citationMissing,
+        waste_tier: wasteTier,
+        waste_factor_source: standard?.waste_factors ? "standards_profile" : "rsic_default",
       },
     };
     });
