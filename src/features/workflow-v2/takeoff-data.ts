@@ -55,9 +55,12 @@ export interface WorkflowQaIssue {
     source_sheet?: string | null;
     page_number?: number | null;
     detail_reference?: string | null;
+    section_reference?: string | null;
+    callout_tag?: string | null;
     grid_reference?: string | null;
     zone_reference?: string | null;
     element_reference?: string | null;
+    schedule_row_identity?: string | null;
     source_excerpt?: string | null;
   } | null;
   location_label?: string | null;
@@ -108,10 +111,86 @@ export function buildLocationLabel(loc: WorkflowQaIssue["location"], fallbackShe
   if (sheet) parts.push(`Sheet ${sheet}`);
   if (loc?.page_number) parts.push(`Page ${loc.page_number}`);
   if (loc?.detail_reference) parts.push(`Detail ${loc.detail_reference}`);
+  if (loc?.section_reference) parts.push(`Section ${loc.section_reference}`);
+  if (loc?.callout_tag) parts.push(`Callout ${loc.callout_tag}`);
   if (loc?.grid_reference) parts.push(`Grid ${loc.grid_reference}`);
   if (loc?.zone_reference) parts.push(loc.zone_reference);
   if (loc?.element_reference) parts.push(loc.element_reference);
+  if (loc?.schedule_row_identity) parts.push(loc.schedule_row_identity);
   return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function cleanPhrase(value: string | null | undefined): string | null {
+  const s = String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/^[@,:;\-\s]+|[@,:;\-\s]+$/g, "")
+    .trim();
+  return s || null;
+}
+
+function titleCase(value: string | null | undefined): string | null {
+  const s = cleanPhrase(value);
+  if (!s) return null;
+  return s.toLowerCase().replace(/\b([a-z])/g, (m) => m.toUpperCase());
+}
+
+function inferObjectAnchor(...vals: Array<string | null | undefined>): {
+  section_reference?: string | null;
+  callout_tag?: string | null;
+  grid_reference?: string | null;
+  zone_reference?: string | null;
+  element_reference?: string | null;
+  schedule_row_identity?: string | null;
+} {
+  const text = vals.filter(Boolean).join(" \n ");
+  const upper = text.toUpperCase();
+
+  const objectPatterns: Array<[RegExp, (m: RegExpMatchArray) => string | null]> = [
+    [/\bTOP OF BRICK LEDGE\b/i, () => "brick ledge"],
+    [/\bBRICK LEDGE\b/i, () => "brick ledge"],
+    [/\bHOUSEKEEPING PAD\b/i, () => "housekeeping pad"],
+    [/\bEQUIPMENT PAD\b/i, () => "equipment pad"],
+    [/\bLEVEL(?:I|E)NG PAD\b(?:[^\n]{0,40}?\bENTRANCE DOOR\b)?/i, (m) => /ENTRANCE DOOR/i.test(m[0]) ? "leveling pad at entrance door" : "leveling pad"],
+    [/\bFOUNDATION WALL\b(?:[^\n]{0,40}?\bENTRANCE DOOR\b)?/i, (m) => /ENTRANCE DOOR/i.test(m[0]) ? "foundation wall at entrance door" : "foundation wall"],
+    [/\bFROST SLAB EDGE\b/i, () => "frost slab edge"],
+    [/\bSLAB EDGE\b/i, () => "slab edge"],
+    [/\bSTRIP FOOTING\b/i, () => "strip footing"],
+    [/\bCONT(?:INUOUS)? FOOTING\b/i, () => "continuous footing"],
+    [/\bDOOR OPENING\b/i, () => "door opening"],
+  ];
+
+  const zoneMatch = upper.match(/\b(?:AT|ALONG|NEAR)\s+(EXTENT OF\s+[A-Z][A-Z\s]+|ENTRANCE DOOR|WEST SIDE|EAST SIDE|NORTH SIDE|SOUTH SIDE)\b/);
+  const zoneReference = zoneMatch ? titleCase(zoneMatch[1]) : null;
+
+  let elementReference: string | null = null;
+  for (const [rx, map] of objectPatterns) {
+    const match = text.match(rx);
+    if (!match) continue;
+    elementReference = cleanPhrase(map(match));
+    break;
+  }
+  if (!elementReference && zoneReference) elementReference = zoneReference.toLowerCase();
+
+  const sectionReference = cleanPhrase(text.match(/\bSECTION\s+([A-Z0-9.\-\/]+)/i)?.[1] || null);
+  const detailReference = cleanPhrase(text.match(/\b(?:DETAIL|DET\.?|T\.D\.?|TD\.?)[\s#:]*([A-Z0-9.\-\/]+)/i)?.[1] || null);
+  const calloutTag = cleanPhrase(
+    text.match(/\b(BS?\d{2,4}|B\d{4}|F\d{1,3}|W\d{1,3}|GB\d{1,3}|D\d{2}(?:-\d+)?|P\d{1,3})\b/i)?.[1] || null
+  );
+  const scheduleRowIdentity = cleanPhrase(
+    text.match(/\b(?:SCHEDULE|ROW)\s+([A-Z0-9.\-\/]+)/i)?.[1] || calloutTag || null
+  );
+  const gridReference = cleanPhrase(
+    text.match(/\bGRID\s+([A-Z]+-?\d+[A-Z]?)\b/i)?.[1] || null
+  );
+
+  return {
+    section_reference: sectionReference,
+    callout_tag: calloutTag,
+    grid_reference: gridReference,
+    zone_reference: zoneReference,
+    element_reference: elementReference,
+    schedule_row_identity: scheduleRowIdentity && /^(10M|15M|20M|25M|30M|35M)$/i.test(scheduleRowIdentity) ? null : scheduleRowIdentity,
+  };
 }
 
 // Build the location-led question text shown in the QA panel.
@@ -150,7 +229,7 @@ function classifyElement(text: string): "slab_edge"|"strip_footing"|"pad"|"wall"
   const t = text.toLowerCase();
   if (/\b(slab\s*edge|frost\s*slab|slab\s*on\s*grade|sog\b|edge\s*of\s*slab)/.test(t)) return "slab_edge";
   if (/\b(strip\s*footing|cont(?:inuous)?\s*footing|wall\s*footing|footing|ftg)\b/.test(t)) return "strip_footing";
-  if (/\b(housekeeping\s*pad|equipment\s*pad|pad)\b/.test(t)) return "pad";
+  if (/\b(housekeeping\s*pad|equipment\s*pad)\b/.test(t)) return "pad";
   if (/\b(wall|stem\s*wall|foundation\s*wall|retaining\s*wall)\b/.test(t)) return "wall";
   if (/\b(column|pier|cage|tie\s*column)\b/.test(t)) return "cage";
   return "generic";
@@ -250,18 +329,27 @@ function extractLocationFromRef(ref: any, aj: Record<string, any>, fallback: { s
   const r = ref || {};
   const nestedR = (r.location && typeof r.location === "object") ? r.location : {};
   const nestedA = (aj.location && typeof aj.location === "object") ? aj.location as Record<string, any> : {};
+  const inferred = inferObjectAnchor(
+    pickStr(r.description, aj.description, r.excerpt, r.source_excerpt, aj.excerpt, aj.source_excerpt),
+    pickStr(r.element, r.element_reference, aj.element, aj.element_reference),
+    pickStr(r.zone, r.zone_reference, aj.zone, aj.zone_reference),
+  );
   return {
     source_sheet: pickStr(nestedR.sheet, nestedA.sheet, r.sheet, r.sheet_id, r.source_sheet, aj.sheet, aj.sheet_id, aj.source_sheet, fallback.sheet_id),
     page_number: Number(nestedR.page_number ?? nestedA.page_number ?? r.page_number ?? aj.page_number ?? 0) || null,
-    detail_reference: pickStr(nestedR.detail, nestedA.detail, r.detail, r.detail_reference, aj.detail, aj.detail_reference),
-    grid_reference: pickStr(nestedR.grid, nestedA.grid, r.grid, r.grid_reference, aj.grid, aj.grid_reference),
-    zone_reference: pickStr(nestedR.zone, nestedA.zone, r.zone, r.zone_reference, aj.zone, aj.zone_reference, aj.area, r.area, nestedR.area, nestedA.area),
+    detail_reference: pickStr(nestedR.detail, nestedA.detail, r.detail, r.detail_reference, aj.detail, aj.detail_reference, inferred.callout_tag && /^T?D\.?/i.test(inferred.callout_tag) ? inferred.callout_tag : null),
+    section_reference: pickStr(nestedR.section, nestedA.section, r.section, r.section_reference, aj.section, aj.section_reference, inferred.section_reference),
+    callout_tag: pickStr(r.callout_tag, aj.callout_tag, inferred.callout_tag),
+    grid_reference: pickStr(nestedR.grid, nestedA.grid, r.grid, r.grid_reference, aj.grid, aj.grid_reference, inferred.grid_reference),
+    zone_reference: pickStr(nestedR.zone, nestedA.zone, r.zone, r.zone_reference, aj.zone, aj.zone_reference, aj.area, r.area, nestedR.area, nestedA.area, inferred.zone_reference),
     element_reference: pickStr(
       nestedR.element, nestedA.element, r.element, r.element_reference, r.mark, r.callout,
       r.wall, r.wall_name, r.footing, r.footing_name, r.pad, r.pad_name,
       aj.element, aj.element_reference, aj.mark, aj.callout,
       aj.wall, aj.wall_name, aj.footing, aj.footing_name, aj.pad, aj.pad_name,
+      inferred.element_reference,
     ),
+    schedule_row_identity: pickStr(r.schedule_row_identity, aj.schedule_row_identity, inferred.schedule_row_identity),
     source_excerpt: pickStr(nestedR.excerpt, nestedA.excerpt, r.excerpt, r.source_excerpt, aj.excerpt, aj.source_excerpt),
   };
 }
