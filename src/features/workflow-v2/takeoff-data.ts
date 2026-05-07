@@ -106,19 +106,39 @@ function isPageTag(v: string | null | undefined): boolean {
 
 export function buildLocationLabel(loc: WorkflowQaIssue["location"], fallbackSheet?: string | null): string | null {
   if (!loc && !fallbackSheet) return null;
-  const parts: string[] = [];
+  // Compact, object-first label. Preferred form: "P12-T.D.33" (page + detail/section/callout).
+  const page = loc?.page_number ? `P${loc.page_number}` : null;
   const sheet = (loc?.source_sheet && !isPageTag(loc.source_sheet)) ? loc.source_sheet
               : (fallbackSheet && !isPageTag(fallbackSheet)) ? fallbackSheet
               : null;
-  if (sheet) parts.push(`Sheet ${sheet}`);
-  if (loc?.page_number) parts.push(`Page ${loc.page_number}`);
-  if (loc?.detail_reference) parts.push(`Detail ${loc.detail_reference}`);
-  if (loc?.section_reference) parts.push(`Section ${loc.section_reference}`);
-  if (loc?.callout_tag) parts.push(`Callout ${loc.callout_tag}`);
-  if (loc?.grid_reference) parts.push(`Grid ${loc.grid_reference}`);
-  if (loc?.zone_reference) parts.push(loc.zone_reference);
-  if (loc?.element_reference) parts.push(loc.element_reference);
-  if (loc?.schedule_row_identity) parts.push(loc.schedule_row_identity);
+  // Pick the most specific *object* anchor (detail > section > callout > grid > schedule).
+  const callout = loc?.callout_tag && !isPageTag(loc.callout_tag) ? loc.callout_tag : null;
+  const obj = loc?.detail_reference
+    || loc?.section_reference
+    || callout
+    || loc?.grid_reference
+    || loc?.schedule_row_identity
+    || null;
+
+  const parts: string[] = [];
+  const seen = new Set<string>();
+  const push = (s: string | null | undefined) => {
+    if (!s) return;
+    const k = s.trim().toLowerCase();
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    parts.push(s);
+  };
+
+  if (page && obj) {
+    push(`${page}-${obj}`);
+  } else {
+    push(sheet);
+    push(page);
+    push(obj);
+  }
+  if (loc?.element_reference) push(loc.element_reference);
+  else if (loc?.zone_reference) push(loc.zone_reference);
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
