@@ -101,14 +101,21 @@ function getExcerptTokens(value: string | null | undefined): string[] {
   )).slice(0, 8);
 }
 
-function buildAnchorCandidates(sel: WorkflowQaIssue | undefined | null): Array<{ value: string; kind: "detail" | "section" | "callout" | "grid" | "element" | "schedule" | "excerpt" | "ocr"; score: number }> {
+type AnchorKind = "trusted" | "detail" | "section" | "callout" | "grid" | "element" | "schedule" | "excerpt" | "ocr";
+function buildAnchorCandidates(sel: WorkflowQaIssue | undefined | null): Array<{ value: string; kind: AnchorKind; score: number }> {
   const loc = sel?.location || {};
-  const candidates: Array<{ value: string; kind: "detail" | "section" | "callout" | "grid" | "element" | "schedule" | "excerpt" | "ocr"; score: number }> = [];
-  const push = (value: string | null | undefined, kind: "detail" | "section" | "callout" | "grid" | "element" | "schedule" | "excerpt" | "ocr", score: number) => {
+  const candidates: Array<{ value: string; kind: AnchorKind; score: number }> = [];
+  const push = (value: string | null | undefined, kind: AnchorKind, score: number) => {
     const s = String(value || "").trim();
     if (!s || /^page\s*\d+$/i.test(s)) return;
     candidates.push({ value: s, kind, score });
   };
+  // 1. TRUSTED anchor emitted by the estimator pipeline. This is the token
+  //    the estimator already verified against the OCR for the chosen page,
+  //    so we always try it first before any viewer-side inference.
+  const trustedText = sel?.locator?.anchor_text || null;
+  const trustedConf = Number(sel?.locator?.anchor_confidence ?? 0);
+  if (trustedText) push(trustedText, "trusted", Math.max(0.95, trustedConf || 0.95));
   push(loc.detail_reference, "detail", 0.99);
   push(loc.section_reference, "section", 0.98);
   push(loc.callout_tag, "callout", 0.97);
@@ -351,7 +358,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
       if (span && isLocalizedSpan(span, imgW, imgH)) {
         return {
           bbox: clampBbox(tightBox(span, imgW, imgH), imgW, imgH),
-          reason: `${candidate.kind === "detail" ? "detail" : candidate.kind === "section" ? "section" : candidate.kind === "callout" ? "callout" : candidate.kind === "grid" ? "grid" : candidate.kind === "schedule" ? "schedule row" : candidate.kind === "element" ? "element label" : candidate.kind === "excerpt" ? "source excerpt" : "OCR phrase"} match on "${candidate.value}"`,
+          reason: `${candidate.kind === "trusted" ? "estimator anchor" : candidate.kind === "detail" ? "detail" : candidate.kind === "section" ? "section" : candidate.kind === "callout" ? "callout" : candidate.kind === "grid" ? "grid" : candidate.kind === "schedule" ? "schedule row" : candidate.kind === "element" ? "element label" : candidate.kind === "excerpt" ? "source excerpt" : "OCR phrase"} match on "${candidate.value}"`,
           confidence: candidate.score,
           mode: candidate.score >= 0.9 ? "exact" : "approximate",
         };
@@ -360,7 +367,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
       if (tokenHit && isLocalizedSpan([tokenHit], imgW, imgH)) {
         return {
           bbox: clampBbox(tightBox([tokenHit], imgW, imgH), imgW, imgH),
-          reason: `${candidate.kind === "detail" ? "detail" : candidate.kind === "section" ? "section" : candidate.kind === "callout" ? "callout" : candidate.kind === "grid" ? "grid" : candidate.kind === "schedule" ? "schedule row" : candidate.kind === "element" ? "element label" : candidate.kind === "excerpt" ? "source excerpt" : "OCR phrase"} token match on "${candidate.value}"`,
+          reason: `${candidate.kind === "trusted" ? "estimator anchor" : candidate.kind === "detail" ? "detail" : candidate.kind === "section" ? "section" : candidate.kind === "callout" ? "callout" : candidate.kind === "grid" ? "grid" : candidate.kind === "schedule" ? "schedule row" : candidate.kind === "element" ? "element label" : candidate.kind === "excerpt" ? "source excerpt" : "OCR phrase"} token match on "${candidate.value}"`,
           confidence: Math.max(0.55, candidate.score - 0.1),
           mode: candidate.score >= 0.9 ? "exact" : "approximate",
         };

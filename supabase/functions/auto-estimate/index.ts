@@ -891,33 +891,76 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
     items = enriched.filter((it: any) => itemMatchesSegment(it, segTypeKey, String(segment?.name || "")));
     console.log(`[auto-estimate] post-filter rows=${items.length} for segment="${segment?.name}" effective_type=${segTypeKey}`);
 
-    // Best-effort page locator: for each item, scan OCR pages for the bar mark
-    // / bar-size / strongest description token and attach the first matching
-    // page_number. No bbox available yet — UI degrades to a centered pin on
-    // that page (much better than rendering the wrong sheet).
+    // Object-first page locator. For each item we build a ranked list of
+    // anchor candidates (detail / section / callout / grid / element /
+    // schedule row / excerpt token / bar mark / bar size), find the first
+    // candidate that appears in any OCR page, and record:
+    //   _page_number       — the page where the anchor appears
+    //   _anchor_text       — the exact token QA should pin on
+    //   _anchor_kind       — what type of object that token is
+    //   _anchor_confidence — confidence the anchor identifies the host
+    //   _anchor_mode       — "exact" | "approximate" | "unavailable"
+    // QA consumes these directly, so it never has to guess from loose text.
     {
       const pages = (searchPages || [])
         .filter((p: any) => p && (p.raw_text || "").length > 20)
         .map((p: any) => ({ page_number: Number(p.page_number) || 1, text: String(p.raw_text || "").toUpperCase() }));
-      const pickPage = (it: any): number | null => {
-        if (pages.length === 0) return null;
-        const tokens: string[] = [];
-        const desc = String(it.description || "").toUpperCase();
-        const sz = String(it.bar_size || "").toUpperCase().trim();
-        const markMatch = desc.match(/\b(BS\d+|BS-\d+|F\d+|FW\d+|W\d+|P\d+|C\d+|GB\d+|B\d+|S\d+|PC\d+)\b/);
-        if (markMatch) tokens.push(markMatch[1]);
-        if (sz) tokens.push(sz);
-        const words = desc.split(/[^A-Z0-9#@.\-]+/).filter((w) => w.length >= 4).slice(0, 4);
-        tokens.push(...words);
-        for (const tok of tokens) {
-          const hit = pages.find((p) => p.text.includes(tok));
-          if (hit) return hit.page_number;
+      type AnchorKind = "detail" | "section" | "callout" | "grid" | "element" | "schedule" | "excerpt" | "mark" | "size";
+      const KIND_SCORE: Record<AnchorKind, number> = {
+        detail: 0.99, section: 0.98, callout: 0.97, grid: 0.94,
+        schedule: 0.92, element: 0.9, excerpt: 0.78, mark: 0.7, size: 0.55,
+      };
+      const cleanTok = (s: any): string => String(s || "").trim().toUpperCase();
+      const isGenericExcerpt = (t: string) => !t || t.length < 4 || /^(REBAR|BARS?|TYPICAL|VERTICAL|CONT|REINFORCEMENT|NOTE|SHEET|PAGE|FROM|LOOK)$/i.test(t);
+      const buildCandidates = (it: any): Array<{ text: string; kind: AnchorKind }> => {
+        const meta = inferQaAnchorMeta(it.description, it.source_excerpt, it.source_sheet);
+        const out: Array<{ text: string; kind: AnchorKind }> = [];
+        const push = (raw: any, kind: AnchorKind) => {
+          const t = cleanTok(raw);
+          if (!t || isGenericExcerpt(t)) return;
+          if (out.some((c) => c.text === t)) return;
+          out.push({ text: t, kind });
+        };
+        push(meta.detail_reference, "detail");
+        push(meta.section_reference, "section");
+        push(meta.callout_tag, "callout");
+        push(meta.grid_reference, "grid");
+        push(meta.schedule_row_identity, "schedule");
+        push(meta.element_reference, "element");
+        // Excerpt tokens: short, distinctive words/numbers
+        const excerpt = String(it.source_excerpt || "").toUpperCase();
+        for (const tok of excerpt.split(/[^A-Z0-9#@.\-]+/).filter((w) => w.length >= 5).slice(0, 4)) {
+          push(tok, "excerpt");
         }
-        return null;
+        const desc = String(it.description || "").toUpperCase();
+        const markMatch = desc.match(/\b(BS\d+|BS-\d+|F\d+|FW\d+|W\d+|P\d+|C\d+|GB\d+|B\d+|S\d+|PC\d+)\b/);
+        if (markMatch) push(markMatch[1], "mark");
+        const sz = cleanTok(it.bar_size);
+        if (sz) push(sz, "size");
+        return out;
       };
       for (const it of items) {
-        const p = pickPage(it);
-        if (p) it._page_number = p;
+        if (pages.length === 0) continue;
+        const cands = buildCandidates(it);
+        let chosen: { page: number; text: string; kind: AnchorKind } | null = null;
+        for (const c of cands) {
+          const hit = pages.find((p) => p.text.includes(c.text));
+          if (hit) { chosen = { page: hit.page_number, text: c.text, kind: c.kind }; break; }
+        }
+        if (chosen) {
+          it._page_number = chosen.page;
+          it._anchor_text = chosen.text;
+          it._anchor_kind = chosen.kind;
+          const baseScore = KIND_SCORE[chosen.kind];
+          it._anchor_confidence = baseScore;
+          // Only the strong object-level kinds get "exact"; everything else
+          // is honestly labeled approximate so the viewer cannot draw a
+          // precise-looking box on weak evidence.
+          it._anchor_mode = baseScore >= 0.9 ? "exact" : "approximate";
+        } else {
+          it._anchor_mode = "unavailable";
+          it._anchor_confidence = 0;
+        }
       }
     }
 
@@ -999,6 +1042,10 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         zone_reference: qaAnchor.zone_reference,
         element_reference: qaAnchor.element_reference,
         schedule_row_identity: qaAnchor.schedule_row_identity,
+        anchor_text: item._anchor_text || null,
+        anchor_kind: item._anchor_kind || null,
+        anchor_confidence: typeof item._anchor_confidence === "number" ? item._anchor_confidence : null,
+        anchor_mode: item._anchor_mode || (item._page_number ? "approximate" : "unavailable"),
         authority_document: "Manual-Standard-Practice-2018",
         authority_section: item.authority_section || null,
         authority_page: item.authority_page || null,
@@ -1123,6 +1170,10 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
           excerpt,
           bar_size: (x.r as any).bar_size || null,
           description: (x.r as any).description || null,
+          anchor_text: aj.anchor_text || null,
+          anchor_kind: aj.anchor_kind || null,
+          anchor_confidence: typeof aj.anchor_confidence === "number" ? aj.anchor_confidence : null,
+          anchor_mode: aj.anchor_mode || (aj.page_number ? "approximate" : "unavailable"),
         }],
       });
       });
