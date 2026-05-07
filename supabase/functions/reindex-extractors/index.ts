@@ -24,6 +24,8 @@ function detectPlacement(tail: string): string | null {
   if (/\bTIES?\b/.test(u)) return "TIES";
   if (/\bSTIRR(?:UPS?)?\b/.test(u)) return "STIRR";
   if (/\bDWLS?\b|\bDOWELS?\b/.test(u)) return "DWL";
+  if (/\bTOP\b/.test(u)) return "TOP";
+  if (/\bBOT(?:TOM)?\b/.test(u)) return "BOT";
   return null;
 }
 function extractBarCallouts(rawText: string): Array<Record<string, unknown>> {
