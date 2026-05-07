@@ -963,6 +963,19 @@ function inferQaAnchorMeta(...vals: Array<string | null | undefined>) {
   };
 }
 
+function hasUsableProjectDimensionKnowledge(entries: Array<{ title?: string; content?: string; file_name?: string }>, projectId: string) {
+  return entries.some((entry) => {
+    const title = String(entry.title || "");
+    const fileName = String(entry.file_name || "");
+    const content = String(entry.content || "");
+    const contentHead = content.slice(0, 4000);
+    const matchesProjectScopedJson = fileName === "dimensions.json" && content.includes(projectId);
+    const matchesLockedRule = /locked dimensions/i.test(title)
+      && /footing schedule|building envelope|foundation wall|piers?:|slab on grade/i.test(contentHead);
+    return matchesProjectScopedJson || matchesLockedRule;
+  });
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -1030,6 +1043,21 @@ serve(async (req) => {
           });
         }
         blockers = await getBlockers();
+      }
+
+      if (blockers.length > 0) {
+        const { data: gateKnowledge } = await supabase
+          .from("agent_knowledge")
+          .select("title, content, file_name")
+          .eq("user_id", user.id)
+          .limit(100);
+        const hasProjectKnowledge = hasUsableProjectDimensionKnowledge(
+          (gateKnowledge || []) as Array<{ title?: string; content?: string; file_name?: string }>,
+          project_id,
+        );
+        if (hasProjectKnowledge) {
+          blockers = [];
+        }
       }
 
       if (blockers.length > 0) {
