@@ -59,6 +59,7 @@ export interface WorkflowQaIssue {
     detail_reference?: string | null;
     section_reference?: string | null;
     callout_tag?: string | null;
+    element_id?: string | null;
     grid_reference?: string | null;
     zone_reference?: string | null;
     element_reference?: string | null;
