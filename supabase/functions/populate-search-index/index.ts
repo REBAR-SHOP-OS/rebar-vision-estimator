@@ -282,23 +282,40 @@ function extractSpecs(rawText: string): Record<string, unknown> {
 function extractDimensions(text: string): Array<Record<string, unknown>> {
   const out: Array<Record<string, unknown>> = [];
   const seen = new Set<string>();
-  const push = (v: number, raw: string) => {
+  // Classify a dimension by its surrounding text context.
+  const classify = (ctx: string): string => {
+    const u = ctx.toUpperCase();
+    if (/\bCLR\b|\bCLEAR\b|\bCOVER\b/.test(u)) return "cover";
+    if (/\bTHK\b|\bTHICK(?:NESS)?\b|\bSLAB\b|\bWALL\b|\bDECK\b/.test(u)) return "thickness";
+    if (/\bDIA\b|\bDIAM(?:ETER)?\b|[ØΦø]/.test(u)) return "diameter";
+    if (/\bSPA(?:CING|CED)?\b|\bO\.?C\.?\b|\b@\s*$|\bEACH\s+WAY\b|\bE\.?W\.?\b/.test(u)) return "spacing";
+    if (/\bCLEARANCE\b|\bGAP\b/.test(u)) return "clearance";
+    if (/\bEL(?:EV)?\.?\b|\bELEVATION\b|\bT\.?O\.?\b|\bB\.?O\.?\b/.test(u)) return "elevation";
+    if (/\bHT\b|\bHEIGHT\b|\bDEPTH\b|\bDP\b/.test(u)) return "height";
+    if (/\bWIDTH\b|\bWD\b/.test(u)) return "width";
+    if (/\bLAP\b|\bSPLICE\b/.test(u)) return "lap";
+    if (/\bLENGTH\b|\bLG\b|\bLONG\b/.test(u)) return "length";
+    return "unknown";
+  };
+  const push = (v: number, raw: string, kind: string) => {
     if (v < 100 || v > 200_000) return;
-    const k = `${v}|${raw}`;
+    const k = `${v}|${raw}|${kind}`;
     if (seen.has(k)) return;
     seen.add(k);
-    out.push({ value_mm: Math.round(v), raw });
+    out.push({ value_mm: Math.round(v), raw, kind });
   };
+  const ctxOf = (idx: number, len: number): string =>
+    text.slice(Math.max(0, idx - 24), Math.min(text.length, idx + len + 24));
   let m: RegExpExecArray | null;
   const reMm = /\b(\d{3,5})\s*(?:mm|MM)\b/g;
-  while ((m = reMm.exec(text)) !== null) push(+m[1], m[0]);
+  while ((m = reMm.exec(text)) !== null) push(+m[1], m[0], classify(ctxOf(m.index, m[0].length)));
   const reM = /\b(\d{1,3}(?:\.\d{1,3})?)\s*m\b(?!m)/g;
-  while ((m = reM.exec(text)) !== null) push(parseFloat(m[1]) * 1000, m[0]);
+  while ((m = reM.exec(text)) !== null) push(parseFloat(m[1]) * 1000, m[0], classify(ctxOf(m.index, m[0].length)));
   const reFt = /\b(\d{1,3})['′]\s*[-–]?\s*(\d{1,2})?\s*["″]?/g;
   while ((m = reFt.exec(text)) !== null) {
     const ft = +m[1];
     const inch = m[2] ? +m[2] : 0;
-    push((ft * 12 + inch) * 25.4, m[0]);
+    push((ft * 12 + inch) * 25.4, m[0], classify(ctxOf(m.index, m[0].length)));
   }
   return out.slice(0, 500);
 }
