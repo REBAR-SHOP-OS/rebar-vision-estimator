@@ -1683,6 +1683,21 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       const cappedItemConf = aiOnly
         ? Math.min(Number(item.confidence) || 0, 0.6)
         : Math.min(1, Math.max(0, Number(item.confidence) || 0));
+      // Tiered waste factor by bar size / item type.
+      // Reads from standards_profiles.waste_factors (jsonb) when present;
+      // defaults match RSIC industry norms: small ≤#6 → 3%, large ≥#7 → 5%,
+      // stirrups/ties → 8%. Falls back to legacy flat 1.05 if profile missing.
+      const wf = (standard?.waste_factors as any) || { small: 1.03, large: 1.05, stirrup: 1.08 };
+      const sizeStr = String(item.bar_size || "").toUpperCase();
+      const isStirrup = /STIRRUP|TIE|HOOP|SPIRAL/i.test(String(item.description || ""));
+      // Imperial #N or metric XXM size parsing.
+      const imp = sizeStr.match(/#\s*(\d+)/);
+      const met = sizeStr.match(/(\d+)\s*M\b/);
+      const sizeNumber = imp ? Number(imp[1]) : met ? Math.round(Number(met[1]) / 3.18) : 0; // crude metric→# equiv
+      let wasteTier: "small" | "large" | "stirrup" = "small";
+      if (isStirrup) wasteTier = "stirrup";
+      else if (sizeNumber >= 7) wasteTier = "large";
+      const wasteFactor = Math.min(1.20, Math.max(1.00, Number(wf[wasteTier]) || 1.05));
       return {
       segment_id,
       project_id,
@@ -1694,6 +1709,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       total_weight: Math.max(0, Number(item.total_weight) || 0),
       confidence: cappedItemConf,
       item_type: String(item.item_type || "rebar"),
+      waste_factor: wasteFactor,
       status: (item._geometry_status === "unresolved" || citationMissing) ? "unresolved" : "draft",
       source_file_id: resolveRowSource(item),
       assumptions_json: {
@@ -1727,6 +1743,8 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         authority_quote: item.authority_quote || null,
         assumption_rule_id: item.assumption_rule_id || null,
         citation_missing: citationMissing,
+        waste_tier: wasteTier,
+        waste_factor_source: standard?.waste_factors ? "standards_profile" : "rsic_default",
       },
     };
     });

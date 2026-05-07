@@ -1700,6 +1700,7 @@ export type Database = {
           naming_rules: Json | null
           units: string | null
           user_id: string
+          waste_factors: Json
         }
         Insert: {
           code_family?: string | null
@@ -1713,6 +1714,7 @@ export type Database = {
           naming_rules?: Json | null
           units?: string | null
           user_id: string
+          waste_factors?: Json
         }
         Update: {
           code_family?: string | null
@@ -1726,6 +1728,7 @@ export type Database = {
           naming_rules?: Json | null
           units?: string | null
           user_id?: string
+          waste_factors?: Json
         }
         Relationships: []
       }
