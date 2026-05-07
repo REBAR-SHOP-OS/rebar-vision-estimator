@@ -114,7 +114,10 @@ export function buildLocationLabel(loc: WorkflowQaIssue["location"], fallbackShe
               : null;
   // Pick the most specific *object* anchor (detail > section > callout > grid > schedule).
   const callout = loc?.callout_tag && !isPageTag(loc.callout_tag) ? loc.callout_tag : null;
-  const obj = loc?.detail_reference
+  const elementId = loc?.element_id && !isPageTag(loc.element_id) ? loc.element_id : null;
+  // Element ID (HKP1, F12, W3) wins over generic detail/section refs.
+  const obj = elementId
+    || loc?.detail_reference
     || loc?.section_reference
     || callout
     || loc?.grid_reference
