@@ -512,6 +512,29 @@ function resolveLine(
   const aiLen = Number(it.total_length) || 0;
   const mass = massFor(size, type);
 
+  // WWM/MESH: weight = mass(kg/m²) × area(m²). NEVER multiply by linear m.
+  if (type === "wwm") {
+    const massM2 = WWM_MASS_KG_PER_M2[size] || 0;
+    const area = parseWwmAreaM2(`${it.description || ""}`);
+    if (massM2 > 0 && area > 0) {
+      return {
+        qty: aiQty || 1,
+        totalLengthM: 0,
+        totalWeightKg: +(area * massM2).toFixed(2),
+        status: "resolved",
+        missing: [],
+        derivation: `wwm: area=${area.toFixed(2)}m² × ${massM2}kg/m²`,
+      };
+    }
+    return {
+      qty: aiQty || 0,
+      totalLengthM: 0,
+      totalWeightKg: 0,
+      status: "unresolved",
+      missing: massM2 > 0 ? ["wwm coverage area (m² or sqft)"] : [`wwm spec ${size} not in mass table`],
+    };
+  }
+
   // CASE A — AI already produced a qty AND length backed by an explicit bar list.
   // Trust the AI value but require provenance: description must reference a mark
   // present in the graph OR contain explicit dimension tokens.
