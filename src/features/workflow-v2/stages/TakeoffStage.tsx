@@ -7,12 +7,87 @@ import { Sparkles, FileText, CheckCircle2, Loader2, Wand2, Pencil, Save, X, Chev
 import PdfRenderer from "@/components/chat/PdfRenderer";
 import { loadWorkflowTakeoffRows, type WorkflowTakeoffRow } from "../takeoff-data";
 import { parseAndIndexFile } from "@/lib/parse-file";
+import { buildEngineerAnswerDraft } from "./qa-answer-fields";
 
 interface EditPatch {
   count?: number;
   length?: number;
   weight?: number;
   size?: string;
+}
+
+interface TakeoffFoundDisplay {
+  qty: string;
+  length: string;
+  weight: string;
+  found: string;
+  question: string;
+  confidence: "high" | "medium" | "low";
+}
+
+const REBAR_MASS_KG_PER_M: Record<string, number> = {
+  "10M": 0.785,
+  "15M": 1.57,
+  "20M": 2.355,
+  "25M": 3.925,
+  "30M": 5.495,
+  "35M": 7.85,
+};
+
+function compactMm(value: string) {
+  return value.replace(/\s+/g, "");
+}
+
+function mmToM(value: number, unit: string) {
+  return unit.toLowerCase() === "m" ? value : value / 1000;
+}
+
+function formatM(value: number) {
+  return Number.isFinite(value) ? `${value.toFixed(value < 1 ? 3 : 2)}m` : "—";
+}
+
+function extractFoundDisplay(row: WorkflowTakeoffRow): TakeoffFoundDisplay {
+  const text = `${row.size} ${row.shape} ${row.missing_refs.join(" ")}`.replace(/\s+/g, " ").trim();
+  const bar = text.match(/\b(10M|15M|20M|25M|30M|35M)\b/i)?.[1]?.toUpperCase() || (row.size !== "-" ? row.size : "");
+  const pieceMatch = text.match(/\b(?:10M|15M|20M|25M|30M|35M)?\s*(?:x|×)?\s*(\d+(?:\.\d+)?)\s*(mm|m)\s*(?:\([^)]*\)\s*)?(?:long|dowels?|bars?)\b/i);
+  const spacingMatch = text.match(/(?:@|at)\s*(\d+(?:\.\d+)?)\s*(mm|m)\s*(?:\([^)]*\)\s*)?O\.?\s*C\.?/i);
+  const thicknessMatch = text.match(/\b(\d+(?:\.\d+)?)\s*mm\s+(?:frost\s+slab|foundation\s+wall|slab|wall|pad|footing)\b/i);
+  const eachWay = /\beach\s+way\b|\be\.?\s*w\.?\b/i.test(text);
+  const staggered = /\bstaggered\b/i.test(text);
+  const pieceM = pieceMatch ? mmToM(Number(pieceMatch[1]), pieceMatch[2]) : null;
+  const spacing = spacingMatch ? `${compactMm(spacingMatch[1] + spacingMatch[2])} O.C.` : "";
+  const thickness = thicknessMatch ? `${compactMm(thicknessMatch[1] + "mm")}` : "";
+  const foundParts = [
+    bar ? `bar ${bar}` : null,
+    pieceM ? `piece length ${formatM(pieceM)}` : null,
+    thickness ? `thickness ${thickness}` : null,
+    spacing ? `spacing ${spacing}` : null,
+    eachWay ? "each way" : null,
+    staggered ? "staggered" : null,
+  ].filter(Boolean) as string[];
+
+  const draft = buildEngineerAnswerDraft({
+    locationLabel: row.page_number ? `P${row.page_number}` : null,
+    objectIdentity: row.shape,
+    title: row.shape,
+    sourceExcerpt: row.shape,
+    missingRefs: row.missing_refs,
+  });
+
+  const needsRun = /run|length|dimension|element_dimensions|perimeter|edge/i.test(row.missing_refs.join(" "));
+  const needsQty = /qty|quantity|count/i.test(row.missing_refs.join(" "));
+  const found = foundParts.length
+    ? `Found: ${foundParts.join("; ")}.`
+    : draft.draftAnswer || `Found source text: "${row.shape}".`;
+
+  return {
+    qty: row.count > 0 ? String(row.count) : needsQty || needsRun ? "Need run" : "Ask",
+    length: row.length > 0 ? row.length.toFixed(2) : pieceM ? `${formatM(pieceM)} ea` : thickness ? thickness : "Ask",
+    weight: row.weight > 0 ? row.weight.toFixed(1) : bar && REBAR_MASS_KG_PER_M[bar] ? "Need qty" : "Ask",
+    found,
+    question: draft.question,
+    confidence: foundParts.length ? "medium" : draft.confidence,
+  };
 }
 
 export default function TakeoffStage({ projectId, state, goToStage }: StageProps) {
@@ -202,11 +277,29 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
     const patch: Record<string, unknown> = {};
     const original: Record<string, unknown> = { count: r.count, length: r.length, weight: r.weight, size: r.size };
     const next: Record<string, unknown> = {};
+    let nextGeometryStatus: WorkflowTakeoffRow["geometry_status"] | null = null;
     if (editPatch.count !== undefined && editPatch.count !== r.count) { patch.quantity_count = editPatch.count; next.count = editPatch.count; }
     if (editPatch.length !== undefined && editPatch.length !== r.length) { patch.total_length = editPatch.length; next.length = editPatch.length; }
     if (editPatch.weight !== undefined && editPatch.weight !== r.weight) { patch.total_weight = editPatch.weight; next.weight = editPatch.weight; }
     if (editPatch.size !== undefined && editPatch.size !== r.size) { patch.bar_size = editPatch.size; next.size = editPatch.size; }
     if (Object.keys(patch).length === 0) { cancelEdit(); return; }
+
+    if (patch.quantity_count !== undefined || patch.total_length !== undefined || patch.total_weight !== undefined) {
+      const { data: item } = await supabase.from("estimate_items").select("assumptions_json").eq("id", r.raw_id).maybeSingle();
+      const assumptions = item?.assumptions_json && typeof item.assumptions_json === "object" && !Array.isArray(item.assumptions_json)
+        ? item.assumptions_json as Record<string, unknown>
+        : {};
+      const nextCount = Number(patch.quantity_count ?? r.count);
+      const nextLength = Number(patch.total_length ?? r.length);
+      const nextWeight = Number(patch.total_weight ?? r.weight);
+      nextGeometryStatus = nextCount > 0 && (nextLength > 0 || nextWeight > 0) ? "resolved" : "partial";
+      patch.assumptions_json = {
+        ...assumptions,
+        geometry_status: nextGeometryStatus,
+        missing_refs: nextGeometryStatus === "resolved" ? [] : assumptions.missing_refs,
+        manual_takeoff_answered_at: new Date().toISOString(),
+      };
+    }
 
     const { error } = await supabase.from("estimate_items").update(patch).eq("id", r.raw_id);
     if (error) { toast.error("Save failed: " + error.message); return; }
@@ -223,7 +316,13 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
       } as any);
     }
 
-    setRows((prev) => prev.map((row) => row.id === r.id ? { ...row, ...(next as Partial<WorkflowTakeoffRow>) } as WorkflowTakeoffRow : row));
+    setRows((prev) => prev.map((row) => row.id === r.id ? {
+      ...row,
+      ...(next as Partial<WorkflowTakeoffRow>),
+      geometry_status: nextGeometryStatus || row.geometry_status,
+      missing_refs: nextGeometryStatus === "resolved" ? [] : row.missing_refs,
+      status: patch.assumptions_json ? "review" : row.status,
+    } as WorkflowTakeoffRow : row));
     cancelEdit();
     toast.success("OCR correction saved & logged");
   };
@@ -355,6 +454,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
                           <tbody>
                             {g.items.map((r, i) => {
                               const editing = editingId === r.id;
+                              const foundDisplay = extractFoundDisplay(r);
                               return (
                                 <tr key={r.id}
                                   onMouseEnter={() => setHoverId(r.id)}
@@ -373,19 +473,19 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
                                     {editing ? (
                                       <input type="number" className="w-16 bg-background border border-border px-1 text-[11px] text-right"
                                         value={editPatch.count ?? 0} onChange={(e) => setEditPatch((p) => ({ ...p, count: Number(e.target.value) }))} />
-                                    ) : r.geometry_status === "unresolved" ? <span className="text-muted-foreground">—</span> : r.count}
+                                    ) : r.geometry_status === "unresolved" ? <UnresolvedValue value={foundDisplay.qty} /> : r.count}
                                   </td>
                                   <td className="px-3 text-right">
                                     {editing ? (
                                       <input type="number" step="0.01" className="w-20 bg-background border border-border px-1 text-[11px] text-right"
                                         value={editPatch.length ?? 0} onChange={(e) => setEditPatch((p) => ({ ...p, length: Number(e.target.value) }))} />
-                                    ) : r.geometry_status === "unresolved" ? <span className="text-muted-foreground">—</span> : r.length.toFixed(2)}
+                                    ) : r.geometry_status === "unresolved" ? <UnresolvedValue value={foundDisplay.length} /> : r.length.toFixed(2)}
                                   </td>
                                   <td className="px-3 text-right font-semibold">
                                     {editing ? (
                                       <input type="number" step="0.1" className="w-20 bg-background border border-border px-1 text-[11px] text-right"
                                         value={editPatch.weight ?? 0} onChange={(e) => setEditPatch((p) => ({ ...p, weight: Number(e.target.value) }))} />
-                                    ) : r.geometry_status === "unresolved" ? <span className="text-muted-foreground">—</span> : r.weight.toFixed(1)}
+                                    ) : r.geometry_status === "unresolved" ? <UnresolvedValue value={foundDisplay.weight} /> : r.weight.toFixed(1)}
                                   </td>
                                   <td className="px-3">
                                     {r.geometry_status === "unresolved" ? (
@@ -476,10 +576,23 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
         </div>
         {sel && (
           <div className="border-t border-border p-3 bg-card text-foreground">
+            {sel.geometry_status === "unresolved" && (
+              <UnresolvedFoundPanel row={sel} />
+            )}
             <div className="grid grid-cols-3 gap-2 text-[11px] font-mono mb-3">
-              <Field label="Qty" value={String(sel.count)} />
-              <Field label="Len (m)" value={sel.length.toFixed(2)} />
-              <Field label="Wt (kg)" value={sel.weight.toFixed(1)} />
+              {sel.geometry_status === "unresolved" ? (
+                <>
+                  <Field label="Qty" value={extractFoundDisplay(sel).qty} />
+                  <Field label="Len" value={extractFoundDisplay(sel).length} />
+                  <Field label="Wt" value={extractFoundDisplay(sel).weight} />
+                </>
+              ) : (
+                <>
+                  <Field label="Qty" value={String(sel.count)} />
+                  <Field label="Len (m)" value={sel.length.toFixed(2)} />
+                  <Field label="Wt (kg)" value={sel.weight.toFixed(1)} />
+                </>
+              )}
             </div>
             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
               <FileText className="w-3.5 h-3.5" />
@@ -507,6 +620,37 @@ function Field({ label, value }: { label: string; value: string }) {
     <div className="border border-border bg-background px-2 py-1.5">
       <div className="ip-kicker">{label}</div>
       <div className="truncate text-[12px] tabular-nums mt-0.5">{value}</div>
+    </div>
+  );
+}
+
+function UnresolvedValue({ value }: { value: string }) {
+  return (
+    <span className="inline-flex items-center justify-end text-[11px] font-semibold text-[hsl(var(--status-inferred))]" title={value}>
+      {value}
+    </span>
+  );
+}
+
+function UnresolvedFoundPanel({ row }: { row: WorkflowTakeoffRow }) {
+  const display = extractFoundDisplay(row);
+  return (
+    <div className="mb-3 border border-[hsl(var(--status-inferred))]/50 bg-[hsl(var(--status-inferred))]/10 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="ip-kicker">Found / Confirmation Needed</div>
+        <Pill tone={display.confidence === "high" ? "ok" : display.confidence === "medium" ? "warn" : "bad"}>
+          {display.confidence}
+        </Pill>
+      </div>
+      <p className="mt-2 text-[12px] leading-relaxed text-foreground">{display.found}</p>
+      <p className="mt-2 border-l border-primary/50 pl-2 text-[12px] leading-relaxed text-muted-foreground">
+        {display.question}
+      </p>
+      {row.missing_refs.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {row.missing_refs.map((ref) => <Pill key={ref} tone="blocked">{ref.replace(/_/g, " ")}</Pill>)}
+        </div>
+      )}
     </div>
   );
 }
