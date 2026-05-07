@@ -34,31 +34,142 @@ function extractBarMarks(text: string): string[] {
   return Array.from(marks);
 }
 
-/** Structured bar callouts: "5-15M @ 300", "4-#5 @ 12\"", "15M @ 300 O.C." */
-function extractBarCallouts(text: string): Array<Record<string, unknown>> {
+/** Pre-clean OCR text: normalize dashes and collapse split-character bar tokens. */
+function preCleanOcr(text: string): string {
+  let t = text.replace(/[–—]/g, "-");
+  // Collapse "1 5 M" / "1 5M" -> "15M"
+  t = t.replace(/\b(\d)\s+(\d)\s*M\b/g, "$1$2M");
+  // Collapse "# 5" -> "#5"
+  t = t.replace(/#\s+(\d)/g, "#$1");
+  // Collapse "15M @ 300" extra space
+  t = t.replace(/(\d)\s+M\b/g, "$1M");
+  return t;
+}
+
+/** Detect placement modifier near a bar callout match. Returns canonical token or null. */
+function detectPlacement(tail: string): string | null {
+  const u = tail.toUpperCase();
+  if (/\bT\s*&\s*B\b|\bBW\b|\bBOTH\s+WAYS?\b|\bTOP\s*(?:AND|&)\s*BOT/.test(u)) return "T&B";
+  if (/\bEW\b|\bEACH\s+WAY\b/.test(u)) return "EW";
+  if (/\bEF\b|\bEACH\s+FACE\b/.test(u)) return "EF";
+  if (/\bCONT\b|\bCONTINUOUS\b/.test(u)) return "CONT";
+  if (/\bTIES?\b/.test(u)) return "TIES";
+  if (/\bSTIRR(?:UPS?)?\b/.test(u)) return "STIRR";
+  if (/\bDWLS?\b|\bDOWELS?\b/.test(u)) return "DWL";
+  return null;
+}
+
+/** Structured bar callouts: "5-15M @ 300 EW", "4-#5 @ 12\" T&B", "15M CONT", "10M TIES @ 200", "(2)-25M". */
+function extractBarCallouts(rawText: string): Array<Record<string, unknown>> {
+  const text = preCleanOcr(rawText);
   const out: Array<Record<string, unknown>> = [];
   const seen = new Set<string>();
   const push = (o: Record<string, unknown>) => {
     const k = JSON.stringify(o);
     if (!seen.has(k)) { seen.add(k); out.push(o); }
   };
-  // Metric: qty - sizeM @ spacing
-  const reMetric = /(\d{1,3})\s*[-–]\s*(\d{2})M\s*@\s*(\d{2,4})\s*(?:mm|MM|o\.?c\.?)?/g;
+  const tailOf = (idx: number, len: number) => text.slice(idx + len, idx + len + 40);
   let m: RegExpExecArray | null;
+
+  // Metric: qty - sizeM @ spacing  (+ optional placement modifier)
+  const reMetric = /(\d{1,3})\s*-\s*(\d{2})M\s*@\s*(\d{2,4})\s*(?:mm|MM|o\.?c\.?|c\/c)?/g;
   while ((m = reMetric.exec(text)) !== null) {
-    push({ qty: +m[1], size: `${m[2]}M`, spacing: +m[3], spacing_unit: "mm", raw: m[0] });
+    const placement = detectPlacement(tailOf(m.index, m[0].length));
+    push({ qty: +m[1], size: `${m[2]}M`, spacing: +m[3], spacing_unit: "mm", placement, raw: m[0] });
   }
   // Metric no qty: sizeM @ spacing
-  const reMetricNoQty = /\b(\d{2})M\s*@\s*(\d{2,4})\s*(?:mm|MM|o\.?c\.?)?/g;
+  const reMetricNoQty = /\b(\d{2})M\s*@\s*(\d{2,4})\s*(?:mm|MM|o\.?c\.?|c\/c)?/g;
   while ((m = reMetricNoQty.exec(text)) !== null) {
-    push({ size: `${m[1]}M`, spacing: +m[2], spacing_unit: "mm", raw: m[0] });
+    const placement = detectPlacement(tailOf(m.index, m[0].length));
+    push({ size: `${m[1]}M`, spacing: +m[2], spacing_unit: "mm", placement, raw: m[0] });
   }
   // Imperial: qty - #N @ spacing
-  const reImp = /(\d{1,3})\s*[-–]\s*#(\d{1,2})\s*@\s*(\d+(?:\.\d+)?)\s*(?:"|in|''|o\.?c\.?)?/gi;
+  const reImp = /(\d{1,3})\s*-\s*#(\d{1,2})\s*@\s*(\d+(?:\.\d+)?)\s*(?:"|in|''|o\.?c\.?|c\/c)?/gi;
   while ((m = reImp.exec(text)) !== null) {
-    push({ qty: +m[1], size: `#${m[2]}`, spacing: +m[3], spacing_unit: "in", raw: m[0] });
+    const placement = detectPlacement(tailOf(m.index, m[0].length));
+    push({ qty: +m[1], size: `#${m[2]}`, spacing: +m[3], spacing_unit: "in", placement, raw: m[0] });
+  }
+  // Continuous: "4-25M CONT" / "15M CONT"
+  const reCont = /(?:(\d{1,3})\s*-\s*)?(\d{2})M\s+(?:CONT|CONTINUOUS)\b/gi;
+  while ((m = reCont.exec(text)) !== null) {
+    push({ qty: m[1] ? +m[1] : null, size: `${m[2]}M`, placement: "CONT", raw: m[0] });
+  }
+  // Ties / Stirrups: "10M TIES @ 200"
+  const reTies = /(\d{2})M\s+(TIES?|STIRR(?:UPS?)?|DWLS?|DOWELS?)\s*@\s*(\d{2,4})/gi;
+  while ((m = reTies.exec(text)) !== null) {
+    const u = m[2].toUpperCase();
+    const placement = u.startsWith("TIE") ? "TIES" : u.startsWith("STIRR") ? "STIRR" : "DWL";
+    push({ size: `${m[1]}M`, spacing: +m[3], spacing_unit: "mm", placement, raw: m[0] });
+  }
+  // Bundled / parenthesized qty: "(2)-25M" or "2-25M BUNDLE"
+  const reBundle = /\(?\s*(\d)\s*\)?\s*-\s*(\d{2})M(?:\s+BUNDLE)?/g;
+  while ((m = reBundle.exec(text)) !== null) {
+    const tail = tailOf(m.index, m[0].length).toUpperCase();
+    const explicit = /BUNDLE/.test(m[0].toUpperCase()) || /\bBUNDLE\b/.test(tail);
+    if (!explicit && +m[1] > 1) continue;
+    push({ qty: +m[1], size: `${m[2]}M`, bundled: true, raw: m[0] });
   }
   return out;
+}
+
+/** Specs / general-notes extractor: cover, lap, hook, grade, splice. */
+function extractSpecs(rawText: string): Record<string, unknown> {
+  const text = preCleanOcr(rawText).toUpperCase();
+  const specs: Record<string, any> = {
+    cover: {},
+    lap: {},
+    hook: {},
+    grade: {},
+    detected_keywords: [] as string[],
+  };
+  let m: RegExpExecArray | null;
+
+  // Cover: "COVER: 50MM BOTTOM" / "75MM AGAINST EARTH"
+  const reCover = /(\d{2,3})\s*MM\s+(BOTTOM|TOP|SIDE|EARTH|SOFFIT|EXPOSED)/g;
+  while ((m = reCover.exec(text)) !== null) {
+    const where = m[2];
+    const v = +m[1];
+    if (where === "BOTTOM" || where === "SOFFIT") specs.cover.bottom_mm = v;
+    else if (where === "TOP") specs.cover.top_mm = v;
+    else if (where === "SIDE" || where === "EXPOSED") specs.cover.side_mm = v;
+    else if (where === "EARTH") specs.cover.against_earth_mm = v;
+    specs.detected_keywords.push(`cover:${where}=${v}`);
+  }
+
+  // Lap: "TENSION LAP = 40DB" / "COMPRESSION LAP 30 DB"
+  const reLap = /(TENSION|COMPRESSION)\s+LAP\s*=?\s*(\d{2,3})\s*DB/g;
+  while ((m = reLap.exec(text)) !== null) {
+    if (m[1] === "TENSION") specs.lap.tension_db = +m[2];
+    else specs.lap.compression_db = +m[2];
+    specs.detected_keywords.push(`lap:${m[1]}=${m[2]}db`);
+  }
+  if (/MECHANICAL\s+COUPLER/.test(text)) specs.lap.splice_type = "mechanical";
+  else if (/WELDED\s+SPLICE/.test(text)) specs.lap.splice_type = "welded";
+  else if (/LAP\s+SPLICE/.test(text)) specs.lap.splice_type = "lap";
+
+  // Hooks
+  const reHook = /(STD|STANDARD|SEISMIC)\s+HOOK\s*=?\s*(90|135|180)/g;
+  while ((m = reHook.exec(text)) !== null) {
+    if (m[1] === "SEISMIC") specs.hook.seismic_deg = +m[2];
+    else specs.hook.standard_deg = +m[2];
+    specs.detected_keywords.push(`hook:${m[1]}=${m[2]}`);
+  }
+
+  // Grade
+  const reFy = /(?:FY|GRADE)\s*=?\s*(\d{2,3})\s*(MPA|KSI)?/g;
+  while ((m = reFy.exec(text)) !== null) {
+    const v = +m[1];
+    if (m[2] === "KSI" || (!m[2] && v <= 80)) specs.grade.fy_ksi = v;
+    else specs.grade.fy_mpa = v;
+    specs.detected_keywords.push(`grade:fy=${v}${m[2] || "MPA"}`);
+  }
+  const reMark = /\b(400W|500W|GRADE\s*60|GRADE\s*75)\b/g;
+  while ((m = reMark.exec(text)) !== null) {
+    specs.grade.mark = m[1].replace(/\s+/g, " ");
+    specs.detected_keywords.push(`grade:${specs.grade.mark}`);
+  }
+
+  return specs;
 }
 
 /** Element dimensions in mm. Filters bar sizes (<100mm) and noise (>200,000mm). */
@@ -501,6 +612,7 @@ Deno.serve(async (req) => {
           bar_callouts: extractBarCallouts(rawText),
           dimensions: extractDimensions(rawText),
           bar_schedule_rows: extractBarSchedule(rawText),
+          specs: extractSpecs(rawText),
           tables: page.tables || [],
           title_block: tb,
           ocr_metadata: page.ocr_metadata || null,

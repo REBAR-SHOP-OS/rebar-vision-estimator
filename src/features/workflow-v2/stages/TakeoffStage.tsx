@@ -129,7 +129,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
       if (error) throw error;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const d = data as any;
-      toast.success(`Re-indexed ${d?.pages_updated ?? 0} page(s) · ${d?.bar_callouts ?? 0} callouts · ${d?.dimensions ?? 0} dims · ${d?.schedule_rows ?? 0} schedule rows`);
+      toast.success(`Re-indexed ${d?.pages_updated ?? 0} page(s) · ${d?.bar_callouts ?? 0} callouts · ${d?.dimensions ?? 0} dims · ${d?.schedule_rows ?? 0} schedule rows · ${d?.spec_keywords ?? 0} spec hits`);
     } catch (err) {
       console.warn("reindex-extractors failed:", err);
       toast.error("Re-index OCR entities failed");

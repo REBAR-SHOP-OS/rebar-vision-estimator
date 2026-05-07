@@ -1,83 +1,75 @@
-# Fix OCR Accuracy Gap (Minimal Patch)
+# Blueprint Fine-Tuning Patch #1+#2
 
-## Problem confirmed by audit
+Pure regex additions to the OCR extractor. No schema changes, no UI changes, no new tables.
 
-For project `a24bba42…`, OCR captured 5–75 KB of text per page (good), but the indexer only populates `bar_marks[]`. `extracted_entities.dimensions`, `bar_callouts`, and `bar_schedule_rows` are empty on **all 18 pages**. That is why downstream `estimate_items` rows have `quantity_count = 0`, `total_length = 0`, `total_weight = 0`.
+## Files Touched
 
-Also: `CRU-1 Architectral.pdf` is stuck in `parse_status='parsing'` (never finished).
+1. **`supabase/functions/populate-search-index/index.ts`** — extend `extractBarCallouts()` and add new `extractSpecs()`
+2. **`supabase/functions/reindex-extractors/index.ts`** — same additions, so the existing "Re-index OCR Entities" button backfills both
 
-## Scope (minimal-patch policy)
+Both files share identical regex helpers (already duplicated by design — keeps edge functions self-contained per project rules).
 
-Touch only the indexer + one tiny migration. No UI changes, no schema changes, no new tables.
+---
 
-### File 1: `supabase/functions/populate-search-index/index.ts` (~60 lines added)
+## Change 1 — Extended Bar Callouts (Patch #2 from prior list)
 
-Add three pure regex helpers next to the existing `extractBarMarks`:
+Add modifier capture to `extractBarCallouts()`. Same return shape, new optional `placement` field.
 
-1. **`extractBarCallouts(text)`** — captures structured bar callouts:
-   - Patterns to match (in order):
-     - `(\d+)\s*[-–]\s*(\d{2})M\s*@\s*(\d+)\s*(mm|o\.?c\.?)?` → `{ qty, size:'15M', spacing_mm }`
-     - `(\d+)\s*[-–]\s*#(\d{1,2})\s*@\s*(\d+(?:\.\d+)?)\s*(?:"|in|ft|'|o\.?c\.?)?` → imperial
-     - `(\d{2})M\s*@\s*(\d+)` → no qty, just size+spacing (drives "Need run")
-   - Returns `Array<{ qty?:number, size:string, spacing?:number, spacing_unit:'mm'|'in', raw:string }>`
+New patterns recognized:
+- `15M @ 300 EW` → `placement: "EW"` (each way — doubles linear meters)
+- `20M @ 250 EF` → `placement: "EF"` (each face — doubles count)
+- `15M @ 200 T&B` / `BW` → `placement: "T&B"`
+- `4-25M CONT` → `placement: "CONT"` (continuous, no spacing needed)
+- `10M TIES @ 200` / `STIRR` → `placement: "TIES"` or `"STIRR"`
+- `15M DWLS @ 400` → `placement: "DWL"`
+- `(2)-25M` / `2-#8 BUNDLE` → `bundled: true, qty: 2`
 
-2. **`extractDimensions(text)`** — captures element dimensions:
-   - `(\d{3,5})\s*(?:mm|MM)\b` → millimetres
-   - `(\d+(?:\.\d+)?)\s*m\b(?!m)` → metres (single m, not mm)
-   - `(\d+)['′]\s*[-–]?\s*(\d{1,2})?\s*["″]?` → feet/inches
-   - Filter: drop values < 100mm or > 200,000mm to skip noise (bar sizes, scales).
-   - Returns `Array<{ value_mm:number, raw:string }>`
+Each pattern keeps the existing `seen` dedup and pushes to the same `bar_callouts` array. `auto-estimate` already reads `bar_callouts[]`; it can now branch on `placement` to multiply correctly.
 
-3. **`extractBarSchedule(text)`** — detects a bar schedule table:
-   - Trigger: a line whose tokens include ≥3 of `MARK`, `SIZE`, `LENGTH`, `QTY`, `SHAPE`, `BAR`, `WEIGHT`, `SPACING`.
-   - Then parse the next ≤80 lines that match `^([A-Z]{1,2}\d{1,3})\s+(\d{1,2}M|#\d{1,2})\s+(\d+(?:\.\d+)?)\s+(\d+)` → rows of `{ mark, size, length, qty }`.
-   - Returns `Array<{ mark, size, length, qty }>`.
+Pre-clean step added at the top of the function:
+- Normalize en/em-dash to `-`
+- Collapse `1 5 M @ 3 0 0` → `15M@300` via `/(\d)\s+(?=[MmM#])/` and similar
+- Uppercase all modifiers before matching
 
-Inject results into `p_extracted_entities` at line 427:
+## Change 2 — Spec / General-Notes Extractor (Patch #6 from prior list)
 
-```ts
-p_extracted_entities: {
-  bar_marks: barMarks,
-  bar_callouts: extractBarCallouts(rawText),
-  dimensions: extractDimensions(rawText),
-  bar_schedule_rows: extractBarSchedule(rawText),
-  tables: page.tables || [],
-  title_block: tb,
-  ocr_metadata: page.ocr_metadata || null,
-},
+New helper `extractSpecs(text: string): Record<string, unknown>` returning a flat object:
+
+```
+{
+  cover: { bottom_mm, top_mm, side_mm, against_earth_mm },
+  lap: { tension_db, compression_db, splice_type },
+  hook: { standard_deg, seismic_deg },
+  grade: { fy_mpa, mark }, // e.g. "400W", "500W", "Grade 60"
+  detected_keywords: [...]
+}
 ```
 
-Bump `EXTRACTION_VERSION` to `2026.05.07`.
+Patterns:
+- Cover: `COVER[:\s]+(\d+)\s*MM\s+(BOTTOM|TOP|SIDE|EARTH)` (multi-pass)
+- Lap: `(TENSION|COMPRESSION)\s+LAP\s*=?\s*(\d+)\s*DB`
+- Hook: `(STD|SEISMIC|STANDARD)\s+HOOK\s*=?\s*(90|135|180)`
+- Grade: `(?:Fy|GRADE)\s*=?\s*(\d{2,3})\s*(?:MPA|KSI)?` plus `\b(400W|500W|Grade\s*60)\b`
+- Splice: `(MECHANICAL\s+COUPLER|LAP\s+SPLICE|WELDED\s+SPLICE)`
 
-That's it for this function. No other call sites change shape — they read from `extracted_entities` jsonb and existing readers ignore unknown keys.
+Output injected into `extracted_entities.specs` per page. Pages with no spec hits get `specs: {}` (cheap).
 
-### File 2: New migration to retry the stuck Architectural PDF
+A second pass aggregates per-project after all pages processed: pick the page with the most spec hits as the authoritative one, log to `audit_events` with `action: "spec_extracted"` and `metadata: { specs, source_page }`. No new table — `auto-estimate` reads from the latest `audit_events` of that action for the project, falling back to `standards_profiles` defaults if empty.
 
-```sql
--- One-shot reset of stuck arch PDF for project a24bba42…
-update document_versions
-set parse_status = 'pending', parse_error = null
-where project_id = 'a24bba42-0120-45ce-be6d-cc5625cf24e5'
-  and parse_status = 'parsing'
-  and parsed_at is null;
-```
+## Out of Scope
 
-The existing pipeline picks up `pending` rows on next workflow tick and re-runs OCR.
+- `auto-estimate` consumption of new fields (separate patch)
+- Sheet-category gating (#5) — separate patch
+- Cross-page reconciliation (#8) — separate patch
+- Bar schedule shape codes (#4) — separate patch
+- Geometry/bbox coupling (#9) — separate patch
+- Dimension kind tagging (#3) — separate patch
 
-### File 3: Re-run indexer for the structural file (no code change)
+## Validation After Deploy
 
-After deploy, call `populate-search-index` once for the 18 already-OCR'd pages so `extracted_entities` gets backfilled. We can do this by re-invoking `process-pipeline` for the structural file — same trigger the user already uses (the "Reprocess" / re-parse path).
+1. Click "Re-index OCR Entities" on the active project
+2. Run SQL check on `drawing_search_index.extracted_entities` for non-empty `specs` and any `bar_callouts[].placement` field
+3. Read `audit_events` where `action = 'spec_extracted'` for the project
+4. Toast in Takeoff stage will report new callouts/dims/schedule rows
 
-## Out of scope
-
-- Changing `auto-estimate` logic — once `dimensions` and `bar_callouts` exist, the existing path will start producing real `quantity_count` / `total_length` / `total_weight`.
-- Schema changes, new columns, new tables.
-- UI changes in `TakeoffStage.tsx`.
-
-## Confirmation plan after deploy
-
-1. SQL check: `select page_number, jsonb_array_length(extracted_entities->'dimensions'), jsonb_array_length(extracted_entities->'bar_callouts'), jsonb_array_length(extracted_entities->'bar_schedule_rows') from drawing_search_index where project_id='a24bba42…' order by page_number;` — expect non-zero on most pages.
-2. SQL check: arch PDF `parse_status` flips from `parsing` → `indexed`.
-3. Refresh Takeoff page — expect real numbers on rows that previously showed "Need run" / 0.
-
-Reply **approve** to apply.
+No regression risk for existing rows — all new fields are additive; readers ignoring unknown keys keep working.
