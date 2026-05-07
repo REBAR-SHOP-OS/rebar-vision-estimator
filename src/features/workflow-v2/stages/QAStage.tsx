@@ -778,9 +778,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                             pageBox={pageBox}
                             approximate={bboxIsApprox}
                             title={sel?.title || "Modification"}
-                            description={[sel?.location_label, sel?.description || "Is this element correct as detected?"].filter(Boolean).join(" - ")}
                             onFix={() => setTab("action")}
-                            onImpact={() => setTab("impact")}
                           />
                         )}
                       </>
@@ -853,6 +851,16 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                 {anchorStatus === "approximate" && renderStatus === "ready" && previewUrl && (
                   <div className="absolute top-14 right-4 z-10 text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--status-inferred))] border border-[hsl(var(--status-inferred))]/40 bg-[hsl(var(--status-inferred))]/10 px-2 py-1">
                     Approximate anchor · review source excerpt before measuring
+                  </div>
+                )}
+                {canShowPointer && bbox && (
+                  <div className="absolute right-4 bottom-4 z-30 pointer-events-auto border border-border bg-card/95 shadow-2xl px-2 py-2 flex items-center gap-2">
+                    <div className="min-w-0 pr-1">
+                      <div className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground">Selected target</div>
+                      <div className="text-[11px] font-bold text-foreground truncate max-w-[180px]">{sel.location_label || sel.title}</div>
+                    </div>
+                    <button onClick={() => setTab("action")} className="px-3 py-1.5 bg-primary text-primary-foreground text-[10px] font-bold uppercase tracking-[0.1em] hover:opacity-90">Answer</button>
+                    <button onClick={() => setTab("impact")} className="px-3 py-1.5 bg-card border border-border text-foreground text-[10px] font-bold uppercase tracking-[0.1em] hover:bg-accent/40">Impact</button>
                   </div>
                 )}
               </>
@@ -1096,7 +1104,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 }
 
 function BBoxPointer({
-  bbox, imgW, imgH, zoom, pageBox, title, onFix, onImpact, approximate,
+  bbox, imgW, imgH, zoom, pageBox, title, onFix, approximate,
 }: {
   bbox: BBox;
   imgW: number;
@@ -1104,9 +1112,7 @@ function BBoxPointer({
   zoom: number;
   pageBox: { left: number; top: number; width: number; height: number };
   title: string;
-  description: string;
   onFix: () => void;
-  onImpact: () => void;
   approximate?: boolean;
 }) {
   // Bbox is in image-pixel space; the image is rendered with object-contain
@@ -1126,20 +1132,12 @@ function BBoxPointer({
   const haloPx = Math.max(0.5, 1.5 / z);
   const isShortBox = heightPx * z < 26 || widthPx * z < 42;
   const labelScale = Math.min(1, Math.max(0.72, 1 / z));
-  const chipOnRight = leftPx + widthPx + 116 < pageBox.left + pageBox.width;
-  const chipAbove = topPx - 34 > pageBox.top;
   const fillBg = approximate ? "rgba(245,158,11,0.035)" : "rgba(255,122,26,0.025)";
-  const chipStyle = chipOnRight
-    ? { left: "calc(100% + 12px)", top: "50%", transform: `translateY(-50%) scale(${labelScale})`, transformOrigin: "left center" }
-    : chipAbove
-      ? { left: "50%", bottom: "calc(100% + 12px)", transform: `translateX(-50%) scale(${labelScale})`, transformOrigin: "bottom center" }
-      : { left: "50%", top: "calc(100% + 12px)", transform: `translateX(-50%) scale(${labelScale})`, transformOrigin: "top center" };
-  const tooltipStyle = chipOnRight
-    ? { left: "calc(100% + 12px)", bottom: "calc(100% + 8px)", transform: `scale(${labelScale})`, transformOrigin: "left bottom" }
-    : { left: "50%", bottom: "calc(100% + 38px)", transform: `translateX(-50%) scale(${labelScale})`, transformOrigin: "bottom center" };
   return (
     <div
-      className="absolute pointer-events-auto group"
+      className="absolute pointer-events-auto group cursor-pointer"
+      onClick={(e) => { e.stopPropagation(); onFix(); }}
+      title={title}
       style={{
         left: `${leftPx}px`,
         top: `${topPx}px`,
@@ -1164,19 +1162,6 @@ function BBoxPointer({
           }}
         />
       )}
-      <div
-        className="absolute z-30 flex items-center gap-1 border border-border bg-card/95 shadow-lg px-1 py-1"
-        style={chipStyle}
-      >
-        <button onClick={(e) => { e.stopPropagation(); onFix(); }} className="px-2 py-1 bg-primary text-primary-foreground text-[9px] font-bold uppercase tracking-[0.1em] hover:opacity-90">Answer</button>
-        <button onClick={(e) => { e.stopPropagation(); onImpact(); }} className="px-2 py-1 bg-card border border-border text-foreground text-[9px] font-bold uppercase tracking-[0.1em] hover:bg-accent/40">Impact</button>
-      </div>
-      <div
-        className="absolute z-20 pointer-events-none opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity max-w-52 bg-card/95 border border-border shadow-xl px-2 py-1.5 text-[10px] text-foreground"
-        style={tooltipStyle}
-      >
-        <div className="font-bold uppercase tracking-[0.1em] truncate">{title}</div>
-      </div>
     </div>
   );
 }
