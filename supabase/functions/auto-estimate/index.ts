@@ -1675,6 +1675,14 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       const hasAssumption = !!(item._derivation || item._missing_refs?.length);
       const citationMissing = hasAssumption && !item.authority_section && !item.authority_quote;
       const qaAnchor = inferQaAnchorMeta(item.description, item.source_excerpt, item.source_sheet);
+      // Confidence ceiling for AI-only rows: if there's no anchor (no page,
+      // no bar-list match, no resolved geometry), cap at 0.6 so downstream
+      // approval gates can flag it. Matches the auto-bar-schedule rule.
+      const hasAnchor = !!(item._page_number || item._anchor_text || item._anchor_kind);
+      const aiOnly = !hasAnchor && (item._geometry_status === "unresolved" || !item._geometry_status);
+      const cappedItemConf = aiOnly
+        ? Math.min(Number(item.confidence) || 0, 0.6)
+        : Math.min(1, Math.max(0, Number(item.confidence) || 0));
       return {
       segment_id,
       project_id,
@@ -1684,7 +1692,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       quantity_count: Math.max(0, Math.round(Number(item.quantity_count) || 0)),
       total_length: Math.max(0, Number(item.total_length) || 0),
       total_weight: Math.max(0, Number(item.total_weight) || 0),
-      confidence: Math.min(1, Math.max(0, Number(item.confidence) || 0)),
+      confidence: cappedItemConf,
       item_type: String(item.item_type || "rebar"),
       status: (item._geometry_status === "unresolved" || citationMissing) ? "unresolved" : "draft",
       source_file_id: resolveRowSource(item),
