@@ -1118,6 +1118,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         const grid = aj.grid || aj.grid_reference || null;
         const zone = aj.zone || aj.zone_reference || aj.area || null;
         const calloutTag = aj.callout_tag || null;
+        const elementId = aj.element_id || null;
         const scheduleRowIdentity = aj.schedule_row_identity || null;
         const element = aj.element || aj.element_reference || aj.mark || aj.callout
           || aj.wall_name || aj.footing_name || aj.pad_name || null;
@@ -1127,7 +1128,8 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         if (aj.page_number) locParts.push(`Page ${aj.page_number}`);
         if (detail) locParts.push(`Detail ${detail}`);
         if (section) locParts.push(`Section ${section}`);
-        if (calloutTag) locParts.push(`Callout ${calloutTag}`);
+        if (elementId) locParts.push(elementId);
+        else if (calloutTag) locParts.push(`Callout ${calloutTag}`);
         if (grid) locParts.push(`Grid ${grid}`);
         if (zone) locParts.push(String(zone));
         if (element) locParts.push(String(element));
@@ -1147,9 +1149,11 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
           ? phrases[0]
           : phrases.slice(0, -1).join(", ") + ", and " + phrases[phrases.length - 1];
         const lookAt = locLabel || (aj.page_number ? `Page ${aj.page_number}` : "the drawing");
-        const findPart = element
-          ? `the ${noun} marked "${element}"`
-          : (excerpt ? `the ${noun} for "${String(excerpt).slice(0, 80)}"` : `the ${noun}`);
+        const findPart = elementId
+          ? `${noun} ${elementId}`
+          : element
+            ? `the ${noun} marked "${element}"`
+            : (excerpt ? `the ${noun} for "${String(excerpt).slice(0, 80)}"` : `the ${noun}`);
         const baseTitle = `${noun} — enter drawing dimensions`;
         const baseDesc = `Look at ${lookAt}. Find ${findPart}. Enter ${inputList} from the drawing.`;
         return ({
@@ -1171,6 +1175,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
           detail,
           section,
           callout_tag: calloutTag,
+          element_id: elementId,
           grid,
           zone,
           element,
