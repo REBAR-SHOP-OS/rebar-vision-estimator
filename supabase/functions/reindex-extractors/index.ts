@@ -187,11 +187,19 @@ Deno.serve(async (req) => {
     let totalCallouts = 0;
     let totalDims = 0;
     let totalRows = 0;
+    let totalSpecKeywords = 0;
+    let bestSpecsPage: { page_id: string; specs: Record<string, unknown>; hits: number } | null = null;
     for (const r of rows || []) {
       const text = (r as any).raw_text || "";
       const callouts = extractBarCallouts(text);
       const dims = extractDimensions(text);
       const schedule = extractBarSchedule(text);
+      const specs = extractSpecs(text);
+      const specHits = Array.isArray((specs as any).detected_keywords) ? (specs as any).detected_keywords.length : 0;
+      totalSpecKeywords += specHits;
+      if (specHits > 0 && (!bestSpecsPage || specHits > bestSpecsPage.hits)) {
+        bestSpecsPage = { page_id: (r as any).id, specs, hits: specHits };
+      }
       totalCallouts += callouts.length;
       totalDims += dims.length;
       totalRows += schedule.length;
@@ -202,12 +210,28 @@ Deno.serve(async (req) => {
         bar_callouts: callouts,
         dimensions: dims,
         bar_schedule_rows: schedule,
+        specs,
       };
       const { error: upErr } = await supabase
         .from("drawing_search_index")
         .update({ extracted_entities: next, extraction_version: EXTRACTION_VERSION })
         .eq("id", (r as any).id);
       if (!upErr) updated++;
+    }
+
+    if (bestSpecsPage) {
+      await supabase.from("audit_events").insert({
+        user_id: userId,
+        project_id,
+        entity_type: "project",
+        action: "spec_extracted",
+        metadata: {
+          specs: bestSpecsPage.specs,
+          source_page_id: bestSpecsPage.page_id,
+          hits: bestSpecsPage.hits,
+          extraction_version: EXTRACTION_VERSION,
+        },
+      });
     }
 
     return new Response(JSON.stringify({
@@ -217,6 +241,8 @@ Deno.serve(async (req) => {
       bar_callouts: totalCallouts,
       dimensions: totalDims,
       schedule_rows: totalRows,
+      spec_keywords: totalSpecKeywords,
+      specs_authoritative_page: bestSpecsPage?.page_id || null,
       extraction_version: EXTRACTION_VERSION,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
