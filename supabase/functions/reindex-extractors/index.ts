@@ -159,18 +159,25 @@ function extractSpecs(rawText: string): Record<string, unknown> {
     ["PILE\\s*CAPS?", "pile_caps"],
   ] as const;
   for (const [pat, key] of buckets) {
-    const re = new RegExp(`\\b(?:${pat})\\b[^\\n]{0,140}?(\\d{2})\\s*MPA`, "g");
+    const re = new RegExp(`\\b(?:${pat})\\b[^\\n]{0,140}?(?<!\\d)(\\d{2})\\s*MPA`, "g");
     let mm: RegExpExecArray | null;
     while ((mm = re.exec(text)) !== null) {
-      specs.concrete_strength[key] = +mm[1];
-      specs.detected_keywords.push(`fc:${key}=${mm[1]}MPa`);
+      const v = +mm[1];
+      if (v < 15 || v > 80) continue;
+      if (specs.concrete_strength[key] == null) {
+        specs.concrete_strength[key] = v;
+        specs.detected_keywords.push(`fc:${key}=${v}MPa`);
+      }
     }
   }
   // Plain Fc' = 25 MPa
-  const reFc = /\b(?:FC['\u2032]?|F'?C)\s*[:=]?\s*(\d{2})\s*MPA/g;
+  const reFc = /\b(?:FC['\u2032]?|F'?C)\s*[:=]?\s*(?<!\d)(\d{2})\s*MPA/g;
   while ((m = reFc.exec(text)) !== null) {
-    specs.concrete_strength.default = +m[1];
-    specs.detected_keywords.push(`fc:default=${m[1]}MPa`);
+    const v = +m[1];
+    if (v >= 15 && v <= 80 && specs.concrete_strength.default == null) {
+      specs.concrete_strength.default = v;
+      specs.detected_keywords.push(`fc:default=${v}MPa`);
+    }
   }
   // Exposure / durability classes (CSA A23.1)
   const reExp = /\b(C-?XL|C-?[12]|F-?[12]|N|S-?[123]|A-?[123]|R-?[12])\b/g;
@@ -189,11 +196,21 @@ function extractSpecs(rawText: string): Record<string, unknown> {
     if (!seenC.has(c)) { seenC.add(c); specs.codes.push(c); }
   }
   if (specs.codes.length) specs.detected_keywords.push(`codes:${specs.codes.length}`);
-  // Geotech bearing capacity
-  const reBear = /(\d{2,4})\s*KPA[^\n]{0,30}?\b(SLS|ULS)\b/g;
-  while ((m = reBear.exec(text)) !== null) {
-    if (m[2] === "SLS") specs.bearing.sls_kpa = +m[1]; else specs.bearing.uls_kpa = +m[1];
-    specs.detected_keywords.push(`bearing:${m[2]}=${m[1]}kPa`);
+  // Geotech bearing — SLS/ULS may appear before or after kPa value
+  const reBear1 = /(\d{2,4})\s*KPA[^\n]{0,30}?\b(SLS|ULS)\b/g;
+  const reBear2 = /\b(SLS|ULS)\b[^\n]{0,80}?(\d{2,4})\s*KPA/g;
+  for (const re of [reBear1, reBear2]) {
+    let mm: RegExpExecArray | null;
+    while ((mm = re.exec(text)) !== null) {
+      const isFirstNum = re === reBear1;
+      const tag = isFirstNum ? mm[2] : mm[1];
+      const v = +(isFirstNum ? mm[1] : mm[2]);
+      const k = tag === "SLS" ? "sls_kpa" : "uls_kpa";
+      if (specs.bearing[k] == null) {
+        specs.bearing[k] = v;
+        specs.detected_keywords.push(`bearing:${tag}=${v}kPa`);
+      }
+    }
   }
   return specs;
 }
