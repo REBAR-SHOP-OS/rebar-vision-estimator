@@ -26,6 +26,7 @@ const FIELD_DEFS: Record<string, EngineerAnswerField> = {
   length: { key: "length", label: "Length", placeholder: "e.g. 3000mm" },
   width: { key: "width", label: "Width", placeholder: "e.g. 1200mm" },
   height: { key: "height", label: "Height", placeholder: "e.g. 203mm" },
+  thickness: { key: "thickness", label: "Thickness", placeholder: "e.g. 152mm" },
   bar_callout: { key: "bar_callout", label: "Bar callout", placeholder: "e.g. 15M @ 406mm O.C." },
   quantity: { key: "quantity", label: "Quantity", placeholder: "e.g. 2" },
   notes: { key: "notes", label: "Notes", placeholder: "Optional drawing note or assumption" },
@@ -55,6 +56,61 @@ function extractLevelingPadDowelCallout(text: string): string {
     .filter(Boolean)
     .join(" ")
     .trim();
+}
+
+function normalizeCalloutText(text: string): string {
+  return text
+    .replace(/\s+/g, " ")
+    .replace(/\bW\/\b/gi, "with")
+    .replace(/\bEA\.?\s*WAY\b/gi, "each way")
+    .replace(/\bE\.?\s*W\.?\b/gi, "each way")
+    .replace(/\bO\.?\s*C\.?\b/gi, "O.C.")
+    .replace(/O\.C\.\./gi, "O.C.")
+    .replace(/\bCENTRE\b/gi, "centre")
+    .replace(/\bCENTER\b/gi, "centre")
+    .trim();
+}
+
+function extractThickness(text: string): string | null {
+  const normalized = normalizeCalloutText(text);
+  return normalized.match(/\b\d+\s*mm\b(?=\s+(?:frost\s+slab|foundation\s+wall|slab|wall|pad|footing)\b)/i)?.[0].replace(/\s+/g, "") || null;
+}
+
+function extractRebarCallout(text: string): string | null {
+  const normalized = normalizeCalloutText(text);
+  const match = normalized.match(/\b(10M|15M|20M|25M|30M|35M)\s*@\s*(\d+\s*mm)\s*O\.C\.?/i);
+  if (!match) return null;
+  const tail = normalized.slice((match.index || 0) + match[0].length);
+  const qualifierMatch = tail.match(/^[\s.:-]*(each way|e\/w|vert(?:ical)?|horiz(?:ontal)?)/i);
+  const qualifier = qualifierMatch ? ` ${qualifierMatch[1].toLowerCase().replace("e/w", "each way")}` : "";
+  return `${match[1].toUpperCase()} @ ${match[2].replace(/\s+/g, "")} O.C.${qualifier}`;
+}
+
+function extractPlacementNote(text: string): string | null {
+  const normalized = normalizeCalloutText(text);
+  const match = normalized.match(/\b(?:in|at)\s+the\s+(centre|center|middle|top|bottom)\s+of\s+(?:the\s+)?([a-z\s]+?)(?:[.;,]|$)/i);
+  if (!match) return null;
+  return `in the ${match[1].toLowerCase().replace("center", "centre")} of ${match[2].trim().toLowerCase()}`;
+}
+
+function inferDrawingObject(text: string, fallback?: string | null): string {
+  const t = text.toLowerCase();
+  if (/frost\s+slab/.test(t)) return "frost slab";
+  if (/\bslab\b/.test(t)) return "slab";
+  if (/foundation\s+wall|frost\s+wall|\bwall\b/.test(t)) return "foundation wall";
+  if (/strip\s+footing|wall\s+footing|footing/.test(t)) return "footing";
+  if (/housekeeping\s+pad|level(?:l)?ing\s+pad|equipment\s+pad/.test(t)) return "pad";
+  return fallback || "drawing item";
+}
+
+function missingDimensionAsk(object: string, missingRefs: string[]): string {
+  const missing = missingRefs.join(" ").toLowerCase();
+  if (/slab/.test(object)) return "slab length and width";
+  if (/wall/.test(object)) return "wall length and height";
+  if (/pad/.test(object)) return "pad length and width";
+  if (/footing/.test(object)) return "footing length";
+  if (/dimension|length|width|height/.test(missing)) return "length and width";
+  return "remaining drawing dimensions";
 }
 
 function asSentence(text: string): string {
@@ -93,7 +149,8 @@ export function inferEngineerAnswerFields(missingRefs: string[] = [], text = "")
 
   if (/\b(length|run|perimeter|edge|dimension|dimensions|long)\b/.test(haystack)) addField(keys, "length");
   if (/\b(width|wide)\b/.test(haystack)) addField(keys, "width");
-  if (/\b(height|high|depth|thick|thickness)\b/.test(haystack)) addField(keys, "height");
+  if (/\b(height|high|depth)\b/.test(haystack)) addField(keys, "height");
+  if (/\b(thick|thickness)\b/.test(haystack) || extractThickness(text)) addField(keys, "thickness");
   if (/\b(bar|rebar|callout|spacing|o\.?c\.?|@\b|15m|20m|10m|25m)\b/.test(haystack)) addField(keys, "bar_callout");
   if (/\b(quantity|qty|count|number)\b/.test(haystack)) addField(keys, "quantity");
 
@@ -137,6 +194,30 @@ export function buildEngineerAnswerDraft(input: SmartQuestionInput): EngineerAns
       question,
       draftAnswer,
       confidence: quantity ? "high" : "medium",
+      needsConfirmation: true,
+      structuredValues,
+    };
+  }
+
+  const visibleThickness = extractThickness(sourceText);
+  const visibleBarCallout = extractRebarCallout(sourceText);
+  if (visibleThickness || visibleBarCallout) {
+    const object = inferDrawingObject(sourceText, input.objectIdentity);
+    const dimensions = missingDimensionAsk(object, missingRefs);
+    const placement = extractPlacementNote(sourceText);
+    const visibleParts = [
+      visibleThickness ? `${visibleThickness} ${object}` : object,
+      visibleBarCallout ? `with ${visibleBarCallout}` : null,
+      placement,
+    ].filter(Boolean).join(" ");
+    const structuredValues: Record<string, string> = {};
+    if (visibleThickness) structuredValues.thickness = visibleThickness;
+    if (visibleBarCallout) structuredValues.bar_callout = visibleBarCallout;
+    if (placement) structuredValues.notes = placement;
+    return {
+      question: `On ${loc}, find the ${object}. The drawing shows ${asSentence(visibleParts)} What ${dimensions} should be used?`,
+      draftAnswer: `Found: ${visibleThickness ? `${visibleThickness} ${object}` : object}${visibleBarCallout ? `; rebar ${visibleBarCallout}` : ""}${placement ? ` ${placement}` : ""}. Please confirm the ${dimensions}.`,
+      confidence: "medium",
       needsConfirmation: true,
       structuredValues,
     };

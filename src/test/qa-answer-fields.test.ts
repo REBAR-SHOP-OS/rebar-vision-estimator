@@ -75,4 +75,37 @@ describe("qa answer fields", () => {
     });
     expect(draft.draftAnswer).toBe('Found: run length 10000mm; use 400mm (16") long 10M dowels @ 300mm (12") O.C.; quantity = 34 dowels. Please confirm.');
   });
+
+  it("drafts an intelligent answer from frost slab rebar callouts", () => {
+    const excerpt = "152mm FROST SLAB W/ 15M @ 305mm O.C. EACH WAY IN THE CENTRE OF SLAB.";
+    const fields = inferEngineerAnswerFields(["rebar_callout", "element_dimensions"], excerpt).map((field) => field.key);
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P12",
+      missingRefs: ["rebar_callout", "element_dimensions"],
+      sourceExcerpt: excerpt,
+    });
+
+    expect(fields).toContain("thickness");
+    expect(fields).toContain("bar_callout");
+    expect(draft.question).toBe("On P12, find the frost slab. The drawing shows 152mm frost slab with 15M @ 305mm O.C. each way in the centre of slab. What slab length and width should be used?");
+    expect(draft.draftAnswer).toBe("Found: 152mm frost slab; rebar 15M @ 305mm O.C. each way in the centre of slab. Please confirm the slab length and width.");
+    expect(draft.structuredValues).toEqual({
+      thickness: "152mm",
+      bar_callout: "15M @ 305mm O.C. each way",
+      notes: "in the centre of slab",
+    });
+  });
+
+  it("drafts visible wall callouts but still asks for missing dimensions", () => {
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P6",
+      missingRefs: ["element_dimensions"],
+      sourceExcerpt: "203mm FOUNDATION WALL W/ 15M @ 406mm O.C. MIDDLE EACH WAY.",
+    });
+
+    expect(draft.question).toContain("find the foundation wall");
+    expect(draft.question).toContain("wall length and height");
+    expect(draft.draftAnswer).toContain("Found: 203mm foundation wall; rebar 15M @ 406mm O.C.");
+    expect(draft.structuredValues.thickness).toBe("203mm");
+  });
 });

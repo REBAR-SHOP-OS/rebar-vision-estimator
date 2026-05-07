@@ -1075,7 +1075,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                         <div className="text-[10px] text-muted-foreground bg-card/50 border border-border p-2">
                           {engineerDraft.confidence === "high"
                             ? "High confidence: confirm or edit this answer."
-                            : "Needs confirmation: app found the callout but needs the run length."}
+                            : "Found drawing callout: confirm missing dimensions."}
                         </div>
                       )}
                       <div className="grid grid-cols-2 gap-2 text-[10px]">
