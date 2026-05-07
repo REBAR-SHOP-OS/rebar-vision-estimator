@@ -106,7 +106,7 @@ export function buildEstimationAudit(params: {
   extraction?: ExtractionAuditResult | null;
   estimatorConfirmed?: boolean;
 }): EstimationAuditResult {
-  const unresolvedRows = params.rows.filter((row) => row.geometry_status === "unresolved");
+  const unresolvedRows = params.rows.filter((row) => row.geometry_status !== "resolved" || row.count <= 0 || row.length <= 0 || row.weight <= 0);
   const noEvidenceRows = params.rows.filter((row) => !row.source_file_id && !row.page_number);
   const duplicateKeys = new Set<string>();
   const duplicateRows = params.rows.filter((row) => {
@@ -115,7 +115,7 @@ export function buildEstimationAudit(params: {
     duplicateKeys.add(key);
     return false;
   });
-  const qaOpen = params.issues.filter((issue) => !["resolved", "closed"].includes(String(issue.status || "").toLowerCase()));
+  const qaOpen = params.issues.filter((issue) => !["answered", "resolved", "closed"].includes(String(issue.status || "").toLowerCase()));
   const extractionOk = !params.extraction || params.extraction.status === "ready";
 
   const checklist = [

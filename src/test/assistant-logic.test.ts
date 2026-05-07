@@ -138,6 +138,111 @@ describe("workflow assistant logic", () => {
     expect(result.content).toContain("foundation wall");
   });
 
+  it("does not loop over duplicate answered brick ledge QA issues after apply", () => {
+    const brickIssue = (id: string): WorkflowQaIssue => ({
+      id,
+      title: "P17: brick ledge",
+      description: "Look at P17. Find the brick ledge.",
+      severity: "error",
+      status: "open",
+      issue_type: "unresolved_geometry",
+      location_label: "P17",
+      location: {
+        page_number: 17,
+        element_reference: "brick ledge",
+        source_excerpt: "15M CONT. REINFORCEMENT @ TOP OF BRICK LEDGE",
+      },
+      linked_item: {
+        id: id.replace("issue", "item"),
+        description: "brick ledge",
+        bar_size: "10M",
+        quantity_count: 0,
+        total_length: 0,
+        total_weight: 0,
+        missing_refs: ["rebar_callout", "element_dimensions"],
+      },
+      source_refs: [{ engineer_answer: { status: "answered", answer_text: "Brick ledge dimensions per detail." } }],
+    });
+    const wallIssue: WorkflowQaIssue = {
+      id: "legacy:issue-wall",
+      title: "P12: foundation wall",
+      description: "Missing wall dimensions.",
+      severity: "error",
+      status: "open",
+      issue_type: "unresolved_geometry",
+      location_label: "P12",
+      location: { page_number: 12, element_reference: "foundation wall", source_excerpt: 'Continuous horizontal bars @top of foundation wall w/ 800mm (32") hook' },
+      linked_item: { id: "item-wall", description: "foundation wall", bar_size: "15M", quantity_count: 0, total_length: 0, total_weight: 0, missing_refs: ["rebar_callout", "element_dimensions"] },
+    };
+
+    const result = buildFinishEstimationAgentResponse({
+      files: [],
+      qaIssues: [brickIssue("legacy:issue-brick-1"), brickIssue("legacy:issue-brick-2"), brickIssue("legacy:issue-brick-3"), wallIssue],
+      takeoffRows: [],
+      extractionAudit: null,
+    });
+
+    expect(result.content).not.toContain("Brick ledge dimensions per detail");
+    expect(result.suggestion?.issueId).toBe("legacy:issue-wall");
+    expect(result.content).toContain("1 open QA issue");
+  });
+
+  it("deduplicates identical open QA findings and skips the whole duplicate group", () => {
+    const makeBrickIssue = (id: string): WorkflowQaIssue => ({
+      id,
+      title: "P17: brick ledge",
+      description: "Look at P17. Find the brick ledge.",
+      severity: "error",
+      status: "open",
+      issue_type: "unresolved_geometry",
+      location_label: "P17",
+      location: { page_number: 17, element_reference: "brick ledge", source_excerpt: "15M CONT. REINFORCEMENT @ TOP OF BRICK LEDGE" },
+      linked_item: { id, description: "brick ledge", bar_size: "10M", quantity_count: 0, total_length: 0, total_weight: 0, missing_refs: ["rebar_callout", "element_dimensions"] },
+    });
+
+    const result = buildNextEstimationAgentResponse({
+      files: [],
+      qaIssues: [makeBrickIssue("legacy:issue-brick-1"), makeBrickIssue("legacy:issue-brick-2")],
+      takeoffRows: [],
+      extractionAudit: null,
+    }, { skipIssueIds: ["legacy:issue-brick-1"] });
+
+    expect(result.suggestion).toBeNull();
+    expect(result.content).toContain("No open QA issues found");
+  });
+
+  it("groups duplicate blocked row findings instead of listing the same blocker repeatedly", () => {
+    const row = (mark: string): WorkflowTakeoffRow => ({
+      id: `legacy:${mark}`,
+      raw_id: mark,
+      raw_kind: "legacy",
+      mark,
+      size: "10M",
+      shape: "115mm (4-1/2\") BRICK LEDGE - 10M VERTICAL",
+      count: 0,
+      length: 0,
+      weight: 0,
+      status: "blocked",
+      source: "Drawing",
+      segment_id: null,
+      segment_name: "Walls",
+      source_file_id: "file-1",
+      page_number: 17,
+      geometry_status: "unresolved",
+      missing_refs: ["element_dimensions"],
+    });
+
+    const result = buildFinishEstimationAgentResponse({
+      files: [],
+      qaIssues: [],
+      takeoffRows: [row("M001"), row("M002")],
+      extractionAudit: null,
+    });
+
+    expect(result.content).toContain("M001 (M002 duplicate)");
+    expect(result.content).not.toContain("- M002:");
+  });
+
   it("builds a suggestion from a QA issue and linked row", () => {
     const issue: WorkflowQaIssue = {
       id: "legacy:issue-1",

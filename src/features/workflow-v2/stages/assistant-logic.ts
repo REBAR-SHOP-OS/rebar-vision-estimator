@@ -80,26 +80,130 @@ export function isFinishAuditIntent(text: string): boolean {
     && /\b(estimate|estimation|takeoff|project|qa|output|confidence|confirmed|audit)\b/i.test(text);
 }
 
+const CLOSED_ASSISTANT_ISSUE_STATUSES = new Set(["answered", "resolved", "closed"]);
+
+function normalizeSignatureText(value: unknown): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^a-z0-9@./"() -]/g, "")
+    .trim();
+}
+
+function sourceRefsArray(sourceRefs: unknown): any[] {
+  if (Array.isArray(sourceRefs)) return sourceRefs;
+  if (sourceRefs && typeof sourceRefs === "object") return [sourceRefs];
+  return [];
+}
+
+function latestEngineerAnswerStatus(issue: WorkflowQaIssue): string | null {
+  const refs = sourceRefsArray(issue.source_refs);
+  for (const ref of [...refs].reverse()) {
+    const status = ref?.engineer_answer?.status;
+    if (status) return String(status).toLowerCase();
+  }
+  return null;
+}
+
+function isAssistantOpenIssue(issue: WorkflowQaIssue): boolean {
+  const status = String(issue.status || "").toLowerCase();
+  if (CLOSED_ASSISTANT_ISSUE_STATUSES.has(status)) return false;
+  const engineerStatus = latestEngineerAnswerStatus(issue);
+  if (engineerStatus && CLOSED_ASSISTANT_ISSUE_STATUSES.has(engineerStatus)) return false;
+  return true;
+}
+
+function issueDisplaySignature(issue: WorkflowQaIssue): string {
+  const firstRef = sourceRefsArray(issue.source_refs)[0] || null;
+  const draft = buildEngineerAnswerDraft({
+    locationLabel: issue.location_label,
+    pageNumber: issue.location?.page_number || issue.locator?.page_number || undefined,
+    objectIdentity: issue.location?.element_reference || issue.linked_item?.description || null,
+    description: issue.description || issue.raw_description || null,
+    title: issue.title,
+    sourceExcerpt: issue.location?.source_excerpt || issue.locator?.anchor_text || issue.linked_item?.description || null,
+    missingRefs: issue.linked_item?.missing_refs || [],
+    linearGeometry: firstRef?.linear_geometry || null,
+    wallGeometry: firstRef?.wall_geometry || null,
+  });
+  return normalizeSignatureText([
+    issue.location_label,
+    issue.location?.element_reference || issue.linked_item?.description || issue.title,
+    draft.draftAnswer || issue.location?.source_excerpt || issue.description || issue.raw_description,
+  ].join("|"));
+}
+
+function getAssistantOpenIssues(issues: WorkflowQaIssue[]): WorkflowQaIssue[] {
+  const seen = new Set<string>();
+  const open: WorkflowQaIssue[] = [];
+  for (const issue of issues) {
+    if (!isAssistantOpenIssue(issue)) continue;
+    const signature = issueDisplaySignature(issue);
+    if (seen.has(signature)) continue;
+    seen.add(signature);
+    open.push(issue);
+  }
+  return open;
+}
+
+function rowNeedsAnswer(row: WorkflowTakeoffRow): boolean {
+  return row.geometry_status !== "resolved" || row.count <= 0 || row.length <= 0 || row.weight <= 0;
+}
+
+function rowDisplaySignature(row: WorkflowTakeoffRow): string {
+  return normalizeSignatureText([
+    row.segment_name,
+    row.size,
+    row.shape,
+    row.source_file_id || "",
+    row.page_number || "",
+  ].join("|"));
+}
+
+function getBlockedTakeoffRows(rows: WorkflowTakeoffRow[]): Array<{ row: WorkflowTakeoffRow; duplicateMarks: string[] }> {
+  const bySignature = new Map<string, { row: WorkflowTakeoffRow; duplicateMarks: string[] }>();
+  for (const row of rows) {
+    if (!rowNeedsAnswer(row)) continue;
+    const signature = rowDisplaySignature(row);
+    const existing = bySignature.get(signature);
+    if (existing) {
+      existing.duplicateMarks.push(row.mark);
+    } else {
+      bySignature.set(signature, { row, duplicateMarks: [] });
+    }
+  }
+  return Array.from(bySignature.values());
+}
+
+function normalizeAssistantAuditSnapshot(snapshot: AssistantProjectSnapshot): AssistantProjectSnapshot {
+  return {
+    ...snapshot,
+    qaIssues: getAssistantOpenIssues(snapshot.qaIssues),
+  };
+}
+
 export function buildWorkingSteps(snapshot: AssistantProjectSnapshot): string[] {
-  const blocked = snapshot.takeoffRows.filter((row) => row.geometry_status === "unresolved").length;
+  const openIssues = getAssistantOpenIssues(snapshot.qaIssues);
+  const blocked = getBlockedTakeoffRows(snapshot.takeoffRows).length;
   return [
     `Reading ${snapshot.files.length} project file${snapshot.files.length === 1 ? "" : "s"}`,
     snapshot.extractionAudit
       ? `Reviewing OCR audit (${snapshot.extractionAudit.indexedPages}/${snapshot.extractionAudit.pageCount || snapshot.extractionAudit.indexedPages} pages indexed)`
       : "Checking OCR audit metadata",
-    `Checking ${snapshot.qaIssues.length} open QA issue${snapshot.qaIssues.length === 1 ? "" : "s"}`,
+    `Checking ${openIssues.length} open QA issue${openIssues.length === 1 ? "" : "s"}`,
     `Finding linked takeoff rows (${blocked} unresolved)`,
     "Waiting for estimator confirmation before applying changes",
   ];
 }
 
 export function buildFinishAuditResponse(snapshot: AssistantProjectSnapshot): string {
+  const auditSnapshot = normalizeAssistantAuditSnapshot(snapshot);
   const audit = buildEstimationAudit({
-    files: snapshot.files,
-    rows: snapshot.takeoffRows,
-    issues: snapshot.qaIssues,
-    extraction: snapshot.extractionAudit,
-    estimatorConfirmed: snapshot.estimatorConfirmed,
+    files: auditSnapshot.files,
+    rows: auditSnapshot.takeoffRows,
+    issues: auditSnapshot.qaIssues,
+    extraction: auditSnapshot.extractionAudit,
+    estimatorConfirmed: auditSnapshot.estimatorConfirmed,
   });
   const title = audit.status === "audit_complete"
     ? "Audit Complete - Estimator Confirmation Ready"
@@ -109,7 +213,7 @@ export function buildFinishAuditResponse(snapshot: AssistantProjectSnapshot): st
   const checklist = audit.checklist
     .map((item) => `${item.ok ? "[x]" : "[ ]"} ${item.label}: ${item.detail}`)
     .join("\n");
-  const nextQuestion = buildNextAuditQuestion(snapshot, audit.blockers);
+  const nextQuestion = buildNextAuditQuestion(auditSnapshot, audit.blockers);
 
   return [
     `**${title}**`,
@@ -129,17 +233,18 @@ export function buildFinishAuditResponse(snapshot: AssistantProjectSnapshot): st
 }
 
 export function buildFinishEstimationAgentResponse(snapshot: AssistantProjectSnapshot): FinishEstimationAgentResult {
-  const workingSteps = buildWorkingSteps(snapshot);
-  const auditText = buildFinishAuditResponse(snapshot);
-  const nextSuggestion = buildBestEstimatorSuggestion(snapshot);
-  const blockedRows = snapshot.takeoffRows
-    .filter((row) => row.geometry_status !== "resolved" || row.count <= 0 || row.length <= 0 || row.weight <= 0)
-    .slice(0, 8);
+  const auditSnapshot = normalizeAssistantAuditSnapshot(snapshot);
+  const workingSteps = buildWorkingSteps(auditSnapshot);
+  const auditText = buildFinishAuditResponse(auditSnapshot);
+  const nextSuggestion = buildBestEstimatorSuggestion(auditSnapshot);
+  const blockedRows = getBlockedTakeoffRows(auditSnapshot.takeoffRows).slice(0, 8);
   const rowFindings = blockedRows.length
-    ? blockedRows.map((row) => `- ${row.mark}: ${describeTakeoffRowFinding(row)}`).join("\n")
+    ? blockedRows.map(({ row, duplicateMarks }) => {
+      const suffix = duplicateMarks.length ? ` (${duplicateMarks.join(", ")} duplicate${duplicateMarks.length === 1 ? "" : "s"})` : "";
+      return `- ${row.mark}${suffix}: ${describeTakeoffRowFinding(row)}`;
+    }).join("\n")
     : "- No blocked takeoff rows found.";
-  const openQa = snapshot.qaIssues
-    .filter((issue) => !["resolved", "closed"].includes(String(issue.status || "").toLowerCase()))
+  const openQa = auditSnapshot.qaIssues
     .slice(0, 6)
     .map((issue) => `- ${issue.location_label || issue.title}: ${buildIssueFinding(issue)}`)
     .join("\n");
@@ -180,19 +285,21 @@ export function buildNextEstimationAgentResponse(
   options: { skipIssueIds?: string[] } = {},
 ): FinishEstimationAgentResult {
   const skip = new Set((options.skipIssueIds || []).map((id) => String(id)));
+  const skippedIssues = snapshot.qaIssues.filter((issue) => skip.has(issue.id));
+  const skippedSignatures = new Set(skippedIssues.map((issue) => issueDisplaySignature(issue)));
   return buildFinishEstimationAgentResponse({
     ...snapshot,
-    qaIssues: snapshot.qaIssues.filter((issue) => !skip.has(issue.id)),
+    qaIssues: snapshot.qaIssues.filter((issue) => !skip.has(issue.id) && !skippedSignatures.has(issueDisplaySignature(issue))),
   });
 }
 
 function buildNextAuditQuestion(snapshot: AssistantProjectSnapshot, blockers: string[]): string | null {
-  const unresolvedRow = snapshot.takeoffRows.find((row) => row.geometry_status === "unresolved");
+  const unresolvedRow = getBlockedTakeoffRows(snapshot.takeoffRows)[0]?.row || null;
   if (unresolvedRow) {
     const missing = unresolvedRow.missing_refs?.length ? unresolvedRow.missing_refs.join(", ") : "quantity/length basis";
     return `I found row ${unresolvedRow.mark} (${unresolvedRow.shape}) but ${missing} is still missing. What confirmed length, quantity, or drawing basis should I use?`;
   }
-  const openIssue = snapshot.qaIssues.find((issue) => !["resolved", "closed"].includes(String(issue.status || "").toLowerCase()));
+  const openIssue = getAssistantOpenIssues(snapshot.qaIssues)[0] || null;
   if (openIssue) {
     return `Issue ${openIssue.location_label || openIssue.title} is still open. Should I save the found answer, mark it for review, or resolve it?`;
   }
@@ -242,7 +349,7 @@ export function pickAssistantIssue(prompt: string, issues: WorkflowQaIssue[], ro
 }
 
 export function buildAssistantSuggestion(prompt: string, snapshot: AssistantProjectSnapshot): AssistantSuggestion | null {
-  const issue = pickAssistantIssue(prompt, snapshot.qaIssues, snapshot.takeoffRows);
+  const issue = pickAssistantIssue(prompt, getAssistantOpenIssues(snapshot.qaIssues), snapshot.takeoffRows);
   if (!issue) return null;
 
   const linkedRow = snapshot.takeoffRows.find((row) => row.raw_id === issue.linked_item?.id)
@@ -280,7 +387,7 @@ export function buildAssistantSuggestion(prompt: string, snapshot: AssistantProj
 }
 
 function buildBestEstimatorSuggestion(snapshot: AssistantProjectSnapshot): AssistantSuggestion | null {
-  const openIssues = snapshot.qaIssues.filter((issue) => !["resolved", "closed"].includes(String(issue.status || "").toLowerCase()));
+  const openIssues = getAssistantOpenIssues(snapshot.qaIssues);
   if (openIssues.length === 0) return null;
   const scored = openIssues
     .map((issue) => {
