@@ -1079,6 +1079,13 @@ serve(async (req) => {
           });
         }
         if (!isPageRelevant(text)) continue;
+        // Sheet-category gate (#5): skip pages explicitly marked non-rebar-relevant
+        // by populate-search-index / reindex-extractors (e.g. arch/MEP/landscape).
+        // Treat missing flag as relevant (backward compatible with un-reindexed data).
+        const rebarRelevant = (page.extracted_entities as any)?.rebar_relevant;
+        if (rebarRelevant === false) {
+          continue;
+        }
         const snip = `[SHEET ${sheetTag} · Page ${page.page_number}] ${text.substring(0, 2000)}`;
         relevantPages.push({ snip, document_version_id: page.document_version_id || null, page_number: Number(page.page_number) || 0, sheetTag: String(sheetTag) });
         if (disc.includes("shop") || isShopName(dvFileName) || /\bSD\b|SHOP DRAWING/i.test(text.slice(0, 200))) shop.push(snip);
