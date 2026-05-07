@@ -1990,6 +1990,21 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       if (oiErr) console.warn("[auto-estimate] outlier issue insert failed:", oiErr.message);
     }
 
+    // Segment integrity score (Patch G):
+    //   harmonic_mean(item_confidence) × (1 − %outliers) × (1 − cross_engine_delta)
+    // Provides a single deterministic 0..1 score the regression harness targets.
+    try {
+      const confs = dedupedRows.map((r: any) => Math.max(0.01, Number(r.confidence) || 0.01));
+      const harmonic = confs.length
+        ? confs.length / confs.reduce((s, c) => s + 1 / c, 0)
+        : 0;
+      const outlierPct = dedupedRows.length ? outlierFlags.size / dedupedRows.length : 0;
+      const integrity = +(harmonic * (1 - outlierPct) * (1 - Math.min(1, crossEngineDelta))).toFixed(3);
+      await supabase.from("segments").update({ confidence: integrity }).eq("id", segment_id);
+    } catch (e) {
+      console.warn("[auto-estimate] segment integrity update failed:", (e as Error).message);
+    }
+
     // Open a validation_issue for every unresolved row so the QA queue surfaces them.
     const unresolvedIssues = dedupedRows
       .map((r, idx) => ({ r, id: inserted?.[idx]?.id }))
