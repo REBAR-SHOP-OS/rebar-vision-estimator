@@ -998,6 +998,32 @@ serve(async (req) => {
       });
     }
 
+    // Dimensions-First Gate: refuse to estimate until every segment in the
+    // project has been confirmed (`complete`) or explicitly excluded (`na`).
+    {
+      const { data: gateRows } = await supabase
+        .from("segments")
+        .select("id, name, dimensions_status")
+        .eq("project_id", project_id);
+      const blockers = (gateRows ?? []).filter(
+        (s: any) => s.dimensions_status !== "complete" && s.dimensions_status !== "na",
+      );
+      if (blockers.length > 0) {
+        return new Response(JSON.stringify({
+          error: "DIMENSIONS_INCOMPLETE",
+          message: "Lock dimensions for every segment before generating an estimate.",
+          blockers: blockers.map((s: any) => ({
+            id: s.id,
+            name: s.name,
+            dimensions_status: s.dimensions_status,
+          })),
+        }), {
+          status: 422,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // Gather context
     const [segRes, projRes, filesRes, stdRes, existingRes, searchIndexRes, knowledgeRes, sheetMetaRes] = await Promise.all([
       supabase.from("segments").select("*").eq("id", segment_id).single(),

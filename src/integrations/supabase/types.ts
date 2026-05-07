@@ -1518,6 +1518,9 @@ export type Database = {
         Row: {
           confidence: number | null
           created_at: string | null
+          dimensions_locked_at: string | null
+          dimensions_locked_by: string | null
+          dimensions_status: string
           drawing_readiness: string | null
           id: string
           level_label: string | null
@@ -1533,6 +1536,9 @@ export type Database = {
         Insert: {
           confidence?: number | null
           created_at?: string | null
+          dimensions_locked_at?: string | null
+          dimensions_locked_by?: string | null
+          dimensions_status?: string
           drawing_readiness?: string | null
           id?: string
           level_label?: string | null
@@ -1548,6 +1554,9 @@ export type Database = {
         Update: {
           confidence?: number | null
           created_at?: string | null
+          dimensions_locked_at?: string | null
+          dimensions_locked_by?: string | null
+          dimensions_status?: string
           drawing_readiness?: string | null
           id?: string
           level_label?: string | null
