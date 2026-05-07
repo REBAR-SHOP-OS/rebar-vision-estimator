@@ -488,6 +488,58 @@ function mapSheetCategory(drawingType: string | null, rawText: string): string {
   return "unknown";
 }
 
+/**
+ * Classify a sheet by discipline / drawing-type / sheet-id prefix and decide
+ * whether it is rebar-relevant. Used to gate downstream auto-estimate logic so
+ * arch / MEP / landscape sheets do not contribute false-positive bar callouts.
+ */
+function classifySheet(
+  sheetId: string | null,
+  discipline: string | null,
+  drawingType: string | null,
+  rawText: string,
+): { category: string; rebar_relevant: boolean; reason: string } {
+  const disc = (discipline || "").toUpperCase().trim();
+  const dt = (drawingType || "").toLowerCase();
+  const sid = (sheetId || "").toUpperCase().trim();
+  const head = rawText.slice(0, 600).toLowerCase();
+
+  // Sheet-id prefix is the strongest signal (e.g. S-201, A-101, M-301).
+  const prefix = sid.match(/^([A-Z]{1,3})[\s\-_]?\d/)?.[1] || "";
+  const PREFIX_MAP: Record<string, string> = {
+    S: "structural", SD: "structural", SK: "structural",
+    A: "architectural", AD: "architectural", ID: "architectural",
+    M: "mep", H: "mep", P: "mep", FP: "mep", FA: "mep",
+    E: "electrical", EL: "electrical",
+    C: "civil", CG: "civil", L: "landscape", LS: "landscape",
+    T: "telecom",
+  };
+  let category = PREFIX_MAP[prefix] || "";
+
+  // Discipline override.
+  if (!category) {
+    if (/STRUCT/i.test(disc)) category = "structural";
+    else if (/ARCH/i.test(disc)) category = "architectural";
+    else if (/MECH|HVAC|PLUMB/i.test(disc)) category = "mep";
+    else if (/ELEC/i.test(disc)) category = "electrical";
+    else if (/CIVIL|SITE/i.test(disc)) category = "civil";
+    else if (/LAND/i.test(disc)) category = "landscape";
+  }
+
+  // Last-resort content sniff for unknown headers.
+  if (!category) {
+    if (/\b(rebar|reinforce|stirrup|tie|footing|grade beam|pile cap)\b/.test(head) ||
+        /\b\d{1,3}\s*M\b/.test(rawText.slice(0, 1000))) category = "structural";
+    else if (/\b(door schedule|window schedule|partition|finish)\b/.test(head)) category = "architectural";
+    else if (/\b(duct|hvac|plumbing|sprinkler|fire alarm)\b/.test(head)) category = "mep";
+    else category = "other";
+  }
+
+  const rebar_relevant = category === "structural";
+  const reason = `prefix=${prefix || "?"} discipline=${disc || "?"} type=${dt || "?"}`;
+  return { category, rebar_relevant, reason };
+}
+
 async function syncRebarDrawingPage(params: {
   supabase: any;
   rebarProjectFileId: string | null;
@@ -699,6 +751,7 @@ Deno.serve(async (req) => {
       const sheetId = tb.sheet_number || null;
       const discipline = tb.discipline || null;
       const drawingType = tb.drawing_type || null;
+      const sheetClass = classifySheet(sheetId, discipline, drawingType, rawText);
 
       let logicalDrawingId: string | null = null;
       if (sheetId) {
@@ -823,6 +876,9 @@ Deno.serve(async (req) => {
           tables: page.tables || [],
           title_block: tb,
           ocr_metadata: page.ocr_metadata || null,
+          sheet_category: sheetClass.category,
+          rebar_relevant: sheetClass.rebar_relevant,
+          sheet_classification_reason: sheetClass.reason,
         },
         p_bar_marks: barMarks,
         p_crm_deal_id: crm_deal_id || null,
