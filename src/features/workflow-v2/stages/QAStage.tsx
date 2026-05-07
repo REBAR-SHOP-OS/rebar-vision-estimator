@@ -250,6 +250,13 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   }, [sel?.id, sel?.locator?.page_number]);
 
   useEffect(() => { setZoomMode("tight"); setZoomLevel(1); setPan({ dx: 0, dy: 0 }); setTab("change"); }, [sel?.id]);
+  // Bug #2 fix: clear the transient "Saved ✓" label after 1.5s so the button
+  // re-renders back to "Save Answer" instead of staying stuck.
+  useEffect(() => {
+    if (!answerSavedAt) return;
+    const t = window.setTimeout(() => setAnswerSavedAt(null), 1600);
+    return () => window.clearTimeout(t);
+  }, [answerSavedAt]);
   useEffect(() => {
     setAnswerError(null);
     setAnswerEdited(false);
@@ -431,10 +438,13 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     if (CLOSED_QA_STATUSES.has(nextStatus)) {
       const currentIndex = issues.findIndex((issue) => issue.id === sel.id);
       const remaining = issues.filter((issue) => issue.id !== sel.id);
-      const nextIssue = remaining[Math.min(Math.max(currentIndex, 0), Math.max(remaining.length - 1, 0))] || null;
+      const nextIssue = remaining.length === 0
+        ? null
+        : remaining[Math.min(Math.max(currentIndex, 0), remaining.length - 1)] || null;
       setIssues(remaining);
       setSelectedId(nextIssue?.id || null);
-      setTab("change");
+      // Bug #3 fix: keep the engineer on the Action tab so consecutive
+      // resolves don't bounce them back to "Change" between every issue.
       return;
     }
     setIssues((current) => current.map((issue) => issue.id === sel.id ? { ...issue, ...patch } : issue));
