@@ -1,10 +1,11 @@
 import { useState, useMemo } from "react";
 import { STAGES, type StageKey } from "./types";
-import { Lock, CheckCircle2, Circle, AlertTriangle, FolderOpen, Layers, Ruler, ShieldCheck, Stamp, FileSpreadsheet, Search, Bell, HelpCircle } from "lucide-react";
+import { Lock, CheckCircle2, Circle, AlertTriangle, FolderOpen, Layers, Ruler, ShieldCheck, Stamp, FileSpreadsheet, Search, Bell, HelpCircle, MessageSquareText } from "lucide-react";
 import FilesStage from "./stages/FilesStage";
 import ScopeStage from "./stages/ScopeStage";
 import TakeoffStage from "./stages/TakeoffStage";
 import QAStage from "./stages/QAStage";
+import AssistantStage from "./stages/AssistantStage";
 import ConfirmStage from "./stages/ConfirmStage";
 import OutputsStage from "./stages/OutputsStage";
 import { useWorkflowState } from "./useWorkflowState";
@@ -29,6 +30,7 @@ const STAGE_ICONS: Record<StageKey, React.ComponentType<{ className?: string }>>
   scope: Layers,
   takeoff: Ruler,
   qa: ShieldCheck,
+  assistant: MessageSquareText,
   confirm: Stamp,
   outputs: FileSpreadsheet,
 };
@@ -45,6 +47,7 @@ export default function WorkflowShell({ projectId, project }: Props) {
     scope: state.scopeAccepted > 0 ? "complete" : state.fileCount > 0 ? "active" : "locked",
     takeoff: state.takeoffRows > 0 ? "complete" : state.scopeAccepted > 0 ? "active" : "locked",
     qa: state.takeoffRows > 0 ? (state.qaCriticalOpen > 0 ? "blocked" : "active") : "locked",
+    assistant: state.takeoffRows > 0 || state.fileCount > 0 ? "active" : "locked",
     confirm: state.estimatorConfirmed ? "complete" : (state.qaCriticalOpen === 0 && state.takeoffRows > 0) ? "active" : "locked",
     outputs: state.estimatorConfirmed ? "active" : "locked",
   }) as Record<StageKey, "complete" | "active" | "locked" | "blocked" | "pending">, [state]);
@@ -56,6 +59,7 @@ export default function WorkflowShell({ projectId, project }: Props) {
       case "scope": return <ScopeStage {...props} />;
       case "takeoff": return <TakeoffStage {...props} />;
       case "qa": return <QAStage {...props} />;
+      case "assistant": return <AssistantStage {...props} />;
       case "confirm": return <ConfirmStage {...props} />;
       case "outputs": return <OutputsStage {...props} />;
     }
@@ -147,7 +151,7 @@ export default function WorkflowShell({ projectId, project }: Props) {
         </div>
 
         {/* Stage rail (numbered steps) */}
-        <div className="flex min-w-[1100px] items-stretch border-b border-border" style={{ background: "hsl(var(--card))" }}>
+        <div className="flex min-w-[1280px] items-stretch border-b border-border" style={{ background: "hsl(var(--card))" }}>
           {STAGES.map((s) => {
             const st = status[s.key];
             const isActive = active === s.key;

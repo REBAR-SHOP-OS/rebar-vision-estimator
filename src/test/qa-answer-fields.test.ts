@@ -127,13 +127,14 @@ describe("qa answer fields", () => {
     });
   });
 
-  it("does not draft an answer from unrelated descriptive text", () => {
+  it("still drafts a low-confidence suggestion from unrelated descriptive text", () => {
     const draft = buildEngineerAnswerDraft({
       locationLabel: "P2",
       sourceExcerpt: "Refer to architectural drawings for information.",
     });
 
-    expect(draft.draftAnswer).toBe("");
+    expect(draft.confidence).toBe("low");
+    expect(draft.draftAnswer).toBe('Found source excerpt: "Refer to architectural drawings for information.". Please confirm the exact drawing value for this item.');
     expect(draft.structuredValues).toEqual({});
   });
 });

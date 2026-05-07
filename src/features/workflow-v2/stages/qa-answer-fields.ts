@@ -269,9 +269,12 @@ export function buildEngineerAnswerDraft(input: SmartQuestionInput): EngineerAns
     : "the exact drawing value";
   const object = input.objectIdentity || inferObjectFromText(`${input.title || ""} ${input.description || ""}`) || "highlighted item";
   const excerptClause = excerpt ? ` Use the callout/excerpt "${excerpt.slice(0, 120)}".` : "";
+  const found = excerpt
+    ? `Found source excerpt: "${excerpt.slice(0, 160)}".`
+    : `Found the ${object} at ${loc}.`;
   return {
     question: `On ${loc}, find the ${object}. What ${ask} should be used for this item?${excerptClause}`,
-    draftAnswer: "",
+    draftAnswer: `${found} Please confirm ${ask} for this item.`,
     confidence: "low",
     needsConfirmation: true,
     structuredValues: {},

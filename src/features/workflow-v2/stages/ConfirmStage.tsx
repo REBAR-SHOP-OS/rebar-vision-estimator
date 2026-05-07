@@ -184,7 +184,7 @@ export default function ConfirmStage({ projectId, state, goToStage }: StageProps
     <div className="grid grid-cols-12 h-full">
       <div className="col-span-7 border-r border-border flex flex-col min-h-0">
         <StageHeader
-          kicker="Stage 05 - Required"
+          kicker="Stage 06 - Required"
           title="Estimator Confirmation · By Segment"
           subtitle="Review every segment. Hover/click a row to inspect the source drawing on the right."
           right={<div className="flex gap-2">

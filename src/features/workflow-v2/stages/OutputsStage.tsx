@@ -23,7 +23,7 @@ export default function OutputsStage({ state }: StageProps) {
   return (
     <div className="flex flex-col h-full">
       <StageHeader
-        kicker="Stage 06"
+        kicker="Stage 07"
         title="Project Deliverables"
         subtitle="Manage and generate estimation packages for submission."
         right={
@@ -42,7 +42,7 @@ export default function OutputsStage({ state }: StageProps) {
           <GateBanner
             tone="blocked"
             title="Export Blocked: Estimator Confirmation Required"
-            message="Complete Stage 05 to unlock all deliverables. No exports are produced before signoff."
+            message="Complete Stage 06 to unlock all deliverables. No exports are produced before signoff."
           />
         )}
 
