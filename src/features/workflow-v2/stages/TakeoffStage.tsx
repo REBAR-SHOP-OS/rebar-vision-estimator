@@ -119,6 +119,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   const [segRunning, setSegRunning] = useState<string | null>(null);
   const [bestGuessRunning, setBestGuessRunning] = useState(false);
   const [reindexRunning, setReindexRunning] = useState(false);
+  const [allSegments, setAllSegments] = useState<{ id: string; name: string }[]>([]);
 
   const handleReindex = async () => {
     setReindexRunning(true);
@@ -145,8 +146,10 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   };
 
   const runSingleSegment = async (segName: string) => {
-    // find segment_id from any row in the group (legacy rows carry segment_id)
-    const seg = rows.find((r) => r.segment_name === segName && r.segment_id)?.segment_id;
+    // find segment_id from any row in the group, falling back to allSegments for empty segments
+    const seg =
+      rows.find((r) => r.segment_name === segName && r.segment_id)?.segment_id ||
+      allSegments.find((s) => s.name === segName)?.id;
     if (!seg) { toast.error("No segment id for this group."); return; }
     setSegRunning(segName);
     try {
@@ -179,6 +182,18 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
     })();
     return () => { cancelled = true; };
   }, [projectId, state.files]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("segments")
+        .select("id,name")
+        .eq("project_id", projectId);
+      if (!cancelled) setAllSegments((data || []) as { id: string; name: string }[]);
+    })();
+    return () => { cancelled = true; };
+  }, [projectId, segRunning, generating]);
 
   useEffect(() => {
     const focus = state.local.takeoffFocus as {
@@ -417,13 +432,26 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(r);
     }
-    return Array.from(map.entries()).map(([name, items]) => ({
+    const populated = Array.from(map.entries()).map(([name, items]) => ({
       name,
       items,
       weight: items.reduce((s, r) => s + r.weight, 0),
       blocked: items.filter((r) => r.status === "blocked").length,
+      empty: false,
     }));
-  }, [rows]);
+    // Add empty segments (defined in DB but no rows yet)
+    const populatedNames = new Set(populated.map((g) => g.name));
+    const empties = allSegments
+      .filter((s) => !populatedNames.has(s.name))
+      .map((s) => ({
+        name: s.name,
+        items: [] as WorkflowTakeoffRow[],
+        weight: 0,
+        blocked: 0,
+        empty: true,
+      }));
+    return [...populated, ...empties];
+  }, [rows, allSegments]);
 
   const totals = useMemo(() => ({
     rows: rows.length,
@@ -466,7 +494,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
                 {g.blocked > 0 && <Pill tone="blocked" solid>{g.blocked}</Pill>}
               </div>
               <div className="text-[10px] text-muted-foreground font-mono mt-0.5">
-                {g.items.length} rows · {g.weight.toFixed(0)} kg
+                {g.empty ? "0 rows · not run" : `${g.items.length} rows · ${g.weight.toFixed(0)} kg`}
               </div>
               <div
                 role="button"
@@ -476,7 +504,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
                 className={`mt-1.5 inline-flex items-center gap-1 text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 border ${segRunning === g.name ? "border-muted-foreground/30 text-muted-foreground" : "border-primary/40 text-primary hover:bg-primary/10"}`}
               >
                 {segRunning === g.name ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Wand2 className="w-2.5 h-2.5" />}
-                {segRunning === g.name ? "Running…" : "Re-run segment"}
+                {segRunning === g.name ? "Running…" : g.empty ? "Run segment" : "Re-run segment"}
               </div>
             </button>
           ))}
