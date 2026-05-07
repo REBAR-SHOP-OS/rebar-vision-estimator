@@ -212,6 +212,8 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
               const isSel = selectedId === c.id;
               return (
                 <button key={c.id} onClick={() => setSelectedId(c.id)}
+                  onDoubleClick={() => { setSelectedId(c.id); setDecision(c.id, "accept"); }}
+                  title="Double-click to approve"
                   className={`w-full text-left ip-card p-3 transition-colors ${isSel ? "border-primary bg-primary/5" : "hover:bg-accent/30"}`}>
                   <div className="flex items-baseline justify-between gap-2 mb-1">
                     <span className="text-[10px] font-mono tracking-widest text-primary">{c.id.slice(0, 8).toUpperCase()}</span>
