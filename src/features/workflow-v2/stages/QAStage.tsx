@@ -302,9 +302,13 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
   useEffect(() => { bump(`view mode → ${viewMode}`); /* eslint-disable-next-line */ }, [viewMode]);
   useEffect(() => { bump(`zoom mode → ${zoomMode}`); /* eslint-disable-next-line */ }, [zoomMode]);
-  useEffect(() => { bump(`zoom level → ${zoomLevel.toFixed(2)}x`); /* eslint-disable-next-line */ }, [zoomLevel]);
-  useEffect(() => { if (pdfImg) bump(`pdf rendered p${pdfPage}`); /* eslint-disable-next-line */ }, [pdfImg]);
+  // Note: do NOT bump on pdfImg/zoomLevel changes — extra renders here were
+  // causing the overlay/page lifecycle to thrash and the drawing to blink.
 
+  // Recompute the page box only when the rendered raster identity or the
+  // image's intrinsic size actually changes. Overlay state (selected issue,
+  // zoom, anchor metadata, viewMode) must NOT force a recompute here — the
+  // ResizeObserver below handles container resizes for those cases.
   useEffect(() => {
     if (renderStatus !== "ready") return;
     updatePageBox();
@@ -313,7 +317,8 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     const ro = new ResizeObserver(() => updatePageBox());
     ro.observe(host);
     return () => ro.disconnect();
-  }, [renderStatus, imgSize?.w, imgSize?.h, viewMode, pdfImg, previewUrl]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renderStatus, imgSize?.w, imgSize?.h, pdfImg]);
 
   // Group issues by source sheet for the left navigator
   const sheets = useMemo(() => {
@@ -623,11 +628,11 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                     onRenderStateChange={(state) => {
                       setRenderStatus(state.status);
                       setRenderError(state.error ?? null);
-                      if (state.status === "loading") {
-                        setPdfImg(null);
-                        setRenderedPage(null);
-                        setPageBox(null);
-                      }
+                      // IMPORTANT: do NOT clear pdfImg / pageBox here. Keep
+                      // the last rendered page visible while the next page
+                      // (or a re-render of the same page) is in flight. The
+                      // page-change effect above is the only place allowed
+                      // to blank the raster, and only when pdfPage changes.
                     }}
                     scale={2}
                   />
