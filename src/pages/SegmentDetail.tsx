@@ -20,6 +20,28 @@ import DrawingViewsPanel from "@/components/workspace/DrawingViewsPanel";
 import QATab from "@/components/workspace/QATab";
 import { getCurrentVerifiedEstimate, refreshVerifiedEstimateFromWorkspace } from "@/lib/verified-estimate/verified-estimate-store";
 
+function getFunctionErrorMessage(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  const jsonStart = message.indexOf("{");
+  if (jsonStart >= 0) {
+    try {
+      const payload = JSON.parse(message.slice(jsonStart));
+      if (payload?.error === "DIMENSIONS_INCOMPLETE") {
+        const blockers = Array.isArray(payload.blockers)
+          ? payload.blockers.map((b: { name?: string }) => b?.name).filter(Boolean).join(", ")
+          : "";
+        return blockers
+          ? `Dimensions still need review for: ${blockers}.`
+          : "Dimensions still need review before estimating.";
+      }
+      if (typeof payload?.message === "string" && payload.message.trim()) return payload.message;
+    } catch {
+      // keep fallback
+    }
+  }
+  return message || fallback;
+}
+
 export default function SegmentDetail() {
   const { id: projectId, segId } = useParams<{ id: string; segId: string }>();
   const navigate = useNavigate();
@@ -78,7 +100,7 @@ export default function SegmentDetail() {
       }
       loadData();
     } catch (e: any) {
-      toast.error(e.message || "Auto-estimate failed");
+      toast.error(getFunctionErrorMessage(e, "Auto-estimate failed"));
     } finally {
       setAutoEstimating(false);
     }

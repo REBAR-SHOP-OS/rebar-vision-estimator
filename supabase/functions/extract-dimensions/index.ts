@@ -60,6 +60,23 @@ Return a single JSON object:
 No prose, no markdown, JSON only.`;
 }
 
+function buildKnowledgePayload(projectId: string, segments: any[]) {
+  return {
+    project_id: projectId,
+    extracted_at: new Date().toISOString(),
+    segments: segments.map((seg) => ({
+      id: seg.id,
+      name: seg.name,
+      status: seg.status,
+      geometry: seg.geometry,
+      missing_fields: seg.missing_fields,
+      sources: seg.sources,
+      confidence: seg.confidence,
+      notes: seg.notes,
+    })),
+  };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -190,6 +207,48 @@ serve(async (req) => {
         notes: r.notes || null,
       });
     }
+
+    const knowledgeTitle = `Project Dimensions (${project_id.slice(0, 8)})`;
+    const knowledgePath = `projects/${project_id}/dimensions.json`;
+    const knowledgeContent = JSON.stringify(buildKnowledgePayload(project_id, summary), null, 2);
+    const { data: existingKnowledge } = await supabase
+      .from("agent_knowledge")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("type", "project_dimensions")
+      .eq("file_path", knowledgePath)
+      .maybeSingle();
+    if (existingKnowledge?.id) {
+      await supabase.from("agent_knowledge").update({
+        title: knowledgeTitle,
+        content: knowledgeContent,
+        file_name: "dimensions.json",
+      }).eq("id", existingKnowledge.id).eq("user_id", user.id);
+    } else {
+      await supabase.from("agent_knowledge").insert({
+        user_id: user.id,
+        type: "project_dimensions",
+        title: knowledgeTitle,
+        file_name: "dimensions.json",
+        file_path: knowledgePath,
+        content: knowledgeContent,
+      });
+    }
+
+    await supabase.from("audit_events").insert({
+      user_id: user.id,
+      project_id,
+      entity_type: "project",
+      entity_id: project_id,
+      action: "dimensions_extracted",
+      metadata: {
+        segment_count: summary.length,
+        complete_count: summary.filter((seg) => seg.status === "complete").length,
+        partial_count: summary.filter((seg) => seg.status === "partial").length,
+        pending_count: summary.filter((seg) => seg.status === "pending").length,
+        knowledge_path: knowledgePath,
+      },
+    });
 
     return new Response(JSON.stringify({ status: "ok", segments: summary }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },

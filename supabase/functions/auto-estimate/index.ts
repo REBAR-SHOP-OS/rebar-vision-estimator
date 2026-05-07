@@ -998,16 +998,35 @@ serve(async (req) => {
       });
     }
 
-    // Dimensions-First Gate: refuse to estimate until every segment in the
-    // project has been confirmed (`complete`) or explicitly excluded (`na`).
+    // Dimensions-First Gate: try real extraction once before refusing to estimate.
     {
-      const { data: gateRows } = await supabase
-        .from("segments")
-        .select("id, name, dimensions_status")
-        .eq("project_id", project_id);
-      const blockers = (gateRows ?? []).filter(
-        (s: any) => s.dimensions_status !== "complete" && s.dimensions_status !== "na",
-      );
+      const getBlockers = async () => {
+        const { data: gateRows } = await supabase
+          .from("segments")
+          .select("id, name, dimensions_status")
+          .eq("project_id", project_id);
+        return (gateRows ?? []).filter(
+          (s: any) => s.dimensions_status !== "complete" && s.dimensions_status !== "na",
+        );
+      };
+
+      let blockers = await getBlockers();
+      if (blockers.length > 0) {
+        const extractRes = await fetch(`${supabaseUrl}/functions/v1/extract-dimensions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ project_id }),
+        });
+        if (!extractRes.ok) {
+          const detail = await extractRes.text();
+          console.warn(`[auto-estimate] extract-dimensions failed before gate: ${extractRes.status} ${detail.slice(0, 300)}`);
+        }
+        blockers = await getBlockers();
+      }
+
       if (blockers.length > 0) {
         return new Response(JSON.stringify({
           error: "DIMENSIONS_INCOMPLETE",
