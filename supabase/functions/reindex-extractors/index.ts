@@ -255,6 +255,49 @@ function extractDimensions(text: string): Array<Record<string, unknown>> {
   return out.slice(0, 500);
 }
 
+/** Sheet category gating — see populate-search-index for full description. */
+function classifySheet(
+  sheetId: string | null,
+  discipline: string | null,
+  drawingType: string | null,
+  rawText: string,
+): { category: string; rebar_relevant: boolean; reason: string } {
+  const disc = (discipline || "").toUpperCase().trim();
+  const dt = (drawingType || "").toLowerCase();
+  const sid = (sheetId || "").toUpperCase().trim();
+  const head = rawText.slice(0, 600).toLowerCase();
+  const prefix = sid.match(/^([A-Z]{1,3})[\s\-_]?\d/)?.[1] || "";
+  const PREFIX_MAP: Record<string, string> = {
+    S: "structural", SD: "structural", SK: "structural",
+    A: "architectural", AD: "architectural", ID: "architectural",
+    M: "mep", H: "mep", P: "mep", FP: "mep", FA: "mep",
+    E: "electrical", EL: "electrical",
+    C: "civil", CG: "civil", L: "landscape", LS: "landscape",
+    T: "telecom",
+  };
+  let category = PREFIX_MAP[prefix] || "";
+  if (!category) {
+    if (/STRUCT/i.test(disc)) category = "structural";
+    else if (/ARCH/i.test(disc)) category = "architectural";
+    else if (/MECH|HVAC|PLUMB/i.test(disc)) category = "mep";
+    else if (/ELEC/i.test(disc)) category = "electrical";
+    else if (/CIVIL|SITE/i.test(disc)) category = "civil";
+    else if (/LAND/i.test(disc)) category = "landscape";
+  }
+  if (!category) {
+    if (/\b(rebar|reinforce|stirrup|tie|footing|grade beam|pile cap)\b/.test(head) ||
+        /\b\d{1,3}\s*M\b/.test(rawText.slice(0, 1000))) category = "structural";
+    else if (/\b(door schedule|window schedule|partition|finish)\b/.test(head)) category = "architectural";
+    else if (/\b(duct|hvac|plumbing|sprinkler|fire alarm)\b/.test(head)) category = "mep";
+    else category = "other";
+  }
+  return {
+    category,
+    rebar_relevant: category === "structural",
+    reason: `prefix=${prefix || "?"} discipline=${disc || "?"} type=${dt || "?"}`,
+  };
+}
+
 function extractBarSchedule(text: string): Array<Record<string, unknown>> {
   const lines = text.split(/\r?\n/);
   const out: Array<Record<string, unknown>> = [];
@@ -348,7 +391,7 @@ Deno.serve(async (req) => {
 
     const { data: rows, error } = await supabase
       .from("drawing_search_index")
-      .select("id, raw_text, extracted_entities")
+      .select("id, raw_text, extracted_entities, page_number")
       .eq("user_id", userId)
       .eq("project_id", project_id);
     if (error) throw error;
@@ -359,6 +402,15 @@ Deno.serve(async (req) => {
     let totalRows = 0;
     let totalSpecKeywords = 0;
     let bestSpecsPage: { page_id: string; specs: Record<string, unknown>; hits: number } | null = null;
+    type MarkSighting = {
+      page_id: string;
+      page_number: number;
+      sheet_id: string | null;
+      category: string;
+      rebar_relevant: boolean;
+      size: string | null;
+    };
+    const markSightings = new Map<string, MarkSighting[]>();
     for (const r of rows || []) {
       const text = (r as any).raw_text || "";
       const callouts = extractBarCallouts(text);
@@ -375,18 +427,76 @@ Deno.serve(async (req) => {
       totalRows += schedule.length;
       const ext = ((r as any).extracted_entities && typeof (r as any).extracted_entities === "object")
         ? (r as any).extracted_entities : {};
+      const tb = (ext.title_block && typeof ext.title_block === "object") ? ext.title_block as Record<string, string> : {};
+      const sheetId = tb.sheet_number || null;
+      const discipline = tb.discipline || null;
+      const drawingType = tb.drawing_type || null;
+      const sheetClass = classifySheet(sheetId, discipline, drawingType, text);
+      const sizeByMark = new Map<string, string>();
+      for (const c of callouts as Array<Record<string, unknown>>) {
+        const mk = (c.mark as string) || (c.bar_mark as string) || null;
+        const sz = (c.size as string) || (c.bar_size as string) || null;
+        if (mk && sz && !sizeByMark.has(mk)) sizeByMark.set(mk, sz);
+      }
+      const barMarks: string[] = Array.isArray(ext.bar_marks) ? ext.bar_marks as string[] : [];
+      for (const mk of barMarks) {
+        const list = markSightings.get(mk) || [];
+        list.push({
+          page_id: (r as any).id,
+          page_number: (r as any).page_number || 0,
+          sheet_id: sheetId,
+          category: sheetClass.category,
+          rebar_relevant: sheetClass.rebar_relevant,
+          size: sizeByMark.get(mk) || null,
+        });
+        markSightings.set(mk, list);
+      }
       const next = {
         ...ext,
         bar_callouts: callouts,
         dimensions: dims,
         bar_schedule_rows: schedule,
         specs,
+        sheet_category: sheetClass.category,
+        rebar_relevant: sheetClass.rebar_relevant,
+        sheet_classification_reason: sheetClass.reason,
       };
       const { error: upErr } = await supabase
         .from("drawing_search_index")
         .update({ extracted_entities: next, extraction_version: EXTRACTION_VERSION })
         .eq("id", (r as any).id);
       if (!upErr) updated++;
+    }
+
+    // Cross-page reconciliation
+    let nonStructuralFlags = 0;
+    let sizeConflictFlags = 0;
+    for (const [mark, sightings] of markSightings.entries()) {
+      const onRebar = sightings.filter((s) => s.rebar_relevant);
+      if (onRebar.length === 0) {
+        nonStructuralFlags++;
+        await supabase.from("reconciliation_records").insert({
+          user_id: userId,
+          project_id,
+          issue_type: "BAR_MARK_NOT_ON_STRUCTURAL",
+          notes: `Bar mark "${mark}" only seen on non-rebar sheets`,
+          candidates: { mark, sightings },
+          automated_reasoning: { source: "reindex-extractors", action: "cross_page_reconcile", extraction_version: EXTRACTION_VERSION },
+        });
+        continue;
+      }
+      const sizes = new Set(onRebar.map((s) => s.size).filter(Boolean) as string[]);
+      if (sizes.size > 1) {
+        sizeConflictFlags++;
+        await supabase.from("reconciliation_records").insert({
+          user_id: userId,
+          project_id,
+          issue_type: "BAR_MARK_SIZE_CONFLICT",
+          notes: `Bar mark "${mark}" has conflicting sizes across sheets: ${[...sizes].join(" vs ")}`,
+          candidates: { mark, sizes: [...sizes], sightings: onRebar },
+          automated_reasoning: { source: "reindex-extractors", action: "cross_page_reconcile", extraction_version: EXTRACTION_VERSION },
+        });
+      }
     }
 
     if (bestSpecsPage) {
@@ -413,6 +523,8 @@ Deno.serve(async (req) => {
       schedule_rows: totalRows,
       spec_keywords: totalSpecKeywords,
       specs_authoritative_page: bestSpecsPage?.page_id || null,
+      non_structural_mark_flags: nonStructuralFlags,
+      size_conflict_mark_flags: sizeConflictFlags,
       extraction_version: EXTRACTION_VERSION,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
