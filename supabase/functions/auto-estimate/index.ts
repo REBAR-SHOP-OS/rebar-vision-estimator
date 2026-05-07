@@ -1024,6 +1024,10 @@ serve(async (req) => {
         if (!extractRes.ok) {
           const detail = await extractRes.text();
           console.warn(`[auto-estimate] extract-dimensions failed before gate: ${extractRes.status} ${detail.slice(0, 300)}`);
+          return new Response(detail, {
+            status: extractRes.status,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
         }
         blockers = await getBlockers();
       }
