@@ -612,6 +612,7 @@ Deno.serve(async (req) => {
           bar_callouts: extractBarCallouts(rawText),
           dimensions: extractDimensions(rawText),
           bar_schedule_rows: extractBarSchedule(rawText),
+          specs: extractSpecs(rawText),
           tables: page.tables || [],
           title_block: tb,
           ocr_metadata: page.ocr_metadata || null,
