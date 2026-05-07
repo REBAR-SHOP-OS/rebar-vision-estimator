@@ -39,13 +39,15 @@ const PLAYBOOKS: Record<string, Playbook> = {
     expected_buckets: ["Substructure", "Slab-on-Grade", "Superstructure"],
     must_have: [
       { name: "Pile Caps / Pad Footings", segment_type: "footing", bucket: "Substructure", notes: "Commercial default" },
+      { name: "Piers / Pedestals", segment_type: "pier", bucket: "Substructure", notes: "Commercial default" },
+      { name: "Steps on Grade", segment_type: "slab", bucket: "Slab-on-Grade", notes: "Commercial default" },
       { name: "Columns (per level)", segment_type: "column", bucket: "Superstructure", notes: "Commercial default" },
       { name: "Elevated Slabs (per level)", segment_type: "slab", bucket: "Superstructure", notes: "Commercial default" },
       { name: "Shear Walls", segment_type: "wall", bucket: "Superstructure", notes: "Commercial default" },
     ],
     forbidden_types: ["icf wall", "garage slab"],
-    bar_mark_hints: "Common: COL/C# = columns, B# = beams, SW# = shear walls, FC# = footing caps. Group by level (L1, L2…).",
-    prompt_emphasis: "Emphasize columns by level, elevated slabs, shear walls, drop panels, post-tension decks if found. Group footings by mark from a footing schedule.",
+    bar_mark_hints: "Common: COL/C# = columns, B# = beams, SW# = shear walls, FC# = footing caps, F# = footings, P# = piers/pedestals, FW = foundation wall. Group by level (L1, L2…).",
+    prompt_emphasis: "Emphasize footings (F#), piers/pedestals (P#) on top of footings, foundation walls, steps on grade, columns by level, elevated slabs, shear walls. Group footings by mark from a footing schedule. Always create a Piers segment when P1/P2/P# marks or a pier schedule appear, distinct from footings.",
   },
   industrial: {
     expected_buckets: ["Substructure", "Slab-on-Grade", "Superstructure"],
