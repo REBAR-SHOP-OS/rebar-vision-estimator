@@ -60,6 +60,29 @@ interface StructuralGraph {
   verifyNotes: string[];
 }
 
+interface WallGeometryPage {
+  pageNumber: number;
+  sheetTag?: string | null;
+  rawText: string;
+  discipline?: string | null;
+  scaleRaw?: string | null;
+  scaleRatio?: number | null;
+  bbox?: [number, number, number, number] | null;
+}
+
+interface WallGeometryEvidence {
+  lengthMm: number | null;
+  heightMm: number | null;
+  method: "explicit_text" | "schedule" | "scale_measurement" | "not_found";
+  confidence: "high" | "medium" | "low";
+  needsConfirmation: boolean;
+  pageNumber?: number | null;
+  sheetTag?: string | null;
+  excerpt?: string | null;
+  scaleRaw?: string | null;
+  reason: string;
+}
+
 function buildStructuralGraph(structuralText: string): StructuralGraph {
   const g: StructuralGraph = {
     barMarks: new Map(),
@@ -116,6 +139,136 @@ function buildStructuralGraph(structuralText: string): StructuralGraph {
     if (g.verifyNotes.length >= 12) break;
   }
   return g;
+}
+
+function parseScaleRatio(scaleRaw: string | null | undefined): number | null {
+  const raw = String(scaleRaw || "").trim();
+  const ratio = raw.match(/1\s*[:=]\s*(\d+(?:\.\d+)?)/i);
+  if (ratio) return Number(ratio[1]);
+  const metric = raw.match(/(\d+(?:\.\d+)?)\s*mm\s*=\s*(\d+(?:\.\d+)?)\s*m/i);
+  if (metric) return (Number(metric[2]) * 1000) / Number(metric[1]);
+  return null;
+}
+
+function resolveWallGeometryFromPages(params: {
+  pages: WallGeometryPage[];
+  objectText?: string | null;
+  calloutText?: string | null;
+  sourceSheet?: string | null;
+}): WallGeometryEvidence {
+  const candidates = params.pages
+    .filter((page) => isStructuralWallPage(page))
+    .map((page) => ({ page, score: scoreWallPage(page, params) }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  for (const { page } of candidates) {
+    const explicit = extractExplicitWallGeometry(page.rawText);
+    if (explicit.lengthMm || explicit.heightMm) {
+      return {
+        ...explicit,
+        method: explicit.method || "explicit_text",
+        confidence: explicit.lengthMm && explicit.heightMm ? "high" : "medium",
+        needsConfirmation: !(explicit.lengthMm && explicit.heightMm),
+        pageNumber: page.pageNumber,
+        sheetTag: page.sheetTag,
+        scaleRaw: page.scaleRaw,
+        reason: explicit.lengthMm && explicit.heightMm ? "Found explicit wall dimensions in OCR text." : "Found partial wall dimensions in OCR text.",
+      };
+    }
+  }
+
+  for (const { page } of candidates) {
+    const scale = page.scaleRatio || parseScaleRatio(page.scaleRaw);
+    const measured = measureWallFromBbox(page.bbox, scale);
+    if (measured) {
+      return {
+        lengthMm: measured,
+        heightMm: null,
+        method: "scale_measurement",
+        confidence: "low",
+        needsConfirmation: true,
+        pageNumber: page.pageNumber,
+        sheetTag: page.sheetTag,
+        scaleRaw: page.scaleRaw,
+        excerpt: wallSnippet(page.rawText),
+        reason: "Estimated wall run from bbox and sheet scale; wall height still needs confirmation.",
+      };
+    }
+  }
+
+  return {
+    lengthMm: null,
+    heightMm: null,
+    method: "not_found",
+    confidence: "low",
+    needsConfirmation: true,
+    reason: candidates.length > 1
+      ? "Multiple wall candidates were found, but none had provable dimensions."
+      : "No reliable wall dimensions were found across structural pages.",
+  };
+}
+
+function isStructuralWallPage(page: WallGeometryPage): boolean {
+  const hay = `${page.discipline || ""} ${page.sheetTag || ""} ${page.rawText.slice(0, 500)}`.toLowerCase();
+  return !/\barchitectural\b|^a[-\s]?\d/.test(hay)
+    && /\bstruct|^s[-\s]?\d|foundation|wall|concrete|reinforc/i.test(hay)
+    && /wall|foundation/i.test(page.rawText);
+}
+
+function scoreWallPage(page: WallGeometryPage, params: { objectText?: string | null; calloutText?: string | null; sourceSheet?: string | null }) {
+  const text = page.rawText.toLowerCase();
+  let score = 0;
+  if (/foundation\s+wall|\bwall\b/.test(text)) score += 2;
+  if (params.sourceSheet && String(page.sheetTag || "").toLowerCase().includes(String(params.sourceSheet).toLowerCase())) score += 2;
+  for (const token of distinctiveTokens(`${params.objectText || ""} ${params.calloutText || ""}`)) {
+    if (text.includes(token)) score += 1;
+  }
+  return score;
+}
+
+function distinctiveTokens(text: string) {
+  return Array.from(new Set(text.toLowerCase().split(/[^a-z0-9.]+/).filter((token) => token.length >= 5 && !["foundation", "drawing", "enter"].includes(token)))).slice(0, 8);
+}
+
+function extractExplicitWallGeometry(text: string): Omit<WallGeometryEvidence, "confidence" | "needsConfirmation" | "reason"> & { method?: "explicit_text" | "schedule" } {
+  const normalized = text.replace(/\s+/g, " ");
+  const length = findLabeledMm(normalized, ["wall length", "run length", "foundation wall length", "length"]);
+  const height = findLabeledMm(normalized, ["wall height", "height", "high"]);
+  if (length || height) return { lengthMm: length, heightMm: height, method: "explicit_text", excerpt: wallSnippet(normalized) };
+
+  const schedule = normalized.match(/\b(?:W\d+|FW\d+|FOUNDATION WALL|WALL)[^.\n]{0,80}?(\d{4,6})\s*(?:mm)?\s*[xX]\s*(\d{3,5})\s*(?:mm)?/i);
+  if (schedule) {
+    const a = Number(schedule[1]);
+    const b = Number(schedule[2]);
+    return { lengthMm: Math.max(a, b), heightMm: Math.min(a, b), method: "schedule", excerpt: schedule[0].trim() };
+  }
+  return { lengthMm: null, heightMm: null, method: "not_found" };
+}
+
+function findLabeledMm(text: string, labels: string[]) {
+  for (const label of labels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s*");
+    const match = text.match(new RegExp(`\\b${escaped}\\s*(?:=|:|is)?\\s*(\\d+(?:,\\d{3})*(?:\\.\\d+)?)\\s*(mm|m)\\b`, "i"))
+      || text.match(new RegExp(`\\b(\\d+(?:,\\d{3})*(?:\\.\\d+)?)\\s*(mm|m)\\s*(?:${escaped})\\b`, "i"));
+    if (match) {
+      const value = Number(match[1].replace(/,/g, ""));
+      return match[2].toLowerCase() === "m" ? value * 1000 : value;
+    }
+  }
+  return null;
+}
+
+function measureWallFromBbox(bbox?: [number, number, number, number] | null, scaleRatio?: number | null) {
+  if (!bbox || !scaleRatio || scaleRatio <= 0) return null;
+  const widthPx = Math.abs(bbox[2] - bbox[0]);
+  const heightPx = Math.abs(bbox[3] - bbox[1]);
+  if (widthPx < 20 || heightPx < 2) return null;
+  return Math.round(Math.max(widthPx, heightPx) * scaleRatio);
+}
+
+function wallSnippet(text: string) {
+  return text.replace(/\s+/g, " ").trim().slice(0, 180);
 }
 
 // Resolve a single AI line item against the graph. Pure function.
@@ -206,6 +359,97 @@ function resolveLine(
   return {
     status: "unresolved",
     missing: ["rebar callout", "element dimensions"],
+  };
+}
+
+function isWallItem(it: { description?: string; source_excerpt?: string | null }) {
+  return /\b(foundation\s+wall|frost\s+wall|stem\s+wall|\bwall\b)/i.test(`${it.description || ""} ${it.source_excerpt || ""}`);
+}
+
+function wallBarOrientation(text: string): "vertical" | "horizontal" | "unknown" {
+  const t = text.toUpperCase();
+  if (/\b(HORIZONTAL|HORIZ|HEF|TOP|BOTTOM)\b/.test(t)) return "horizontal";
+  if (/\b(VERTICAL|VERT|VEF|STAGGERED)\b/.test(t)) return "vertical";
+  return "unknown";
+}
+
+function parseWallSpacingMm(text: string): number | null {
+  const match = text.match(/(?:@|AT)\s*(\d+(?:\.\d+)?)\s*(?:MM)?\s*(?:\([^)]*\)\s*)?O\.?\s*C\.?/i);
+  return match ? Number(match[1]) : null;
+}
+
+function applyWallGeometryResolution(
+  it: any,
+  current: ResolveResult,
+  evidence: WallGeometryEvidence,
+): ResolveResult {
+  if (!isWallItem(it) || (!evidence.lengthMm && !evidence.heightMm)) return current;
+  const desc = `${it.description || ""} ${it.source_excerpt || ""}`;
+  const spacing = parseWallSpacingMm(desc);
+  const orientation = wallBarOrientation(desc);
+  const size = String(it.bar_size || "").toUpperCase();
+  const mass = massFor(size, String(it.item_type || "rebar"));
+  const missing = new Set<string>(current.missing || []);
+  if (evidence.lengthMm) {
+    missing.delete("wall length (mm)");
+    missing.delete("wall length");
+    missing.delete("element_dimensions");
+  }
+  if (evidence.heightMm) {
+    missing.delete("wall height (mm)");
+    missing.delete("wall height");
+    missing.delete("element_dimensions");
+  }
+
+  let qty = current.qty;
+  let totalLengthM = current.totalLengthM;
+  let totalWeightKg = current.totalWeightKg;
+  const derivationParts = [
+    current.derivation,
+    `wall_geometry=${evidence.method}`,
+    evidence.lengthMm ? `length=${Math.round(evidence.lengthMm)}mm` : null,
+    evidence.heightMm ? `height=${Math.round(evidence.heightMm)}mm` : null,
+  ].filter(Boolean) as string[];
+
+  if (spacing && orientation !== "horizontal" && evidence.lengthMm) {
+    qty = Math.floor(evidence.lengthMm / spacing) + 1;
+    derivationParts.push(`qty=floor(${Math.round(evidence.lengthMm)}/${spacing})+1=${qty}`);
+    if (evidence.heightMm) {
+      totalLengthM = Number((qty * evidence.heightMm / 1000).toFixed(3));
+      totalWeightKg = mass ? Number((totalLengthM * mass).toFixed(2)) : undefined;
+    } else {
+      missing.add("wall height");
+    }
+  } else if (spacing && orientation === "horizontal" && evidence.heightMm) {
+    qty = Math.floor(evidence.heightMm / spacing) + 1;
+    derivationParts.push(`qty=floor(${Math.round(evidence.heightMm)}/${spacing})+1=${qty}`);
+    if (evidence.lengthMm) {
+      totalLengthM = Number((qty * evidence.lengthMm / 1000).toFixed(3));
+      totalWeightKg = mass ? Number((totalLengthM * mass).toFixed(2)) : undefined;
+    } else {
+      missing.add("wall length");
+    }
+  } else if (spacing && evidence.lengthMm) {
+    qty = Math.floor(evidence.lengthMm / spacing) + 1;
+    derivationParts.push(`qty=floor(${Math.round(evidence.lengthMm)}/${spacing})+1=${qty}; orientation needs confirmation`);
+    missing.add("wall bar orientation");
+    if (!evidence.heightMm) missing.add("wall height");
+  }
+
+  const remaining = Array.from(missing).filter((m) => m && !/^rebar callout$/i.test(m));
+  const status: GeometryStatus = totalLengthM && totalWeightKg && remaining.length === 0 && evidence.confidence !== "low"
+    ? "resolved"
+    : qty || evidence.lengthMm || evidence.heightMm
+      ? "partial"
+      : current.status;
+
+  return {
+    qty,
+    totalLengthM,
+    totalWeightKg,
+    status,
+    missing: remaining.length ? remaining : status === "partial" ? ["needs_confirmation"] : [],
+    derivation: derivationParts.join("; "),
   };
 }
 
@@ -408,7 +652,7 @@ serve(async (req) => {
     }
 
     // Gather context
-    const [segRes, projRes, filesRes, stdRes, existingRes, searchIndexRes, knowledgeRes] = await Promise.all([
+    const [segRes, projRes, filesRes, stdRes, existingRes, searchIndexRes, knowledgeRes, sheetMetaRes] = await Promise.all([
       supabase.from("segments").select("*").eq("id", segment_id).single(),
       supabase.from("projects").select("name, project_type, scope_items, description").eq("id", project_id).single(),
       supabase.from("project_files").select("id, file_name, file_type").eq("project_id", project_id).limit(20),
@@ -416,6 +660,7 @@ serve(async (req) => {
       supabase.from("estimate_items").select("id, description, bar_size, quantity_count, total_length, total_weight, confidence").eq("segment_id", segment_id).limit(200),
       supabase.from("drawing_search_index").select("raw_text, page_number, extracted_entities, document_version_id").eq("project_id", project_id).limit(80),
       supabase.from("agent_knowledge").select("title, content, file_name").eq("user_id", user.id).limit(50),
+      supabase.from("document_sheets").select("document_version_id,page_number,sheet_number,scale_raw,scale_ratio").eq("project_id", project_id).limit(200),
     ]);
 
     const segment = segRes.data;
@@ -423,6 +668,10 @@ serve(async (req) => {
     const files = filesRes.data || [];
     const standard = stdRes.data?.[0];
     const existing = existingRes.data || [];
+    const sheetMetaByKey = new Map<string, any>();
+    for (const row of (sheetMetaRes.data || []) as any[]) {
+      sheetMetaByKey.set(`${row.document_version_id || ""}:${Number(row.page_number) || 0}`, row);
+    }
 
     // Map document_version_id -> project_files.id for per-row provenance.
     // We need the document_versions.file_id (legacy file id) to reach project_files.id.
@@ -529,6 +778,7 @@ serve(async (req) => {
     // Per-page metadata so we can later resolve provenance back to a file.
     type RelevantPage = { snip: string; document_version_id: string | null; page_number: number; sheetTag: string };
     const relevantPages: RelevantPage[] = [];
+    const wallGeometryPages: WallGeometryPage[] = [];
     if (searchPages.length > 0) {
       const shop: string[] = [];
       const structural: string[] = [];
@@ -537,14 +787,31 @@ serve(async (req) => {
       for (const page of searchPages) {
         const text = (page.raw_text || "").trim();
         if (text.length <= 20) continue;
-        if (!isPageRelevant(text)) continue;
         const tb = (page.extracted_entities as any)?.title_block || {};
         const dvFileId = page.document_version_id ? dvToFileId.get(String(page.document_version_id)) : null;
         const dvFileName = dvFileId
           ? String((files as any[]).find((f: any) => f.id === dvFileId)?.file_name || "")
           : "";
         const disc = String(tb.discipline || "").toLowerCase();
-        const sheetTag = (page.extracted_entities as any)?.title_block?.sheet_id || `p${page.page_number}`;
+        const sheetMeta = sheetMetaByKey.get(`${page.document_version_id || ""}:${Number(page.page_number) || 0}`) || {};
+        const sheetTag = (page.extracted_entities as any)?.title_block?.sheet_id
+          || (page.extracted_entities as any)?.title_block?.sheet_number
+          || sheetMeta.sheet_number
+          || `p${page.page_number}`;
+        const isStructuralForGeometry = disc.includes("struct")
+          || isStructName(dvFileName)
+          || /\bS-\d|FOUNDATION PLAN|FOUNDATION WALL|CONCRETE REINFORCING|LEVELING PAD|F-\d|WF-\d/i.test(text.slice(0, 700));
+        if (isStructuralForGeometry && !isArchName(dvFileName)) {
+          wallGeometryPages.push({
+            pageNumber: Number(page.page_number) || 0,
+            sheetTag: String(sheetTag),
+            rawText: text,
+            discipline: disc || "structural",
+            scaleRaw: sheetMeta.scale_raw || tb.scale || tb.scale_raw || null,
+            scaleRatio: Number(sheetMeta.scale_ratio || 0) || parseScaleRatio(tb.scale || tb.scale_raw || null),
+          });
+        }
+        if (!isPageRelevant(text)) continue;
         const snip = `[SHEET ${sheetTag} · Page ${page.page_number}] ${text.substring(0, 2000)}`;
         relevantPages.push({ snip, document_version_id: page.document_version_id || null, page_number: Number(page.page_number) || 0, sheetTag: String(sheetTag) });
         if (disc.includes("shop") || isShopName(dvFileName) || /\bSD\b|SHOP DRAWING/i.test(text.slice(0, 200))) shop.push(snip);
@@ -917,7 +1184,16 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
     console.log(`[auto-estimate] graph: ${graph.barMarks.size} marks, ${graph.walls.length} walls, ${graph.footings.length} footings, ${graph.verifyNotes.length} verify notes`);
 
     const enriched = items.map((it: any) => {
-      const r = resolveLine(it, graph);
+      const wallGeometry = isWallItem(it)
+        ? resolveWallGeometryFromPages({
+          pages: wallGeometryPages,
+          objectText: it.description || null,
+          calloutText: it.source_excerpt || it.description || null,
+          sourceSheet: it.source_sheet || null,
+        })
+        : null;
+      const baseResolution = resolveLine(it, graph);
+      const r = wallGeometry ? applyWallGeometryResolution(it, baseResolution, wallGeometry) : baseResolution;
       const baseDesc = String(it.description || "").trim();
       const isUnresolved = r.status === "unresolved";
       const cleanDesc = baseDesc.replace(/^UNRESOLVED:\s*/i, "");
@@ -934,6 +1210,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         _geometry_status: r.status,
         _missing_refs: r.missing,
         _derivation: r.derivation || null,
+        _wall_geometry: wallGeometry,
       };
     });
     items = enriched.filter((it: any) => itemMatchesSegment(it, segTypeKey, String(segment?.name || "")));
@@ -1102,6 +1379,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         anchor_kind: item._anchor_kind || null,
         anchor_confidence: typeof item._anchor_confidence === "number" ? item._anchor_confidence : null,
         anchor_mode: item._anchor_mode || (item._page_number ? "approximate" : "unavailable"),
+        wall_geometry: item._wall_geometry || null,
         authority_document: "Manual-Standard-Practice-2018",
         authority_section: item.authority_section || null,
         authority_page: item.authority_page || null,
@@ -1157,7 +1435,12 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
     // Open a validation_issue for every unresolved row so the QA queue surfaces them.
     const unresolvedIssues = dedupedRows
       .map((r, idx) => ({ r, id: inserted?.[idx]?.id }))
-      .filter((x) => (x.r as any).assumptions_json?.geometry_status === "unresolved")
+      .filter((x) => {
+        const aj = (x.r as any).assumptions_json || {};
+        return ["unresolved", "partial"].includes(String(aj.geometry_status || ""))
+          && Array.isArray(aj.missing_refs)
+          && aj.missing_refs.length > 0;
+      })
       .map((x) => {
         const aj: any = (x.r as any).assumptions_json || {};
         const sheet = aj.sheet || aj.sheet_id || aj.source_sheet || null;
@@ -1210,14 +1493,25 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
             ? `the ${noun} marked "${element}"`
             : (excerpt ? `the ${noun} for "${String(excerpt).slice(0, 80)}"` : `the ${noun}`);
         const baseTitle = `${noun} — enter drawing dimensions`;
-        const baseDesc = `Look at ${lookAt}. Find ${findPart}. Enter ${inputList} from the drawing.`;
+        const wallGeo = aj.wall_geometry || null;
+        const wallFoundParts = wallGeo && (wallGeo.lengthMm || wallGeo.heightMm)
+          ? [
+            wallGeo.lengthMm ? `wall length ${Math.round(wallGeo.lengthMm)}mm` : null,
+            wallGeo.heightMm ? `wall height ${Math.round(wallGeo.heightMm)}mm` : null,
+            wallGeo.sheetTag || wallGeo.pageNumber ? `from ${wallGeo.sheetTag || `page ${wallGeo.pageNumber}`}` : null,
+          ].filter(Boolean).join("; ")
+          : null;
+        const foundPrefix = wallFoundParts
+          ? `Found ${wallFoundParts}. Evidence quality: ${wallGeo.confidence}; ${wallGeo.reason} `
+          : "";
+        const baseDesc = `${foundPrefix}Look at ${lookAt}. Find ${findPart}. Enter ${inputList} from the drawing.`;
         return ({
         user_id: user.id,
         project_id,
         segment_id,
         source_file_id: (x.r as any).source_file_id || null,
         issue_type: "unresolved_geometry",
-        severity: "error",
+        severity: (x.r as any).assumptions_json?.geometry_status === "partial" ? "warning" : "error",
         title: locLabel ? `${locLabel}: ${baseTitle}` : baseTitle,
         description: baseDesc,
         sheet_id: sheet,
@@ -1246,6 +1540,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
           anchor_kind: aj.anchor_kind || null,
           anchor_confidence: typeof aj.anchor_confidence === "number" ? aj.anchor_confidence : null,
           anchor_mode: aj.anchor_mode || (aj.page_number ? "approximate" : "unavailable"),
+          wall_geometry: wallGeo,
         }],
       });
       });

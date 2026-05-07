@@ -12,6 +12,15 @@ type SmartQuestionInput = {
   title?: string | null;
   sourceExcerpt?: string | null;
   missingRefs?: string[];
+  wallGeometry?: {
+    lengthMm?: number | null;
+    heightMm?: number | null;
+    confidence?: "high" | "medium" | "low" | string | null;
+    reason?: string | null;
+    sheetTag?: string | null;
+    pageNumber?: number | null;
+    excerpt?: string | null;
+  } | null;
 };
 
 export type EngineerAnswerDraft = {
@@ -213,6 +222,35 @@ export function buildEngineerAnswerDraft(input: SmartQuestionInput): EngineerAns
   const fields = inferEngineerAnswerFields(missingRefs, sourceText);
   const loc = input.locationLabel || (input.pageNumber ? `P${input.pageNumber}` : "the highlighted drawing area");
   const excerpt = String(input.sourceExcerpt || "").trim();
+  const wallGeometry = input.wallGeometry;
+
+  if (wallGeometry && (wallGeometry.lengthMm || wallGeometry.heightMm)) {
+    const visibleBarCallout = extractRebarCallout(sourceText) || extractDescriptiveRebarCallout(sourceText);
+    const foundParts = [
+      wallGeometry.lengthMm ? `wall length ${formatMm(Number(wallGeometry.lengthMm))}` : null,
+      wallGeometry.heightMm ? `wall height ${formatMm(Number(wallGeometry.heightMm))}` : null,
+      visibleBarCallout ? `rebar ${visibleBarCallout}` : null,
+    ].filter(Boolean);
+    const missingParts = [
+      !wallGeometry.lengthMm ? "wall length" : null,
+      !wallGeometry.heightMm ? "wall height" : null,
+    ].filter(Boolean) as string[];
+    const source = wallGeometry.sheetTag || (wallGeometry.pageNumber ? `P${wallGeometry.pageNumber}` : loc);
+    const ask = missingParts.length
+      ? `Please confirm the ${missingParts.join(" and ")}.`
+      : "Please confirm or mark resolved.";
+    const structuredValues: Record<string, string> = {};
+    if (wallGeometry.lengthMm) structuredValues.length = formatMm(Number(wallGeometry.lengthMm));
+    if (wallGeometry.heightMm) structuredValues.height = formatMm(Number(wallGeometry.heightMm));
+    if (visibleBarCallout) structuredValues.bar_callout = visibleBarCallout;
+    return {
+      question: `On ${loc}, find the foundation wall. Found ${foundParts.join("; ")} from ${source}. ${missingParts.length ? `What ${missingParts.join(" and ")} should be used?` : "Should this wall geometry be used?"}`,
+      draftAnswer: `Found: ${foundParts.join("; ")}. Evidence quality: ${wallGeometry.confidence || "medium"}. ${wallGeometry.reason || ""} ${ask}`.replace(/\s+/g, " ").trim(),
+      confidence: wallGeometry.confidence === "high" ? "high" : wallGeometry.confidence === "medium" ? "medium" : "low",
+      needsConfirmation: true,
+      structuredValues,
+    };
+  }
 
   if (isLevelingPadDowelCallout(sourceText)) {
     const callout = extractLevelingPadDowelCallout(excerpt || sourceText) || "the dowel spacing callout";

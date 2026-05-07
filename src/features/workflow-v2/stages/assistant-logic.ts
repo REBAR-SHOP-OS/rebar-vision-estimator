@@ -165,6 +165,7 @@ export function buildAssistantSuggestion(prompt: string, snapshot: AssistantProj
   const linkedRow = snapshot.takeoffRows.find((row) => row.raw_id === issue.linked_item?.id)
     || snapshot.takeoffRows.find((row) => issue.title.toLowerCase().includes(row.mark.toLowerCase()));
   const missingRefs = issue.linked_item?.missing_refs || [];
+  const firstRef = Array.isArray(issue.source_refs) ? issue.source_refs[0] : null;
   const draft = buildEngineerAnswerDraft({
     locationLabel: issue.location_label,
     pageNumber: issue.location?.page_number || issue.locator?.page_number || undefined,
@@ -173,6 +174,7 @@ export function buildAssistantSuggestion(prompt: string, snapshot: AssistantProj
     title: issue.title,
     sourceExcerpt: issue.location?.source_excerpt || issue.locator?.anchor_text || issue.linked_item?.description || null,
     missingRefs,
+    wallGeometry: firstRef?.wall_geometry || null,
   });
   const sourceExcerpt = issue.location?.source_excerpt || issue.locator?.anchor_text || issue.linked_item?.description || null;
   const fallbackAnswer = draft.draftAnswer || buildFallbackSuggestedAnswer(issue, missingRefs, sourceExcerpt);
@@ -225,11 +227,15 @@ export function parseAssistantAnswerValues(text: string, structuredValues: Recor
   const pieceLengthMm = parsePieceLengthMm(combined);
   const spacingMm = parseSpacingMm(combined);
   const runLengthMm = extractRunLengthMm(combined, structuredValues.length);
+  const wallHeightMm = parseFirstMetricLengthMm(combined, ["wall height", "height"]);
+  const isHorizontalWall = /\b(horizontal|horiz|hef|top|bottom)\b/i.test(combined);
+  const countDistanceMm = isHorizontalWall && wallHeightMm ? wallHeightMm : runLengthMm;
+  const calculatedPieceLengthMm = pieceLengthMm || (isHorizontalWall ? runLengthMm : wallHeightMm);
   const estimate = estimateCanadianLine({
     barSize,
-    runLengthMm,
+    runLengthMm: countDistanceMm,
     spacingMm,
-    pieceLengthMm,
+    pieceLengthMm: calculatedPieceLengthMm,
     quantity: explicitQty ? Number(explicitQty) : null,
   });
 

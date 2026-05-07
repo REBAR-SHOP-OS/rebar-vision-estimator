@@ -137,4 +137,45 @@ describe("qa answer fields", () => {
     expect(draft.draftAnswer).toBe('Found source excerpt: "Refer to architectural drawings for information.". Please confirm the exact drawing value for this item.');
     expect(draft.structuredValues).toEqual({});
   });
+
+  it("asks only for missing wall height when wall length was auto-resolved", () => {
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P10",
+      objectIdentity: "foundation wall",
+      missingRefs: ["wall_height"],
+      sourceExcerpt: "15M @ 406mm O.C.",
+      wallGeometry: {
+        lengthMm: 12400,
+        heightMm: null,
+        confidence: "medium",
+        reason: "Found partial wall dimensions in OCR text.",
+        sheetTag: "S-1.0",
+      },
+    });
+
+    expect(draft.question).toContain("wall length 12400mm");
+    expect(draft.question).toContain("What wall height should be used");
+    expect(draft.draftAnswer).toContain("Please confirm the wall height");
+    expect(draft.structuredValues.length).toBe("12400mm");
+  });
+
+  it("prefills wall length and height when both are auto-resolved", () => {
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P10",
+      objectIdentity: "foundation wall",
+      missingRefs: ["element_dimensions"],
+      sourceExcerpt: "15M @ 406mm O.C.",
+      wallGeometry: {
+        lengthMm: 12400,
+        heightMm: 3000,
+        confidence: "high",
+        reason: "Found explicit wall dimensions in OCR text.",
+        sheetTag: "S-1.0",
+      },
+    });
+
+    expect(draft.question).toContain("Should this wall geometry be used");
+    expect(draft.draftAnswer).toContain("wall height 3000mm");
+    expect(draft.structuredValues).toMatchObject({ length: "12400mm", height: "3000mm" });
+  });
 });

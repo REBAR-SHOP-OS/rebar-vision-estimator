@@ -390,7 +390,8 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     title: sel?.title,
     sourceExcerpt: sel?.location?.source_excerpt,
     missingRefs,
-  }), [missingRefs, objectIdentity, sel?.description, sel?.location?.page_number, sel?.location?.source_excerpt, sel?.location_label, sel?.locator?.page_number, sel?.title]);
+    wallGeometry: Array.isArray(sel?.source_refs) ? (sel?.source_refs?.[0] as any)?.wall_geometry : null,
+  }), [missingRefs, objectIdentity, sel?.description, sel?.location?.page_number, sel?.location?.source_excerpt, sel?.location_label, sel?.locator?.page_number, sel?.source_refs, sel?.title]);
   const engineerQuestion = engineerDraft.question;
 
   useEffect(() => {

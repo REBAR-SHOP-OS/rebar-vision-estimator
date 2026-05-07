@@ -103,6 +103,15 @@ describe("workflow assistant logic", () => {
     });
   });
 
+  it("parses wall length, height, and spacing into Canadian quantity and weight", () => {
+    expect(parseAssistantAnswerValues("Wall length 12400mm; wall height 3000mm; rebar 15M @ 406mm O.C. vertical")).toMatchObject({
+      barSize: "15M",
+      quantity: 31,
+      totalLengthM: 93,
+      weightKg: 146.01,
+    });
+  });
+
   it("updates validation issue and linked estimate item on confirmed apply", async () => {
     const calls: Array<{ table: string; update: Record<string, unknown>; id?: string }> = [];
     const sourceRefs = [{ estimate_item_id: "item-1" }];

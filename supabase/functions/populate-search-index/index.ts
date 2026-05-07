@@ -77,6 +77,15 @@ function computeConfidence(flags: string[]): number {
   return Math.max(0, Math.round(score * 100) / 100);
 }
 
+function parseScaleRatio(scaleRaw: string | null | undefined): number | null {
+  const raw = String(scaleRaw || "").trim();
+  const ratio = raw.match(/1\s*[:=]\s*(\d+(?:\.\d+)?)/i);
+  if (ratio) return Number(ratio[1]);
+  const metric = raw.match(/(\d+(?:\.\d+)?)\s*mm\s*=\s*(\d+(?:\.\d+)?)\s*m/i);
+  if (metric) return (Number(metric[2]) * 1000) / Number(metric[1]);
+  return null;
+}
+
 function mapSheetCategory(drawingType: string | null, rawText: string): string {
   const haystack = `${drawingType || ""} ${rawText.slice(0, 400)}`.toLowerCase();
   if (haystack.includes("foundation")) return "foundation_plan";
@@ -471,6 +480,9 @@ Deno.serve(async (req) => {
                 sheet_title: (tb as Record<string, string>).sheet_title || null,
                 discipline,
                 title_block_json: tb as Record<string, unknown>,
+                scale_raw: (tb as Record<string, string>).scale || (tb as Record<string, string>).scale_raw || null,
+                scale_ratio: parseScaleRatio((tb as Record<string, string>).scale || (tb as Record<string, string>).scale_raw || null),
+                scale_confidence: ((tb as Record<string, string>).scale || (tb as Record<string, string>).scale_raw) ? confidence : null,
               },
               { onConflict: "document_version_id,page_number" },
             )
