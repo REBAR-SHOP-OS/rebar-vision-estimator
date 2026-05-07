@@ -223,17 +223,20 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
   useEffect(() => {
     let cancelled = false;
+    const fileId = sel?.source_file_id || sel?.linked_item?.source_file_id || null;
+    if (!fileId) {
+      setPreviewUrl(null); setPreviewKind(null); setPdfImg(null);
+      setPdfPageCount(1); setPreviewName("");
+      setImgSize(null); setPageText([]); setRenderedPage(null); setPageBox(null);
+      setRenderStatus(sel ? "error" : "idle");
+      if (sel) setRenderError("Drawing source is missing for this issue.");
+      return;
+    }
+    // Only reset/refetch when the underlying source file actually changes.
     setPreviewUrl(null); setPreviewKind(null); setPdfImg(null);
     setPdfPageCount(1); setPreviewName("");
     setImgSize(null); setPageText([]); setRenderedPage(null); setRenderError(null); setPageBox(null);
-    setRenderStatus(sel ? "loading" : "idle");
-    // Initialize page from the issue locator (do NOT force back to 1, that
-    // was the bug that caused the cover sheet to always appear).
-    const initialPage = sel?.locator?.page_number;
-    if (initialPage && initialPage > 0) setPdfPage(initialPage);
-    else setPdfPage((p) => p || 1);
-    const fileId = sel?.source_file_id || sel?.linked_item?.source_file_id || null;
-    if (!fileId) return;
+    setRenderStatus("loading");
     setPreviewLoading(true);
     (async () => {
       const { data: file } = await supabase
@@ -256,23 +259,30 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
       setPreviewName(file.file_name || "");
       if (!url) {
         setRenderStatus("error");
-        setRenderError(`Could not load ${file.file_name || "the source file"} page ${initialPage || sel?.locator?.page_number || 1}.`);
+        setRenderError(`Could not load ${file.file_name || "the source file"}.`);
       } else if (!isPdf) {
         setRenderStatus("loading");
       }
       setPreviewLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [sel?.source_file_id, sel?.id]);
+    // Intentionally only depend on the source file id — switching between
+    // issues that share the same drawing must NOT reload the PDF.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel?.source_file_id, sel?.linked_item?.source_file_id]);
 
   useEffect(() => {
     if (previewKind !== "pdf" || !previewUrl) return;
-    setRenderStatus("loading");
-    setRenderError(null);
-    setPdfImg(null);
-    setPageText([]);
-    setRenderedPage(null);
-    setPageBox(null);
+    // Only blank the rendered raster when the page actually changes — not on
+    // every re-mount of the same URL (that caused the flicker loop).
+    if (renderedPage !== null && renderedPage !== pdfPage) {
+      setRenderStatus("loading");
+      setRenderError(null);
+      setPdfImg(null);
+      setPageText([]);
+      setPageBox(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewKind, previewUrl, pdfPage]);
 
   useEffect(() => {
