@@ -295,6 +295,35 @@ function defaultRawInputForAsk(c: string): string {
   } as Record<string,string>)[c] || "the dimensions and bar callout";
 }
 
+function cleanAnchorPhrase(value: string | null | undefined): string | null {
+  const s = String(value || "").replace(/\s+/g, " ").replace(/^[@,:;\-\s]+|[@,:;\-\s]+$/g, "").trim();
+  return s || null;
+}
+
+function inferQaAnchorMeta(...vals: Array<string | null | undefined>) {
+  const text = vals.filter(Boolean).join(" \n ");
+  const zoneMatch = text.match(/\b(?:AT|ALONG|NEAR)\s+(EXTENT OF\s+[A-Z][A-Z\s]+|ENTRANCE DOOR|WEST SIDE|EAST SIDE|NORTH SIDE|SOUTH SIDE)\b/i);
+  const section = cleanAnchorPhrase(text.match(/\bSECTION\s+([A-Z0-9.\-\/]+)/i)?.[1] || null);
+  const detail = cleanAnchorPhrase(text.match(/\b(?:DETAIL|DET\.?|T\.D\.?|TD\.?)[\s#:]*([A-Z0-9.\-\/]+)/i)?.[1] || null);
+  const callout = cleanAnchorPhrase(text.match(/\b(BS?\d{2,4}|B\d{4}|F\d{1,3}|W\d{1,3}|GB\d{1,3}|D\d{2}(?:-\d+)?|P\d{1,3})\b/i)?.[1] || null);
+  const grid = cleanAnchorPhrase(text.match(/\bGRID\s+([A-Z]+-?\d+[A-Z]?)\b/i)?.[1] || null);
+  const zone = cleanAnchorPhrase(zoneMatch?.[1] || null);
+  let element = cleanAnchorPhrase(
+    text.match(/\b(HOUSEKEEPING PAD|EQUIPMENT PAD|LEVEL(?:I|E)NG PAD(?: AT ENTRANCE DOOR)?|FOUNDATION WALL(?: AT ENTRANCE DOOR)?|TOP OF BRICK LEDGE|BRICK LEDGE|FROST SLAB EDGE|SLAB EDGE|STRIP FOOTING|CONT(?:INUOUS)? FOOTING|DOOR OPENING)\b/i)?.[1] || null
+  );
+  if (element) element = element.toLowerCase();
+  const schedule = cleanAnchorPhrase(text.match(/\b(?:SCHEDULE|ROW)\s+([A-Z0-9.\-\/]+)/i)?.[1] || callout || null);
+  return {
+    detail_reference: detail,
+    section_reference: section,
+    callout_tag: callout,
+    grid_reference: grid,
+    zone_reference: zone,
+    element_reference: element,
+    schedule_row_identity: schedule && /^(10M|15M|20M|25M|30M|35M)$/i.test(schedule) ? null : schedule,
+  };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
