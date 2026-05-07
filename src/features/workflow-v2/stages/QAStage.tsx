@@ -364,10 +364,11 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const exactAnchorConfidence = Number((sel?.source_refs?.[0] as { anchor_confidence?: number } | undefined)?.anchor_confidence ?? sel?.locator?.anchor_confidence ?? 1);
   const exactAnchorMode = String((sel?.source_refs?.[0] as { anchor_mode?: string } | undefined)?.anchor_mode ?? sel?.locator?.anchor_mode ?? "exact");
   const exactBboxValid = !!exactBbox && exactAnchorConfidence >= MIN_ANCHOR_CONFIDENCE && exactAnchorMode !== "approximate";
+  const inferredExact = !exactBboxValid && approxResult.mode === "exact" && approxResult.confidence >= MIN_ANCHOR_CONFIDENCE;
   const safeApproxBbox = approxResult.confidence >= MIN_ANCHOR_CONFIDENCE ? approxBbox : null;
   const bbox = clampBbox(exactBboxValid ? exactBbox : safeApproxBbox, imgW, imgH);
-  const bboxIsApprox = !exactBboxValid && !!bbox;
-  const anchorStatus: "exact" | "approximate" | "unavailable" = exactBboxValid ? "exact" : bbox ? "approximate" : "unavailable";
+  const bboxIsApprox = !exactBboxValid && !inferredExact && !!bbox;
+  const anchorStatus: "exact" | "approximate" | "unavailable" = exactBboxValid || inferredExact ? "exact" : bbox ? "approximate" : "unavailable";
   const anchorReason = exactBboxValid ? "" : approxReason || (exactBbox ? "saved anchor confidence is too low for a precise box" : "no trusted drawing object was found on this page");
   const center = bbox && imgW && imgH
     ? { cx: ((bbox[0] + bbox[2]) / 2) / imgW, cy: ((bbox[1] + bbox[3]) / 2) / imgH }
