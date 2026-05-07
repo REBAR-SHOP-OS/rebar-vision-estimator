@@ -1,60 +1,88 @@
-# Fine-tune Segment Finder per project type
+## Estimator audit — what's already strong
 
-Today `auto-segments` uses **one generic prompt** for every project (residential, commercial, industrial, infra, cage_only, bar_list_only). It guesses bar-mark prefixes (`B1001`, `BS03`…) that only match one builder's convention. That's why the same 3 generic candidates (SOG / Footings / Walls) keep showing up regardless of project — exactly what your screenshot shows.
+After the last 5 patches the estimator already has:
+- Project-spec precedence for lap / cover / grade (with `lap_source`, `cover_source`, `grade_source` columns).
+- Deterministic-match gating + 0.6 confidence ceiling for AI-only rows.
+- MAD outlier guard on length-per-piece (3.5σ, samples ≥4) → flagged rows become `unresolved` with an `error` validation issue.
+- Tiered waste factors (small 3% / large 5% / stirrup 8%) sourced from `standards_profiles.waste_factors`.
+- Per-row source provenance, citation-missing detection, weight-gate per segment type.
 
-The fix: turn the segment finder into a **project-type-driven playbook**, seeded by `detect-project-type` (already returns `primaryCategory` + `recommendedScope` + `disciplinesFound` + `hiddenScope`) and the existing `scope_templates` table.
+## Remaining accuracy gaps (root-cause review)
 
-This is a minimal, surgical change — only `auto-segments/index.ts` is rewritten internally; no DB migration is required (we reuse existing `scope_templates`, `projects.project_type`, and the new `sheet_category` / `rebar_relevant` tags from the last patch).
+| # | Gap | Impact on 99.9% target |
+|---|---|---|
+| 1 | `REBAR_MASS_KG_PER_M` table only covers #3–#8 / 10M–35M. A `#9 / #10 / #11 / 45M / 55M` callout silently weighs **0 kg** (massFor returns 0). | Missing-item / weight error on heavier-bar projects. |
+| 2 | When AI returns a `total_weight`, it is trusted (`Number(it.total_weight) > 0 ? it.total_weight : aiLen*mass`). AI hallucinations propagate into final totals. | Direct weight error. |
+| 3 | WWM rows: `massFor` returns kg/**m²**, but it's multiplied by `total_length` (linear m) → wrong units. WWM weight is mass × area, not mass × length. | 100%+ error on any segment with mesh. |
+| 4 | Size→tier classifier uses `Math.round(metric/3.18)` for waste tiering — 25M maps to #8, 30M to #9, 35M to #11. Crude but works for waste; **but the same mass table has no entries for #9–#11**, compounding gap #1. | Silent zero-weight on metric ≥30M with imperial-keyed lookup paths. |
+| 5 | No round-trip integrity check: deterministic resolver computes `total_weight = total_length × mass`, but if the AI's `total_length` was wrong, nothing flags that the segment total deviates from sum-of-bar-items (`auto-bar-schedule` output for the same segment). | Cross-engine drift goes undetected. |
+| 6 | Stock-length splice math: bars ship in 20/40/60 ft (or 6/12/18 m) lengths. When `bar_len > stock`, the resolver currently produces 1 piece — real shop adds `ceil(bar_len/stock)−1` lap splices × lap-length per splice. Missing tonnage ≈ 1–3%. | Systematic under-estimation on tall walls / long footings. |
+| 7 | Hook / bend additions absent in the deterministic path (only the AI is told to "leave hooks alone"). RSIC standard hooks add real cm to cut length. | Small but recurring under-call. |
 
-## What changes
+## Patches (minimum-diff, all in `supabase/functions/auto-estimate/index.ts` unless noted)
 
-### 1. Per-type playbooks (in-function, one constant)
-A `PLAYBOOKS` map keyed by `project_type`, each entry contains:
-- `expected_buckets` — which of the 5 construction buckets to scan for
-- `naming_conventions` — typical sheet/bar-mark prefixes (S-, A-, F-, W-, P-, C-, GB-, B-, COL-…)
-- `must_have_segments` — defaults the finder will create even with thin OCR (e.g. residential ⇒ Strip Footings, Basement Walls, SOG, Garage Slab; commercial ⇒ Columns L1-Ln, Elevated Slabs L1-Ln, Shear Walls, Pile Caps; industrial ⇒ Equipment Pads, Tank Bases, Crane Beams; infra ⇒ Abutments, Pier Caps, Deck, Barriers; cage_only ⇒ Caisson Cage groups by diameter)
-- `forbidden_segments` — types to NEVER suggest (e.g. cage_only ⇒ no SOG, no walls; residential ⇒ no crane beams)
-- `bar_mark_hints` — common prefix→element maps per builder family (configurable, with sane defaults)
+### Patch A — Complete mass tables (gap #1, #4)
+Extend `REBAR_MASS_KG_PER_M` with the rest of the RSIC weight table:
+```
+"#9":5.060, "#10":6.404, "#11":7.907, "#14":11.384, "#18":20.238,
+"45M":11.775, "55M":19.625
+```
+Update `sizeKey()` regex to include `#9|#10|#11|#14|#18|45M|55M`.
 
-### 2. Use `detect-project-type` output as the seed
-`auto-segments` already has `project.project_type`. Add:
-- pull `recommendedScope[]`, `disciplinesFound[]`, `hiddenScope[]` from the last `audit_events` row of type `project_classified` (already written by detect-project-type)
-- if absent, fall back to playbook defaults
+### Patch B — Always recompute weight deterministically (gap #2)
+In `resolveItem` / `resolveLinear` / `resolveWall`, replace:
+```ts
+totalWeightKg: Number(it.total_weight) > 0 ? Number(it.total_weight) : +(aiLen*mass).toFixed(2)
+```
+with:
+```ts
+totalWeightKg: mass > 0 ? +(totalLengthM * mass).toFixed(2) : 0
+```
+Track AI's value in `assumptions_json.ai_reported_weight_kg` for audit; never trust it as truth.
 
-### 3. Use `scope_templates` table as user-overridable per-type templates
-- Read `scope_templates` where `project_type = project.project_type AND (is_system OR user_id = me)`
-- Pre-seed the suggestion list with each `scope_items[]` entry as a candidate segment (so commercial users get their saved playbook automatically)
-- Users can edit/save their own template per project type → fine-tunes future projects without touching code
+### Patch C — Correct WWM units (gap #3)
+Add `item_type === "wwm"` branch: weight = mass(kg/m²) × `area_m2` (extracted from description like `"6X6-W2.9 - 250m²"`). When area is missing → `geometry_status='unresolved'`, weight=0, queue validation issue "WWM area not extracted". Stop multiplying kg/m² by linear meters.
 
-### 4. Filter by sheet category (rides on the previous #5/#8 patch)
-- When iterating `drawing_search_index`, skip pages where `extracted_entities.rebar_relevant === false` for segment evidence
-- But still surface **Hidden Scope** flags from architectural / civil sheets (CMU walls, depressed slabs, light pole bases) as separate suggestions tagged `source: "hidden_scope"`
+### Patch D — Cross-engine reconciliation gate (gap #5)
+After `dedupedRows` is built (around line 1779), query `bar_items` for the same `segment_id`, sum their `cut_length × quantity × mass(size)` to a "bar-schedule weight". Compare to estimator's `Σ total_weight`:
+- delta < 5% → no-op.
+- 5–15% → `validation_issues` severity `warning`, type `cross_engine_drift`.
+- > 15% → severity `error`, blocks approval (matches existing `<15% OK / 15–35% FLAG / >35% RISK_ALERT` thresholds in mem://logic/reconciliation-thresholds).
+Records both totals in the issue `source_refs`.
 
-### 5. Project-type-specific prompt
-Rebuild the AI prompt section dynamically from the playbook so the model sees only relevant rules:
-- residential → emphasize ICF, basement, SOG, garage, strip footings; ignore PT decks
-- commercial → emphasize columns/levels/shear walls/PT decks; group footings by mark
-- industrial → emphasize equipment pads, tank bases, secondary containment, crane beams
-- infrastructure → emphasize abutments, pier caps, deck panels, barriers, MTO/OPSS callouts
-- cage_only → group by cage diameter and length only; suppress everything else
-- bar_list_only → ONE segment per bar mark family from the schedule
+### Patch E — Stock-length splice augmentation (gap #6)
+New helper `applySpliceWaste(barLenM, sizeKey, lapMm, stockM=18)`:
+```ts
+if (barLenM <= stockM) return barLenM;
+const splices = Math.ceil(barLenM/stockM) - 1;
+return barLenM + splices * (lapMm/1000);
+```
+Apply inside `resolveWall` and `resolveLinear` whenever `lap > 0`. Record in `assumptions_json.splice_count` and `assumptions_json.stock_length_m`. Stock length comes from `standard?.naming_rules?.stock_length_m` if set, else 18 (≈60 ft).
 
-### 6. Confidence + source labels on each suggestion
-Each returned segment carries:
-- `confidence` (0–1) — high when found in OCR + matches playbook, lower when inferred
-- `source` — `"drawing"` | `"playbook"` | `"hidden_scope"` | `"user_template"`
-- `bucket` — which of the 5 construction buckets
-- `evidence` — sheet IDs / bar marks where it was seen
+### Patch F — RSIC hook addition (gap #7)
+Add `hookAddMm(sizeKey, hookType)` driven by `standard?.hook_defaults` (already exists on `standards_profiles`) with RSIC defaults (e.g. 90° hook = 12·db, 180° = 6·db + 4·db tail). Add to bar length only when description includes `HOOK|HK|180|135|STD HK` or item is a stirrup/tie. Record `assumptions_json.hook_addition_mm`.
 
-UI already shows the "Inferred from project type" badge — it'll now show `Drawing-confirmed (S-201)` vs `Playbook default` vs `Hidden scope (A-101)`.
+### Patch G — Segment integrity score (closes the loop)
+After all patches, write `segments.confidence` = harmonic mean of (item confidences) × (1 − %outlier rows) × (1 − cross-engine-delta). Currently confidence is set elsewhere ad-hoc; making it deterministic gives the regression harness a single numeric target.
+
+## Migration
+
+One small migration to add `assumptions_json` keys is unnecessary (jsonb is schemaless). No DDL required for A–G.
+
+Optional: add `standards_profiles.stock_length_m numeric default 18` so Patch E is configurable per profile. This is a 1-line migration.
 
 ## Files touched
-- `supabase/functions/auto-segments/index.ts` — rewrite the prompt builder + add PLAYBOOKS constant + read scope_templates + use sheet_category filter (one file, ~+150 lines)
-- `src/components/workspace/...` — no UI changes required; existing candidate list renders the new fields if present (badge renders `source` if available)
-- (optional) seed a few `scope_templates` rows via migration for commercial / industrial / infrastructure if not already present
 
-## Out of scope (kept for later)
-- Learning loop that tunes playbooks from approved/rejected candidates — needs a follow-up migration
-- Per-user bar-mark-prefix learning — wait until we have ≥3 approved projects per user
+- `supabase/functions/auto-estimate/index.ts` (Patches A–G)
+- `supabase/migrations/<ts>_stock_length.sql` (optional, Patch E)
 
-After approval I'll implement just step 1–5 in `auto-segments/index.ts` (single-file patch).
+No UI files change. No edge function deletes. Existing logic preserved; all new behavior is additive and gated by data presence (e.g. WWM area extraction failure → unresolved, never silent zero).
+
+## Expected accuracy delta
+
+Combined the 7 patches close the known systematic error sources. Projected after harness re-run:
+- Weight error: from current ~3% target → **<0.5%** on standard projects, <1.5% on heavy-bar / WWM-mixed.
+- Missing items: from <1% → **<0.2%** (mass-table gap was the largest silent-zero source).
+- Cross-engine drift: now bounded and surfaced, not absorbed.
+
+After approval I'll implement A→G in that order and stop for the regression harness delta before any further tuning.
