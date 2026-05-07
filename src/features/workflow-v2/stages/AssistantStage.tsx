@@ -16,6 +16,7 @@ import {
   applyAssistantSuggestion,
   buildAssistantSuggestion,
   buildFinishEstimationAgentResponse,
+  buildNextEstimationAgentResponse,
   buildWorkingSteps,
   isAssistantConfirmationIntent,
   isFinishAuditIntent,
@@ -273,7 +274,37 @@ export default function AssistantStage({ projectId, state, goToStage }: StagePro
         working_steps: ["QA answer saved", result.estimateUpdated ? "Takeoff row updated" : "Takeoff row left for confirmation"],
       },
     );
-  }, [insertMessage, state]);
+    setWorkingSteps([
+      "Refreshing project after apply",
+      "Scanning for the next unresolved QA issue",
+      "Preparing the next suggested answer",
+    ]);
+    const snapshot = await loadSnapshot();
+    const next = buildNextEstimationAgentResponse(snapshot, { skipIssueIds: [suggestion.issueId] });
+    setLatestSuggestion(next.suggestion);
+    await insertMessage(
+      "assistant",
+      next.suggestion
+        ? [
+          "**Moving to next blocker**",
+          "",
+          next.suggestion.answerText,
+          "",
+          `**Next question:** ${next.suggestion.question}`,
+          `Evidence quality: ${next.suggestion.confidence}`,
+          "Say **apply** to save this answer, or correct it in chat.",
+        ].join("\n")
+        : "I re-checked the project after applying that answer. I do not see another applyable QA answer right now. Run **Finish estimation audit** to review remaining OCR/takeoff blockers.",
+      {
+        kind: next.suggestion ? "suggestion" : "audit",
+        confidence: next.confidence,
+        working_steps: next.workingSteps,
+        suggestion: next.suggestion,
+        linked_issue_id: next.suggestion?.issueId || null,
+        linked_estimate_item_id: next.suggestion?.linkedEstimateItemId || null,
+      },
+    );
+  }, [insertMessage, loadSnapshot, state]);
 
   const send = useCallback(async (override?: string) => {
     const text = (override ?? input).trim();

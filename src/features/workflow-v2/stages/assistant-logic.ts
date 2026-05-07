@@ -175,6 +175,17 @@ export function buildFinishEstimationAgentResponse(snapshot: AssistantProjectSna
   };
 }
 
+export function buildNextEstimationAgentResponse(
+  snapshot: AssistantProjectSnapshot,
+  options: { skipIssueIds?: string[] } = {},
+): FinishEstimationAgentResult {
+  const skip = new Set((options.skipIssueIds || []).map((id) => String(id)));
+  return buildFinishEstimationAgentResponse({
+    ...snapshot,
+    qaIssues: snapshot.qaIssues.filter((issue) => !skip.has(issue.id)),
+  });
+}
+
 function buildNextAuditQuestion(snapshot: AssistantProjectSnapshot, blockers: string[]): string | null {
   const unresolvedRow = snapshot.takeoffRows.find((row) => row.geometry_status === "unresolved");
   if (unresolvedRow) {

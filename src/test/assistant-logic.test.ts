@@ -4,6 +4,7 @@ import {
   buildFinishEstimationAgentResponse,
   buildFinishAuditResponse,
   buildAssistantSuggestion,
+  buildNextEstimationAgentResponse,
   isAssistantConfirmationIntent,
   isFinishAuditIntent,
   parseAssistantAnswerValues,
@@ -100,6 +101,41 @@ describe("workflow assistant logic", () => {
     expect(result.content).toContain("Brick ledge dimensions per detail");
     expect(result.suggestion?.issueId).toBe("legacy:issue-brick");
     expect(result.suggestion?.answerText).toContain("115mm");
+  });
+
+  it("moves to the next estimation suggestion after skipping an applied issue", () => {
+    const brickIssue: WorkflowQaIssue = {
+      id: "legacy:issue-brick",
+      title: "P17: brick ledge",
+      description: "Look at P17. Find the brick ledge.",
+      severity: "error",
+      status: "open",
+      issue_type: "unresolved_geometry",
+      location_label: "P17",
+      location: { page_number: 17, element_reference: "brick ledge", source_excerpt: "15M CONT. REINFORCEMENT @ TOP OF BRICK LEDGE" },
+      linked_item: { id: "item-brick", description: "brick ledge", bar_size: "10M", quantity_count: 0, total_length: 0, total_weight: 0, missing_refs: ["rebar_callout", "element_dimensions"] },
+    };
+    const wallIssue: WorkflowQaIssue = {
+      id: "legacy:issue-wall",
+      title: "P12: foundation wall",
+      description: "Missing wall dimensions.",
+      severity: "error",
+      status: "open",
+      issue_type: "unresolved_geometry",
+      location_label: "P12",
+      location: { page_number: 12, element_reference: "foundation wall", source_excerpt: 'Continuous horizontal bars @top of foundation wall w/ 800mm (32") hook' },
+      linked_item: { id: "item-wall", description: "foundation wall", bar_size: "15M", quantity_count: 0, total_length: 0, total_weight: 0, missing_refs: ["rebar_callout", "element_dimensions"] },
+    };
+
+    const result = buildNextEstimationAgentResponse({
+      files: [],
+      qaIssues: [brickIssue, wallIssue],
+      takeoffRows: [],
+      extractionAudit: null,
+    }, { skipIssueIds: ["legacy:issue-brick"] });
+
+    expect(result.suggestion?.issueId).toBe("legacy:issue-wall");
+    expect(result.content).toContain("foundation wall");
   });
 
   it("builds a suggestion from a QA issue and linked row", () => {
