@@ -358,7 +358,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
       if (span && isLocalizedSpan(span, imgW, imgH)) {
         return {
           bbox: clampBbox(tightBox(span, imgW, imgH), imgW, imgH),
-          reason: `${candidate.kind === "detail" ? "detail" : candidate.kind === "section" ? "section" : candidate.kind === "callout" ? "callout" : candidate.kind === "grid" ? "grid" : candidate.kind === "schedule" ? "schedule row" : candidate.kind === "element" ? "element label" : candidate.kind === "excerpt" ? "source excerpt" : "OCR phrase"} match on "${candidate.value}"`,
+          reason: `${candidate.kind === "trusted" ? "estimator anchor" : candidate.kind === "detail" ? "detail" : candidate.kind === "section" ? "section" : candidate.kind === "callout" ? "callout" : candidate.kind === "grid" ? "grid" : candidate.kind === "schedule" ? "schedule row" : candidate.kind === "element" ? "element label" : candidate.kind === "excerpt" ? "source excerpt" : "OCR phrase"} match on "${candidate.value}"`,
           confidence: candidate.score,
           mode: candidate.score >= 0.9 ? "exact" : "approximate",
         };
@@ -367,7 +367,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
       if (tokenHit && isLocalizedSpan([tokenHit], imgW, imgH)) {
         return {
           bbox: clampBbox(tightBox([tokenHit], imgW, imgH), imgW, imgH),
-          reason: `${candidate.kind === "detail" ? "detail" : candidate.kind === "section" ? "section" : candidate.kind === "callout" ? "callout" : candidate.kind === "grid" ? "grid" : candidate.kind === "schedule" ? "schedule row" : candidate.kind === "element" ? "element label" : candidate.kind === "excerpt" ? "source excerpt" : "OCR phrase"} token match on "${candidate.value}"`,
+          reason: `${candidate.kind === "trusted" ? "estimator anchor" : candidate.kind === "detail" ? "detail" : candidate.kind === "section" ? "section" : candidate.kind === "callout" ? "callout" : candidate.kind === "grid" ? "grid" : candidate.kind === "schedule" ? "schedule row" : candidate.kind === "element" ? "element label" : candidate.kind === "excerpt" ? "source excerpt" : "OCR phrase"} token match on "${candidate.value}"`,
           confidence: Math.max(0.55, candidate.score - 0.1),
           mode: candidate.score >= 0.9 ? "exact" : "approximate",
         };
