@@ -292,14 +292,12 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
   useEffect(() => {
     if (previewKind !== "pdf" || !previewUrl) return;
-    // Only blank the rendered raster when the page actually changes — not on
-    // every re-mount of the same URL (that caused the flicker loop).
+    // Keep the last rendered raster visible while the requested page renders.
+    // Clearing pdfImg here causes the first/next page to flash blank white.
     if (renderedPage !== null && renderedPage !== pdfPage) {
       setRenderStatus("loading");
       setRenderError(null);
-      setPdfImg(null);
       setPageText([]);
-      setPageBox(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewKind, previewUrl, pdfPage]);
@@ -415,6 +413,8 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const fitZoom = bbox && imgW && imgH ? Math.min(imgW / (bboxW * PAD), imgH / (bboxH * PAD)) : 1;
   const autoZoom = zoomMode === "tight" && bbox ? Math.min(8, Math.max(1.5, fitZoom)) : 1;
   const zoom = Math.min(24, Math.max(0.5, autoZoom * zoomLevel));
+  const isRenderedPageCurrent = previewKind !== "pdf" || renderedPage === pdfPage;
+  const canShowPointer = isRenderedPageCurrent && renderStatus === "ready";
   const focusTransform = computeFocusTransformForImage({
     bbox,
     imgW,
@@ -700,7 +700,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                           style={viewMode === "diff" ? { mixBlendMode: "difference", filter: "invert(1) hue-rotate(180deg)" } : undefined}
                           draggable={false}
                         />
-                        {bbox && imgW && imgH && pageBox && (
+                        {canShowPointer && bbox && imgW && imgH && pageBox && (
                           <BBoxPointer
                             bbox={bbox}
                             imgW={imgW}
@@ -758,8 +758,15 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                 {!previewUrl && !previewLoading && (
                   <div className="absolute inset-0 grid place-items-center text-[10px] uppercase tracking-widest text-muted-foreground">No linked drawing for this issue</div>
                 )}
-                {previewLoading && (
+                {(previewLoading || (previewKind === "pdf" && previewUrl && !isRenderedPageCurrent && renderStatus === "loading")) && (
                   <div className="absolute inset-0 grid place-items-center text-[10px] uppercase tracking-widest text-muted-foreground">Loading drawing…</div>
+                )}
+                {previewKind === "pdf" && previewUrl && !isRenderedPageCurrent && renderedPage !== null && (
+                  <div className="absolute inset-0 z-10 pointer-events-none grid place-items-center bg-background/10 backdrop-blur-[1px]">
+                    <div className="border border-border bg-card/90 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground shadow-xl">
+                      Rendering page {pdfPage}…
+                    </div>
+                  </div>
                 )}
                 {renderStatus === "error" && (
                   <div className="absolute inset-0 grid place-items-center px-6 text-center">
@@ -986,7 +993,12 @@ function BBoxPointer({
   const heightPx = (height / 100) * pageBox.height;
   const z = Math.max(1, zoom);
   const stroke = approximate ? "#f59e0b" : "#ff7a1a";
-  const fillBg = approximate ? "rgba(245,158,11,0.12)" : "rgba(34,197,94,0.18)";
+  const borderPx = Math.max(1, 2 / z);
+  const haloPx = Math.max(0.5, 1.5 / z);
+  const isShortBox = heightPx * z < 26 || widthPx * z < 42;
+  const labelScale = Math.min(1, Math.max(0.72, 1 / z));
+  const popoverOnRight = leftPx + widthPx + 280 < pageBox.left + pageBox.width;
+  const fillBg = approximate ? "rgba(245,158,11,0.035)" : "rgba(255,122,26,0.025)";
   return (
     <div
       className="absolute pointer-events-auto"
@@ -995,17 +1007,30 @@ function BBoxPointer({
         top: `${topPx}px`,
         width: `${widthPx}px`,
         height: `${heightPx}px`,
-        border: `${Math.max(2, 6 / z)}px ${approximate ? "dashed" : "solid"} ${stroke}`,
+        border: `${borderPx}px ${approximate ? "dashed" : "solid"} ${stroke}`,
         background: fillBg,
-        boxShadow: `0 0 0 ${Math.max(1, 4 / z)}px ${stroke}55`,
+        boxShadow: `0 0 0 ${haloPx}px ${stroke}44`,
       }}
     >
-      <div className="absolute -top-3 -right-3 w-6 h-6 rounded-full grid place-items-center text-white shadow-lg" style={{ background: stroke, transform: `scale(${1 / z})`, transformOrigin: "center" }}>
+      <div className="absolute -top-2 -right-2 w-4 h-4 rounded-full grid place-items-center text-white shadow-md" style={{ background: stroke, transform: `scale(${labelScale})`, transformOrigin: "center" }}>
         <span className="text-[10px] font-bold">{approximate ? "≈" : "!"}</span>
       </div>
+      {isShortBox && (
+        <div
+          className="absolute left-0 h-px"
+          style={{
+            top: "50%",
+            width: `${Math.max(18, 34 / z)}px`,
+            transform: "translateX(-100%)",
+            background: stroke,
+          }}
+        />
+      )}
       <div
-        className="absolute left-1/2 bg-card border border-border shadow-2xl px-3 py-2 w-56 z-30"
-        style={{ top: "calc(100% + 8px)", transform: `translateX(-50%) scale(${1 / z})`, transformOrigin: "top center" }}
+        className="absolute bg-card border border-border shadow-2xl px-3 py-2 w-56 z-30"
+        style={popoverOnRight
+          ? { left: "calc(100% + 28px)", top: "50%", transform: `translateY(-50%) scale(${labelScale})`, transformOrigin: "left center" }
+          : { left: "50%", top: "calc(100% + 28px)", transform: `translateX(-50%) scale(${labelScale})`, transformOrigin: "top center" }}
       >
         <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-foreground mb-1.5 truncate">{title}</div>
         <div className="text-[10px] text-muted-foreground leading-snug mb-2 line-clamp-3">{description}</div>
