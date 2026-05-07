@@ -163,6 +163,7 @@ function titleCase(value: string | null | undefined): string | null {
 function inferObjectAnchor(...vals: Array<string | null | undefined>): {
   section_reference?: string | null;
   callout_tag?: string | null;
+  element_id?: string | null;
   grid_reference?: string | null;
   zone_reference?: string | null;
   element_reference?: string | null;
@@ -199,9 +200,9 @@ function inferObjectAnchor(...vals: Array<string | null | undefined>): {
 
   const sectionReference = cleanPhrase(text.match(/\bSECTION\s+([A-Z0-9.\-\/]+)/i)?.[1] || null);
   const detailReference = cleanPhrase(text.match(/\b(?:DETAIL|DET\.?|T\.D\.?|TD\.?)[\s#:]*([A-Z0-9.\-\/]+)/i)?.[1] || null);
-  const calloutTag = cleanPhrase(
-    text.match(/\b(BS?\d{2,4}|B\d{4}|F\d{1,3}|W\d{1,3}|GB\d{1,3}|D\d{2}(?:-\d+)?|P\d{1,3})\b/i)?.[1] || null
-  );
+  const ELEMENT_ID_RX = /\b(HKP\d+|EQP\d+|FW\d+|WF\d+|SF\d+|SOG\d+|SL\d+|FZ\d+|COL\d+|PIER\d+|PR\d+|BS?\d{2,4}|B\d{4}|F\d{1,3}|W\d{1,3}|GB\d{1,3}|D\d{2}(?:-\d+)?|P\d{1,3}|S-\d+|TD-?\d+)\b/i;
+  const calloutTag = cleanPhrase(text.match(ELEMENT_ID_RX)?.[1] || null);
+  const elementId = calloutTag ? calloutTag.toUpperCase() : null;
   const scheduleRowIdentity = cleanPhrase(
     text.match(/\b(?:SCHEDULE|ROW)\s+([A-Z0-9.\-\/]+)/i)?.[1] || calloutTag || null
   );
@@ -212,6 +213,7 @@ function inferObjectAnchor(...vals: Array<string | null | undefined>): {
   return {
     section_reference: sectionReference,
     callout_tag: calloutTag,
+    element_id: elementId,
     grid_reference: gridReference,
     zone_reference: zoneReference,
     element_reference: elementReference,
