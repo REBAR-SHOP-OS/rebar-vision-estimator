@@ -128,6 +128,21 @@ serve(async (req) => {
       .select("page_number, raw_text")
       .eq("project_id", project_id)
       .order("page_number");
+    const hasIndexedText = (ocrRows ?? []).some((row: any) => String(row?.raw_text || "").trim().length > 0);
+    if (!hasIndexedText) {
+      return new Response(JSON.stringify({
+        error: "DRAWING_DATA_MISSING",
+        message: "No indexed drawing text is available for this project. Re-upload or re-index the drawing files before generating an estimate.",
+        blockers: segments.map((seg) => ({
+          id: seg.id,
+          name: seg.name,
+          dimensions_status: seg.dimensions_status,
+        })),
+      }), {
+        status: 422,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const ocrText = (ocrRows ?? [])
       .map((r: any) => `\n=== PAGE ${r.page_number} ===\n${(r.raw_text || "").slice(0, 4000)}`)
       .join("\n")
