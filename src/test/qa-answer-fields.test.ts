@@ -30,4 +30,17 @@ describe("qa answer fields", () => {
       sourceExcerpt: "LEVELING PAD INTO FOUNDATION WALL",
     })).toBe('On P15-T.D.69, find the leveling pad. What length should be used for this item? Use the callout/excerpt "LEVELING PAD INTO FOUNDATION WALL".');
   });
+
+  it("asks for run length and dowel count from leveling pad dowel callouts", () => {
+    const excerpt = 'PROVIDE 400mm (16") LONG 10M DOWELS AT 300mm (12") O.C. FROM C.I.P. CONC. LEVELING PAD INTO FOUNDATION WALL';
+    const fields = inferEngineerAnswerFields(["rebar_callout", "element_dimensions"], excerpt).map((field) => field.key);
+
+    expect(fields).toEqual(["length", "quantity", "bar_callout", "notes"]);
+    expect(buildEngineerQuestion({
+      locationLabel: "P15",
+      objectIdentity: "leveling pad",
+      missingRefs: ["rebar_callout", "element_dimensions"],
+      sourceExcerpt: excerpt,
+    })).toBe('On P15, find the C.I.P. concrete leveling pad into foundation wall. The callout requires 400mm (16") long 10M dowels at 300mm (12") O.C. What is the full leveling pad run length, and how many dowels are required?');
+  });
 });
