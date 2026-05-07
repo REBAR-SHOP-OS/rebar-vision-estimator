@@ -207,10 +207,10 @@ Rebar only exists inside concrete or masonry. Find EVERY piece of concrete acros
 
 ## 5 Construction Buckets (classify every concrete element into one):
 
-**Bucket 1 — Substructure & Deep Foundations**: Piles, Caissons, Grade Beams, Strip Footings, Pad Footings, Raft Slabs, Elevator Pits, Sump Pits.
+**Bucket 1 — Substructure & Deep Foundations**: Piles, Caissons, Piers/Pedestals (P# marks on top of footings), Grade Beams, Strip Footings, Pad Footings (F# marks), Raft Slabs, Elevator Pits, Sump Pits, Foundation Walls (FW).
   Found on: Structural (S), Elevator specs, Plumbing (P) drawings.
 
-**Bucket 2 — Slab-on-Grade & Flatwork**: Main interior slabs, thickened edges, trench drains, vapor barrier protection slabs, heavy equipment pads, wire mesh.
+**Bucket 2 — Slab-on-Grade & Flatwork**: Main interior slabs, thickened edges, trench drains, vapor barrier protection slabs, heavy equipment pads, wire mesh, Steps on Grade (exterior step assemblies on SOG).
   Found on: Structural (S), Architectural (A) for depressed slabs, Mechanical/Electrical (M/E) for housekeeping pads.
 
 **Bucket 3 — Superstructure**: Columns, Beams, Elevated/Suspended Slabs, Concrete Roofs, Stairs, Shear Walls, Post-Tensioned decks, Cage Assemblies.
