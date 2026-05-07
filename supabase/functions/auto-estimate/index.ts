@@ -525,6 +525,42 @@ function resolveLine(
   }
 
   // CASE D — concrete element placeholder, no rebar callout in OCR
+  // Last-chance literal extraction: if the description itself contains an
+  // explicit "N-<size>M" count and an explicit "<n>mm LONG" piece length,
+  // we can honor those literal numbers as a PARTIAL row rather than leaving
+  // it fully unresolved. This never invents values — both numbers must be
+  // present verbatim in the OCR-derived description.
+  {
+    const litCount = desc.match(/\b(\d{1,3})\s*[-x]\s*(?:C)?(10M|15M|20M|25M|30M|35M)\b/);
+    const litLen = desc.match(/\b(\d{2,5})\s*MM\s+LONG\b/);
+    const litSpacing = desc.match(/@\s*(\d{2,4})\s*MM/);
+    const sizeFromDesc = (litCount?.[2] || size) as string;
+    const m = sizeFromDesc ? massFor(sizeFromDesc, type) : 0;
+    if (litCount && litLen && m > 0) {
+      const qty = Number(litCount[1]);
+      const pieceM = Number(litLen[1]) / 1000;
+      const totalLengthM = +(qty * pieceM).toFixed(2);
+      return {
+        qty,
+        totalLengthM,
+        totalWeightKg: +(totalLengthM * m).toFixed(2),
+        status: "partial",
+        missing: ["needs_confirmation"],
+        derivation: `literal: qty=${qty}, piece=${litLen[1]}mm`,
+      };
+    }
+    if (litCount && m > 0 && !litSpacing) {
+      // Explicit count only (e.g. "2-15M TOP AND BOTTOM"). Record qty so the
+      // row is partial instead of unresolved; length still needs the host
+      // element dimensions to be confirmed by the estimator.
+      return {
+        qty: Number(litCount[1]),
+        status: "partial",
+        missing: ["host element length"],
+        derivation: `literal qty=${litCount[1]} ${sizeFromDesc}`,
+      };
+    }
+  }
   return {
     status: "unresolved",
     missing: ["rebar callout", "element dimensions"],
