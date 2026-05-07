@@ -118,6 +118,25 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   const [pdfImg, setPdfImg] = useState<string | null>(null);
   const [segRunning, setSegRunning] = useState<string | null>(null);
   const [bestGuessRunning, setBestGuessRunning] = useState(false);
+  const [reindexRunning, setReindexRunning] = useState(false);
+
+  const handleReindex = async () => {
+    setReindexRunning(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("reindex-extractors", {
+        body: { project_id: projectId },
+      });
+      if (error) throw error;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const d = data as any;
+      toast.success(`Re-indexed ${d?.pages_updated ?? 0} page(s) · ${d?.bar_callouts ?? 0} callouts · ${d?.dimensions ?? 0} dims · ${d?.schedule_rows ?? 0} schedule rows`);
+    } catch (err) {
+      console.warn("reindex-extractors failed:", err);
+      toast.error("Re-index OCR entities failed");
+    } finally {
+      setReindexRunning(false);
+    }
+  };
 
   const reload = async () => {
     const mapped = await loadWorkflowTakeoffRows(projectId, state.files);
@@ -480,6 +499,15 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
             >
               {bestGuessRunning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
               {bestGuessRunning ? "Estimating…" : "Best-Guess Estimate"}
+            </button>
+            <button
+              onClick={handleReindex}
+              disabled={reindexRunning || generating}
+              title="Re-run regex extractors over already-OCR'd raw text to backfill bar callouts, dimensions, and bar schedules. No re-OCR."
+              className="inline-flex items-center gap-1.5 h-7 px-2.5 border border-cyan-500 text-cyan-500 text-[10px] font-mono uppercase tracking-wider hover:bg-cyan-500/10 disabled:opacity-50"
+            >
+              {reindexRunning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+              {reindexRunning ? "Re-indexing…" : "Re-index OCR Entities"}
             </button>
             <button
               onClick={handleGenerate}
