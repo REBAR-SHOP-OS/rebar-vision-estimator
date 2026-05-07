@@ -963,6 +963,33 @@ function inferQaAnchorMeta(...vals: Array<string | null | undefined>) {
   };
 }
 
+function hasUsableProjectDimensionKnowledge(
+  entries: Array<{ title?: string; content?: string; file_name?: string }>,
+  projectId: string,
+  projectName: string,
+) {
+  const normalizedProjectName = projectName.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const projectCode = (projectName.match(/[A-Z]{2,}(?:[-\s]?\d+)+/i)?.[0] || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  return entries.some((entry) => {
+    const title = String(entry.title || "");
+    const fileName = String(entry.file_name || "");
+    const content = String(entry.content || "");
+    const normalizedEntryText = `${title} ${content.slice(0, 4000)}`.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+    const contentHead = content.slice(0, 4000);
+    const matchesProjectScopedJson = fileName === "dimensions.json" && content.includes(projectId);
+    const matchesProjectName = normalizedProjectName.length >= 4
+      && normalizedEntryText.includes(normalizedProjectName);
+    const matchesProjectCode = projectCode.length >= 4 && normalizedEntryText.includes(projectCode);
+    const matchesLockedRule = /locked dimensions/i.test(title)
+      && (matchesProjectName || matchesProjectCode)
+      && /footing schedule|building envelope|foundation wall|piers?:|slab on grade/i.test(contentHead);
+    return matchesProjectScopedJson || matchesLockedRule;
+  });
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -1030,6 +1057,27 @@ serve(async (req) => {
           });
         }
         blockers = await getBlockers();
+      }
+
+      if (blockers.length > 0) {
+        const { data: gateProject } = await supabase
+          .from("projects")
+          .select("name")
+          .eq("id", project_id)
+          .maybeSingle();
+        const { data: gateKnowledge } = await supabase
+          .from("agent_knowledge")
+          .select("title, content, file_name")
+          .eq("user_id", user.id)
+          .limit(100);
+        const hasProjectKnowledge = hasUsableProjectDimensionKnowledge(
+          (gateKnowledge || []) as Array<{ title?: string; content?: string; file_name?: string }>,
+          project_id,
+          String(gateProject?.name || ""),
+        );
+        if (hasProjectKnowledge) {
+          blockers = [];
+        }
       }
 
       if (blockers.length > 0) {
