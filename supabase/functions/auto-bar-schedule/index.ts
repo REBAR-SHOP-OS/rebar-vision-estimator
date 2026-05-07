@@ -291,6 +291,18 @@ Generate the bar schedule. NEVER invent quantities or lengths — if not in OCR 
     }
 
     const rows = merged.map((item: any) => {
+      // Deterministic-match gate: only true when BOTH engines agreed on
+      // mark + size + qty AND a real shape_code (not the "straight" fallback)
+      // AND a non-zero cut length. Anything else stays ai_inferred and is
+      // capped at confidence 0.6 so downstream gates can flag it.
+      const ag = item.consensus?.agree || {};
+      const hasRealShape = item.shape_code && !/^straight$/i.test(item.shape_code);
+      const hasMark = !!item.mark && !/^B[S]?\d+$/i.test(item.mark); // exclude auto-fallback marks
+      const hasLen = Number(item.cut_length) > 0;
+      const deterministic = !!(ag.mark && ag.size && ag.qty && hasMark && hasRealShape && hasLen);
+      const provenance_state = deterministic ? "deterministic" : "ai_inferred";
+      const rawConf = Math.min(1, Math.max(0, Number(item.confidence) || 0));
+      const cappedConf = deterministic ? rawConf : Math.min(rawConf, 0.6);
       return {
         segment_id,
         user_id: user.id,
@@ -302,7 +314,9 @@ Generate the bar schedule. NEVER invent quantities or lengths — if not in OCR 
         finish_type: String(item.finish_type || "black").slice(0, 20),
         cover_value: Math.max(0, Number(item.cover_value) || 0),
         lap_length: Math.max(0, Number(item.lap_length) || 0),
-        confidence: Math.min(1, Math.max(0, Number(item.confidence) || 0)),
+        confidence: cappedConf,
+        deterministic_match: deterministic,
+        provenance_state,
         estimate_item_id: item.estimate_item_id || null,
       };
     });
