@@ -523,6 +523,8 @@ Deno.serve(async (req) => {
       schedule_rows: totalRows,
       spec_keywords: totalSpecKeywords,
       specs_authoritative_page: bestSpecsPage?.page_id || null,
+      non_structural_mark_flags: nonStructuralFlags,
+      size_conflict_mark_flags: sizeConflictFlags,
       extraction_version: EXTRACTION_VERSION,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
