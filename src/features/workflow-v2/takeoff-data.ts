@@ -48,6 +48,8 @@ export interface WorkflowQaIssue {
     image_size?: { w: number; h: number } | null;
     anchor_confidence?: number | null;
     anchor_mode?: "exact" | "approximate" | "unavailable" | null;
+    anchor_text?: string | null;
+    anchor_kind?: string | null;
   } | null;
   linked_item?: { id: string; description: string | null; bar_size: string | null; quantity_count: number; total_length: number; total_weight: number; missing_refs: string[]; source_file_id?: string | null; segment_id?: string | null; page_number?: number | null } | null;
   // Structured drawing location (used to prefix question text)
@@ -622,6 +624,8 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
         image_size: ref?.image_size ?? aj.image_size ?? null,
         anchor_confidence: Number(ref?.anchor_confidence ?? aj.anchor_confidence ?? 0) || null,
         anchor_mode: ref?.anchor_mode ?? aj.anchor_mode ?? null,
+        anchor_text: ref?.anchor_text ?? aj.anchor_text ?? null,
+        anchor_kind: ref?.anchor_kind ?? aj.anchor_kind ?? null,
       };
       if (item) {
         iss.linked_item = {
