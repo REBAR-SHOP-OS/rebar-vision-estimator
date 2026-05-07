@@ -59,6 +59,7 @@ export interface WorkflowQaIssue {
     detail_reference?: string | null;
     section_reference?: string | null;
     callout_tag?: string | null;
+    element_id?: string | null;
     grid_reference?: string | null;
     zone_reference?: string | null;
     element_reference?: string | null;
@@ -113,7 +114,10 @@ export function buildLocationLabel(loc: WorkflowQaIssue["location"], fallbackShe
               : null;
   // Pick the most specific *object* anchor (detail > section > callout > grid > schedule).
   const callout = loc?.callout_tag && !isPageTag(loc.callout_tag) ? loc.callout_tag : null;
-  const obj = loc?.detail_reference
+  const elementId = loc?.element_id && !isPageTag(loc.element_id) ? loc.element_id : null;
+  // Element ID (HKP1, F12, W3) wins over generic detail/section refs.
+  const obj = elementId
+    || loc?.detail_reference
     || loc?.section_reference
     || callout
     || loc?.grid_reference
@@ -159,6 +163,7 @@ function titleCase(value: string | null | undefined): string | null {
 function inferObjectAnchor(...vals: Array<string | null | undefined>): {
   section_reference?: string | null;
   callout_tag?: string | null;
+  element_id?: string | null;
   grid_reference?: string | null;
   zone_reference?: string | null;
   element_reference?: string | null;
@@ -195,9 +200,9 @@ function inferObjectAnchor(...vals: Array<string | null | undefined>): {
 
   const sectionReference = cleanPhrase(text.match(/\bSECTION\s+([A-Z0-9.\-\/]+)/i)?.[1] || null);
   const detailReference = cleanPhrase(text.match(/\b(?:DETAIL|DET\.?|T\.D\.?|TD\.?)[\s#:]*([A-Z0-9.\-\/]+)/i)?.[1] || null);
-  const calloutTag = cleanPhrase(
-    text.match(/\b(BS?\d{2,4}|B\d{4}|F\d{1,3}|W\d{1,3}|GB\d{1,3}|D\d{2}(?:-\d+)?|P\d{1,3})\b/i)?.[1] || null
-  );
+  const ELEMENT_ID_RX = /\b(HKP\d+|EQP\d+|FW\d+|WF\d+|SF\d+|SOG\d+|SL\d+|FZ\d+|COL\d+|PIER\d+|PR\d+|BS?\d{2,4}|B\d{4}|F\d{1,3}|W\d{1,3}|GB\d{1,3}|D\d{2}(?:-\d+)?|P\d{1,3}|S-\d+|TD-?\d+)\b/i;
+  const calloutTag = cleanPhrase(text.match(ELEMENT_ID_RX)?.[1] || null);
+  const elementId = calloutTag ? calloutTag.toUpperCase() : null;
   const scheduleRowIdentity = cleanPhrase(
     text.match(/\b(?:SCHEDULE|ROW)\s+([A-Z0-9.\-\/]+)/i)?.[1] || calloutTag || null
   );
@@ -208,6 +213,7 @@ function inferObjectAnchor(...vals: Array<string | null | undefined>): {
   return {
     section_reference: sectionReference,
     callout_tag: calloutTag,
+    element_id: elementId,
     grid_reference: gridReference,
     zone_reference: zoneReference,
     element_reference: elementReference,
@@ -341,9 +347,12 @@ function rewriteToRawInputAsk(
   const lookAt = label && label.trim().length > 0
     ? label.trim()
     : (loc?.page_number ? `Page ${loc.page_number}` : "the drawing");
-  const findPart = calloutText
-    ? `the ${noun} marked "${calloutText}"`
-    : `the ${noun}`;
+  const elementId = (loc?.element_id || "").trim();
+  const findPart = elementId
+    ? `${noun} ${elementId}`
+    : calloutText
+      ? `the ${noun} marked "${calloutText}"`
+      : `the ${noun}`;
   return `Look at ${lookAt}. Find ${findPart}. Enter ${inputList} from the drawing.`;
 }
 
@@ -362,6 +371,7 @@ function extractLocationFromRef(ref: any, aj: Record<string, any>, fallback: { s
     detail_reference: pickStr(nestedR.detail, nestedA.detail, r.detail, r.detail_reference, aj.detail, aj.detail_reference, inferred.callout_tag && /^T?D\.?/i.test(inferred.callout_tag) ? inferred.callout_tag : null),
     section_reference: pickStr(nestedR.section, nestedA.section, r.section, r.section_reference, aj.section, aj.section_reference, inferred.section_reference),
     callout_tag: pickStr(r.callout_tag, aj.callout_tag, inferred.callout_tag),
+    element_id: pickStr(r.element_id, aj.element_id, inferred.element_id),
     grid_reference: pickStr(nestedR.grid, nestedA.grid, r.grid, r.grid_reference, aj.grid, aj.grid_reference, inferred.grid_reference),
     zone_reference: pickStr(nestedR.zone, nestedA.zone, r.zone, r.zone_reference, aj.zone, aj.zone_reference, aj.area, r.area, nestedR.area, nestedA.area, inferred.zone_reference),
     element_reference: pickStr(

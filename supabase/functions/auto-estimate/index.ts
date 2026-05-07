@@ -305,7 +305,10 @@ function inferQaAnchorMeta(...vals: Array<string | null | undefined>) {
   const zoneMatch = text.match(/\b(?:AT|ALONG|NEAR)\s+(EXTENT OF\s+[A-Z][A-Z\s]+|ENTRANCE DOOR|WEST SIDE|EAST SIDE|NORTH SIDE|SOUTH SIDE)\b/i);
   const section = cleanAnchorPhrase(text.match(/\bSECTION\s+([A-Z0-9.\-\/]+)/i)?.[1] || null);
   const detail = cleanAnchorPhrase(text.match(/\b(?:DETAIL|DET\.?|T\.D\.?|TD\.?)[\s#:]*([A-Z0-9.\-\/]+)/i)?.[1] || null);
-  const callout = cleanAnchorPhrase(text.match(/\b(BS?\d{2,4}|B\d{4}|F\d{1,3}|W\d{1,3}|GB\d{1,3}|D\d{2}(?:-\d+)?|P\d{1,3})\b/i)?.[1] || null);
+  // Element-ID style callouts (HKP1, F12, WF3, GB2, W3, COL5, S-1, etc.)
+  const ELEMENT_ID_RX = /\b(HKP\d+|EQP\d+|FW\d+|WF\d+|SF\d+|SOG\d+|SL\d+|FZ\d+|COL\d+|PIER\d+|PR\d+|BS?\d{2,4}|B\d{4}|F\d{1,3}|W\d{1,3}|GB\d{1,3}|D\d{2}(?:-\d+)?|P\d{1,3}|S-\d+|TD-?\d+)\b/i;
+  const callout = cleanAnchorPhrase(text.match(ELEMENT_ID_RX)?.[1] || null);
+  const elementId = callout ? callout.toUpperCase() : null;
   const grid = cleanAnchorPhrase(text.match(/\bGRID\s+([A-Z]+-?\d+[A-Z]?)\b/i)?.[1] || null);
   const zone = cleanAnchorPhrase(zoneMatch?.[1] || null);
   let element = cleanAnchorPhrase(
@@ -317,6 +320,7 @@ function inferQaAnchorMeta(...vals: Array<string | null | undefined>) {
     detail_reference: detail,
     section_reference: section,
     callout_tag: callout,
+    element_id: elementId,
     grid_reference: grid,
     zone_reference: zone,
     element_reference: element,
@@ -905,8 +909,9 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       const pages = (searchPages || [])
         .filter((p: any) => p && (p.raw_text || "").length > 20)
         .map((p: any) => ({ page_number: Number(p.page_number) || 1, text: String(p.raw_text || "").toUpperCase() }));
-      type AnchorKind = "detail" | "section" | "callout" | "grid" | "element" | "schedule" | "excerpt" | "mark" | "size";
+      type AnchorKind = "element_id" | "detail" | "section" | "callout" | "grid" | "element" | "schedule" | "excerpt" | "mark" | "size";
       const KIND_SCORE: Record<AnchorKind, number> = {
+        element_id: 0.99,
         detail: 0.99, section: 0.98, callout: 0.97, grid: 0.94,
         schedule: 0.92, element: 0.9, excerpt: 0.78, mark: 0.7, size: 0.55,
       };
@@ -923,6 +928,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         };
         push(meta.detail_reference, "detail");
         push(meta.section_reference, "section");
+        push(meta.element_id, "element_id");
         push(meta.callout_tag, "callout");
         push(meta.grid_reference, "grid");
         push(meta.schedule_row_identity, "schedule");
@@ -1006,8 +1012,9 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         const hit = upperNames.find((f) => f.name.includes(tag));
         if (hit && !isArchName(hit.name)) return hit.id;
       }
-      // 3. Default — never pick an architectural file.
-      return defaultSourceId;
+      // 3. No reliable evidence — return null so QA does not present an unrelated
+      // (often Page 1 cover) sheet as the source of an unresolved row.
+      return null;
     };
 
     // Insert items into estimate_items
@@ -1038,6 +1045,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         detail_reference: qaAnchor.detail_reference,
         section_reference: qaAnchor.section_reference,
         callout_tag: qaAnchor.callout_tag,
+        element_id: qaAnchor.element_id,
         grid_reference: qaAnchor.grid_reference,
         zone_reference: qaAnchor.zone_reference,
         element_reference: qaAnchor.element_reference,
@@ -1110,6 +1118,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         const grid = aj.grid || aj.grid_reference || null;
         const zone = aj.zone || aj.zone_reference || aj.area || null;
         const calloutTag = aj.callout_tag || null;
+        const elementId = aj.element_id || null;
         const scheduleRowIdentity = aj.schedule_row_identity || null;
         const element = aj.element || aj.element_reference || aj.mark || aj.callout
           || aj.wall_name || aj.footing_name || aj.pad_name || null;
@@ -1119,7 +1128,8 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         if (aj.page_number) locParts.push(`Page ${aj.page_number}`);
         if (detail) locParts.push(`Detail ${detail}`);
         if (section) locParts.push(`Section ${section}`);
-        if (calloutTag) locParts.push(`Callout ${calloutTag}`);
+        if (elementId) locParts.push(elementId);
+        else if (calloutTag) locParts.push(`Callout ${calloutTag}`);
         if (grid) locParts.push(`Grid ${grid}`);
         if (zone) locParts.push(String(zone));
         if (element) locParts.push(String(element));
@@ -1139,9 +1149,11 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
           ? phrases[0]
           : phrases.slice(0, -1).join(", ") + ", and " + phrases[phrases.length - 1];
         const lookAt = locLabel || (aj.page_number ? `Page ${aj.page_number}` : "the drawing");
-        const findPart = element
-          ? `the ${noun} marked "${element}"`
-          : (excerpt ? `the ${noun} for "${String(excerpt).slice(0, 80)}"` : `the ${noun}`);
+        const findPart = elementId
+          ? `${noun} ${elementId}`
+          : element
+            ? `the ${noun} marked "${element}"`
+            : (excerpt ? `the ${noun} for "${String(excerpt).slice(0, 80)}"` : `the ${noun}`);
         const baseTitle = `${noun} — enter drawing dimensions`;
         const baseDesc = `Look at ${lookAt}. Find ${findPart}. Enter ${inputList} from the drawing.`;
         return ({
@@ -1163,6 +1175,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
           detail,
           section,
           callout_tag: calloutTag,
+          element_id: elementId,
           grid,
           zone,
           element,
