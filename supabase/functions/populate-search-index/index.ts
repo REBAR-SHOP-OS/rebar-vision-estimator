@@ -56,6 +56,8 @@ function detectPlacement(tail: string): string | null {
   if (/\bTIES?\b/.test(u)) return "TIES";
   if (/\bSTIRR(?:UPS?)?\b/.test(u)) return "STIRR";
   if (/\bDWLS?\b|\bDOWELS?\b/.test(u)) return "DWL";
+  if (/\bTOP\b/.test(u)) return "TOP";
+  if (/\bBOT(?:TOM)?\b/.test(u)) return "BOT";
   return null;
 }
 
@@ -100,6 +102,19 @@ function extractBarCallouts(rawText: string): Array<Record<string, unknown>> {
     const u = m[2].toUpperCase();
     const placement = u.startsWith("TIE") ? "TIES" : u.startsWith("STIRR") ? "STIRR" : "DWL";
     push({ size: `${m[1]}M`, spacing: +m[3], spacing_unit: "mm", placement, raw: m[0] });
+  }
+  // Ties / Stirrups without explicit spacing: "10M TIES"
+  const reTiesBare = /\b(\d{2})M\s+(TIES?|STIRR(?:UPS?)?|DWLS?|DOWELS?)\b(?!\s*@)/gi;
+  while ((m = reTiesBare.exec(text)) !== null) {
+    const u = m[2].toUpperCase();
+    const placement = u.startsWith("TIE") ? "TIES" : u.startsWith("STIRR") ? "STIRR" : "DWL";
+    push({ size: `${m[1]}M`, placement, raw: m[0] });
+  }
+  // Qty-size with placement (no spacing): "2-15M TOP", "6-20M BOT", "4-25M EW"
+  const reQtyPlace = /(\d{1,3})\s*-\s*(\d{2})M\s+(TOP|BOT(?:TOM)?|EW|EF|T\s*&\s*B|CONT(?:INUOUS)?)\b/gi;
+  while ((m = reQtyPlace.exec(text)) !== null) {
+    const placement = detectPlacement(m[3]) || m[3].toUpperCase();
+    push({ qty: +m[1], size: `${m[2]}M`, placement, raw: m[0] });
   }
   // Bundled / parenthesized qty: "(2)-25M" or "2-25M BUNDLE"
   const reBundle = /\(?\s*(\d)\s*\)?\s*-\s*(\d{2})M(?:\s+BUNDLE)?/g;
