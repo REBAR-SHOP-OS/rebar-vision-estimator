@@ -574,13 +574,19 @@ function resolveLine(
     if (wall.heightMm && lap) barLenMm = wall.heightMm + lap;
     else if (!wall.heightMm) missing.push("wall height (mm)");
     if (barLenMm > 0) {
-      const totalLengthM = +(qty * barLenMm / 1000).toFixed(2);
+      // RSIC hook addition (e.g. 90° standard hook ≈ 12·db) when callout names a hook.
+      const hk = hookAddMm(sizeKey(size), desc);
+      const pieceM = (barLenMm + hk) / 1000;
+      // Stock-length splice augmentation: bars > stock get ceil(L/stock)-1 extra laps each.
+      const stockM = 18.288;
+      const spliced = applySpliceWaste(pieceM, lap, stockM);
+      const totalLengthM = +(qty * spliced.lenM).toFixed(2);
       return {
         qty, totalLengthM,
         totalWeightKg: +(totalLengthM * mass).toFixed(2),
         status: missing.length ? "partial" : "resolved",
         missing,
-        derivation: `qty=ceil(${wall.lengthMm}/${spacing})+1=${qty}; bar=${(wall.heightMm || 0)}+${lap}mm`,
+        derivation: `qty=ceil(${wall.lengthMm}/${spacing})+1=${qty}; bar=${(wall.heightMm || 0)}+${lap}mm${hk ? `+${hk}mm hook` : ""}${spliced.splices ? `; +${spliced.splices} splice(s)` : ""}`,
       };
     }
     return { qty, status: "partial", missing: ["bar developed length"], derivation: `qty=${qty} from wall`, };
