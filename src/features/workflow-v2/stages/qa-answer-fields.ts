@@ -14,6 +14,14 @@ type SmartQuestionInput = {
   missingRefs?: string[];
 };
 
+export type EngineerAnswerDraft = {
+  question: string;
+  draftAnswer: string;
+  confidence: "high" | "medium" | "low";
+  needsConfirmation: boolean;
+  structuredValues: Record<string, string>;
+};
+
 const FIELD_DEFS: Record<string, EngineerAnswerField> = {
   length: { key: "length", label: "Length", placeholder: "e.g. 3000mm" },
   width: { key: "width", label: "Width", placeholder: "e.g. 1200mm" },
@@ -42,11 +50,33 @@ function extractLevelingPadDowelCallout(text: string): string {
   const length = normalized.match(/\b\d+\s*mm\s*(?:\([^)]*\)\s*)?long\b/i)?.[0].toLowerCase();
   const bar = normalized.match(/\b\d+\s*M\b/i)?.[0].toUpperCase();
   const spacingMatch = normalized.match(/(?:at|@)\s*(\d+\s*mm\s*(?:\([^)]*\)\s*)?)O\.?\s*C\.?/i);
-  const spacing = spacingMatch ? `at ${spacingMatch[1].trim()} O.C` : null;
+  const spacing = spacingMatch ? `@ ${spacingMatch[1].trim()} O.C.` : null;
   return [length, bar, "dowels", spacing]
     .filter(Boolean)
     .join(" ")
     .trim();
+}
+
+function asSentence(text: string): string {
+  return /[.!?]$/.test(text) ? text : `${text}.`;
+}
+
+function extractSpacingMm(text: string): number | null {
+  const match = text.match(/(?:at|@)\s*(\d+(?:\.\d+)?)\s*mm\s*(?:\([^)]*\)\s*)?O\.?\s*C\.?/i);
+  return match ? Number(match[1]) : null;
+}
+
+function extractRunLengthMm(text: string): number | null {
+  const normalized = text.replace(/\s+/g, " ");
+  const explicit = normalized.match(/\b(?:run|pad|length)\s*(?:length)?\s*(?:is|=|:)?\s*(\d+(?:,\d{3})*(?:\.\d+)?)\s*(mm|m)\b/i);
+  if (!explicit) return null;
+  const value = Number(explicit[1].replace(/,/g, ""));
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return explicit[2].toLowerCase() === "m" ? value * 1000 : value;
+}
+
+function formatMm(value: number): string {
+  return `${Math.round(value)}mm`;
 }
 
 export function inferEngineerAnswerFields(missingRefs: string[] = [], text = ""): EngineerAnswerField[] {
@@ -81,6 +111,10 @@ export function summarizeEngineerAnswer(values: Record<string, string>): string 
 }
 
 export function buildEngineerQuestion(input: SmartQuestionInput): string {
+  return buildEngineerAnswerDraft(input).question;
+}
+
+export function buildEngineerAnswerDraft(input: SmartQuestionInput): EngineerAnswerDraft {
   const missingRefs = input.missingRefs || [];
   const sourceText = `${input.title || ""}\n${input.description || ""}\n${input.sourceExcerpt || ""}`;
   const fields = inferEngineerAnswerFields(missingRefs, sourceText);
@@ -89,7 +123,23 @@ export function buildEngineerQuestion(input: SmartQuestionInput): string {
 
   if (isLevelingPadDowelCallout(sourceText)) {
     const callout = extractLevelingPadDowelCallout(excerpt || sourceText) || "the dowel spacing callout";
-    return `On ${loc}, find the C.I.P. concrete leveling pad into foundation wall. The callout requires ${callout}. What is the full leveling pad run length, and how many dowels are required?`;
+    const spacingMm = extractSpacingMm(excerpt || sourceText);
+    const runLengthMm = extractRunLengthMm(sourceText);
+    const quantity = runLengthMm && spacingMm ? Math.floor(runLengthMm / spacingMm) + 1 : null;
+    const question = `On ${loc}, find the C.I.P. concrete leveling pad into foundation wall. The callout requires ${asSentence(callout)} What is the full leveling pad run length, and how many dowels are required?`;
+    const structuredValues: Record<string, string> = { bar_callout: callout };
+    if (runLengthMm) structuredValues.length = formatMm(runLengthMm);
+    if (quantity) structuredValues.quantity = `${quantity}`;
+    const draftAnswer = quantity && runLengthMm
+      ? `Found: run length ${formatMm(runLengthMm)}; use ${callout}; quantity = ${quantity} dowels. Please confirm.`
+      : `Found: ${callout} from C.I.P. concrete leveling pad into foundation wall. Please confirm the full leveling pad run length so dowel quantity can be calculated.`;
+    return {
+      question,
+      draftAnswer,
+      confidence: quantity ? "high" : "medium",
+      needsConfirmation: true,
+      structuredValues,
+    };
   }
 
   const needed = fields
@@ -102,7 +152,13 @@ export function buildEngineerQuestion(input: SmartQuestionInput): string {
     : "the exact drawing value";
   const object = input.objectIdentity || inferObjectFromText(`${input.title || ""} ${input.description || ""}`) || "highlighted item";
   const excerptClause = excerpt ? ` Use the callout/excerpt "${excerpt.slice(0, 120)}".` : "";
-  return `On ${loc}, find the ${object}. What ${ask} should be used for this item?${excerptClause}`;
+  return {
+    question: `On ${loc}, find the ${object}. What ${ask} should be used for this item?${excerptClause}`,
+    draftAnswer: "",
+    confidence: "low",
+    needsConfirmation: true,
+    structuredValues: {},
+  };
 }
 
 function inferObjectFromText(text: string): string | null {

@@ -13,7 +13,7 @@ import {
   normalizeBboxToImagePixels,
   type BBox,
 } from "./qa-overlay-geometry";
-import { buildEngineerQuestion, inferEngineerAnswerFields, summarizeEngineerAnswer } from "./qa-answer-fields";
+import { buildEngineerAnswerDraft, inferEngineerAnswerFields, summarizeEngineerAnswer } from "./qa-answer-fields";
 
 type TabKey = "change" | "impact" | "evidence" | "action";
 
@@ -184,6 +184,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [debug, setDebug] = useState(false);
   const [answerValues, setAnswerValues] = useState<Record<string, string>>({});
   const [answerText, setAnswerText] = useState("");
+  const [answerEdited, setAnswerEdited] = useState(false);
   const [answerSaving, setAnswerSaving] = useState(false);
   const [answerError, setAnswerError] = useState<string | null>(null);
   const [redrawCount, setRedrawCount] = useState(0);
@@ -247,6 +248,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   useEffect(() => { setZoomMode("tight"); setZoomLevel(1); setPan({ dx: 0, dy: 0 }); setTab("change"); }, [sel?.id]);
   useEffect(() => {
     setAnswerError(null);
+    setAnswerEdited(false);
     const refs = Array.isArray(sel?.source_refs) ? sel?.source_refs : [];
     const existing = refs.find((ref: any) => ref?.engineer_answer)?.engineer_answer;
     setAnswerValues((existing?.values && typeof existing.values === "object") ? existing.values : {});
@@ -362,9 +364,10 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
   const visibleSheets = changedOnly ? sheets.filter((s) => s.items.length > 0) : sheets;
   const missingRefs = sel?.linked_item?.missing_refs || [];
+  const answerFieldContext = `${sel?.title || ""}\n${sel?.description || ""}\n${sel?.location?.source_excerpt || ""}`;
   const answerFields = useMemo(
-    () => inferEngineerAnswerFields(missingRefs, `${sel?.title || ""}\n${sel?.description || ""}`),
-    [missingRefs, sel?.title, sel?.description],
+    () => inferEngineerAnswerFields(missingRefs, answerFieldContext),
+    [missingRefs, answerFieldContext],
   );
   const objectIdentity = [
     sel?.location?.element_reference,
@@ -377,7 +380,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     sel?.location?.detail_reference,
     sel?.location?.grid_reference,
   ].find(Boolean);
-  const engineerQuestion = useMemo(() => buildEngineerQuestion({
+  const engineerDraft = useMemo(() => buildEngineerAnswerDraft({
     locationLabel: sel?.location_label,
     pageNumber: sel?.locator?.page_number ?? sel?.location?.page_number ?? null,
     objectIdentity: objectIdentity ? String(objectIdentity) : null,
@@ -386,6 +389,26 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     sourceExcerpt: sel?.location?.source_excerpt,
     missingRefs,
   }), [missingRefs, objectIdentity, sel?.description, sel?.location?.page_number, sel?.location?.source_excerpt, sel?.location_label, sel?.locator?.page_number, sel?.title]);
+  const engineerQuestion = engineerDraft.question;
+
+  useEffect(() => {
+    if (!sel || answerEdited) return;
+    const refs = Array.isArray(sel.source_refs) ? sel.source_refs : [];
+    const existing = refs.find((ref: any) => ref?.engineer_answer)?.engineer_answer;
+    const hasSavedAnswer = Boolean(String(existing?.answer_text || sel.resolution_note || "").trim());
+    if (!hasSavedAnswer && !answerText.trim() && engineerDraft.draftAnswer) {
+      setAnswerText(engineerDraft.draftAnswer);
+    }
+    if (Object.keys(engineerDraft.structuredValues).length > 0) {
+      setAnswerValues((current) => {
+        const next = { ...current };
+        for (const [key, value] of Object.entries(engineerDraft.structuredValues)) {
+          if (!String(next[key] || "").trim()) next[key] = value;
+        }
+        return next;
+      });
+    }
+  }, [answerEdited, answerText, engineerDraft, sel]);
 
   const openAnswerTab = () => {
     setTab("action");
@@ -1027,9 +1050,18 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                   <section className="space-y-3">
                     <div className="bg-background/60 p-3 border border-primary/40 space-y-3">
                       <div>
-                        <div className="text-[10px] font-bold text-primary uppercase tracking-[0.12em] mb-1.5">Engineer Question</div>
+                        <div className="text-[10px] font-bold text-primary uppercase tracking-[0.12em] mb-1.5">
+                          {engineerDraft.draftAnswer ? "Found Answer / Confirmation Needed" : "Engineer Question"}
+                        </div>
                         <div className="text-[13px] text-foreground leading-relaxed font-medium">{engineerQuestion}</div>
                       </div>
+                      {engineerDraft.draftAnswer && (
+                        <div className="text-[10px] text-muted-foreground bg-card/50 border border-border p-2">
+                          {engineerDraft.confidence === "high"
+                            ? "High confidence: confirm or edit this answer."
+                            : "Needs confirmation: app found the callout but needs the run length."}
+                        </div>
+                      )}
                       <div className="grid grid-cols-2 gap-2 text-[10px]">
                         <div className="border border-border bg-card/60 p-2">
                           <div className="uppercase tracking-[0.12em] text-muted-foreground mb-1">Location</div>
@@ -1055,7 +1087,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                         <textarea
                           ref={answerBoxRef}
                           value={answerText}
-                          onChange={(e) => setAnswerText(e.target.value)}
+                          onChange={(e) => { setAnswerEdited(true); setAnswerText(e.target.value); }}
                           placeholder="Type the engineer answer here, e.g. wall length 10m, wall height 1200mm, rebar 15M @ 406mm O.C."
                           rows={5}
                           className="w-full bg-card border border-border px-2 py-2 text-[12px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary"

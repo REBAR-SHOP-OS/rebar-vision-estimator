@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildEngineerQuestion, inferEngineerAnswerFields, summarizeEngineerAnswer } from "@/features/workflow-v2/stages/qa-answer-fields";
+import { buildEngineerAnswerDraft, buildEngineerQuestion, inferEngineerAnswerFields, summarizeEngineerAnswer } from "@/features/workflow-v2/stages/qa-answer-fields";
 
 describe("qa answer fields", () => {
   it("asks for length and bar callout from unresolved geometry text", () => {
@@ -41,6 +41,38 @@ describe("qa answer fields", () => {
       objectIdentity: "leveling pad",
       missingRefs: ["rebar_callout", "element_dimensions"],
       sourceExcerpt: excerpt,
-    })).toBe('On P15, find the C.I.P. concrete leveling pad into foundation wall. The callout requires 400mm (16") long 10M dowels at 300mm (12") O.C. What is the full leveling pad run length, and how many dowels are required?');
+    })).toBe('On P15, find the C.I.P. concrete leveling pad into foundation wall. The callout requires 400mm (16") long 10M dowels @ 300mm (12") O.C. What is the full leveling pad run length, and how many dowels are required?');
+  });
+
+  it("drafts a confirmation answer when dowel callout is found without run length", () => {
+    const excerpt = 'PROVIDE 400mm (16") LONG 10M DOWELS AT 300mm (12") O.C. FROM C.I.P. CONC. LEVELING PAD INTO FOUNDATION WALL';
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P15",
+      missingRefs: ["rebar_callout", "element_dimensions"],
+      sourceExcerpt: excerpt,
+    });
+
+    expect(draft.confidence).toBe("medium");
+    expect(draft.needsConfirmation).toBe(true);
+    expect(draft.structuredValues).toEqual({ bar_callout: '400mm (16") long 10M dowels @ 300mm (12") O.C.' });
+    expect(draft.draftAnswer).toBe('Found: 400mm (16") long 10M dowels @ 300mm (12") O.C. from C.I.P. concrete leveling pad into foundation wall. Please confirm the full leveling pad run length so dowel quantity can be calculated.');
+  });
+
+  it("calculates dowel quantity when reliable run length is present", () => {
+    const excerpt = 'PROVIDE 400mm (16") LONG 10M DOWELS AT 300mm (12") O.C. FROM C.I.P. CONC. LEVELING PAD INTO FOUNDATION WALL';
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P15",
+      description: "Leveling pad run length 10000mm.",
+      missingRefs: ["rebar_callout", "element_dimensions"],
+      sourceExcerpt: excerpt,
+    });
+
+    expect(draft.confidence).toBe("high");
+    expect(draft.structuredValues).toEqual({
+      bar_callout: '400mm (16") long 10M dowels @ 300mm (12") O.C.',
+      length: "10000mm",
+      quantity: "34",
+    });
+    expect(draft.draftAnswer).toBe('Found: run length 10000mm; use 400mm (16") long 10M dowels @ 300mm (12") O.C.; quantity = 34 dowels. Please confirm.');
   });
 });
