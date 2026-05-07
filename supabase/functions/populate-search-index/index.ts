@@ -40,6 +40,10 @@ function computeQualityFlags(page: {
   bar_marks: string[];
   sheet_id: string | null;
   is_ocr?: boolean;
+  ocr_metadata?: {
+    render_scale?: number | null;
+    crop_passes?: Array<{ kind?: string; text_length?: number | null }>;
+  } | null;
 }): string[] {
   const flags: string[] = [];
   if (page.is_ocr) flags.push("ocr_used");
@@ -47,6 +51,12 @@ function computeQualityFlags(page: {
   if (!page.title_block?.scale) flags.push("missing_scale");
   if (page.bar_marks.length === 0) flags.push("no_bar_marks");
   if (!page.raw_text || page.raw_text.length < 50) flags.push("sparse_text");
+  if (page.is_ocr && Number(page.ocr_metadata?.render_scale || 0) > 0 && Number(page.ocr_metadata?.render_scale || 0) < 2.25) {
+    flags.push("low_dpi_ocr");
+  }
+  if (page.is_ocr && page.ocr_metadata && (!Array.isArray(page.ocr_metadata.crop_passes) || page.ocr_metadata.crop_passes.length === 0)) {
+    flags.push("targeted_ocr_missing");
+  }
   return flags;
 }
 
@@ -58,6 +68,8 @@ function computeConfidence(flags: string[]): number {
     no_bar_marks: 0.1,
     sparse_text: 0.2,
     ocr_used: 0.05,
+    low_dpi_ocr: 0.2,
+    targeted_ocr_missing: 0.1,
   };
   for (const f of flags) {
     score -= penalties[f] || 0;
@@ -88,6 +100,7 @@ async function syncRebarDrawingPage(params: {
   barMarks: string[];
   confidence: number;
   isOcr: boolean;
+  ocrMetadata?: Record<string, unknown> | null;
 }) {
   const {
     supabase,
@@ -100,6 +113,7 @@ async function syncRebarDrawingPage(params: {
     barMarks,
     confidence,
     isOcr,
+    ocrMetadata,
   } = params;
 
   if (!rebarProjectFileId) return;
@@ -175,7 +189,7 @@ async function syncRebarDrawingPage(params: {
     label: isOcr ? "ocr_page" : "text_page",
     value_text: rawText.slice(0, 1000),
     confidence,
-    metadata: { extraction_version: EXTRACTION_VERSION },
+    metadata: { extraction_version: EXTRACTION_VERSION, ocr_metadata: ocrMetadata || null },
   });
 
   if (detections.length > 0) {
@@ -389,6 +403,7 @@ Deno.serve(async (req) => {
         bar_marks: barMarks,
         sheet_id: sheetId,
         is_ocr: is_ocr || page.is_ocr,
+        ocr_metadata: page.ocr_metadata || null,
       });
       const confidence = computeConfidence(qualityFlags);
       const needsReview = qualityFlags.length > 0 && confidence < 0.7;
@@ -404,6 +419,7 @@ Deno.serve(async (req) => {
           bar_marks: barMarks,
           tables: page.tables || [],
           title_block: tb,
+          ocr_metadata: page.ocr_metadata || null,
         },
         p_bar_marks: barMarks,
         p_crm_deal_id: crm_deal_id || null,
@@ -473,6 +489,7 @@ Deno.serve(async (req) => {
                 bar_marks: barMarks,
                 quality_flags: qualityFlags,
                 page_number: page.page_number,
+                ocr_metadata: page.ocr_metadata || null,
               },
               extraction_method: is_ocr || page.is_ocr ? "ocr" : "vector_pdf",
               confidence,
@@ -493,6 +510,7 @@ Deno.serve(async (req) => {
           barMarks,
           confidence,
           isOcr: Boolean(is_ocr || page.is_ocr),
+          ocrMetadata: page.ocr_metadata || null,
         });
 
         indexed++;

@@ -1,9 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildEngineerAnswerDraft, summarizeEngineerAnswer } from "./qa-answer-fields";
+import { buildEstimationAudit, type ExtractionAuditResult } from "../accuracy-audit";
 import type { WorkflowFileRef, WorkflowQaIssue, WorkflowTakeoffRow } from "../takeoff-data";
+import {
+  estimateCanadianLine,
+  parseFirstMetricLengthMm,
+  parsePieceLengthMm,
+  parseSpacingMm,
+} from "@/lib/canadian-rebar-estimating";
 
-export type AssistantMessageKind = "progress" | "question" | "suggestion" | "applied_fix" | "error";
+export type AssistantMessageKind = "progress" | "question" | "suggestion" | "applied_fix" | "audit" | "error";
 
 export type AssistantMessageMetadata = {
   channel: "workflow_v2_assistant";
@@ -35,29 +42,82 @@ export type AssistantProjectSnapshot = {
   files: WorkflowFileRef[];
   takeoffRows: WorkflowTakeoffRow[];
   qaIssues: WorkflowQaIssue[];
-};
-
-const REBAR_MASS_KG_PER_M: Record<string, number> = {
-  "10M": 0.785,
-  "15M": 1.57,
-  "20M": 2.355,
-  "25M": 3.925,
-  "30M": 5.495,
-  "35M": 7.85,
+  extractionAudit?: ExtractionAuditResult | null;
+  estimatorConfirmed?: boolean;
 };
 
 export function isAssistantConfirmationIntent(text: string): boolean {
   return /\b(yes|confirm|confirmed|apply|save it|mark resolved|resolve|use this|looks good|approved)\b/i.test(text);
 }
 
+export function isFinishAuditIntent(text: string): boolean {
+  return /(?:\b(?:finish|final|complete|audit|check all|full check|estimator confirmed|ready for output|ready to confirm)\b|100\s*%)/i.test(text)
+    && /\b(estimate|estimation|takeoff|project|qa|output|confidence|confirmed|audit)\b/i.test(text);
+}
+
 export function buildWorkingSteps(snapshot: AssistantProjectSnapshot): string[] {
   const blocked = snapshot.takeoffRows.filter((row) => row.geometry_status === "unresolved").length;
   return [
     `Reading ${snapshot.files.length} project file${snapshot.files.length === 1 ? "" : "s"}`,
+    snapshot.extractionAudit
+      ? `Reviewing OCR audit (${snapshot.extractionAudit.indexedPages}/${snapshot.extractionAudit.pageCount || snapshot.extractionAudit.indexedPages} pages indexed)`
+      : "Checking OCR audit metadata",
     `Checking ${snapshot.qaIssues.length} open QA issue${snapshot.qaIssues.length === 1 ? "" : "s"}`,
     `Finding linked takeoff rows (${blocked} unresolved)`,
     "Waiting for estimator confirmation before applying changes",
   ];
+}
+
+export function buildFinishAuditResponse(snapshot: AssistantProjectSnapshot): string {
+  const audit = buildEstimationAudit({
+    files: snapshot.files,
+    rows: snapshot.takeoffRows,
+    issues: snapshot.qaIssues,
+    extraction: snapshot.extractionAudit,
+    estimatorConfirmed: snapshot.estimatorConfirmed,
+  });
+  const title = audit.status === "audit_complete"
+    ? "Audit Complete - Estimator Confirmation Ready"
+    : audit.status === "needs_ocr_review"
+      ? "Needs OCR Review Before Final Estimate"
+      : "Needs Answers Before Final Estimate";
+  const checklist = audit.checklist
+    .map((item) => `${item.ok ? "[x]" : "[ ]"} ${item.label}: ${item.detail}`)
+    .join("\n");
+  const nextQuestion = buildNextAuditQuestion(snapshot, audit.blockers);
+
+  return [
+    `**${title}**`,
+    "",
+    checklist,
+    "",
+    audit.blockers.length > 0 ? "**Blockers**" : "**Result**",
+    audit.blockers.length > 0 ? audit.blockers.map((blocker) => `- ${blocker}`).join("\n") : "- All required checks are clean. Final estimator confirmation is still the truth gate before outputs.",
+    "",
+    "**Evidence quality**",
+    snapshot.extractionAudit
+      ? `OCR/index audit is ${snapshot.extractionAudit.status} with score ${Math.round(snapshot.extractionAudit.score * 100)}%. Flags: ${snapshot.extractionAudit.flags.join(", ") || "none"}.`
+      : "No extraction audit metadata was loaded for this project yet.",
+    "",
+    nextQuestion ? `**Next question:** ${nextQuestion}` : "**Next step:** Confirm the estimate, then unlock outputs.",
+  ].join("\n");
+}
+
+function buildNextAuditQuestion(snapshot: AssistantProjectSnapshot, blockers: string[]): string | null {
+  const unresolvedRow = snapshot.takeoffRows.find((row) => row.geometry_status === "unresolved");
+  if (unresolvedRow) {
+    const missing = unresolvedRow.missing_refs?.length ? unresolvedRow.missing_refs.join(", ") : "quantity/length basis";
+    return `I found row ${unresolvedRow.mark} (${unresolvedRow.shape}) but ${missing} is still missing. What confirmed length, quantity, or drawing basis should I use?`;
+  }
+  const openIssue = snapshot.qaIssues.find((issue) => !["resolved", "closed"].includes(String(issue.status || "").toLowerCase()));
+  if (openIssue) {
+    return `Issue ${openIssue.location_label || openIssue.title} is still open. Should I save the found answer, mark it for review, or resolve it?`;
+  }
+  if (blockers.some((blocker) => blocker.includes("OCR complete"))) {
+    return "OCR audit is not clean. Should I re-run high-DPI OCR for the flagged pages before final confirmation?";
+  }
+  if (!snapshot.estimatorConfirmed) return "Everything else looks clean. Do you want to mark this estimate as estimator-confirmed?";
+  return null;
 }
 
 export function pickAssistantIssue(prompt: string, issues: WorkflowQaIssue[], rows: WorkflowTakeoffRow[]): WorkflowQaIssue | null {
@@ -162,49 +222,35 @@ export function parseAssistantAnswerValues(text: string, structuredValues: Recor
   const explicitQty = combined.match(/\b(?:quantity|qty|count)\s*(?:=|:|is)?\s*(\d+)\b/i)?.[1]
     || combined.match(/\b(\d+)\s*(?:dowels?|bars?)\b/i)?.[1]
     || null;
-  const pieceLengthM = extractPieceLengthM(combined);
-  const spacingM = extractSpacingM(combined);
-  const runLengthM = extractRunLengthM(combined, structuredValues.length);
-  const quantity = explicitQty ? Number(explicitQty) : (runLengthM && spacingM ? Math.floor(runLengthM / spacingM) + 1 : null);
-  const totalLengthM = quantity && pieceLengthM ? quantity * pieceLengthM : runLengthM;
-  const weightKg = totalLengthM && barSize && REBAR_MASS_KG_PER_M[barSize]
-    ? Number((totalLengthM * REBAR_MASS_KG_PER_M[barSize]).toFixed(2))
-    : null;
+  const pieceLengthMm = parsePieceLengthMm(combined);
+  const spacingMm = parseSpacingMm(combined);
+  const runLengthMm = extractRunLengthMm(combined, structuredValues.length);
+  const estimate = estimateCanadianLine({
+    barSize,
+    runLengthMm,
+    spacingMm,
+    pieceLengthMm,
+    quantity: explicitQty ? Number(explicitQty) : null,
+  });
 
   return {
-    barSize,
-    quantity: quantity && Number.isFinite(quantity) ? quantity : null,
-    totalLengthM: totalLengthM && Number.isFinite(totalLengthM) ? Number(totalLengthM.toFixed(3)) : null,
-    weightKg,
+    barSize: estimate.barSize || barSize,
+    quantity: estimate.quantity,
+    totalLengthM: estimate.totalLengthM,
+    weightKg: estimate.weightKg,
+    rule: estimate.rule,
   };
 }
 
-function extractPieceLengthM(text: string): number | null {
-  const match = text.match(/\b(\d+(?:\.\d+)?)\s*(mm|m)\s*(?:\([^)]*\)\s*)?(?:long|bar length|dowel)/i);
-  if (!match) return null;
-  return toMeters(Number(match[1]), match[2]);
-}
-
-function extractSpacingM(text: string): number | null {
-  const match = text.match(/(?:@|at)\s*(\d+(?:\.\d+)?)\s*(mm|m)\s*(?:\([^)]*\)\s*)?O\.?\s*C\.?/i);
-  if (!match) return null;
-  return toMeters(Number(match[1]), match[2]);
-}
-
-function extractRunLengthM(text: string, structuredLength?: string): number | null {
+function extractRunLengthMm(text: string, structuredLength?: string): number | null {
   if (structuredLength) {
     const plain = structuredLength.match(/^\s*(\d+(?:,\d{3})*(?:\.\d+)?)\s*(mm|m)\s*$/i);
-    if (plain) return toMeters(Number(plain[1].replace(/,/g, "")), plain[2]);
+    if (plain) return plain[2].toLowerCase() === "m"
+      ? Number(plain[1].replace(/,/g, "")) * 1000
+      : Number(plain[1].replace(/,/g, ""));
   }
   const source = `${structuredLength || ""}\n${text}`;
-  const labeled = source.match(/\b(?:run\s*length|wall\s*length|pad\s*length|slab\s*length|footing\s*length|length)\s*(?:=|:|is)?\s*(\d+(?:,\d{3})*(?:\.\d+)?)\s*(mm|m)\b/i);
-  if (!labeled) return null;
-  return toMeters(Number(labeled[1].replace(/,/g, "")), labeled[2]);
-}
-
-function toMeters(value: number, unit: string): number | null {
-  if (!Number.isFinite(value) || value <= 0) return null;
-  return unit.toLowerCase() === "m" ? value : value / 1000;
+  return parseFirstMetricLengthMm(source, ["run length", "wall length", "pad length", "slab length", "footing length", "length"]);
 }
 
 export async function applyAssistantSuggestion(

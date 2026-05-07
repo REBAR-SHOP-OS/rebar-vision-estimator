@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   applyAssistantSuggestion,
+  buildFinishAuditResponse,
   buildAssistantSuggestion,
   isAssistantConfirmationIntent,
+  isFinishAuditIntent,
   parseAssistantAnswerValues,
   type AssistantSuggestion,
 } from "@/features/workflow-v2/stages/assistant-logic";
@@ -12,6 +14,34 @@ describe("workflow assistant logic", () => {
   it("detects confirmation language", () => {
     expect(isAssistantConfirmationIntent("yes apply this")).toBe(true);
     expect(isAssistantConfirmationIntent("what did you find?")).toBe(false);
+  });
+
+  it("detects final estimation audit intent", () => {
+    expect(isFinishAuditIntent("finish estimation audit")).toBe(true);
+    expect(isFinishAuditIntent("can you make this 100% confidence?")).toBe(true);
+    expect(isFinishAuditIntent("what did you find for M008?")).toBe(false);
+  });
+
+  it("builds an audit checklist without claiming machine-only certainty", () => {
+    const response = buildFinishAuditResponse({
+      files: [],
+      takeoffRows: [],
+      qaIssues: [],
+      extractionAudit: {
+        status: "ready",
+        score: 0.91,
+        flags: [],
+        pageCount: 2,
+        indexedPages: 2,
+        sparsePages: 0,
+      },
+      estimatorConfirmed: false,
+    });
+
+    expect(response).toContain("Audit Complete");
+    expect(response).toContain("Final estimator confirmation");
+    expect(response).toContain("Evidence quality");
+    expect(response).not.toContain("100% confidence");
   });
 
   it("builds a suggestion from a QA issue and linked row", () => {

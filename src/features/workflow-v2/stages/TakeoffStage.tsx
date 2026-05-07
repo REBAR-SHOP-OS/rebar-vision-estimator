@@ -8,6 +8,12 @@ import PdfRenderer from "@/components/chat/PdfRenderer";
 import { loadWorkflowTakeoffRows, type WorkflowTakeoffRow } from "../takeoff-data";
 import { parseAndIndexFile } from "@/lib/parse-file";
 import { buildEngineerAnswerDraft } from "./qa-answer-fields";
+import {
+  CANADIAN_BAR_MASS_KG_PER_M,
+  estimateCanadianLine,
+  parsePieceLengthMm,
+  parseSpacingMm,
+} from "@/lib/canadian-rebar-estimating";
 
 interface EditPatch {
   count?: number;
@@ -25,36 +31,32 @@ interface TakeoffFoundDisplay {
   confidence: "high" | "medium" | "low";
 }
 
-const REBAR_MASS_KG_PER_M: Record<string, number> = {
-  "10M": 0.785,
-  "15M": 1.57,
-  "20M": 2.355,
-  "25M": 3.925,
-  "30M": 5.495,
-  "35M": 7.85,
-};
-
 function compactMm(value: string) {
   return value.replace(/\s+/g, "");
 }
 
-function mmToM(value: number, unit: string) {
-  return unit.toLowerCase() === "m" ? value : value / 1000;
-}
-
 function formatM(value: number) {
-  return Number.isFinite(value) ? `${value.toFixed(value < 1 ? 3 : 2)}m` : "—";
+  return Number.isFinite(value) ? `${value.toFixed(value < 1 ? 3 : 2)}m` : "--";
 }
 
 function extractFoundDisplay(row: WorkflowTakeoffRow): TakeoffFoundDisplay {
   const text = `${row.size} ${row.shape} ${row.missing_refs.join(" ")}`.replace(/\s+/g, " ").trim();
   const bar = text.match(/\b(10M|15M|20M|25M|30M|35M)\b/i)?.[1]?.toUpperCase() || (row.size !== "-" ? row.size : "");
-  const pieceMatch = text.match(/\b(?:10M|15M|20M|25M|30M|35M)?\s*(?:x|×)?\s*(\d+(?:\.\d+)?)\s*(mm|m)\s*(?:\([^)]*\)\s*)?(?:long|dowels?|bars?)\b/i);
+  const pieceMatch = text.match(/\b(?:10M|15M|20M|25M|30M|35M)?\s*(?:x|\u00d7)?\s*(\d+(?:\.\d+)?)\s*(mm|m)\s*(?:\([^)]*\)\s*)?(?:long|dowels?|bars?)\b/i);
   const spacingMatch = text.match(/(?:@|at)\s*(\d+(?:\.\d+)?)\s*(mm|m)\s*(?:\([^)]*\)\s*)?O\.?\s*C\.?/i);
   const thicknessMatch = text.match(/\b(\d+(?:\.\d+)?)\s*mm\s+(?:frost\s+slab|foundation\s+wall|slab|wall|pad|footing)\b/i);
   const eachWay = /\beach\s+way\b|\be\.?\s*w\.?\b/i.test(text);
   const staggered = /\bstaggered\b/i.test(text);
-  const pieceM = pieceMatch ? mmToM(Number(pieceMatch[1]), pieceMatch[2]) : null;
+  const pieceMm = parsePieceLengthMm(text) || (pieceMatch ? (pieceMatch[2].toLowerCase() === "m" ? Number(pieceMatch[1]) * 1000 : Number(pieceMatch[1])) : null);
+  const pieceM = pieceMm ? pieceMm / 1000 : null;
+  const spacingMm = parseSpacingMm(text);
+  const canadianEstimate = estimateCanadianLine({
+    barSize: bar,
+    runLengthMm: row.length > 0 ? row.length * 1000 : null,
+    spacingMm,
+    pieceLengthMm: pieceMm,
+    quantity: row.count > 0 ? row.count : null,
+  });
   const spacing = spacingMatch ? `${compactMm(spacingMatch[1] + spacingMatch[2])} O.C.` : "";
   const thickness = thicknessMatch ? `${compactMm(thicknessMatch[1] + "mm")}` : "";
   const foundParts = [
@@ -79,13 +81,21 @@ function extractFoundDisplay(row: WorkflowTakeoffRow): TakeoffFoundDisplay {
   const found = foundParts.length
     ? `Found: ${foundParts.join("; ")}.`
     : draft.draftAnswer || `Found source text: "${row.shape}".`;
+  const needsRunText = spacingMm ? "Need run" : "Ask";
+  const inferredWeight = row.weight > 0
+    ? row.weight.toFixed(1)
+    : canadianEstimate.weightKg
+      ? canadianEstimate.weightKg.toFixed(1)
+      : bar && CANADIAN_BAR_MASS_KG_PER_M[bar]
+        ? needsRunText
+        : "Ask";
 
   return {
     qty: row.count > 0 ? String(row.count) : needsQty || needsRun ? "Need run" : "Ask",
     length: row.length > 0 ? row.length.toFixed(2) : pieceM ? `${formatM(pieceM)} ea` : thickness ? thickness : "Ask",
-    weight: row.weight > 0 ? row.weight.toFixed(1) : bar && REBAR_MASS_KG_PER_M[bar] ? "Need qty" : "Ask",
+    weight: inferredWeight,
     found,
-    question: draft.question,
+    question: `${draft.question} Canadian rule: count bars across the opposite direction; quantity = floor(run / spacing) + 1, then weight = total length x kg/m.`,
     confidence: foundParts.length ? "medium" : draft.confidence,
   };
 }
@@ -639,7 +649,7 @@ function UnresolvedFoundPanel({ row }: { row: WorkflowTakeoffRow }) {
       <div className="flex items-center justify-between gap-2">
         <div className="ip-kicker">Found / Confirmation Needed</div>
         <Pill tone={display.confidence === "high" ? "ok" : display.confidence === "medium" ? "warn" : "bad"}>
-          {display.confidence}
+          Evidence {display.confidence}
         </Pill>
       </div>
       <p className="mt-2 text-[12px] leading-relaxed text-foreground">{display.found}</p>

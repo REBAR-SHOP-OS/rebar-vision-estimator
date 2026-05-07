@@ -15,12 +15,15 @@ import { StageHeader, EmptyState, Pill, type StageProps } from "./_shared";
 import {
   applyAssistantSuggestion,
   buildAssistantSuggestion,
+  buildFinishAuditResponse,
   buildWorkingSteps,
   isAssistantConfirmationIntent,
+  isFinishAuditIntent,
   parseAssistantAnswerValues,
   type AssistantMessageMetadata,
   type AssistantSuggestion,
 } from "./assistant-logic";
+import type { ExtractionAuditResult, ExtractionAuditStatus } from "../accuracy-audit";
 
 type AssistantMessage = {
   id: string;
@@ -36,6 +39,41 @@ type StagedUpload = {
 };
 
 const CHANNEL = "workflow_v2_assistant";
+
+async function loadExtractionAudit(projectId: string): Promise<ExtractionAuditResult | null> {
+  const { data, error } = await supabase
+    .from("document_versions")
+    .select("pdf_metadata,page_count,parse_status")
+    .eq("project_id", projectId);
+  if (error) {
+    console.warn("Failed to load extraction audit:", error);
+    return null;
+  }
+
+  const audits = ((data || []) as any[])
+    .map((row) => row.pdf_metadata?.extraction_audit)
+    .filter(Boolean) as ExtractionAuditResult[];
+  if (audits.length === 0) return null;
+
+  const statusRank: Record<ExtractionAuditStatus, number> = {
+    ready: 0,
+    needs_engineer_review: 1,
+    needs_ocr_rerun: 2,
+  };
+  const status = audits.reduce<ExtractionAuditStatus>(
+    (worst, audit) => statusRank[audit.status] > statusRank[worst] ? audit.status : worst,
+    "ready",
+  );
+  const flags = Array.from(new Set(audits.flatMap((audit) => audit.flags || [])));
+  const indexedPages = audits.reduce((sum, audit) => sum + Number(audit.indexedPages || 0), 0);
+  const pageCount = audits.reduce((sum, audit) => sum + Number(audit.pageCount || audit.indexedPages || 0), 0);
+  const sparsePages = audits.reduce((sum, audit) => sum + Number(audit.sparsePages || 0), 0);
+  const score = audits.length
+    ? Math.min(...audits.map((audit) => Number(audit.score || 0)))
+    : 0;
+
+  return { status, score, flags, indexedPages, pageCount, sparsePages };
+}
 
 export default function AssistantStage({ projectId, state, goToStage }: StageProps) {
   const { user } = useAuth();
@@ -121,12 +159,19 @@ export default function AssistantStage({ projectId, state, goToStage }: StagePro
   }, [projectId, user]);
 
   const loadSnapshot = useCallback(async () => {
-    const [qaIssues, takeoffRows] = await Promise.all([
+    const [qaIssues, takeoffRows, extractionAudit] = await Promise.all([
       loadWorkflowQaIssues(projectId),
       loadWorkflowTakeoffRows(projectId, state.files),
+      loadExtractionAudit(projectId),
     ]);
-    return { files: state.files, qaIssues, takeoffRows };
-  }, [projectId, state.files]);
+    return {
+      files: state.files,
+      qaIssues,
+      takeoffRows,
+      extractionAudit,
+      estimatorConfirmed: Boolean((state as any).estimatorConfirmed),
+    };
+  }, [projectId, state]);
 
   const uploadStagedFiles = useCallback(async () => {
     if (!user || staged.length === 0) return [];
@@ -160,6 +205,13 @@ export default function AssistantStage({ projectId, state, goToStage }: StagePro
     const snapshot = await loadSnapshot();
     const steps = buildWorkingSteps(snapshot);
     setWorkingSteps(steps);
+    if (isFinishAuditIntent(prompt)) {
+      await insertMessage("assistant", buildFinishAuditResponse(snapshot), {
+        kind: "audit",
+        working_steps: steps,
+      });
+      return;
+    }
     const suggestion = buildAssistantSuggestion(prompt, snapshot);
     if (!suggestion) {
       setLatestSuggestion(null);
@@ -179,7 +231,7 @@ export default function AssistantStage({ projectId, state, goToStage }: StagePro
       `**Question:** ${suggestion.question}`,
       "",
       suggestion.linkedTakeoffMark ? `Linked row: ${suggestion.linkedTakeoffMark}` : null,
-      `Confidence: ${suggestion.confidence}`,
+      `Evidence quality: ${suggestion.confidence}`,
       "Reply with the corrected answer, or say **apply** to save this suggestion.",
     ].filter(Boolean).join("\n");
     await insertMessage("assistant", content, {
@@ -304,7 +356,7 @@ export default function AssistantStage({ projectId, state, goToStage }: StagePro
                 <Sparkles className="w-7 h-7 mx-auto text-primary mb-3" />
                 <div className="text-sm font-semibold">Ask the assistant to inspect blockers.</div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Try: “check unresolved QA”, “what answer did you find for M007?”, or upload another drawing directly into this chat.
+                  Try: "check unresolved QA", "finish estimation audit", or upload another drawing directly into this chat.
                 </p>
               </div>
             </div>
@@ -389,7 +441,7 @@ export default function AssistantStage({ projectId, state, goToStage }: StagePro
               <div className="text-[13px] font-semibold">{latestSuggestion.locationLabel}</div>
               <p className="text-[12px] text-muted-foreground">{latestSuggestion.answerText}</p>
               <div className="flex gap-2">
-                <Pill tone={latestSuggestion.confidence === "high" ? "ok" : latestSuggestion.confidence === "medium" ? "warn" : "bad"}>{latestSuggestion.confidence}</Pill>
+                <Pill tone={latestSuggestion.confidence === "high" ? "ok" : latestSuggestion.confidence === "medium" ? "warn" : "bad"}>Evidence {latestSuggestion.confidence}</Pill>
                 {latestSuggestion.linkedTakeoffMark && <Pill tone="info">{latestSuggestion.linkedTakeoffMark}</Pill>}
               </div>
               <button
@@ -403,7 +455,7 @@ export default function AssistantStage({ projectId, state, goToStage }: StagePro
           )}
           <section className="border border-border bg-background/50 p-3">
             <div className="ip-kicker mb-2">Useful Prompts</div>
-            {["Check unresolved QA", "Suggest answer for the next blocked row", "What still needs engineer confirmation?"].map((prompt) => (
+            {["Finish estimation audit", "Check unresolved QA", "Suggest answer for the next blocked row", "What still needs engineer confirmation?"].map((prompt) => (
               <button key={prompt} onClick={() => send(prompt)} disabled={busy} className="block w-full text-left px-2 py-2 text-[12px] border border-border mb-2 hover:bg-accent/40 disabled:opacity-50">
                 {prompt}
               </button>
@@ -427,7 +479,7 @@ function AssistantBubble({ message, onApply, busy }: { message: AssistantMessage
             <Icon className="w-3.5 h-3.5" />
           </span>
           <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{isUser ? "Estimator" : "Assistant"}</span>
-          {message.metadata?.confidence && <Pill tone={message.metadata.confidence === "high" ? "ok" : message.metadata.confidence === "medium" ? "warn" : "bad"}>{message.metadata.confidence}</Pill>}
+          {message.metadata?.confidence && <Pill tone={message.metadata.confidence === "high" ? "ok" : message.metadata.confidence === "medium" ? "warn" : "bad"}>Evidence {message.metadata.confidence}</Pill>}
         </div>
         {attachments.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">

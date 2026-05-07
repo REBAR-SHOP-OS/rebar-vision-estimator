@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabase } from "@/integrations/supabase/client";
 import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
+import { auditIndexedPages } from "@/features/workflow-v2/accuracy-audit";
 
 export type ParseStatus = "pending" | "parsing" | "indexed" | "failed";
 
@@ -80,33 +81,80 @@ export async function parseAndIndexFile(
     let pages: any[] = extraction?.pages || [];
     const sha256 = extraction?.sha256 || `file_${legacyFileId}`;
     const hasText = pages.some((p: any) => p.raw_text && p.raw_text.trim().length > 20);
+    const totalPages = Number(extraction?.total_pages || pages.length || 0);
+    const sparseTextPages = pages.filter((p: any) => String(p.raw_text || "").trim().length < 120).length;
+    const needsRasterOcr = !hasText
+      || (totalPages > pages.length)
+      || (pages.length > 0 && sparseTextPages / pages.length > 0.25);
 
-    if (!hasText) {
-      onProgress?.(`Rendering ${file.file_name}`);
+    if (needsRasterOcr) {
+      onProgress?.(`High-DPI OCR render: ${file.file_name}`);
       const pageImages = await renderPdfPagesToImages(urlData.signedUrl, projectId, {
         maxPages: 50,
-        scale: 1.5,
+        scale: "adaptive",
+        targetCrops: true,
         onProgress: (cur, total) => onProgress?.(`Rendering ${cur}/${total}: ${file.file_name}`),
       });
       pages = [];
-      for (let bi = 0; bi < pageImages.length; bi += 4) {
-        const batch = pageImages.slice(bi, bi + 4);
+      const fullPages = pageImages.filter((img) => !img.crop);
+      const cropPages = pageImages.filter((img) => img.crop);
+      for (let bi = 0; bi < fullPages.length; bi += 3) {
+        const batch = fullPages.slice(bi, bi + 3);
         const results = await Promise.allSettled(batch.map(async (img) => {
-          onProgress?.(`OCR ${img.pageNumber}/${pageImages.length}: ${file.file_name}`);
-          const { data: ocrData } = await supabase.functions.invoke("ocr-image", {
-            body: { image_url: img.signedUrl },
-          });
-          const fullText = (ocrData?.ocr_results || [])
-            .map((r: any) => r.fullText || "")
-            .filter((t: string) => t.length > 0)
-            .sort((a: string, b: string) => b.length - a.length)[0] || "";
-          return { page_number: img.pageNumber, raw_text: fullText };
+          onProgress?.(`OCR page ${img.pageNumber}/${fullPages.length}: ${file.file_name}`);
+          const fullText = await ocrBestText(img.signedUrl);
+          const crops = cropPages.filter((crop) => crop.pageNumber === img.pageNumber);
+          const cropPasses: Array<{ kind: string; text: string; text_length: number; bbox?: number[] }> = [];
+          for (const crop of crops) {
+            const cropText = await ocrBestText(crop.signedUrl);
+            if (cropText.trim().length > 0) {
+              cropPasses.push({
+                kind: crop.crop?.kind || "crop",
+                text: cropText,
+                text_length: cropText.trim().length,
+                bbox: crop.crop?.bbox,
+              });
+            }
+          }
+          const cropTextBlock = cropPasses
+            .map((crop) => `\n[OCR CROP ${crop.kind.toUpperCase()}]\n${crop.text}`)
+            .join("\n");
+          return {
+            page_number: img.pageNumber,
+            raw_text: `${fullText}${cropTextBlock}`.trim(),
+            is_ocr: true,
+            ocr_metadata: {
+              render_scale: img.renderScale,
+              image_size: { w: img.imageWidth, h: img.imageHeight },
+              source_page_size: { w: img.width, h: img.height },
+              full_page_text_length: fullText.trim().length,
+              crop_passes: cropPasses.map(({ kind, text_length, bbox }) => ({ kind, text_length, bbox })),
+              reason: !hasText ? "no_text_layer" : totalPages > (extraction?.pages || []).length ? "server_page_limit_or_large_pdf" : "sparse_text",
+            },
+          };
         }));
         for (const r of results) {
           if (r.status === "fulfilled") pages.push(r.value);
         }
       }
+    } else if (totalPages > pages.length) {
+      pages = pages.map((page: any) => ({
+        ...page,
+        ocr_metadata: { ...(page.ocr_metadata || {}), skipped_reason: "server_page_limit" },
+      }));
     }
+
+    const extractionAudit = auditIndexedPages(
+      pages.map((page: any) => ({
+        page_number: page.page_number,
+        raw_text: page.raw_text,
+        title_block: page.title_block,
+        is_scanned: page.is_ocr || page.is_scanned,
+        ocr_metadata: page.ocr_metadata,
+        extracted_entities: { title_block: page.title_block, bar_marks: [] },
+      })),
+      totalPages || pages.length,
+    );
 
     let pagesIndexed = 0;
     if (pages.length > 0 && dvId) {
@@ -119,6 +167,7 @@ export async function parseAndIndexFile(
           file_name: file.file_name,
           sha256,
           pipeline_file_id: legacyFileId,
+          is_ocr: needsRasterOcr,
         },
       });
       pagesIndexed = (indexed as any)?.indexed ?? pages.length;
@@ -131,7 +180,14 @@ export async function parseAndIndexFile(
         parsed_at: new Date().toISOString(),
         sha256,
         page_count: pages.length || null,
-        is_scanned: !hasText,
+        is_scanned: needsRasterOcr || !hasText,
+        pdf_metadata: {
+          ...(extraction?.pdf_metadata || {}),
+          extraction_audit: extractionAudit,
+          ocr_strategy: needsRasterOcr ? "adaptive_high_dpi_with_target_crops" : "vector_text",
+          total_pages_reported: totalPages || pages.length || null,
+          pages_indexed: pages.length,
+        },
       } as any).eq("id", dvId);
     }
 
@@ -146,4 +202,14 @@ export async function parseAndIndexFile(
     }
     return { status: "failed", pages_indexed: 0, document_version_id: dvId, error: msg };
   }
+}
+
+async function ocrBestText(imageUrl: string): Promise<string> {
+  const { data: ocrData } = await supabase.functions.invoke("ocr-image", {
+    body: { image_url: imageUrl },
+  });
+  return (ocrData?.ocr_results || [])
+    .map((r: any) => r.fullText || "")
+    .filter((t: string) => t.length > 0)
+    .sort((a: string, b: string) => b.length - a.length)[0] || "";
 }

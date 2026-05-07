@@ -1074,7 +1074,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                       {engineerDraft.draftAnswer && (
                         <div className="text-[10px] text-muted-foreground bg-card/50 border border-border p-2">
                           {engineerDraft.confidence === "high"
-                            ? "High confidence: confirm or edit this answer."
+                            ? "High evidence quality: confirm or edit this answer."
                             : "Found drawing callout: confirm missing dimensions."}
                         </div>
                       )}
