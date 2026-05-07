@@ -1,59 +1,48 @@
-# Fix Dimension Problem — Project + Going Forward
+# Fix: Save Answer & Mark Resolved appear inactive
 
-## Goal
-Stop inventing `10 m × 3 m` placeholder dimensions. Extract real dimensions from drawings using OCR + Vision, persist them in `agent_knowledge` per project, and gate `auto-estimate` until dimensions are real.
+## Root cause
 
----
+The buttons *are* wired and the click reaches the database (the brick‑ledge issue in the screenshot is already `status='answered'` in `validation_issues`). Two things make them feel "not active":
 
-## Part A — Repair current project (`cd42ebfe…` LONDON_CRU1-7)
+1. **`persistIssueStatus` silently downgrades `resolved` → `answered`**
+   In `src/features/workflow-v2/stages/QAStage.tsx` (lines 469‑474), if `applyEngineerAnswerToEstimateItem` reports `geometryStatus !== "resolved"`, the requested status is rewritten to `"answered"`. Because only `"resolved"` / `"closed"` are in `CLOSED_QA_STATUSES`, the issue is **not removed from the list** and the side panel re‑renders with the same content. The engineer clicks "Mark Resolved" and visually nothing happens → "button not active".
 
-1. **Revert synthetic patches** (data migration via insert tool):
-   - For the 14 estimate items touched by `accept_synthetic_dims_bulk`:
-     - Remove `linear_geometry.lengthMm = 10000` and `heightMm = 3000` defaults where `confirmation_source = "user_accept_synthetic_bulk"` or `"user_accept_synthetic"`.
-     - Restore `missing_refs` from `audit_events.metadata.previous_missing_refs`.
-     - Set `geometry_status = "partial"`, clear `confirmed_at`, clear `confirmation_source`.
-   - Flip the 8 segments back to `dimensions_status = 'pending'`.
-   - Log one `audit_events` row per item: `revert_synthetic_host_length`.
+2. **`applyEngineerAnswerToEstimateItem` only treats geometry as resolved when *quantity, length AND weight* are all parsed numerically** (`assistant-logic.ts` line 649). Free‑text answers like *"115 mm typical; 152 mm where wall > 300 mm"* never produce all three numbers, so geometry stays `partial` and the downgrade above kicks in every time.
 
-2. **Run `extract-dimensions` edge function** on this project:
-   - OCR sweep all sheets for scale + schedule dimensions.
-   - **Vision pass** on plan/elevation/section sheets for host lengths + heights OCR can't see (P9, P11, P13, P16, frost slab, brick ledge, shear walls, housekeeping pads).
-   - Persist a single `agent_knowledge` row keyed by project (type=`project_dimensions`, file_path=`projects/{id}/dimensions.json`) — same shape as the existing CRU-1 row.
+The result: Mark Resolved is effectively unreachable from any text-only engineer answer, and Save Answer looks like a no‑op because the same row stays selected.
 
-3. **Re-run `auto-estimate`** — items resolve from real `agent_knowledge` dimensions. Genuine gaps remain as `MISSING:` chips for human review (no synthetic fill).
+## Fix (minimum patch, two files)
 
----
+### 1. `src/features/workflow-v2/stages/QAStage.tsx` — respect explicit user intent
 
-## Part B — Going forward (all projects)
+Inside `persistIssueStatus`:
 
-4. **Pipeline gate** (`auto-estimate` edge function):
-   - Before estimating, require either:
-     - `agent_knowledge` row of type `project_dimensions` for `project_id`, OR
-     - All `segments.dimensions_status IN ('complete','na')`.
-   - If neither, auto-invoke `extract-dimensions` first. Never fall through to `10000 mm` defaults.
+- Remove the silent downgrade. When the engineer clicks **Mark Resolved**, persist `status="resolved"` and let `updateSelectedIssue` advance to the next issue.
+- Keep the takeoff‑geometry warning, but surface it as an **appended note** on the saved record only — do **not** rewrite the status.
+- After a successful Save Answer (`status="answered"`), give visible feedback by:
+  - clearing `answerError`,
+  - setting a transient `answerSavedAt` flag (already have `answerSaving`) so the button label briefly reads "Saved ✓" for ~1.2 s.
 
-5. **Remove synthetic-default code paths**:
-   - In `auto-estimate` and any synthetic-quote helper, delete the `lengthMm ?? 10000` / `heightMm ?? 3000` fallbacks. On missing dim, emit `MISSING:` and skip that item, do not synthesize.
+### 2. `src/features/workflow-v2/stages/assistant-logic.ts` — broaden "resolved" criteria
 
-6. **`extract-dimensions` improvements**:
-   - Always run Vision on plan + elevation + section sheets (not just OCR).
-   - Write dimensions to `agent_knowledge` (project-scoped) at end of every run, so estimator loads them on every prompt going forward.
-   - Add audit log entry `dimensions_extracted` with source breakdown (OCR vs Vision per dimension).
+In `applyEngineerAnswerToEstimateItem` (lines 642‑653):
 
-7. **Backfill sweep** (one-shot script via edge function):
-   - For every project with synthetic-marked items (`assumptions_json->>'confirmation_source' LIKE 'user_accept_synthetic%'`):
-     - Apply Part A steps 1–3.
-   - Idempotent — safe to re-run.
+- If the caller passes `requestedStatus === "resolved"`, treat it as resolved when **either** all numeric values parse **or** the engineer supplied any structured value / non‑empty answer text. This matches the human contract: "engineer reviewed and signed off".
+- Continue to compute `geometryStatus = "partial"` when only some numbers are present, but no longer block the issue‑level status from going to `resolved`.
 
----
+### Optional polish (same QAStage file, ~3 lines)
 
-## Technical Notes
-
-- All schema unchanged. Only data + edge function logic.
-- Migration tool used only for any new index / no DDL needed here — data ops via insert tool.
-- Edge functions touched: `auto-estimate`, `extract-dimensions`, new `backfill-dimensions` (one-shot).
-- Respects FAIL-CLOSED rule: missing dim → `MISSING:` chip, never invented value.
-- Respects Trust-First / Never-invent-values core rules.
+- Make the secondary buttons (`Mark Resolved`, `Needs Review`) use `bg-secondary text-secondary-foreground` instead of `bg-card`, so they read as actionable instead of dimmed against the dark panel (the user’s screenshot shows them looking grayed out).
 
 ## Out of scope
-- No UI changes. QA cards already render `MISSING:` chips correctly once data is honest.
+
+- No DB schema changes.
+- No changes to `auto-estimate` / `extract-dimensions` edge functions.
+- No changes to the takeoff geometry parser; we only stop it from overriding the engineer’s explicit decision.
+
+## Verification
+
+1. Open a QA issue with a free‑text answer (e.g. brick ledge on P17).
+2. Click **Save Answer** → button shows "Saved ✓" briefly, issue stays selected, `validation_issues.status='answered'`, panel shows "Saved: …".
+3. Click **Mark Resolved** → issue is removed from the list, selection moves to the next open issue, `validation_issues.status='resolved'`.
+4. Click **Needs Review** → issue stays in the list with `status='review'` badge.
