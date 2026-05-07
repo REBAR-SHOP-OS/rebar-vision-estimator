@@ -628,11 +628,11 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                     onRenderStateChange={(state) => {
                       setRenderStatus(state.status);
                       setRenderError(state.error ?? null);
-                      if (state.status === "loading") {
-                        setPdfImg(null);
-                        setRenderedPage(null);
-                        setPageBox(null);
-                      }
+                      // IMPORTANT: do NOT clear pdfImg / pageBox here. Keep
+                      // the last rendered page visible while the next page
+                      // (or a re-render of the same page) is in flight. The
+                      // page-change effect above is the only place allowed
+                      // to blank the raster, and only when pdfPage changes.
                     }}
                     scale={2}
                   />
