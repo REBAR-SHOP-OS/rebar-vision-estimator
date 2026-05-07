@@ -1,59 +1,38 @@
-## Goal
+1. Fix the immediate TypeScript blocker
+- Patch `src/lib/wall-geometry-resolver.ts` so its helper return type matches the actual `"not_found"` fallback.
+- Keep this as the smallest possible change so the app can compile again before validating estimate behavior.
 
-Keep the app running on Lovable Cloud (primary, unchanged) and maintain a **read-only mirror** of every table in your own Supabase project (`aogvxeiltgsyxdndvwja`) so you have full Supabase dashboard access to a complete copy of the data.
+2. Make the geometry resolver recognize your wall/brick-ledge examples
+- Patch the estimate resolver in `supabase/functions/auto-estimate/index.ts` with minimal targeted logic for the patterns shown in your screenshot and stored rows:
+  - brick ledge lines like `10M VERTICAL BARS @ 300mm O.C.`
+  - continuous top reinforcement like `15M CONT. REINFORCEMENT @ TOP OF BRICK LEDGE`
+  - wall lines like `15M @ 406mm O.C. MIDDLE EACH WAY`
+  - dowel lines like `15M x 457mm LONG @ 610mm O.C. STAGGERED`
+- Improve the current regex/path so those rows become at least `partial` with real quantity and/or length evidence when the drawing contains enough literal information, instead of staying fully `unresolved` with all zeros.
+- Preserve the existing trust-first rule: if the drawing still does not prove a full number, keep it partial rather than inventing values.
 
-## Decisions (assumed — tell me to change before approving)
+3. Tighten the unresolved fallback so one estimate is actually produced
+- Adjust the resolver flow so when a row already contains a literal piece length, spacing, or explicit bar count from OCR, that evidence is preserved into numeric output.
+- This will let the UI show a real estimate line similar to your example instead of only `Ask` / `Need run` placeholders.
+- Keep the patch narrow and only affect the stuck unresolved cases.
 
-- **Direction:** one-way, Cloud → mirror. The app never reads/writes the mirror. Safer, no conflicts.
-- **Frequency:** hourly. Adjustable later.
-- **Scope:** all 36 public tables (full row mirror, not schema-only).
-- **Storage / Auth users / Edge Functions:** NOT mirrored in v1. Only Postgres data. (Auth users and Storage objects can be added in a v2 if needed — they require separate flows.)
+4. Validate against your current backend data
+- Re-run the estimator on the affected segment/project and confirm that:
+  - at least one row gets numeric estimate values
+  - geometry status moves from `unresolved` to `partial` or `resolved`
+  - the segment table no longer shows all rows as blocked for that example
+- Check the latest estimate rows in the backend to verify the stored values match what the UI shows.
 
-## Secrets you'll provide (I'll request via add_secret after approval)
+Technical details
+- Files to change:
+  - `src/lib/wall-geometry-resolver.ts`
+  - `supabase/functions/auto-estimate/index.ts`
+- Files to verify/read during implementation:
+  - `src/features/workflow-v2/stages/TakeoffStage.tsx`
+  - `src/features/workflow-v2/takeoff-data.ts`
+- Root cause found so far:
+  - There is a compile blocker in the shared wall geometry helper.
+  - Your latest project does create `estimate_items`, but they remain mostly `geometry_status = unresolved` because the current deterministic resolver is not converting the extracted OCR callouts into numeric qty/length/weight for the wall and brick-ledge patterns in your example.
+  - For the project ID from your earlier broken workspace, all 11 rows are still unresolved; for the newest uploaded project, 13 rows exist and 6 are already partial, which shows the pipeline is close but still missing the exact pattern handling needed for your sample.
 
-1. `MIRROR_SUPABASE_URL` = `https://aogvxeiltgsyxdndvwja.supabase.co` (already have)
-2. `MIRROR_SUPABASE_SERVICE_ROLE_KEY` — Supabase project → Project Settings → API Keys → `service_role` (secret)
-3. `MIRROR_SUPABASE_DB_URL` — Project Settings → Database → Connection string → URI (`postgresql://postgres:<pwd>@db.aogvxeiltgsyxdndvwja.supabase.co:5432/postgres`)
-
-Anon key is not needed since the app never reads the mirror.
-
-## One-time setup you do in your Supabase project
-
-Before the sync runs, the mirror needs the same schema as Cloud. Two options:
-
-- **Option A (recommended):** I generate a single SQL file with the full schema (tables, RLS policies, functions, triggers, enums) extracted from Cloud. You paste it into your Supabase SQL editor and run once. Takes ~2 min.
-- **Option B:** You run `pg_dump --schema-only` against Cloud and `psql` it into your project. Requires CLI access; equivalent result.
-
-## Implementation (after approval + secrets)
-
-1. **New edge function `mirror-sync`** (`supabase/functions/mirror-sync/index.ts`)
-   - Runs with `verify_jwt = false` + a shared-secret header so only cron can call it.
-   - For each table in a hard-coded list (the 36 public tables), in dependency order:
-     - Reads rows from Cloud changed since `last_sync_at` (uses `created_at` / `updated_at` where available, full-table refresh for tables without timestamps — small ones only).
-     - Upserts into mirror via `service_role` key, using primary key `id`.
-   - Writes a row to a new local table `mirror_sync_runs` (started_at, finished_at, rows_per_table jsonb, error).
-
-2. **New table `mirror_sync_runs`** in Cloud (small bookkeeping table, RLS off, only edge function writes it).
-
-3. **Cron schedule** via `pg_cron` + `pg_net` — fires `mirror-sync` hourly.
-
-4. **Settings page panel** (`/settings` or Cloud view → small "Mirror status" card): shows last run time, row counts, last error. Read-only.
-
-## What this plan does NOT do
-
-- Does not migrate auth users (passwords can't be exported in plaintext; Supabase has a separate "Auth migration" flow if you need it later).
-- Does not mirror Storage bucket files (would need a separate `storage.objects` walker — can be added in v2).
-- Does not sync deletes by default. Hard-deletes in Cloud will leave stale rows in the mirror. If you want deletes mirrored, say so and I'll add a soft-delete tracker or a periodic full-diff pass (more expensive).
-- Does not change anything about how the app reads/writes data today. Zero risk to the live app.
-
-## Rollback
-
-The mirror is additive. To undo: delete the cron job, delete the `mirror-sync` function, drop `mirror_sync_runs`. The app is unaffected.
-
-## What I need from you to proceed
-
-1. **Approve this plan** (or tell me what to change — direction, frequency, scope, deletes, etc.).
-2. After approval, in build mode I will:
-   - Request the 2 missing secrets via `add_secret`
-   - Generate the schema-mirror SQL file and tell you to run it in your Supabase SQL editor
-   - Build the edge function, cron job, bookkeeping table, and status panel
+If you approve, I’ll apply the minimal patch and verify that at least one estimate line is produced from your example.

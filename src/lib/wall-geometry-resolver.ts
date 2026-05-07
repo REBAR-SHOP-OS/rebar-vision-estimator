@@ -278,7 +278,7 @@ function distinctiveTokens(text: string) {
   return Array.from(new Set(text.toLowerCase().split(/[^a-z0-9.]+/).filter((token) => token.length >= 5 && !["foundation", "drawing", "enter"].includes(token)))).slice(0, 8);
 }
 
-function extractExplicitWallGeometry(text: string): Omit<WallGeometryEvidence, "confidence" | "needsConfirmation" | "reason"> & { method?: "explicit_text" | "schedule" } {
+function extractExplicitWallGeometry(text: string): Omit<WallGeometryEvidence, "confidence" | "needsConfirmation" | "reason"> & { method?: "explicit_text" | "schedule" | "not_found" } {
   const normalized = text.replace(/\s+/g, " ");
   const length = findLabeledMm(normalized, ["wall length", "run length", "foundation wall length", "length"]);
   const height = findLabeledMm(normalized, ["wall height", "height", "high"]);
