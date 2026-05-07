@@ -263,7 +263,7 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
           right={
             <div className="flex items-center gap-3">
               <div className="flex gap-4 text-[11px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
-                <span>Total Tonnage <span className="text-foreground font-semibold ml-1">{(accepted.length * 14.2).toFixed(1)} TN</span></span>
+                <span>Total Tonnage <span className="text-foreground font-semibold ml-1">— TN</span></span>
                 <span>Items <span className="text-foreground font-semibold ml-1">{accepted.length}</span></span>
               </div>
               <button
@@ -291,7 +291,7 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
                     {items.map((it, i) => (
                       <div key={it.id} className="flex justify-between text-[12px] tabular-nums">
                         <span className="text-foreground">{name.charAt(0)}{i + 1}</span>
-                        <span className="text-muted-foreground">{(2.5 + (i * 0.7)).toFixed(1)} TN</span>
+                        <span className="text-muted-foreground">— TN</span>
                       </div>
                     ))}
                   </div>
