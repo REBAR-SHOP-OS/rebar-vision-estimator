@@ -940,6 +940,46 @@ serve(async (req) => {
       sheetMetaByKey.set(`${row.document_version_id || ""}:${Number(row.page_number) || 0}`, row);
     }
 
+    // ============================================================
+    // PROJECT-SPEC PRECEDENCE (lap / cover / grade)
+    // Aggregate `specs` from extracted_entities (general-notes
+    // extractor #6). Project-specific specs ALWAYS beat the user's
+    // standards_profiles defaults, which beat CSA fallback.
+    // ============================================================
+    type ProjectSpecs = {
+      lap: { tension_db?: number; compression_db?: number; splice_class?: string; splice_type?: string };
+      cover: { top_mm?: number; bottom_mm?: number; side_mm?: number; against_earth_mm?: number; clear_mm?: number };
+      grade: { fy_mpa?: number; fy_ksi?: number; mark?: string };
+      hook: { standard_deg?: number; seismic_deg?: number };
+      source_pages: number[];
+    };
+    const projectSpecs: ProjectSpecs = { lap: {}, cover: {}, grade: {}, hook: {}, source_pages: [] };
+    for (const page of (searchIndexRes.data || []) as any[]) {
+      const s = (page.extracted_entities as any)?.specs;
+      if (!s || typeof s !== "object") continue;
+      let touched = false;
+      for (const k of ["tension_db","compression_db","splice_class","splice_type"] as const) {
+        if (s.lap?.[k] != null && projectSpecs.lap[k] == null) { (projectSpecs.lap as any)[k] = s.lap[k]; touched = true; }
+      }
+      for (const k of ["top_mm","bottom_mm","side_mm","against_earth_mm","clear_mm"] as const) {
+        if (s.cover?.[k] != null && projectSpecs.cover[k] == null) { (projectSpecs.cover as any)[k] = s.cover[k]; touched = true; }
+      }
+      for (const k of ["fy_mpa","fy_ksi","mark"] as const) {
+        if (s.grade?.[k] != null && projectSpecs.grade[k] == null) { (projectSpecs.grade as any)[k] = s.grade[k]; touched = true; }
+      }
+      for (const k of ["standard_deg","seismic_deg"] as const) {
+        if (s.hook?.[k] != null && projectSpecs.hook[k] == null) { (projectSpecs.hook as any)[k] = s.hook[k]; touched = true; }
+      }
+      if (touched && page.page_number != null) projectSpecs.source_pages.push(Number(page.page_number));
+    }
+    const hasProjectLap = Object.keys(projectSpecs.lap).length > 0;
+    const hasProjectCover = Object.keys(projectSpecs.cover).length > 0;
+    const hasProjectGrade = Object.keys(projectSpecs.grade).length > 0;
+    const lapSourceLabel = hasProjectLap ? "project_spec_extracted" : (standard?.lap_defaults ? "standards_profile" : "csa_fallback");
+    const coverSourceLabel = hasProjectCover ? "project_spec_extracted" : (standard?.cover_defaults ? "standards_profile" : "csa_fallback");
+    const gradeSourceLabel = hasProjectGrade ? "project_spec_extracted" : (standard?.code_family ? "standards_profile" : "csa_fallback");
+    console.log(`[auto-estimate] spec_precedence lap=${lapSourceLabel} cover=${coverSourceLabel} grade=${gradeSourceLabel} pages=${projectSpecs.source_pages.join(",") || "none"}`);
+
     // Map document_version_id -> project_files.id for per-row provenance.
     // We need the document_versions.file_id (legacy file id) to reach project_files.id.
     const dvIds = Array.from(new Set(((searchIndexRes.data || []) as any[])
@@ -1242,6 +1282,14 @@ Notes: ${segment.notes || "None"}
 Standards: ${standard ? `${standard.name} (${standard.code_family}, ${standard.units})` : "Default metric"}
 Cover defaults: ${standard?.cover_defaults ? JSON.stringify(standard.cover_defaults) : "Standard"}
 Lap defaults: ${standard?.lap_defaults ? JSON.stringify(standard.lap_defaults) : "Standard"}
+
+=== PROJECT SPEC PRECEDENCE (use FIRST, before standards/CSA fallback) ===
+Source for LAP rules:   ${lapSourceLabel}${hasProjectLap ? ` -> ${JSON.stringify(projectSpecs.lap)}` : ""}
+Source for COVER rules: ${coverSourceLabel}${hasProjectCover ? ` -> ${JSON.stringify(projectSpecs.cover)}` : ""}
+Source for GRADE rules: ${gradeSourceLabel}${hasProjectGrade ? ` -> ${JSON.stringify(projectSpecs.grade)}` : ""}
+Spec extractor pages:   ${projectSpecs.source_pages.join(", ") || "none"}
+RULE: If a project_spec_extracted value exists, USE IT and cite the page in authority_quote (e.g. "Spec sheet p${projectSpecs.source_pages[0] ?? "?"}: tension lap = Xdb"). Only fall back to standards/CSA if the project value is missing for that field.
+=== END PROJECT SPEC PRECEDENCE ===
 
 ${knowledgeContext}
 

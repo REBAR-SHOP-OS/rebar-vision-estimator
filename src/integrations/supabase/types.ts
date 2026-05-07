@@ -236,14 +236,17 @@ export type Database = {
       bar_items: {
         Row: {
           confidence: number | null
+          cover_source: string | null
           cover_value: number | null
           created_at: string | null
           cut_length: number | null
           deterministic_match: boolean
           estimate_item_id: string | null
           finish_type: string | null
+          grade_source: string | null
           id: string
           lap_length: number | null
+          lap_source: string | null
           mark: string | null
           provenance_state: string
           quantity: number | null
@@ -254,14 +257,17 @@ export type Database = {
         }
         Insert: {
           confidence?: number | null
+          cover_source?: string | null
           cover_value?: number | null
           created_at?: string | null
           cut_length?: number | null
           deterministic_match?: boolean
           estimate_item_id?: string | null
           finish_type?: string | null
+          grade_source?: string | null
           id?: string
           lap_length?: number | null
+          lap_source?: string | null
           mark?: string | null
           provenance_state?: string
           quantity?: number | null
@@ -272,14 +278,17 @@ export type Database = {
         }
         Update: {
           confidence?: number | null
+          cover_source?: string | null
           cover_value?: number | null
           created_at?: string | null
           cut_length?: number | null
           deterministic_match?: boolean
           estimate_item_id?: string | null
           finish_type?: string | null
+          grade_source?: string | null
           id?: string
           lap_length?: number | null
+          lap_source?: string | null
           mark?: string | null
           provenance_state?: string
           quantity?: number | null
