@@ -101,13 +101,18 @@ function getExcerptTokens(value: string | null | undefined): string[] {
   )).slice(0, 8);
 }
 
+function isPageLikeAnchor(value: string | null | undefined): boolean {
+  const s = String(value || "").trim();
+  return !s || /^(?:p|page)?\s*\d+$/i.test(s);
+}
+
 type AnchorKind = "trusted" | "detail" | "section" | "callout" | "grid" | "element" | "schedule" | "excerpt" | "ocr";
 function buildAnchorCandidates(sel: WorkflowQaIssue | undefined | null): Array<{ value: string; kind: AnchorKind; score: number }> {
   const loc = sel?.location || {};
   const candidates: Array<{ value: string; kind: AnchorKind; score: number }> = [];
   const push = (value: string | null | undefined, kind: AnchorKind, score: number) => {
     const s = String(value || "").trim();
-    if (!s || /^page\s*\d+$/i.test(s)) return;
+    if (isPageLikeAnchor(s)) return;
     candidates.push({ value: s, kind, score });
   };
   // 1. TRUSTED anchor emitted by the estimator pipeline. This is the token

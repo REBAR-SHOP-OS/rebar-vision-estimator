@@ -121,22 +121,19 @@ export function buildLocationLabel(loc: WorkflowQaIssue["location"], fallbackShe
   const sheet = (loc?.source_sheet && !isPageTag(loc.source_sheet)) ? loc.source_sheet
               : (fallbackSheet && !isPageTag(fallbackSheet)) ? fallbackSheet
               : null;
-  // Pick the most specific *object* anchor (detail > section > callout > grid > schedule).
+  // Pick the most specific *object* anchor. Page tokens never qualify here.
   const callout = loc?.callout_tag && !isPageTag(loc.callout_tag) ? loc.callout_tag : null;
   const elementId = loc?.element_id && !isPageTag(loc.element_id) ? loc.element_id : null;
   const detail = loc?.detail_reference && !isPageTag(loc.detail_reference) ? loc.detail_reference : null;
   const section = loc?.section_reference && !isPageTag(loc.section_reference) ? loc.section_reference : null;
   const grid = loc?.grid_reference && !isPageTag(loc.grid_reference) ? loc.grid_reference : null;
   const schedule = loc?.schedule_row_identity && !isPageTag(loc.schedule_row_identity) ? loc.schedule_row_identity : null;
-  const elementReference = loc?.element_reference && !isPageTag(loc.element_reference) ? loc.element_reference : null;
-  const zoneReference = loc?.zone_reference && !isPageTag(loc.zone_reference) ? loc.zone_reference : null;
-  // Element ID (HKP1, F12, W3) wins over generic detail/section refs.
-  const obj = elementId
-    || detail
+  const obj = detail
     || section
     || callout
     || grid
     || schedule
+    || elementId
     || null;
 
   const parts: string[] = [];
@@ -156,8 +153,6 @@ export function buildLocationLabel(loc: WorkflowQaIssue["location"], fallbackShe
     push(page);
     push(obj);
   }
-  if (elementReference) push(elementReference);
-  else if (zoneReference) push(zoneReference);
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
@@ -180,6 +175,42 @@ function normalizeDetailReference(value: string | null | undefined): string | nu
   if (!s) return null;
   const td = s.match(/^(?:T\.?\s*D\.?|TD)[\s#:.-]*([A-Z0-9][A-Z0-9./-]*)$/i);
   return td ? `T.D.${td[1]}` : s;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function cleanIssueText(value: string | null | undefined, label: string | null): string | null {
+  let s = cleanPhrase(value);
+  if (!s) return null;
+  if (label) {
+    s = s.replace(new RegExp(`^${escapeRegex(label)}\\s*[:\\-–—·|]*\\s*`, "i"), "");
+  }
+  s = s
+    .replace(/\b(?:sheet|callout|anchor|element)\s+(?:p|page)\s*\d+\b/gi, "")
+    .replace(/\bpage\s*(?:p|page)?\s*\d+\b/gi, "")
+    .replace(/(^|[\s:;,\-–—·|])(?:p|page)\s*\d+\b(?=$|[\s:;,\-–—·|])/gi, "$1")
+    .replace(/(?:\s*[:\-–—·|]\s*){2,}/g, " - ")
+    .replace(/^\s*[:\-–—·|]+\s*|\s*[:\-–—·|]+\s*$/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return s || null;
+}
+
+function applyLocationText(issue: WorkflowQaIssue, loc: WorkflowQaIssue["location"], fallbackSheet?: string | null) {
+  const label = buildLocationLabel(loc, fallbackSheet);
+  const originalTitle = issue.title ?? issue.issue_type ?? "review item";
+  const originalDescription = issue.description ?? null;
+  const cleanedTitle = cleanIssueText(originalTitle, label);
+  const cleanedDescription = cleanIssueText(originalDescription, label);
+  const titleBody = cleanedTitle || issue.issue_type || "review item";
+
+  issue.location = loc;
+  issue.location_label = label;
+  issue.raw_description = originalDescription;
+  issue.description = buildQuestionText(label, loc, cleanedDescription, titleBody);
+  issue.title = label ? `${label}: ${titleBody}` : titleBody;
 }
 
 function inferObjectAnchor(...vals: Array<string | null | undefined>): {
@@ -703,13 +734,7 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
       if (!iss.source_file_id && item?.source_file_id) iss.source_file_id = item.source_file_id;
       // Build structured location & visible label
       const loc = extractLocationFromRef(ref, aj, { sheet_id: iss.sheet_id });
-      iss.location = loc;
-      iss.location_label = buildLocationLabel(loc, iss.sheet_id);
-      iss.raw_description = iss.description ?? null;
-      iss.description = buildQuestionText(iss.location_label, loc, iss.description, iss.title);
-      if (iss.location_label && !String(iss.title || "").startsWith(iss.location_label)) {
-        iss.title = `${iss.location_label}: ${iss.title || iss.issue_type || "review item"}`;
-      }
+      applyLocationText(iss, loc, iss.sheet_id);
     }
   }
 
@@ -718,25 +743,14 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
     if (iss.location_label || iss.raw_description !== undefined) continue;
     const ref = Array.isArray(iss.source_refs) ? iss.source_refs[0] : null;
     const loc = extractLocationFromRef(ref, {}, { sheet_id: iss.sheet_id });
-    iss.location = loc;
-    iss.location_label = buildLocationLabel(loc, iss.sheet_id);
-    iss.raw_description = iss.description ?? null;
-    iss.description = buildQuestionText(iss.location_label, loc, iss.description, iss.title);
-    if (iss.location_label && !String(iss.title || "").startsWith(iss.location_label)) {
-      iss.title = `${iss.location_label}: ${iss.title || iss.issue_type || "review item"}`;
-    }
+    applyLocationText(iss, loc, iss.sheet_id);
   }
 
   // Canonical issues: enrich location from takeoff_items, then prefix
   await enrichCanonicalIssueLocations(canonicalIssues);
   for (const iss of canonicalIssues) {
-    iss.location_label = buildLocationLabel(iss.location, null)
-      || (iss.sheet_id ? `Item ${String(iss.sheet_id).slice(0, 8)}` : null);
-    iss.raw_description = iss.description ?? null;
-    iss.description = buildQuestionText(iss.location_label, iss.location, iss.description, iss.title);
-    if (iss.location_label && !String(iss.title || "").startsWith(iss.location_label)) {
-      iss.title = `${iss.location_label}: ${iss.title || iss.issue_type || "review item"}`;
-    }
+    applyLocationText(iss, iss.location, null);
+    if (!iss.location_label && iss.sheet_id) iss.location_label = `Item ${String(iss.sheet_id).slice(0, 8)}`;
   }
 
   return [...legacyIssues, ...canonicalIssues];
