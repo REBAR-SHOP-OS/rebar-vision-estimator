@@ -680,28 +680,28 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                         draggable={false}
                       />
                     )}
-                    {viewMode !== "side" && renderStatus === "ready" && renderedPage === pdfPage && bbox && imgW && imgH && pageBox && (
-                      <>
-                        <div
-                          className="absolute inset-0 pointer-events-none"
-                        >
-                          <BBoxPointer
-                            bbox={bbox}
-                            imgW={imgW}
-                            imgH={imgH}
-                            zoom={zoom}
-                            pageBox={pageBox}
-                            approximate={bboxIsApprox}
-                            title={sel?.title || "Modification"}
-                            description={[sel?.location_label, sel?.description || "Is this element correct as detected?"].filter(Boolean).join(" — ")}
-                            onFix={jumpToTakeoff}
-                            onImpact={() => setTab("impact")}
-                          />
-                        </div>
-                      </>
-                    )}
                   </div>
                 )}
+                {/* Dedicated overlay layer — stays mounted independent of the
+                    PDF raster lifecycle. Only its positioning/graphics update
+                    when bbox / pageBox / zoom change. Never tears down the
+                    image below. */}
+                <div className="absolute inset-0 pointer-events-none z-20" data-qa-overlay-layer="true">
+                  {viewMode !== "side" && bbox && imgW && imgH && pageBox && (
+                    <BBoxPointer
+                      bbox={bbox}
+                      imgW={imgW}
+                      imgH={imgH}
+                      zoom={zoom}
+                      pageBox={pageBox}
+                      approximate={bboxIsApprox}
+                      title={sel?.title || "Modification"}
+                      description={[sel?.location_label, sel?.description || "Is this element correct as detected?"].filter(Boolean).join(" — ")}
+                      onFix={jumpToTakeoff}
+                      onImpact={() => setTab("impact")}
+                    />
+                  )}
+                </div>
                 {/* DEBUG OVERLAY */}
                 {debug && (
                   <div className="absolute top-14 right-4 z-30 w-[300px] bg-card/95 border border-primary/60 shadow-2xl text-[10px] font-mono p-2 space-y-0.5 pointer-events-auto">
