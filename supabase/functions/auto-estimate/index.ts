@@ -24,7 +24,9 @@ const REBAR_DIA_MM: Record<string, number> = {
 };
 const REBAR_MASS_KG_PER_M: Record<string, number> = {
   "10M": 0.785, "15M": 1.570, "20M": 2.355, "25M": 3.925, "30M": 5.495, "35M": 7.850,
+  "45M": 11.775, "55M": 19.625,
   "#3": 0.561, "#4": 0.994, "#5": 1.552, "#6": 2.235, "#7": 3.042, "#8": 3.973,
+  "#9": 5.060, "#10": 6.404, "#11": 7.907, "#14": 11.384, "#18": 20.238,
 };
 const WWM_MASS_KG_PER_M2: Record<string, number> = {
   "6X6-W1.4/W1.4": 0.93, "6X6-W2.1/W2.1": 1.37, "6X6-W2.9/W2.9": 1.90,
@@ -32,7 +34,7 @@ const WWM_MASS_KG_PER_M2: Record<string, number> = {
 };
 const sizeKey = (s: string) => {
   const k = String(s || "").toUpperCase().trim();
-  const m = k.match(/^(10M|15M|20M|25M|30M|35M|#[3-8])/);
+  const m = k.match(/^(10M|15M|20M|25M|30M|35M|45M|55M|#1[0148]|#[3-9])/);
   return m ? m[1] : k;
 };
 const massFor = (size: string, type: string): number => {
@@ -40,6 +42,55 @@ const massFor = (size: string, type: string): number => {
   if (type === "wwm") return WWM_MASS_KG_PER_M2[k] || 0;
   return REBAR_MASS_KG_PER_M[sizeKey(k)] || 0;
 };
+
+// Parse WWM coverage area (m²) from a description like
+// "6X6-W2.9/W2.9 - 250 m2", "WWM 4X4 ... 1,200 sqft", "MESH 85 SF".
+// Returns 0 when nothing usable is present so callers can flag UNRESOLVED.
+function parseWwmAreaM2(text: string): number {
+  const t = String(text || "").toUpperCase().replace(/,/g, "");
+  const m2 = t.match(/(\d+(?:\.\d+)?)\s*(?:M\^?2|M²|SQ\s*M|SQM)/);
+  if (m2) return Number(m2[1]);
+  const sf = t.match(/(\d+(?:\.\d+)?)\s*(?:SF|SQ\s*FT|SQFT|FT\^?2|FT²)/);
+  if (sf) return Number(sf[1]) * 0.092903;
+  return 0;
+}
+
+// RSIC stock length (m). Bars longer than this need splices.
+// Default ≈60 ft = 18.288 m. Configurable via standards_profile.naming_rules.stock_length_m.
+function pickStockLengthM(naming: any): number {
+  const v = Number(naming?.stock_length_m);
+  return v && v > 0 ? v : 18.288;
+}
+
+// Add lap splices when a single bar exceeds stock length.
+// barLenM = developed bar length per piece; lapMm = lap-splice length per joint.
+function applySpliceWaste(barLenM: number, lapMm: number, stockM: number): { lenM: number; splices: number } {
+  if (!(barLenM > 0) || !(stockM > 0) || barLenM <= stockM) return { lenM: barLenM, splices: 0 };
+  const splices = Math.ceil(barLenM / stockM) - 1;
+  return { lenM: +(barLenM + splices * (Math.max(0, lapMm) / 1000)).toFixed(3), splices };
+}
+
+// RSIC standard hook addition (mm) by bar size.
+// 90° hook ≈ 12·db, 180° hook ≈ 6·db + 4·db tail. db taken from sizeKey.
+function dbMmFor(sizeKey0: string): number {
+  const k = sizeKey0.toUpperCase();
+  const map: Record<string, number> = {
+    "10M":11.3,"15M":16,"20M":19.5,"25M":25.2,"30M":29.9,"35M":35.7,"45M":43.7,"55M":56.4,
+    "#3":9.5,"#4":12.7,"#5":15.9,"#6":19.1,"#7":22.2,"#8":25.4,"#9":28.7,"#10":32.3,"#11":35.8,"#14":43,"#18":57.3,
+  };
+  return map[k] || 0;
+}
+function hookAddMm(sizeKey0: string, descUpper: string): number {
+  const db = dbMmFor(sizeKey0);
+  if (!db) return 0;
+  const has180 = /\b180(?:\s*°|DEG)?\b|\bSTD\s*HK\b/.test(descUpper);
+  const has135 = /\b135(?:\s*°|DEG)?\b/.test(descUpper);
+  const has90 = /\b90(?:\s*°|DEG)?\b|\bHOOK\b|\bHK\b/.test(descUpper);
+  if (has180) return Math.round(10 * db);
+  if (has135) return Math.round(8 * db);
+  if (has90) return Math.round(12 * db);
+  return 0;
+}
 // NOTE: hardcoded lap fallback (e.g. 40·db) removed by policy.
 // Lap lengths must come from Manual-Standard-Practice-2018 (via Brain) or
 // from an explicit LAP table in the structural OCR. If neither source
@@ -461,6 +512,29 @@ function resolveLine(
   const aiLen = Number(it.total_length) || 0;
   const mass = massFor(size, type);
 
+  // WWM/MESH: weight = mass(kg/m²) × area(m²). NEVER multiply by linear m.
+  if (type === "wwm") {
+    const massM2 = WWM_MASS_KG_PER_M2[size] || 0;
+    const area = parseWwmAreaM2(`${it.description || ""}`);
+    if (massM2 > 0 && area > 0) {
+      return {
+        qty: aiQty || 1,
+        totalLengthM: 0,
+        totalWeightKg: +(area * massM2).toFixed(2),
+        status: "resolved",
+        missing: [],
+        derivation: `wwm: area=${area.toFixed(2)}m² × ${massM2}kg/m²`,
+      };
+    }
+    return {
+      qty: aiQty || 0,
+      totalLengthM: 0,
+      totalWeightKg: 0,
+      status: "unresolved",
+      missing: massM2 > 0 ? ["wwm coverage area (m² or sqft)"] : [`wwm spec ${size} not in mass table`],
+    };
+  }
+
   // CASE A — AI already produced a qty AND length backed by an explicit bar list.
   // Trust the AI value but require provenance: description must reference a mark
   // present in the graph OR contain explicit dimension tokens.
@@ -472,7 +546,7 @@ function resolveLine(
       return {
         qty: aiQty,
         totalLengthM: aiLen,
-        totalWeightKg: Number(it.total_weight) > 0 ? Number(it.total_weight) : +(aiLen * mass).toFixed(2),
+        totalWeightKg: mass > 0 ? +(aiLen * mass).toFixed(2) : 0,
         status: "resolved",
         missing: [],
         derivation: known ? `mark ${markMatch![1]} from schedule` : "explicit dimensions in callout",
@@ -481,7 +555,7 @@ function resolveLine(
     // AI guessed without provenance — downgrade to partial
     return {
       qty: aiQty, totalLengthM: aiLen,
-      totalWeightKg: Number(it.total_weight) > 0 ? Number(it.total_weight) : +(aiLen * mass).toFixed(2),
+      totalWeightKg: mass > 0 ? +(aiLen * mass).toFixed(2) : 0,
       status: "partial",
       missing: ["provenance: no bar mark or explicit dimension found in description"],
     };
@@ -500,13 +574,19 @@ function resolveLine(
     if (wall.heightMm && lap) barLenMm = wall.heightMm + lap;
     else if (!wall.heightMm) missing.push("wall height (mm)");
     if (barLenMm > 0) {
-      const totalLengthM = +(qty * barLenMm / 1000).toFixed(2);
+      // RSIC hook addition (e.g. 90° standard hook ≈ 12·db) when callout names a hook.
+      const hk = hookAddMm(sizeKey(size), desc);
+      const pieceM = (barLenMm + hk) / 1000;
+      // Stock-length splice augmentation: bars > stock get ceil(L/stock)-1 extra laps each.
+      const stockM = 18.288;
+      const spliced = applySpliceWaste(pieceM, lap, stockM);
+      const totalLengthM = +(qty * spliced.lenM).toFixed(2);
       return {
         qty, totalLengthM,
         totalWeightKg: +(totalLengthM * mass).toFixed(2),
         status: missing.length ? "partial" : "resolved",
         missing,
-        derivation: `qty=ceil(${wall.lengthMm}/${spacing})+1=${qty}; bar=${(wall.heightMm || 0)}+${lap}mm`,
+        derivation: `qty=ceil(${wall.lengthMm}/${spacing})+1=${qty}; bar=${(wall.heightMm || 0)}+${lap}mm${hk ? `+${hk}mm hook` : ""}${spliced.splices ? `; +${spliced.splices} splice(s)` : ""}`,
       };
     }
     return { qty, status: "partial", missing: ["bar developed length"], derivation: `qty=${qty} from wall`, };
@@ -1832,6 +1912,50 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       }
     }
 
+    // ───────────────────────────────────────────────────────────────
+    // CROSS-ENGINE RECONCILIATION
+    // Compare estimator Σ total_weight vs auto-bar-schedule Σ (qty × cut_length × mass).
+    // Thresholds match mem://logic/reconciliation-thresholds:
+    //   <5%  → ok    (no issue)
+    //   5–15% → warning
+    //   >15% → error (blocks approval)
+    // ───────────────────────────────────────────────────────────────
+    let crossEngineDelta = 0;
+    try {
+      const { data: barRows } = await supabase
+        .from("bar_items")
+        .select("size, cut_length, quantity")
+        .eq("segment_id", segment_id);
+      if (Array.isArray(barRows) && barRows.length > 0) {
+        const barWeight = barRows.reduce((s: number, b: any) => {
+          const m = massFor(String(b.size || ""), "rebar");
+          const len = (Number(b.cut_length) || 0) / 1000; // mm → m
+          const q = Number(b.quantity) || 0;
+          return s + m * len * q;
+        }, 0);
+        const estWeight = dedupedRows.reduce((s: number, r: any) => s + (Number(r.total_weight) || 0), 0);
+        if (barWeight > 0 && estWeight > 0) {
+          crossEngineDelta = Math.abs(estWeight - barWeight) / Math.max(estWeight, barWeight);
+          if (crossEngineDelta >= 0.05) {
+            const sev = crossEngineDelta > 0.15 ? "error" : "warning";
+            await supabase.from("validation_issues").insert({
+              user_id: user.id,
+              project_id,
+              segment_id,
+              issue_type: "cross_engine_drift",
+              severity: sev,
+              title: `Estimate vs bar-schedule weight differs by ${(crossEngineDelta * 100).toFixed(1)}%`,
+              description: `Estimator total = ${estWeight.toFixed(0)}kg; bar-schedule total = ${barWeight.toFixed(0)}kg. ${sev === "error" ? "Blocks approval" : "Review"} per RSIC reconciliation thresholds.`,
+              status: "open",
+              source_refs: [{ estimator_kg: estWeight, bar_schedule_kg: barWeight, delta_pct: crossEngineDelta }],
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[auto-estimate] cross-engine reconciliation failed:", (e as Error).message);
+    }
+
     const { data: inserted, error: insertErr } = await supabase
       .from("estimate_items")
       .insert(dedupedRows)
@@ -1864,6 +1988,21 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       }
       const { error: oiErr } = await supabase.from("validation_issues").insert(outlierIssues);
       if (oiErr) console.warn("[auto-estimate] outlier issue insert failed:", oiErr.message);
+    }
+
+    // Segment integrity score (Patch G):
+    //   harmonic_mean(item_confidence) × (1 − %outliers) × (1 − cross_engine_delta)
+    // Provides a single deterministic 0..1 score the regression harness targets.
+    try {
+      const confs = dedupedRows.map((r: any) => Math.max(0.01, Number(r.confidence) || 0.01));
+      const harmonic = confs.length
+        ? confs.length / confs.reduce((s, c) => s + 1 / c, 0)
+        : 0;
+      const outlierPct = dedupedRows.length ? outlierFlags.size / dedupedRows.length : 0;
+      const integrity = +(harmonic * (1 - outlierPct) * (1 - Math.min(1, crossEngineDelta))).toFixed(3);
+      await supabase.from("segments").update({ confidence: integrity }).eq("id", segment_id);
+    } catch (e) {
+      console.warn("[auto-estimate] segment integrity update failed:", (e as Error).message);
     }
 
     // Open a validation_issue for every unresolved row so the QA queue surfaces them.
