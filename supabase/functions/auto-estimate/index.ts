@@ -963,14 +963,22 @@ function inferQaAnchorMeta(...vals: Array<string | null | undefined>) {
   };
 }
 
-function hasUsableProjectDimensionKnowledge(entries: Array<{ title?: string; content?: string; file_name?: string }>, projectId: string) {
+function hasUsableProjectDimensionKnowledge(
+  entries: Array<{ title?: string; content?: string; file_name?: string }>,
+  projectId: string,
+  projectName: string,
+) {
+  const normalizedProjectName = projectName.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   return entries.some((entry) => {
     const title = String(entry.title || "");
     const fileName = String(entry.file_name || "");
     const content = String(entry.content || "");
     const contentHead = content.slice(0, 4000);
     const matchesProjectScopedJson = fileName === "dimensions.json" && content.includes(projectId);
+    const matchesProjectName = normalizedProjectName.length >= 4
+      && `${title} ${contentHead}`.toLowerCase().includes(normalizedProjectName);
     const matchesLockedRule = /locked dimensions/i.test(title)
+      && matchesProjectName
       && /footing schedule|building envelope|foundation wall|piers?:|slab on grade/i.test(contentHead);
     return matchesProjectScopedJson || matchesLockedRule;
   });
@@ -1046,6 +1054,11 @@ serve(async (req) => {
       }
 
       if (blockers.length > 0) {
+        const { data: gateProject } = await supabase
+          .from("projects")
+          .select("name")
+          .eq("id", project_id)
+          .maybeSingle();
         const { data: gateKnowledge } = await supabase
           .from("agent_knowledge")
           .select("title, content, file_name")
@@ -1054,6 +1067,7 @@ serve(async (req) => {
         const hasProjectKnowledge = hasUsableProjectDimensionKnowledge(
           (gateKnowledge || []) as Array<{ title?: string; content?: string; file_name?: string }>,
           project_id,
+          String(gateProject?.name || ""),
         );
         if (hasProjectKnowledge) {
           blockers = [];
