@@ -1044,6 +1044,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         detail_reference: qaAnchor.detail_reference,
         section_reference: qaAnchor.section_reference,
         callout_tag: qaAnchor.callout_tag,
+        element_id: qaAnchor.element_id,
         grid_reference: qaAnchor.grid_reference,
         zone_reference: qaAnchor.zone_reference,
         element_reference: qaAnchor.element_reference,
