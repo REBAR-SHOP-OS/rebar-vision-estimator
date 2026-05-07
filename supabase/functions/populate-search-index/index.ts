@@ -6,7 +6,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const EXTRACTION_VERSION = "2026.03.05";
+const EXTRACTION_VERSION = "2026.05.07";
 
 const COMMON_WORDS = new Set([
   "OF","IN","AT","TO","AS","IS","IT","OR","ON","IF","NO","DO","UP","BY","AN","BE","SO","WE","HE","ME",
@@ -32,6 +32,78 @@ function extractBarMarks(text: string): string[] {
     }
   }
   return Array.from(marks);
+}
+
+/** Structured bar callouts: "5-15M @ 300", "4-#5 @ 12\"", "15M @ 300 O.C." */
+function extractBarCallouts(text: string): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+  const push = (o: Record<string, unknown>) => {
+    const k = JSON.stringify(o);
+    if (!seen.has(k)) { seen.add(k); out.push(o); }
+  };
+  // Metric: qty - sizeM @ spacing
+  const reMetric = /(\d{1,3})\s*[-–]\s*(\d{2})M\s*@\s*(\d{2,4})\s*(?:mm|MM|o\.?c\.?)?/g;
+  let m: RegExpExecArray | null;
+  while ((m = reMetric.exec(text)) !== null) {
+    push({ qty: +m[1], size: `${m[2]}M`, spacing: +m[3], spacing_unit: "mm", raw: m[0] });
+  }
+  // Metric no qty: sizeM @ spacing
+  const reMetricNoQty = /\b(\d{2})M\s*@\s*(\d{2,4})\s*(?:mm|MM|o\.?c\.?)?/g;
+  while ((m = reMetricNoQty.exec(text)) !== null) {
+    push({ size: `${m[1]}M`, spacing: +m[2], spacing_unit: "mm", raw: m[0] });
+  }
+  // Imperial: qty - #N @ spacing
+  const reImp = /(\d{1,3})\s*[-–]\s*#(\d{1,2})\s*@\s*(\d+(?:\.\d+)?)\s*(?:"|in|''|o\.?c\.?)?/gi;
+  while ((m = reImp.exec(text)) !== null) {
+    push({ qty: +m[1], size: `#${m[2]}`, spacing: +m[3], spacing_unit: "in", raw: m[0] });
+  }
+  return out;
+}
+
+/** Element dimensions in mm. Filters bar sizes (<100mm) and noise (>200,000mm). */
+function extractDimensions(text: string): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+  const push = (v: number, raw: string) => {
+    if (v < 100 || v > 200_000) return;
+    const k = `${v}|${raw}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({ value_mm: Math.round(v), raw });
+  };
+  let m: RegExpExecArray | null;
+  const reMm = /\b(\d{3,5})\s*(?:mm|MM)\b/g;
+  while ((m = reMm.exec(text)) !== null) push(+m[1], m[0]);
+  const reM = /\b(\d{1,3}(?:\.\d{1,3})?)\s*m\b(?!m)/g;
+  while ((m = reM.exec(text)) !== null) push(parseFloat(m[1]) * 1000, m[0]);
+  const reFt = /\b(\d{1,3})['′]\s*[-–]?\s*(\d{1,2})?\s*["″]?/g;
+  while ((m = reFt.exec(text)) !== null) {
+    const ft = +m[1];
+    const inch = m[2] ? +m[2] : 0;
+    push((ft * 12 + inch) * 25.4, m[0]);
+  }
+  return out.slice(0, 500);
+}
+
+/** Bar schedule rows. Triggered by header containing 3+ schedule keywords. */
+function extractBarSchedule(text: string): Array<Record<string, unknown>> {
+  const lines = text.split(/\r?\n/);
+  const out: Array<Record<string, unknown>> = [];
+  const headerKeys = ["MARK", "SIZE", "LENGTH", "QTY", "QUANTITY", "SHAPE", "BAR", "WEIGHT", "SPACING"];
+  const rowRe = /^([A-Z]{1,2}\d{1,3})\s+(\d{1,2}M|#\d{1,2})\s+(\d+(?:\.\d+)?)\s+(\d{1,4})/;
+  for (let i = 0; i < lines.length; i++) {
+    const upper = lines[i].toUpperCase();
+    const hits = headerKeys.filter((k) => upper.includes(k)).length;
+    if (hits < 3) continue;
+    const end = Math.min(i + 80, lines.length);
+    for (let j = i + 1; j < end; j++) {
+      const r = lines[j].match(rowRe);
+      if (r) out.push({ mark: r[1], size: r[2], length: parseFloat(r[3]), qty: +r[4] });
+    }
+    if (out.length > 0) break;
+  }
+  return out;
 }
 
 function computeQualityFlags(page: {
@@ -426,6 +498,9 @@ Deno.serve(async (req) => {
         p_raw_text: rawText,
         p_extracted_entities: {
           bar_marks: barMarks,
+          bar_callouts: extractBarCallouts(rawText),
+          dimensions: extractDimensions(rawText),
+          bar_schedule_rows: extractBarSchedule(rawText),
           tables: page.tables || [],
           title_block: tb,
           ocr_metadata: page.ocr_metadata || null,
