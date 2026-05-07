@@ -1170,6 +1170,10 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
           excerpt,
           bar_size: (x.r as any).bar_size || null,
           description: (x.r as any).description || null,
+          anchor_text: aj.anchor_text || null,
+          anchor_kind: aj.anchor_kind || null,
+          anchor_confidence: typeof aj.anchor_confidence === "number" ? aj.anchor_confidence : null,
+          anchor_mode: aj.anchor_mode || (aj.page_number ? "approximate" : "unavailable"),
         }],
       });
       });
