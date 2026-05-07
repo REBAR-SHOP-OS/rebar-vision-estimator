@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inferEngineerAnswerFields, summarizeEngineerAnswer } from "@/features/workflow-v2/stages/qa-answer-fields";
+import { buildEngineerQuestion, inferEngineerAnswerFields, summarizeEngineerAnswer } from "@/features/workflow-v2/stages/qa-answer-fields";
 
 describe("qa answer fields", () => {
   it("asks for length and bar callout from unresolved geometry text", () => {
@@ -20,5 +20,14 @@ describe("qa answer fields", () => {
   it("summarizes non-empty values for storage", () => {
     expect(summarizeEngineerAnswer({ length: "3000mm", notes: "", bar_callout: "15M @ 406mm O.C." }))
       .toBe("Length: 3000mm; Bar callout: 15M @ 406mm O.C.");
+  });
+
+  it("builds an on-point free response question", () => {
+    expect(buildEngineerQuestion({
+      locationLabel: "P15-T.D.69",
+      objectIdentity: "leveling pad",
+      missingRefs: ["element_dimensions"],
+      sourceExcerpt: "LEVELING PAD INTO FOUNDATION WALL",
+    })).toBe('On P15-T.D.69, find the leveling pad. What length should be used for this item? Use the callout/excerpt "LEVELING PAD INTO FOUNDATION WALL".');
   });
 });

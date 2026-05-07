@@ -13,7 +13,7 @@ import {
   normalizeBboxToImagePixels,
   type BBox,
 } from "./qa-overlay-geometry";
-import { inferEngineerAnswerFields, summarizeEngineerAnswer } from "./qa-answer-fields";
+import { buildEngineerQuestion, inferEngineerAnswerFields, summarizeEngineerAnswer } from "./qa-answer-fields";
 
 type TabKey = "change" | "impact" | "evidence" | "action";
 
@@ -183,6 +183,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [changedOnly, setChangedOnly] = useState(true);
   const [debug, setDebug] = useState(false);
   const [answerValues, setAnswerValues] = useState<Record<string, string>>({});
+  const [answerText, setAnswerText] = useState("");
   const [answerSaving, setAnswerSaving] = useState(false);
   const [answerError, setAnswerError] = useState<string | null>(null);
   const [redrawCount, setRedrawCount] = useState(0);
@@ -195,6 +196,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [pageBox, setPageBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+  const answerBoxRef = useRef<HTMLTextAreaElement | null>(null);
 
   const bump = (reason: string) => {
     setRedrawCount((c) => c + 1);
@@ -248,6 +250,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     const refs = Array.isArray(sel?.source_refs) ? sel?.source_refs : [];
     const existing = refs.find((ref: any) => ref?.engineer_answer)?.engineer_answer;
     setAnswerValues((existing?.values && typeof existing.values === "object") ? existing.values : {});
+    setAnswerText(String(existing?.answer_text || sel?.resolution_note || ""));
   }, [sel?.id, sel?.source_refs]);
 
   useEffect(() => {
@@ -374,13 +377,27 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     sel?.location?.detail_reference,
     sel?.location?.grid_reference,
   ].find(Boolean);
+  const engineerQuestion = useMemo(() => buildEngineerQuestion({
+    locationLabel: sel?.location_label,
+    pageNumber: sel?.locator?.page_number ?? sel?.location?.page_number ?? null,
+    objectIdentity: objectIdentity ? String(objectIdentity) : null,
+    description: sel?.description,
+    title: sel?.title,
+    sourceExcerpt: sel?.location?.source_excerpt,
+    missingRefs,
+  }), [missingRefs, objectIdentity, sel?.description, sel?.location?.page_number, sel?.location?.source_excerpt, sel?.location_label, sel?.locator?.page_number, sel?.title]);
+
+  const openAnswerTab = () => {
+    setTab("action");
+    window.setTimeout(() => answerBoxRef.current?.focus(), 0);
+  };
 
   const updateSelectedIssue = (patch: Partial<WorkflowQaIssue>) => {
     if (!sel) return;
     setIssues((current) => current.map((issue) => issue.id === sel.id ? { ...issue, ...patch } : issue));
   };
 
-  const persistIssueStatus = async (status: string, note: string, values: Record<string, string> = answerValues) => {
+  const persistIssueStatus = async (status: string, note: string, values: Record<string, string> = answerValues, text = answerText) => {
     if (!sel) return;
     setAnswerSaving(true);
     setAnswerError(null);
@@ -390,6 +407,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     nextRefs.push({
       engineer_answer: {
         values,
+        answer_text: text,
         note,
         status,
         answered_at: now,
@@ -415,7 +433,9 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   };
 
   const saveEngineerAnswer = async (status = "answered") => {
-    await persistIssueStatus(status, summarizeEngineerAnswer(answerValues));
+    const structured = summarizeEngineerAnswer(answerValues);
+    const note = answerText.trim() || structured;
+    await persistIssueStatus(status, note, answerValues, answerText.trim());
   };
 
   // Bbox-driven crop
@@ -778,7 +798,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                             pageBox={pageBox}
                             approximate={bboxIsApprox}
                             title={sel?.title || "Modification"}
-                            onFix={() => setTab("action")}
+                            onFix={openAnswerTab}
                           />
                         )}
                       </>
@@ -859,8 +879,8 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                       <div className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground">Selected target</div>
                       <div className="text-[11px] font-bold text-foreground truncate max-w-[180px]">{sel.location_label || sel.title}</div>
                     </div>
-                    <button onClick={() => setTab("action")} className="px-3 py-1.5 bg-primary text-primary-foreground text-[10px] font-bold uppercase tracking-[0.1em] hover:opacity-90">Answer</button>
-                    <button onClick={() => setTab("impact")} className="px-3 py-1.5 bg-card border border-border text-foreground text-[10px] font-bold uppercase tracking-[0.1em] hover:bg-accent/40">Impact</button>
+                    <button onClick={openAnswerTab} className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] hover:opacity-90 ${tab === "action" ? "bg-primary text-primary-foreground" : "bg-card border border-border text-foreground"}`}>Answer</button>
+                    <button onClick={() => setTab("impact")} className={`px-3 py-1.5 border border-border text-[10px] font-bold uppercase tracking-[0.1em] hover:bg-accent/40 ${tab === "impact" ? "bg-primary text-primary-foreground border-primary" : "bg-card text-foreground"}`}>Impact</button>
                   </div>
                 )}
               </>
@@ -1005,14 +1025,10 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
                 {tab === "action" && (
                   <section className="space-y-3">
-                    <div className="bg-background/60 p-3 border border-border">
-                      <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.12em] mb-1.5 flex items-center gap-1.5"><Wand2 className="w-3 h-3" /> Recommended Fix</div>
-                      <div className="text-[11px] italic text-muted-foreground">Review element source and apply standard correction per project spec, then re-run takeoff for this row.</div>
-                    </div>
                     <div className="bg-background/60 p-3 border border-primary/40 space-y-3">
                       <div>
-                        <div className="text-[10px] font-bold text-primary uppercase tracking-[0.12em] mb-1.5">Engineer Answer</div>
-                        <div className="text-[11px] text-muted-foreground leading-relaxed">{sel.description || "Enter the missing drawing values for this issue."}</div>
+                        <div className="text-[10px] font-bold text-primary uppercase tracking-[0.12em] mb-1.5">Engineer Question</div>
+                        <div className="text-[13px] text-foreground leading-relaxed font-medium">{engineerQuestion}</div>
                       </div>
                       <div className="grid grid-cols-2 gap-2 text-[10px]">
                         <div className="border border-border bg-card/60 p-2">
@@ -1034,29 +1050,43 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                           ))}
                         </div>
                       )}
-                      <div className="space-y-2">
-                        {answerFields.map((field) => (
-                          <label key={field.key} className="block">
-                            <span className="block text-[9px] font-bold uppercase tracking-[0.12em] text-muted-foreground mb-1">{field.label}</span>
-                            {field.key === "notes" || field.key === "answer" ? (
-                              <textarea
-                                value={answerValues[field.key] || ""}
-                                onChange={(e) => setAnswerValues((v) => ({ ...v, [field.key]: e.target.value }))}
-                                placeholder={field.placeholder}
-                                rows={field.key === "notes" ? 2 : 3}
-                                className="w-full bg-card border border-border px-2 py-2 text-[12px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary"
-                              />
-                            ) : (
-                              <input
-                                value={answerValues[field.key] || ""}
-                                onChange={(e) => setAnswerValues((v) => ({ ...v, [field.key]: e.target.value }))}
-                                placeholder={field.placeholder}
-                                className="w-full bg-card border border-border px-2 py-2 text-[12px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary"
-                              />
-                            )}
-                          </label>
-                        ))}
-                      </div>
+                      <label className="block">
+                        <span className="block text-[9px] font-bold uppercase tracking-[0.12em] text-muted-foreground mb-1">Engineer Response</span>
+                        <textarea
+                          ref={answerBoxRef}
+                          value={answerText}
+                          onChange={(e) => setAnswerText(e.target.value)}
+                          placeholder="Type the engineer answer here, e.g. wall length 10m, wall height 1200mm, rebar 15M @ 406mm O.C."
+                          rows={5}
+                          className="w-full bg-card border border-border px-2 py-2 text-[12px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary"
+                        />
+                      </label>
+                      <details className="border border-border bg-card/40 p-2">
+                        <summary className="cursor-pointer text-[9px] font-bold uppercase tracking-[0.12em] text-muted-foreground">Optional structured values</summary>
+                        <div className="space-y-2 mt-2">
+                          {answerFields.map((field) => (
+                            <label key={field.key} className="block">
+                              <span className="block text-[9px] font-bold uppercase tracking-[0.12em] text-muted-foreground mb-1">{field.label}</span>
+                              {field.key === "notes" || field.key === "answer" ? (
+                                <textarea
+                                  value={answerValues[field.key] || ""}
+                                  onChange={(e) => setAnswerValues((v) => ({ ...v, [field.key]: e.target.value }))}
+                                  placeholder={field.placeholder}
+                                  rows={field.key === "notes" ? 2 : 3}
+                                  className="w-full bg-card border border-border px-2 py-2 text-[12px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary"
+                                />
+                              ) : (
+                                <input
+                                  value={answerValues[field.key] || ""}
+                                  onChange={(e) => setAnswerValues((v) => ({ ...v, [field.key]: e.target.value }))}
+                                  placeholder={field.placeholder}
+                                  className="w-full bg-card border border-border px-2 py-2 text-[12px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary"
+                                />
+                              )}
+                            </label>
+                          ))}
+                        </div>
+                      </details>
                       {sel.resolution_note && (
                         <div className="text-[10px] text-muted-foreground bg-card/50 border border-border p-2">Saved: {sel.resolution_note}</div>
                       )}
@@ -1066,7 +1096,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                       <div className="grid grid-cols-3 gap-2">
                         <button disabled={answerSaving} onClick={() => saveEngineerAnswer("answered")} className="py-2 bg-primary text-primary-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:opacity-90 disabled:opacity-50">Save Answer</button>
                         <button disabled={answerSaving} onClick={() => saveEngineerAnswer("resolved")} className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40 disabled:opacity-50">Mark Resolved</button>
-                        <button disabled={answerSaving} onClick={() => persistIssueStatus("review", "Engineer marked this issue for review.", answerValues)} className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40 disabled:opacity-50">Needs Review</button>
+                        <button disabled={answerSaving} onClick={() => persistIssueStatus("review", answerText.trim() || "Engineer marked this issue for review.", answerValues, answerText.trim())} className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40 disabled:opacity-50">Needs Review</button>
                       </div>
                     </div>
                   </section>
@@ -1085,14 +1115,14 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                 <RefreshCw className="w-4 h-4" /> Open Takeoff / Re-run
               </button>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => persistIssueStatus("answered", "Engineer accepted this issue unchanged.", answerValues)} disabled={answerSaving} className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40 disabled:opacity-50">
+                <button onClick={() => persistIssueStatus("answered", answerText.trim() || "Engineer accepted this issue unchanged.", answerValues, answerText.trim())} disabled={answerSaving} className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40 disabled:opacity-50">
                   Accept Unchanged
                 </button>
-                <button onClick={() => persistIssueStatus("review", "Engineer marked this issue for review.", answerValues)} disabled={answerSaving} className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40 disabled:opacity-50">
+                <button onClick={() => persistIssueStatus("review", answerText.trim() || "Engineer marked this issue for review.", answerValues, answerText.trim())} disabled={answerSaving} className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40 disabled:opacity-50">
                   Mark for Review
                 </button>
               </div>
-              <button onClick={() => persistIssueStatus("resolved", "Engineer marked this issue as no impact.", answerValues)} disabled={answerSaving} className="w-full py-1.5 text-muted-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:text-foreground disabled:opacity-50">
+              <button onClick={() => persistIssueStatus("resolved", answerText.trim() || "Engineer marked this issue as no impact.", answerValues, answerText.trim())} disabled={answerSaving} className="w-full py-1.5 text-muted-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:text-foreground disabled:opacity-50">
                 Mark No Impact
               </button>
             </div>

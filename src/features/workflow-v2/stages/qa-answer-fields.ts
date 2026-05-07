@@ -4,6 +4,16 @@ export type EngineerAnswerField = {
   placeholder: string;
 };
 
+type SmartQuestionInput = {
+  locationLabel?: string | null;
+  pageNumber?: number | null;
+  objectIdentity?: string | null;
+  description?: string | null;
+  title?: string | null;
+  sourceExcerpt?: string | null;
+  missingRefs?: string[];
+};
+
 const FIELD_DEFS: Record<string, EngineerAnswerField> = {
   length: { key: "length", label: "Length", placeholder: "e.g. 3000mm" },
   width: { key: "width", label: "Width", placeholder: "e.g. 1200mm" },
@@ -39,4 +49,32 @@ export function summarizeEngineerAnswer(values: Record<string, string>): string 
     .filter(([, value]) => value.length > 0)
     .map(([key, value]) => `${FIELD_DEFS[key]?.label || key}: ${value}`);
   return parts.length ? parts.join("; ") : "No engineer answer entered.";
+}
+
+export function buildEngineerQuestion(input: SmartQuestionInput): string {
+  const missingRefs = input.missingRefs || [];
+  const fields = inferEngineerAnswerFields(missingRefs, `${input.title || ""}\n${input.description || ""}`);
+  const needed = fields
+    .filter((field) => field.key !== "notes" && field.key !== "answer")
+    .map((field) => field.label.toLowerCase());
+  const ask = needed.length
+    ? needed.length === 1
+      ? needed[0]
+      : `${needed.slice(0, -1).join(", ")} and ${needed[needed.length - 1]}`
+    : "the exact drawing value";
+  const loc = input.locationLabel || (input.pageNumber ? `P${input.pageNumber}` : "the highlighted drawing area");
+  const object = input.objectIdentity || inferObjectFromText(`${input.title || ""} ${input.description || ""}`) || "highlighted item";
+  const excerpt = String(input.sourceExcerpt || "").trim();
+  const excerptClause = excerpt ? ` Use the callout/excerpt "${excerpt.slice(0, 120)}".` : "";
+  return `On ${loc}, find the ${object}. What ${ask} should be used for this item?${excerptClause}`;
+}
+
+function inferObjectFromText(text: string): string | null {
+  const t = text.toLowerCase();
+  if (/housekeeping\s*pad|leveling\s*pad|equipment\s*pad/.test(t)) return "housekeeping pad";
+  if (/foundation\s*wall|frost\s*wall|stem\s*wall|\bwall\b/.test(t)) return "foundation wall";
+  if (/strip\s*footing|wall\s*footing|footing/.test(t)) return "footing";
+  if (/slab\s*edge|frost\s*slab|slab/.test(t)) return "slab";
+  if (/column|pier|pocket/.test(t)) return "column or pier";
+  return null;
 }
