@@ -22,6 +22,7 @@ type TextLine = { items: PageTextItem[]; y: number; text: string };
 
 const MIN_ANCHOR_CONFIDENCE = 0.75;
 const EMPTY_REFS: string[] = [];
+const CLOSED_QA_STATUSES = new Set(["resolved", "closed"]);
 
 function normalizeText(value: string | null | undefined): string {
   return String(value || "")
@@ -422,6 +423,16 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
   const updateSelectedIssue = (patch: Partial<WorkflowQaIssue>) => {
     if (!sel) return;
+    const nextStatus = String(patch.status || "").toLowerCase();
+    if (CLOSED_QA_STATUSES.has(nextStatus)) {
+      const currentIndex = issues.findIndex((issue) => issue.id === sel.id);
+      const remaining = issues.filter((issue) => issue.id !== sel.id);
+      const nextIssue = remaining[Math.min(Math.max(currentIndex, 0), Math.max(remaining.length - 1, 0))] || null;
+      setIssues(remaining);
+      setSelectedId(nextIssue?.id || null);
+      setTab("change");
+      return;
+    }
     setIssues((current) => current.map((issue) => issue.id === sel.id ? { ...issue, ...patch } : issue));
   };
 
