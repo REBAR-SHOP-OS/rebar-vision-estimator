@@ -83,21 +83,47 @@ function extractBarCallouts(rawText: string): Array<Record<string, unknown>> {
 
 function extractSpecs(rawText: string): Record<string, unknown> {
   const text = preCleanOcr(rawText).toUpperCase();
-  const specs: Record<string, any> = { cover: {}, lap: {}, hook: {}, grade: {}, detected_keywords: [] as string[] };
+  const specs: Record<string, any> = {
+    cover: {}, lap: {}, hook: {}, grade: {},
+    concrete_strength: {} as Record<string, number>,
+    exposure_class: [] as string[],
+    codes: [] as string[],
+    bearing: {} as Record<string, number>,
+    detected_keywords: [] as string[],
+  };
   let m: RegExpExecArray | null;
-  const reCover = /(\d{2,3})\s*MM\s+(BOTTOM|TOP|SIDE|EARTH|SOFFIT|EXPOSED)/g;
+  // Cover — explicit phrasings
+  const reCover = /(\d{2,3})\s*MM\s+(BOTTOM|TOP|SIDE|EARTH|SOFFIT|EXPOSED|CLEAR)/g;
   while ((m = reCover.exec(text)) !== null) {
     const where = m[2]; const v = +m[1];
     if (where === "BOTTOM" || where === "SOFFIT") specs.cover.bottom_mm = v;
     else if (where === "TOP") specs.cover.top_mm = v;
     else if (where === "SIDE" || where === "EXPOSED") specs.cover.side_mm = v;
     else if (where === "EARTH") specs.cover.against_earth_mm = v;
+    else if (where === "CLEAR") specs.cover.clear_mm = v;
     specs.detected_keywords.push(`cover:${where}=${v}`);
+  }
+  // "CLEAR COVER 40MM" / "MIN. COVER = 50 MM" / "MINIMUM CONCRETE COVER 75MM"
+  const reCover2 = /(?:CLEAR|MIN(?:IMUM)?\.?|MINIMUM\s+CONCRETE)\s+COVER[\s:=]+(\d{2,3})\s*MM/g;
+  while ((m = reCover2.exec(text)) !== null) {
+    specs.cover.clear_mm = +m[1];
+    specs.detected_keywords.push(`cover:clear=${m[1]}`);
   }
   const reLap = /(TENSION|COMPRESSION)\s+LAP\s*=?\s*(\d{2,3})\s*DB/g;
   while ((m = reLap.exec(text)) !== null) {
     if (m[1] === "TENSION") specs.lap.tension_db = +m[2]; else specs.lap.compression_db = +m[2];
     specs.detected_keywords.push(`lap:${m[1]}=${m[2]}db`);
+  }
+  // "CLASS A/B SPLICE", "40 BAR DIAMETERS", plain "LAP = 40 DB"
+  const reLapBare = /\bLAP\s*[:=]?\s*(\d{2,3})\s*(?:DB|BAR\s*DIA(?:METER)?S?)/g;
+  while ((m = reLapBare.exec(text)) !== null) {
+    specs.lap.tension_db = specs.lap.tension_db ?? +m[1];
+    specs.detected_keywords.push(`lap:db=${m[1]}`);
+  }
+  const reClass = /\bCLASS\s+([AB])\s+(?:LAP\s+)?SPLICE/g;
+  while ((m = reClass.exec(text)) !== null) {
+    specs.lap.splice_class = m[1];
+    specs.detected_keywords.push(`lap:class=${m[1]}`);
   }
   if (/MECHANICAL\s+COUPLER/.test(text)) specs.lap.splice_type = "mechanical";
   else if (/WELDED\s+SPLICE/.test(text)) specs.lap.splice_type = "welded";
@@ -107,16 +133,67 @@ function extractSpecs(rawText: string): Record<string, unknown> {
     if (m[1] === "SEISMIC") specs.hook.seismic_deg = +m[2]; else specs.hook.standard_deg = +m[2];
     specs.detected_keywords.push(`hook:${m[1]}=${m[2]}`);
   }
-  const reFy = /(?:FY|GRADE)\s*=?\s*(\d{2,3})\s*(MPA|KSI)?/g;
+  const reFy = /\b(?:FY|YIELD\s+STRENGTH)\s*[:=]?\s*(\d{2,3})\s*(MPA|KSI)?/g;
   while ((m = reFy.exec(text)) !== null) {
     const v = +m[1];
     if (m[2] === "KSI" || (!m[2] && v <= 80)) specs.grade.fy_ksi = v; else specs.grade.fy_mpa = v;
     specs.detected_keywords.push(`grade:fy=${v}${m[2] || "MPA"}`);
   }
-  const reMark = /\b(400W|500W|GRADE\s*60|GRADE\s*75)\b/g;
+  const reMark = /\b(400W|400R|500W|GRADE\s*60|GRADE\s*75|G30\.18[A-Z0-9.\-]*)\b/g;
   while ((m = reMark.exec(text)) !== null) {
-    specs.grade.mark = m[1].replace(/\s+/g, " ");
-    specs.detected_keywords.push(`grade:${specs.grade.mark}`);
+    const mk = m[1].replace(/\s+/g, " ");
+    specs.grade.mark = mk;
+    specs.detected_keywords.push(`grade:${mk}`);
+  }
+  // Concrete strength per element-bucket: "FOOTINGS ... 25 MPA", "BEAMS ... 35 MPA"
+  const buckets = [
+    ["FOOTINGS?", "footings"],
+    ["FND\\.?\\s*WALLS?|FOUNDATION\\s+WALLS?", "fnd_walls"],
+    ["WALLS?", "walls"],
+    ["BEAMS?", "beams"],
+    ["COLUMNS?(?:\\s*\\/\\s*PIERS?)?", "columns_piers"],
+    ["S\\.?O\\.?G\\.?|SLAB\\s+ON\\s+GRADE", "sog"],
+    ["SUSP(?:ENDED)?\\.?\\s*SLABS?", "suspended_slab"],
+    ["CURBS?(?:\\s*\\/\\s*WALKS?)?", "curbs_walks"],
+    ["TOPPING\\s+SLABS?", "topping_slab"],
+    ["PILE\\s*CAPS?", "pile_caps"],
+  ] as const;
+  for (const [pat, key] of buckets) {
+    const re = new RegExp(`\\b(?:${pat})\\b[^\\n]{0,140}?(\\d{2})\\s*MPA`, "g");
+    let mm: RegExpExecArray | null;
+    while ((mm = re.exec(text)) !== null) {
+      specs.concrete_strength[key] = +mm[1];
+      specs.detected_keywords.push(`fc:${key}=${mm[1]}MPa`);
+    }
+  }
+  // Plain Fc' = 25 MPa
+  const reFc = /\b(?:FC['\u2032]?|F'?C)\s*[:=]?\s*(\d{2})\s*MPA/g;
+  while ((m = reFc.exec(text)) !== null) {
+    specs.concrete_strength.default = +m[1];
+    specs.detected_keywords.push(`fc:default=${m[1]}MPa`);
+  }
+  // Exposure / durability classes (CSA A23.1)
+  const reExp = /\b(C-?XL|C-?[12]|F-?[12]|N|S-?[123]|A-?[123]|R-?[12])\b/g;
+  const seenExp = new Set<string>();
+  while ((m = reExp.exec(text)) !== null) {
+    const c = m[1].replace(/-/g, "");
+    if (c === "N" && !/(?:CLASS|EXPOSURE)\s*N\b/.test(text.slice(Math.max(0, m.index - 20), m.index + 5))) continue;
+    if (!seenExp.has(c)) { seenExp.add(c); specs.exposure_class.push(c); }
+  }
+  if (specs.exposure_class.length) specs.detected_keywords.push(`exposure:${specs.exposure_class.join(",")}`);
+  // Code refs
+  const reCodes = /\b(CAN\/CSA\s*A23\.[123]|CSA\s*A23\.[123]|CSA\s*G30\.18|ACI\s*30[18]|ACI\s*318|OBC|NBCC?)\b/g;
+  const seenC = new Set<string>();
+  while ((m = reCodes.exec(text)) !== null) {
+    const c = m[1].replace(/\s+/g, " ");
+    if (!seenC.has(c)) { seenC.add(c); specs.codes.push(c); }
+  }
+  if (specs.codes.length) specs.detected_keywords.push(`codes:${specs.codes.length}`);
+  // Geotech bearing capacity
+  const reBear = /(\d{2,4})\s*KPA[^\n]{0,30}?\b(SLS|ULS)\b/g;
+  while ((m = reBear.exec(text)) !== null) {
+    if (m[2] === "SLS") specs.bearing.sls_kpa = +m[1]; else specs.bearing.uls_kpa = +m[1];
+    specs.detected_keywords.push(`bearing:${m[2]}=${m[1]}kPa`);
   }
   return specs;
 }
