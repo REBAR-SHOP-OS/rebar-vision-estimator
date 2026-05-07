@@ -646,15 +646,20 @@ export async function applyEngineerAnswerToEstimateItem(
     : {};
   const previousGeometry = String(assumptions.geometry_status || "unresolved");
   const normalizedPrevious = previousGeometry === "resolved" || previousGeometry === "partial" ? previousGeometry : "unresolved";
-  const geometryStatus: ApplyEngineerAnswerResult["geometryStatus"] = requestedStatus === "resolved" && parsed.quantity && parsed.totalLengthM && parsed.weightKg
-    ? "resolved"
-    : hasComputableValue
-      ? "partial"
-      : normalizedPrevious;
-  const storedEngineerAnswer = {
-    ...engineerAnswer,
-    status: requestedStatus === "resolved" && geometryStatus !== "resolved" ? "answered" : engineerAnswer.status,
-  };
+  const hasEngineerInput = Boolean(
+    (responseText && responseText.trim().length > 0) ||
+      Object.values(structuredValues).some((v) => String(v || "").trim().length > 0),
+  );
+  const geometryStatus: ApplyEngineerAnswerResult["geometryStatus"] =
+    parsed.quantity && parsed.totalLengthM && parsed.weightKg
+      ? "resolved"
+      : hasComputableValue
+        ? "partial"
+        : requestedStatus === "resolved" && hasEngineerInput
+          ? "partial"
+          : normalizedPrevious;
+  // Honour the engineer's explicit decision: never silently downgrade status.
+  const storedEngineerAnswer = { ...engineerAnswer };
   const update: Record<string, unknown> = {
     assumptions_json: {
       ...assumptions,
