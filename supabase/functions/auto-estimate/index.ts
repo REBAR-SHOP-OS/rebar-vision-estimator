@@ -1015,6 +1015,7 @@ serve(async (req) => {
         const extractRes = await fetch(`${supabaseUrl}/functions/v1/extract-dimensions`, {
           method: "POST",
           headers: {
+            apikey: Deno.env.get("SUPABASE_ANON_KEY")!,
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
