@@ -74,7 +74,7 @@ export default function AssistantStage({ projectId, state, goToStage }: StagePro
         .filter((row) => row.metadata?.channel === CHANNEL)
         .map((row) => ({
           id: row.id,
-          role: row.role === "user" ? "user" : row.role === "system" ? "system" : "assistant",
+          role: (row.role === "user" ? "user" : row.role === "system" ? "system" : "assistant") as AssistantMessage["role"],
           content: row.content,
           created_at: row.created_at,
           metadata: row.metadata || null,
