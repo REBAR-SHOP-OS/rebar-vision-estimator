@@ -1012,8 +1012,9 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         const hit = upperNames.find((f) => f.name.includes(tag));
         if (hit && !isArchName(hit.name)) return hit.id;
       }
-      // 3. Default — never pick an architectural file.
-      return defaultSourceId;
+      // 3. No reliable evidence — return null so QA does not present an unrelated
+      // (often Page 1 cover) sheet as the source of an unresolved row.
+      return null;
     };
 
     // Insert items into estimate_items
