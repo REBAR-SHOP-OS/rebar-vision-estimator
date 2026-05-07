@@ -21,6 +21,7 @@ type PageTextItem = { str: string; x: number; y: number; w: number; h: number };
 type TextLine = { items: PageTextItem[]; y: number; text: string };
 
 const MIN_ANCHOR_CONFIDENCE = 0.75;
+const EMPTY_REFS: string[] = [];
 
 function normalizeText(value: string | null | undefined): string {
   return String(value || "")
@@ -363,7 +364,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const staleOutputs = issues.filter((i) => ["critical", "error"].includes(i.severity?.toLowerCase())).length;
 
   const visibleSheets = changedOnly ? sheets.filter((s) => s.items.length > 0) : sheets;
-  const missingRefs = sel?.linked_item?.missing_refs || [];
+  const missingRefs = sel?.linked_item?.missing_refs || EMPTY_REFS;
   const answerFieldContext = `${sel?.title || ""}\n${sel?.description || ""}\n${sel?.location?.source_excerpt || ""}`;
   const answerFields = useMemo(
     () => inferEngineerAnswerFields(missingRefs, answerFieldContext),
@@ -402,10 +403,14 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     if (Object.keys(engineerDraft.structuredValues).length > 0) {
       setAnswerValues((current) => {
         const next = { ...current };
+        let changed = false;
         for (const [key, value] of Object.entries(engineerDraft.structuredValues)) {
-          if (!String(next[key] || "").trim()) next[key] = value;
+          if (!String(next[key] || "").trim()) {
+            next[key] = value;
+            changed = true;
+          }
         }
-        return next;
+        return changed ? next : current;
       });
     }
   }, [answerEdited, answerText, engineerDraft, sel]);
