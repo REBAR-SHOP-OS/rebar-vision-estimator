@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   applyAssistantSuggestion,
+  buildFinishEstimationAgentResponse,
   buildFinishAuditResponse,
   buildAssistantSuggestion,
   isAssistantConfirmationIntent,
@@ -42,6 +43,63 @@ describe("workflow assistant logic", () => {
     expect(response).toContain("Final estimator confirmation");
     expect(response).toContain("Evidence quality");
     expect(response).not.toContain("100% confidence");
+  });
+
+  it("builds a finish-estimation agent response with row findings and an applyable suggestion", () => {
+    const issue: WorkflowQaIssue = {
+      id: "legacy:issue-brick",
+      title: "P17: brick ledge",
+      description: "Look at P17. Find the brick ledge.",
+      severity: "error",
+      status: "open",
+      issue_type: "unresolved_geometry",
+      location_label: "P17",
+      location: {
+        page_number: 17,
+        element_reference: "brick ledge",
+        source_excerpt: "15M CONT. REINFORCEMENT @ TOP OF BRICK LEDGE",
+      },
+      linked_item: {
+        id: "item-brick",
+        description: "brick ledge",
+        bar_size: "10M",
+        quantity_count: 0,
+        total_length: 0,
+        total_weight: 0,
+        missing_refs: ["rebar_callout", "element_dimensions"],
+      },
+    };
+    const row: WorkflowTakeoffRow = {
+      id: "legacy:item-brick",
+      raw_id: "item-brick",
+      raw_kind: "legacy",
+      mark: "M011",
+      size: "10M",
+      shape: "brick ledge",
+      count: 0,
+      length: 0,
+      weight: 0,
+      status: "blocked",
+      source: "Drawing",
+      segment_id: null,
+      segment_name: "Walls",
+      source_file_id: null,
+      geometry_status: "unresolved",
+      missing_refs: ["element_dimensions"],
+    };
+
+    const result = buildFinishEstimationAgentResponse({
+      files: [],
+      qaIssues: [issue],
+      takeoffRows: [row],
+      extractionAudit: null,
+    });
+
+    expect(result.content).toContain("Blocked Row Findings");
+    expect(result.content).toContain("M011");
+    expect(result.content).toContain("Brick ledge dimensions per detail");
+    expect(result.suggestion?.issueId).toBe("legacy:issue-brick");
+    expect(result.suggestion?.answerText).toContain("115mm");
   });
 
   it("builds a suggestion from a QA issue and linked row", () => {

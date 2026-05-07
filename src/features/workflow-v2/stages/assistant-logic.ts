@@ -64,6 +64,13 @@ export type AssistantProjectSnapshot = {
   estimatorConfirmed?: boolean;
 };
 
+export type FinishEstimationAgentResult = {
+  content: string;
+  suggestion: AssistantSuggestion | null;
+  confidence: "high" | "medium" | "low";
+  workingSteps: string[];
+};
+
 export function isAssistantConfirmationIntent(text: string): boolean {
   return /\b(yes|confirm|confirmed|apply|save it|mark resolved|resolve|use this|looks good|approved)\b/i.test(text);
 }
@@ -119,6 +126,53 @@ export function buildFinishAuditResponse(snapshot: AssistantProjectSnapshot): st
     "",
     nextQuestion ? `**Next question:** ${nextQuestion}` : "**Next step:** Confirm the estimate, then unlock outputs.",
   ].join("\n");
+}
+
+export function buildFinishEstimationAgentResponse(snapshot: AssistantProjectSnapshot): FinishEstimationAgentResult {
+  const workingSteps = buildWorkingSteps(snapshot);
+  const auditText = buildFinishAuditResponse(snapshot);
+  const nextSuggestion = buildBestEstimatorSuggestion(snapshot);
+  const blockedRows = snapshot.takeoffRows
+    .filter((row) => row.geometry_status !== "resolved" || row.count <= 0 || row.length <= 0 || row.weight <= 0)
+    .slice(0, 8);
+  const rowFindings = blockedRows.length
+    ? blockedRows.map((row) => `- ${row.mark}: ${describeTakeoffRowFinding(row)}`).join("\n")
+    : "- No blocked takeoff rows found.";
+  const openQa = snapshot.qaIssues
+    .filter((issue) => !["resolved", "closed"].includes(String(issue.status || "").toLowerCase()))
+    .slice(0, 6)
+    .map((issue) => `- ${issue.location_label || issue.title}: ${buildIssueFinding(issue)}`)
+    .join("\n");
+  const nextBlock = nextSuggestion
+    ? [
+      "**Next suggested answer**",
+      nextSuggestion.answerText,
+      "",
+      `**Next question:** ${nextSuggestion.question}`,
+      `Evidence quality: ${nextSuggestion.confidence}`,
+      "Say **apply** to save this answer, or correct the answer in chat.",
+    ].join("\n")
+    : "**Next suggested answer**\nNo open QA answer is ready to apply. Re-run OCR/takeoff for stale or missing evidence, then ask me to audit again.";
+
+  return {
+    content: [
+      auditText,
+      "",
+      "**Blocked Row Findings**",
+      rowFindings,
+      "",
+      openQa ? "**Open QA Findings**\n" + openQa : "**Open QA Findings**\n- No open QA issues found.",
+      "",
+      nextBlock,
+    ].join("\n"),
+    suggestion: nextSuggestion,
+    confidence: nextSuggestion?.confidence || (blockedRows.length ? "medium" : "high"),
+    workingSteps: [
+      ...workingSteps,
+      "Building row-by-row evidence findings",
+      nextSuggestion ? "Prepared the next applyable QA answer" : "No applyable QA answer found",
+    ],
+  };
 }
 
 function buildNextAuditQuestion(snapshot: AssistantProjectSnapshot, blockers: string[]): string | null {
@@ -212,6 +266,88 @@ export function buildAssistantSuggestion(prompt: string, snapshot: AssistantProj
     missingRefs,
     sourceExcerpt,
   };
+}
+
+function buildBestEstimatorSuggestion(snapshot: AssistantProjectSnapshot): AssistantSuggestion | null {
+  const openIssues = snapshot.qaIssues.filter((issue) => !["resolved", "closed"].includes(String(issue.status || "").toLowerCase()));
+  if (openIssues.length === 0) return null;
+  const scored = openIssues
+    .map((issue) => {
+      const suggestion = buildSuggestionForIssue(issue, snapshot);
+      if (!suggestion) return null;
+      const linkedRow = snapshot.takeoffRows.find((row) => row.raw_id === issue.linked_item?.id);
+      const confidenceScore = suggestion.confidence === "high" ? 3 : suggestion.confidence === "medium" ? 2 : 1;
+      const blockedScore = linkedRow && (linkedRow.geometry_status === "unresolved" || linkedRow.count <= 0 || linkedRow.length <= 0 || linkedRow.weight <= 0) ? 2 : 0;
+      const answerScore = suggestion.answerText.toLowerCase().startsWith("found:") || suggestion.answerText.toLowerCase().startsWith("brick ledge") ? 1 : 0;
+      return { suggestion, score: confidenceScore + blockedScore + answerScore };
+    })
+    .filter((entry): entry is { suggestion: AssistantSuggestion; score: number } => !!entry)
+    .sort((a, b) => b.score - a.score);
+  return scored[0]?.suggestion || null;
+}
+
+function buildSuggestionForIssue(issue: WorkflowQaIssue, snapshot: AssistantProjectSnapshot): AssistantSuggestion | null {
+  const linkedRow = snapshot.takeoffRows.find((row) => row.raw_id === issue.linked_item?.id)
+    || snapshot.takeoffRows.find((row) => issue.title.toLowerCase().includes(row.mark.toLowerCase()));
+  const missingRefs = issue.linked_item?.missing_refs || [];
+  const firstRef = Array.isArray(issue.source_refs) ? issue.source_refs[0] : null;
+  const draft = buildEngineerAnswerDraft({
+    locationLabel: issue.location_label,
+    pageNumber: issue.location?.page_number || issue.locator?.page_number || undefined,
+    objectIdentity: issue.location?.element_reference || issue.linked_item?.description || null,
+    description: issue.description || issue.raw_description || null,
+    title: issue.title,
+    sourceExcerpt: issue.location?.source_excerpt || issue.locator?.anchor_text || issue.linked_item?.description || null,
+    missingRefs,
+    linearGeometry: firstRef?.linear_geometry || null,
+    wallGeometry: firstRef?.wall_geometry || null,
+  });
+  const sourceExcerpt = issue.location?.source_excerpt || issue.locator?.anchor_text || issue.linked_item?.description || null;
+  return {
+    issueId: issue.id,
+    issueTitle: issue.title,
+    locationLabel: issue.location_label || (issue.location?.page_number ? `P${issue.location.page_number}` : "selected issue"),
+    linkedEstimateItemId: issue.linked_item?.id || null,
+    linkedTakeoffMark: linkedRow?.mark || null,
+    question: draft.question,
+    answerText: draft.draftAnswer || buildFallbackSuggestedAnswer(issue, missingRefs, sourceExcerpt),
+    confidence: draft.draftAnswer ? draft.confidence : "low",
+    needsConfirmation: true,
+    structuredValues: draft.structuredValues,
+    missingRefs,
+    sourceExcerpt,
+  };
+}
+
+function describeTakeoffRowFinding(row: WorkflowTakeoffRow): string {
+  const found: string[] = [];
+  if (row.size && row.size !== "-") found.push(`bar ${row.size}`);
+  if (row.shape) found.push(`callout "${row.shape}"`);
+  if (row.count > 0) found.push(`qty ${row.count}`);
+  if (row.length > 0) found.push(`length ${row.length}m`);
+  if (row.weight > 0) found.push(`weight ${row.weight}kg`);
+  const missing: string[] = [];
+  if (row.count <= 0) missing.push("qty");
+  if (row.length <= 0) missing.push("length");
+  if (row.weight <= 0) missing.push("weight");
+  if (row.missing_refs?.length) missing.push(...row.missing_refs);
+  return `${found.length ? `Found ${found.join(", ")}` : "Found row but no computed quantity values yet"}. ${missing.length ? `Needs ${Array.from(new Set(missing)).join(", ")}.` : "Ready for review."}`;
+}
+
+function buildIssueFinding(issue: WorkflowQaIssue): string {
+  const firstRef = Array.isArray(issue.source_refs) ? issue.source_refs[0] : null;
+  const draft = buildEngineerAnswerDraft({
+    locationLabel: issue.location_label,
+    pageNumber: issue.location?.page_number || issue.locator?.page_number || undefined,
+    objectIdentity: issue.location?.element_reference || issue.linked_item?.description || null,
+    description: issue.description || issue.raw_description || null,
+    title: issue.title,
+    sourceExcerpt: issue.location?.source_excerpt || issue.locator?.anchor_text || issue.linked_item?.description || null,
+    missingRefs: issue.linked_item?.missing_refs || [],
+    linearGeometry: firstRef?.linear_geometry || null,
+    wallGeometry: firstRef?.wall_geometry || null,
+  });
+  return `${draft.draftAnswer || issue.description || "Needs review"} Evidence quality: ${draft.confidence}.`;
 }
 
 function buildFallbackSuggestedAnswer(issue: WorkflowQaIssue, missingRefs: string[], sourceExcerpt?: string | null): string {

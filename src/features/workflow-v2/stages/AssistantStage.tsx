@@ -15,7 +15,7 @@ import { StageHeader, EmptyState, Pill, type StageProps } from "./_shared";
 import {
   applyAssistantSuggestion,
   buildAssistantSuggestion,
-  buildFinishAuditResponse,
+  buildFinishEstimationAgentResponse,
   buildWorkingSteps,
   isAssistantConfirmationIntent,
   isFinishAuditIntent,
@@ -206,9 +206,15 @@ export default function AssistantStage({ projectId, state, goToStage }: StagePro
     const steps = buildWorkingSteps(snapshot);
     setWorkingSteps(steps);
     if (isFinishAuditIntent(prompt)) {
-      await insertMessage("assistant", buildFinishAuditResponse(snapshot), {
+      const agentResult = buildFinishEstimationAgentResponse(snapshot);
+      setLatestSuggestion(agentResult.suggestion);
+      await insertMessage("assistant", agentResult.content, {
         kind: "audit",
-        working_steps: steps,
+        confidence: agentResult.confidence,
+        working_steps: agentResult.workingSteps,
+        suggestion: agentResult.suggestion,
+        linked_issue_id: agentResult.suggestion?.issueId || null,
+        linked_estimate_item_id: agentResult.suggestion?.linkedEstimateItemId || null,
       });
       return;
     }
