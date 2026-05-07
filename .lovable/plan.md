@@ -1,75 +1,60 @@
-# Blueprint Fine-Tuning Patch #1+#2
+# Fine-tune Segment Finder per project type
 
-Pure regex additions to the OCR extractor. No schema changes, no UI changes, no new tables.
+Today `auto-segments` uses **one generic prompt** for every project (residential, commercial, industrial, infra, cage_only, bar_list_only). It guesses bar-mark prefixes (`B1001`, `BS03`…) that only match one builder's convention. That's why the same 3 generic candidates (SOG / Footings / Walls) keep showing up regardless of project — exactly what your screenshot shows.
 
-## Files Touched
+The fix: turn the segment finder into a **project-type-driven playbook**, seeded by `detect-project-type` (already returns `primaryCategory` + `recommendedScope` + `disciplinesFound` + `hiddenScope`) and the existing `scope_templates` table.
 
-1. **`supabase/functions/populate-search-index/index.ts`** — extend `extractBarCallouts()` and add new `extractSpecs()`
-2. **`supabase/functions/reindex-extractors/index.ts`** — same additions, so the existing "Re-index OCR Entities" button backfills both
+This is a minimal, surgical change — only `auto-segments/index.ts` is rewritten internally; no DB migration is required (we reuse existing `scope_templates`, `projects.project_type`, and the new `sheet_category` / `rebar_relevant` tags from the last patch).
 
-Both files share identical regex helpers (already duplicated by design — keeps edge functions self-contained per project rules).
+## What changes
 
----
+### 1. Per-type playbooks (in-function, one constant)
+A `PLAYBOOKS` map keyed by `project_type`, each entry contains:
+- `expected_buckets` — which of the 5 construction buckets to scan for
+- `naming_conventions` — typical sheet/bar-mark prefixes (S-, A-, F-, W-, P-, C-, GB-, B-, COL-…)
+- `must_have_segments` — defaults the finder will create even with thin OCR (e.g. residential ⇒ Strip Footings, Basement Walls, SOG, Garage Slab; commercial ⇒ Columns L1-Ln, Elevated Slabs L1-Ln, Shear Walls, Pile Caps; industrial ⇒ Equipment Pads, Tank Bases, Crane Beams; infra ⇒ Abutments, Pier Caps, Deck, Barriers; cage_only ⇒ Caisson Cage groups by diameter)
+- `forbidden_segments` — types to NEVER suggest (e.g. cage_only ⇒ no SOG, no walls; residential ⇒ no crane beams)
+- `bar_mark_hints` — common prefix→element maps per builder family (configurable, with sane defaults)
 
-## Change 1 — Extended Bar Callouts (Patch #2 from prior list)
+### 2. Use `detect-project-type` output as the seed
+`auto-segments` already has `project.project_type`. Add:
+- pull `recommendedScope[]`, `disciplinesFound[]`, `hiddenScope[]` from the last `audit_events` row of type `project_classified` (already written by detect-project-type)
+- if absent, fall back to playbook defaults
 
-Add modifier capture to `extractBarCallouts()`. Same return shape, new optional `placement` field.
+### 3. Use `scope_templates` table as user-overridable per-type templates
+- Read `scope_templates` where `project_type = project.project_type AND (is_system OR user_id = me)`
+- Pre-seed the suggestion list with each `scope_items[]` entry as a candidate segment (so commercial users get their saved playbook automatically)
+- Users can edit/save their own template per project type → fine-tunes future projects without touching code
 
-New patterns recognized:
-- `15M @ 300 EW` → `placement: "EW"` (each way — doubles linear meters)
-- `20M @ 250 EF` → `placement: "EF"` (each face — doubles count)
-- `15M @ 200 T&B` / `BW` → `placement: "T&B"`
-- `4-25M CONT` → `placement: "CONT"` (continuous, no spacing needed)
-- `10M TIES @ 200` / `STIRR` → `placement: "TIES"` or `"STIRR"`
-- `15M DWLS @ 400` → `placement: "DWL"`
-- `(2)-25M` / `2-#8 BUNDLE` → `bundled: true, qty: 2`
+### 4. Filter by sheet category (rides on the previous #5/#8 patch)
+- When iterating `drawing_search_index`, skip pages where `extracted_entities.rebar_relevant === false` for segment evidence
+- But still surface **Hidden Scope** flags from architectural / civil sheets (CMU walls, depressed slabs, light pole bases) as separate suggestions tagged `source: "hidden_scope"`
 
-Each pattern keeps the existing `seen` dedup and pushes to the same `bar_callouts` array. `auto-estimate` already reads `bar_callouts[]`; it can now branch on `placement` to multiply correctly.
+### 5. Project-type-specific prompt
+Rebuild the AI prompt section dynamically from the playbook so the model sees only relevant rules:
+- residential → emphasize ICF, basement, SOG, garage, strip footings; ignore PT decks
+- commercial → emphasize columns/levels/shear walls/PT decks; group footings by mark
+- industrial → emphasize equipment pads, tank bases, secondary containment, crane beams
+- infrastructure → emphasize abutments, pier caps, deck panels, barriers, MTO/OPSS callouts
+- cage_only → group by cage diameter and length only; suppress everything else
+- bar_list_only → ONE segment per bar mark family from the schedule
 
-Pre-clean step added at the top of the function:
-- Normalize en/em-dash to `-`
-- Collapse `1 5 M @ 3 0 0` → `15M@300` via `/(\d)\s+(?=[MmM#])/` and similar
-- Uppercase all modifiers before matching
+### 6. Confidence + source labels on each suggestion
+Each returned segment carries:
+- `confidence` (0–1) — high when found in OCR + matches playbook, lower when inferred
+- `source` — `"drawing"` | `"playbook"` | `"hidden_scope"` | `"user_template"`
+- `bucket` — which of the 5 construction buckets
+- `evidence` — sheet IDs / bar marks where it was seen
 
-## Change 2 — Spec / General-Notes Extractor (Patch #6 from prior list)
+UI already shows the "Inferred from project type" badge — it'll now show `Drawing-confirmed (S-201)` vs `Playbook default` vs `Hidden scope (A-101)`.
 
-New helper `extractSpecs(text: string): Record<string, unknown>` returning a flat object:
+## Files touched
+- `supabase/functions/auto-segments/index.ts` — rewrite the prompt builder + add PLAYBOOKS constant + read scope_templates + use sheet_category filter (one file, ~+150 lines)
+- `src/components/workspace/...` — no UI changes required; existing candidate list renders the new fields if present (badge renders `source` if available)
+- (optional) seed a few `scope_templates` rows via migration for commercial / industrial / infrastructure if not already present
 
-```
-{
-  cover: { bottom_mm, top_mm, side_mm, against_earth_mm },
-  lap: { tension_db, compression_db, splice_type },
-  hook: { standard_deg, seismic_deg },
-  grade: { fy_mpa, mark }, // e.g. "400W", "500W", "Grade 60"
-  detected_keywords: [...]
-}
-```
+## Out of scope (kept for later)
+- Learning loop that tunes playbooks from approved/rejected candidates — needs a follow-up migration
+- Per-user bar-mark-prefix learning — wait until we have ≥3 approved projects per user
 
-Patterns:
-- Cover: `COVER[:\s]+(\d+)\s*MM\s+(BOTTOM|TOP|SIDE|EARTH)` (multi-pass)
-- Lap: `(TENSION|COMPRESSION)\s+LAP\s*=?\s*(\d+)\s*DB`
-- Hook: `(STD|SEISMIC|STANDARD)\s+HOOK\s*=?\s*(90|135|180)`
-- Grade: `(?:Fy|GRADE)\s*=?\s*(\d{2,3})\s*(?:MPA|KSI)?` plus `\b(400W|500W|Grade\s*60)\b`
-- Splice: `(MECHANICAL\s+COUPLER|LAP\s+SPLICE|WELDED\s+SPLICE)`
-
-Output injected into `extracted_entities.specs` per page. Pages with no spec hits get `specs: {}` (cheap).
-
-A second pass aggregates per-project after all pages processed: pick the page with the most spec hits as the authoritative one, log to `audit_events` with `action: "spec_extracted"` and `metadata: { specs, source_page }`. No new table — `auto-estimate` reads from the latest `audit_events` of that action for the project, falling back to `standards_profiles` defaults if empty.
-
-## Out of Scope
-
-- `auto-estimate` consumption of new fields (separate patch)
-- Sheet-category gating (#5) — separate patch
-- Cross-page reconciliation (#8) — separate patch
-- Bar schedule shape codes (#4) — separate patch
-- Geometry/bbox coupling (#9) — separate patch
-- Dimension kind tagging (#3) — separate patch
-
-## Validation After Deploy
-
-1. Click "Re-index OCR Entities" on the active project
-2. Run SQL check on `drawing_search_index.extracted_entities` for non-empty `specs` and any `bar_callouts[].placement` field
-3. Read `audit_events` where `action = 'spec_extracted'` for the project
-4. Toast in Takeoff stage will report new callouts/dims/schedule rows
-
-No regression risk for existing rows — all new fields are additive; readers ignoring unknown keys keep working.
+After approval I'll implement just step 1–5 in `auto-segments/index.ts` (single-file patch).
