@@ -305,7 +305,10 @@ function inferQaAnchorMeta(...vals: Array<string | null | undefined>) {
   const zoneMatch = text.match(/\b(?:AT|ALONG|NEAR)\s+(EXTENT OF\s+[A-Z][A-Z\s]+|ENTRANCE DOOR|WEST SIDE|EAST SIDE|NORTH SIDE|SOUTH SIDE)\b/i);
   const section = cleanAnchorPhrase(text.match(/\bSECTION\s+([A-Z0-9.\-\/]+)/i)?.[1] || null);
   const detail = cleanAnchorPhrase(text.match(/\b(?:DETAIL|DET\.?|T\.D\.?|TD\.?)[\s#:]*([A-Z0-9.\-\/]+)/i)?.[1] || null);
-  const callout = cleanAnchorPhrase(text.match(/\b(BS?\d{2,4}|B\d{4}|F\d{1,3}|W\d{1,3}|GB\d{1,3}|D\d{2}(?:-\d+)?|P\d{1,3})\b/i)?.[1] || null);
+  // Element-ID style callouts (HKP1, F12, WF3, GB2, W3, COL5, S-1, etc.)
+  const ELEMENT_ID_RX = /\b(HKP\d+|EQP\d+|FW\d+|WF\d+|SF\d+|SOG\d+|SL\d+|FZ\d+|COL\d+|PIER\d+|PR\d+|BS?\d{2,4}|B\d{4}|F\d{1,3}|W\d{1,3}|GB\d{1,3}|D\d{2}(?:-\d+)?|P\d{1,3}|S-\d+|TD-?\d+)\b/i;
+  const callout = cleanAnchorPhrase(text.match(ELEMENT_ID_RX)?.[1] || null);
+  const elementId = callout ? callout.toUpperCase() : null;
   const grid = cleanAnchorPhrase(text.match(/\bGRID\s+([A-Z]+-?\d+[A-Z]?)\b/i)?.[1] || null);
   const zone = cleanAnchorPhrase(zoneMatch?.[1] || null);
   let element = cleanAnchorPhrase(
@@ -317,6 +320,7 @@ function inferQaAnchorMeta(...vals: Array<string | null | undefined>) {
     detail_reference: detail,
     section_reference: section,
     callout_tag: callout,
+    element_id: elementId,
     grid_reference: grid,
     zone_reference: zone,
     element_reference: element,
