@@ -303,20 +303,104 @@ function extractDimensions(text: string): Array<Record<string, unknown>> {
   return out.slice(0, 500);
 }
 
-/** Bar schedule rows. Triggered by header containing 3+ schedule keywords. */
+/**
+ * Bar schedule rows. Header-driven: detects column order from the header line
+ * (MARK, SIZE, NO/QTY, LENGTH/CUT, SHAPE, A, B, C, D, E, R) and emits structured
+ * rows. Computes cut length from A+B+C+D+E when LENGTH column is missing.
+ */
 function extractBarSchedule(text: string): Array<Record<string, unknown>> {
   const lines = text.split(/\r?\n/);
   const out: Array<Record<string, unknown>> = [];
-  const headerKeys = ["MARK", "SIZE", "LENGTH", "QTY", "QUANTITY", "SHAPE", "BAR", "WEIGHT", "SPACING"];
-  const rowRe = /^([A-Z]{1,2}\d{1,3})\s+(\d{1,2}M|#\d{1,2})\s+(\d+(?:\.\d+)?)\s+(\d{1,4})/;
+  const seen = new Set<string>();
+
+  // Tokens we care about (uppercase). Single letters A/B/C/D/E/R are bend legs (BS 8666).
+  const COL_TOKENS: Record<string, string> = {
+    MARK: "mark", "BAR MARK": "mark",
+    SIZE: "size", BAR: "size",
+    NO: "qty", "NO.": "qty", QTY: "qty", QUANTITY: "qty", "NO OF BARS": "qty", COUNT: "qty",
+    LENGTH: "length", "CUT LENGTH": "length", LEN: "length", TOTAL: "length",
+    SHAPE: "shape", "SHAPE CODE": "shape", CODE: "shape", TYPE: "shape",
+    SPACING: "spacing", SPA: "spacing", "@": "spacing",
+    WEIGHT: "weight", WT: "weight", MASS: "weight",
+    A: "a", B: "b", C: "c", D: "d", E: "e", R: "r",
+  };
+
+  // Tokenize a header into ordered column names by splitting on 2+ spaces / tab.
+  const parseHeader = (line: string): string[] | null => {
+    const u = line.toUpperCase().trim();
+    const cells = u.split(/\s{2,}|\t/).map((s) => s.trim()).filter(Boolean);
+    if (cells.length < 3) return null;
+    const cols: string[] = [];
+    let hits = 0;
+    for (const cell of cells) {
+      const key = COL_TOKENS[cell] ?? null;
+      cols.push(key ?? "_");
+      if (key) hits++;
+    }
+    // Need MARK or SIZE plus at least 2 schedule fields total.
+    if (hits < 3) return null;
+    if (!cols.includes("mark") && !cols.includes("size")) return null;
+    return cols;
+  };
+
+  // Tokenize a row similarly. Numbers stay strings; we coerce later.
+  const parseRow = (line: string): string[] => {
+    return line.trim().split(/\s{2,}|\t/).map((s) => s.trim()).filter(Boolean);
+  };
+
+  const isMark = (s: string) => /^[A-Z]{1,3}\d{1,4}[A-Z]?$/i.test(s);
+  const isSize = (s: string) => /^(?:\d{1,2}M|#\d{1,2})$/i.test(s);
+  const isInt = (s: string) => /^\d{1,4}$/.test(s);
+  const isLen = (s: string) => /^\d{2,5}(?:\.\d{1,2})?$/.test(s);
+  const isShape = (s: string) => /^[A-Z]?\d{2}$/.test(s) || /^SC\d{2,3}$/.test(s); // BS8666 (00-99) or "SC###"
+
   for (let i = 0; i < lines.length; i++) {
-    const upper = lines[i].toUpperCase();
-    const hits = headerKeys.filter((k) => upper.includes(k)).length;
-    if (hits < 3) continue;
-    const end = Math.min(i + 80, lines.length);
+    const cols = parseHeader(lines[i]);
+    if (!cols) continue;
+    const end = Math.min(i + 200, lines.length);
     for (let j = i + 1; j < end; j++) {
-      const r = lines[j].match(rowRe);
-      if (r) out.push({ mark: r[1], size: r[2], length: parseFloat(r[3]), qty: +r[4] });
+      const cells = parseRow(lines[j]);
+      if (cells.length < 2) continue;
+      // Map cells to column names by index; ignore extras.
+      const row: Record<string, string | number> = {};
+      for (let k = 0; k < Math.min(cells.length, cols.length); k++) {
+        const name = cols[k]; const val = cells[k];
+        if (name === "_") continue;
+        row[name] = val;
+      }
+      // Validate plausibility.
+      const mark = String(row.mark ?? "");
+      const size = String(row.size ?? "");
+      if (!isMark(mark) && !isSize(size)) continue;
+      if (size && !isSize(size)) continue;
+      // Coerce numerics.
+      const numKeys = ["qty", "length", "spacing", "weight", "a", "b", "c", "d", "e", "r"];
+      for (const k of numKeys) {
+        const v = row[k]; if (typeof v === "string" && /^\d/.test(v)) {
+          const n = Number(v);
+          if (!Number.isNaN(n)) row[k] = n;
+        }
+      }
+      // Compute cut length if missing and bend legs present.
+      if (row.length == null) {
+        const parts = ["a", "b", "c", "d", "e"]
+          .map((k) => (typeof row[k] === "number" ? (row[k] as number) : 0));
+        const sum = parts.reduce((s, n) => s + n, 0);
+        if (sum > 0) {
+          row.length = sum;
+          row.length_computed = true;
+        }
+      }
+      // Normalize shape code if present
+      if (typeof row.shape === "string") row.shape = row.shape.toUpperCase();
+      // De-dupe
+      const k = `${mark}|${size}|${row.length ?? ""}|${row.qty ?? ""}|${row.shape ?? ""}`;
+      if (seen.has(k)) continue; seen.add(k);
+      // Drop empty rows
+      const fieldCount = Object.keys(row).length;
+      if (fieldCount < 2) continue;
+      out.push(row);
+      if (out.length > 200) break;
     }
     if (out.length > 0) break;
   }
