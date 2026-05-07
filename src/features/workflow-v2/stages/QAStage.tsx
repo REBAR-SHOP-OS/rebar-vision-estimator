@@ -190,6 +190,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [answerEdited, setAnswerEdited] = useState(false);
   const [answerSaving, setAnswerSaving] = useState(false);
   const [answerError, setAnswerError] = useState<string | null>(null);
+  const [answerSavedAt, setAnswerSavedAt] = useState<number | null>(null);
   const [redrawCount, setRedrawCount] = useState(0);
   const [lastTrigger, setLastTrigger] = useState<string>("init");
   const [renderedPage, setRenderedPage] = useState<number | null>(null);
@@ -466,11 +467,11 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
         requestedStatus: status,
         engineerAnswer,
       });
-      const effectiveStatus = status === "resolved" && itemResult.updated && itemResult.geometryStatus !== "resolved"
-        ? "answered"
-        : status;
+      // Honour the engineer's explicit decision. Append a takeoff caveat to the note
+      // when geometry is still partial, but do NOT downgrade the requested status.
+      const effectiveStatus = status;
       const effectiveNote = status === "resolved" && itemResult.updated && itemResult.geometryStatus !== "resolved"
-        ? `${note}\n\nTakeoff update is ${itemResult.geometryStatus}; quantity, length, and weight are not all proven yet. Confirm the remaining dimensions before resolving.`
+        ? `${note}\n\nNote: takeoff geometry remains ${itemResult.geometryStatus} (quantity/length/weight not all proven).`
         : note;
       nextRefs.push({
         engineer_answer: {
@@ -498,6 +499,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
         },
       } : {};
       updateSelectedIssue({ status: effectiveStatus, resolution_note: effectiveNote, source_refs: nextRefs, ...linkedPatch });
+      setAnswerSavedAt(Date.now());
     } catch (err) {
       setAnswerError(err instanceof Error ? err.message : "Could not save engineer answer.");
     } finally {
@@ -1176,9 +1178,9 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                         <div className="text-[10px] text-[hsl(var(--status-blocked))] border border-[hsl(var(--status-blocked))]/30 bg-[hsl(var(--status-blocked))]/10 p-2">{answerError}</div>
                       )}
                       <div className="grid grid-cols-3 gap-2">
-                        <button disabled={answerSaving} onClick={() => saveEngineerAnswer("answered")} className="py-2 bg-primary text-primary-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:opacity-90 disabled:opacity-50">Save Answer</button>
-                        <button disabled={answerSaving} onClick={() => saveEngineerAnswer("resolved")} className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40 disabled:opacity-50">Mark Resolved</button>
-                        <button disabled={answerSaving} onClick={() => persistIssueStatus("review", answerText.trim() || "Engineer marked this issue for review.", answerValues, answerText.trim())} className="py-2 bg-card border border-border text-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:bg-accent/40 disabled:opacity-50">Needs Review</button>
+                        <button disabled={answerSaving} onClick={() => saveEngineerAnswer("answered")} className="py-2 bg-primary text-primary-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:opacity-90 disabled:opacity-50">{answerSaving ? "Saving…" : answerSavedAt && Date.now() - answerSavedAt < 1500 ? "Saved ✓" : "Save Answer"}</button>
+                        <button disabled={answerSaving} onClick={() => saveEngineerAnswer("resolved")} className="py-2 bg-secondary text-secondary-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:opacity-90 disabled:opacity-50">Mark Resolved</button>
+                        <button disabled={answerSaving} onClick={() => persistIssueStatus("review", answerText.trim() || "Engineer marked this issue for review.", answerValues, answerText.trim())} className="py-2 bg-secondary text-secondary-foreground font-bold text-[10px] uppercase tracking-[0.12em] hover:opacity-90 disabled:opacity-50">Needs Review</button>
                       </div>
                     </div>
                   </section>
