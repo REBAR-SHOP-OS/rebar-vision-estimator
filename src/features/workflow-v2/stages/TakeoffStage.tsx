@@ -560,7 +560,11 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
                                      ) : r.geometry_status !== "resolved" ? <UnresolvedValue value={foundDisplay.weight} /> : r.weight.toFixed(1)}
                                   </td>
                                   <td className="px-3">
-                                    {r.geometry_status === "unresolved" ? (
+                                    {r.synthetic ? (
+                                      <Pill tone="inferred" solid>
+                                        <span title={r.synthetic_basis ? `ASSUMED: ${r.synthetic_basis}` : "Best-guess values from industry defaults"}>ASSUMED</span>
+                                      </Pill>
+                                    ) : r.geometry_status === "unresolved" ? (
                                       <Pill tone="blocked" solid>
                                         <span title={r.missing_refs.length ? `Missing: ${r.missing_refs.join("; ")}` : "Geometry unresolved"}>Unresolved</span>
                                       </Pill>
@@ -652,7 +656,13 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
               <UnresolvedFoundPanel row={sel} />
             )}
             <div className="grid grid-cols-3 gap-2 text-[11px] font-mono mb-3">
-              {sel.geometry_status !== "resolved" ? (
+              {sel.synthetic ? (
+                <>
+                  <Field label="Qty (assumed)" value={String(sel.count)} />
+                  <Field label="Len m (assumed)" value={sel.length.toFixed(2)} />
+                  <Field label="Wt kg (assumed)" value={sel.weight.toFixed(1)} />
+                </>
+              ) : sel.geometry_status !== "resolved" ? (
                 <>
                   <Field label="Qty" value={extractFoundDisplay(sel).qty} />
                   <Field label="Len" value={extractFoundDisplay(sel).length} />
