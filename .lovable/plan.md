@@ -1,46 +1,83 @@
-## Patch — show extracted hints on Partial rows (no zeros, no inventions)
+# Fix OCR Accuracy Gap (Minimal Patch)
 
-**File:** `src/features/workflow-v2/stages/TakeoffStage.tsx`
+## Problem confirmed by audit
 
-Change in 4 spots: treat `geometry_status === "partial"` the same as `"unresolved"` for value display only. The `Partial` orange badge, tooltip, missing_refs chips, and DB values stay exactly as-is.
+For project `a24bba42…`, OCR captured 5–75 KB of text per page (good), but the indexer only populates `bar_marks[]`. `extracted_entities.dimensions`, `bar_callouts`, and `bar_schedule_rows` are empty on **all 18 pages**. That is why downstream `estimate_items` rows have `quantity_count = 0`, `total_length = 0`, `total_weight = 0`.
 
-### Edits
+Also: `CRU-1 Architectral.pdf` is stuck in `parse_status='parsing'` (never finished).
 
-**1. Qty cell (~line 486)**
-```tsx
-) : r.geometry_status !== "resolved" ? <UnresolvedValue value={foundDisplay.qty} /> : r.count}
+## Scope (minimal-patch policy)
+
+Touch only the indexer + one tiny migration. No UI changes, no schema changes, no new tables.
+
+### File 1: `supabase/functions/populate-search-index/index.ts` (~60 lines added)
+
+Add three pure regex helpers next to the existing `extractBarMarks`:
+
+1. **`extractBarCallouts(text)`** — captures structured bar callouts:
+   - Patterns to match (in order):
+     - `(\d+)\s*[-–]\s*(\d{2})M\s*@\s*(\d+)\s*(mm|o\.?c\.?)?` → `{ qty, size:'15M', spacing_mm }`
+     - `(\d+)\s*[-–]\s*#(\d{1,2})\s*@\s*(\d+(?:\.\d+)?)\s*(?:"|in|ft|'|o\.?c\.?)?` → imperial
+     - `(\d{2})M\s*@\s*(\d+)` → no qty, just size+spacing (drives "Need run")
+   - Returns `Array<{ qty?:number, size:string, spacing?:number, spacing_unit:'mm'|'in', raw:string }>`
+
+2. **`extractDimensions(text)`** — captures element dimensions:
+   - `(\d{3,5})\s*(?:mm|MM)\b` → millimetres
+   - `(\d+(?:\.\d+)?)\s*m\b(?!m)` → metres (single m, not mm)
+   - `(\d+)['′]\s*[-–]?\s*(\d{1,2})?\s*["″]?` → feet/inches
+   - Filter: drop values < 100mm or > 200,000mm to skip noise (bar sizes, scales).
+   - Returns `Array<{ value_mm:number, raw:string }>`
+
+3. **`extractBarSchedule(text)`** — detects a bar schedule table:
+   - Trigger: a line whose tokens include ≥3 of `MARK`, `SIZE`, `LENGTH`, `QTY`, `SHAPE`, `BAR`, `WEIGHT`, `SPACING`.
+   - Then parse the next ≤80 lines that match `^([A-Z]{1,2}\d{1,3})\s+(\d{1,2}M|#\d{1,2})\s+(\d+(?:\.\d+)?)\s+(\d+)` → rows of `{ mark, size, length, qty }`.
+   - Returns `Array<{ mark, size, length, qty }>`.
+
+Inject results into `p_extracted_entities` at line 427:
+
+```ts
+p_extracted_entities: {
+  bar_marks: barMarks,
+  bar_callouts: extractBarCallouts(rawText),
+  dimensions: extractDimensions(rawText),
+  bar_schedule_rows: extractBarSchedule(rawText),
+  tables: page.tables || [],
+  title_block: tb,
+  ocr_metadata: page.ocr_metadata || null,
+},
 ```
 
-**2. Length cell (~line 492)**
-```tsx
-) : r.geometry_status !== "resolved" ? <UnresolvedValue value={foundDisplay.length} /> : r.length.toFixed(2)}
+Bump `EXTRACTION_VERSION` to `2026.05.07`.
+
+That's it for this function. No other call sites change shape — they read from `extracted_entities` jsonb and existing readers ignore unknown keys.
+
+### File 2: New migration to retry the stuck Architectural PDF
+
+```sql
+-- One-shot reset of stuck arch PDF for project a24bba42…
+update document_versions
+set parse_status = 'pending', parse_error = null
+where project_id = 'a24bba42-0120-45ce-be6d-cc5625cf24e5'
+  and parse_status = 'parsing'
+  and parsed_at is null;
 ```
 
-**3. Weight cell (~line 498)**
-```tsx
-) : r.geometry_status !== "resolved" ? <UnresolvedValue value={foundDisplay.weight} /> : r.weight.toFixed(1)}
-```
+The existing pipeline picks up `pending` rows on next workflow tick and re-runs OCR.
 
-**4. Right pane Field block (~lines 593-605)** — change the ternary from `=== "unresolved"` to `!== "resolved"` and reuse `extractFoundDisplay(sel)` for partial rows too. Also render the `UnresolvedFoundPanel` when `!== "resolved"` (line 589).
+### File 3: Re-run indexer for the structural file (no code change)
 
-### Result for the 8 rows currently at 0/0/0
+After deploy, call `populate-search-index` once for the 18 already-OCR'd pages so `extracted_entities` gets backfilled. We can do this by re-invoking `process-pipeline` for the structural file — same trigger the user already uses (the "Reprocess" / re-parse path).
 
-| Row | Was | Will show (extracted from OCR) |
-|---|---|---|
-| 152mm FROST SLAB W/ 15M @ 305 EW | 0/0.00/0.0 | bar 15M; thickness 152mm; spacing 305mm O.C.; each way → Need run / 152mm / Need run |
-| C10M @750 ALONG PAD EDGE (HKP>1500x1500) | 0/0.00/0.0 | bar 10M; spacing 750mm O.C. → Ask / Ask / Need run |
-| 4-C10M IN CORNERS (HKP) | 0/0.00/0.0 | qty=4; bar 10M → 4 / Ask / Need run |
-| 203mm FW W/ 15M @ 406 MEW | 0/0.00/0.0 | bar 15M; thickness 203mm; spacing 406mm O.C.; each way → Need run / 203mm / Need run |
-| (2) 20M door openings | 0/0.00/0.0 | bar 20M → Ask / Ask / Need run |
-| 15M @ 406 STAGGERED | 0/0.00/0.0 | bar 15M; spacing 406mm O.C.; staggered → Need run / Ask / Need run |
-| 15M x 457 @ 610 STAGGERED | 0/0.00/0.0 | bar 15M; piece length 0.457m; spacing 610mm O.C. → Need run / 0.457m ea / Need run |
-| 400mm 10M dowels @ 300 | 0/0.00/0.0 | bar 10M; piece length 0.400m; spacing 300mm O.C. → Need run / 0.400m ea / Need run |
+## Out of scope
 
-No row shows `0` after the patch — every cell shows either the parsed value or the honest token `Need run` / `Ask`. Confirm Takeoff Data button still routes to QA, where each missing dimension can be filled.
+- Changing `auto-estimate` logic — once `dimensions` and `bar_callouts` exist, the existing path will start producing real `quantity_count` / `total_length` / `total_weight`.
+- Schema changes, new columns, new tables.
+- UI changes in `TakeoffStage.tsx`.
 
-### Out of scope
-- Parser improvement to extract element dimensions (real follow-up).
-- Verifying the 3 already-`answered` validation_issues actually wrote back to `estimate_items` — separate audit task.
+## Confirmation plan after deploy
 
-### Files touched
-- `src/features/workflow-v2/stages/TakeoffStage.tsx` (~6 lines, UI only).
+1. SQL check: `select page_number, jsonb_array_length(extracted_entities->'dimensions'), jsonb_array_length(extracted_entities->'bar_callouts'), jsonb_array_length(extracted_entities->'bar_schedule_rows') from drawing_search_index where project_id='a24bba42…' order by page_number;` — expect non-zero on most pages.
+2. SQL check: arch PDF `parse_status` flips from `parsing` → `indexed`.
+3. Refresh Takeoff page — expect real numbers on rows that previously showed "Need run" / 0.
+
+Reply **approve** to apply.
