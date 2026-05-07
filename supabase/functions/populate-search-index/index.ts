@@ -737,6 +737,17 @@ Deno.serve(async (req) => {
     let skipped = 0;
     const conflicts: string[] = [];
     const qualityIssues: string[] = [];
+    // Cross-page reconciliation accumulator: tracks every bar mark sighting and
+    // its sheet category so we can flag (a) marks only seen on non-rebar sheets
+    // and (b) marks with conflicting sizes across rebar sheets.
+    type MarkSighting = {
+      page_number: number;
+      sheet_id: string | null;
+      category: string;
+      rebar_relevant: boolean;
+      size: string | null;
+    };
+    const markSightings = new Map<string, MarkSighting[]>();
 
     for (const page of pages) {
       const tb = page.title_block || {};
@@ -752,6 +763,26 @@ Deno.serve(async (req) => {
       const discipline = tb.discipline || null;
       const drawingType = tb.drawing_type || null;
       const sheetClass = classifySheet(sheetId, discipline, drawingType, rawText);
+      // Record sightings of every bar mark seen on this page for the
+      // post-loop cross-page reconciliation pass.
+      const callouts = extractBarCallouts(rawText) as Array<Record<string, unknown>>;
+      const calloutSizeByMark = new Map<string, string>();
+      for (const c of callouts) {
+        const mk = (c.mark as string) || (c.bar_mark as string) || null;
+        const sz = (c.size as string) || (c.bar_size as string) || null;
+        if (mk && sz && !calloutSizeByMark.has(mk)) calloutSizeByMark.set(mk, sz);
+      }
+      for (const mk of barMarks) {
+        const list = markSightings.get(mk) || [];
+        list.push({
+          page_number: page.page_number || 0,
+          sheet_id: sheetId,
+          category: sheetClass.category,
+          rebar_relevant: sheetClass.rebar_relevant,
+          size: calloutSizeByMark.get(mk) || null,
+        });
+        markSightings.set(mk, list);
+      }
 
       let logicalDrawingId: string | null = null;
       if (sheetId) {
@@ -976,6 +1007,48 @@ Deno.serve(async (req) => {
         });
 
         indexed++;
+      }
+    }
+
+    // ---- Cross-page reconciliation (#8) ----
+    // 1) Bar marks that appear ONLY on non-rebar-relevant sheets are likely
+    //    OCR false positives (e.g. door tags on arch sheets).
+    // 2) Bar marks whose size disagrees across rebar-relevant sheets.
+    for (const [mark, sightings] of markSightings.entries()) {
+      const onRebar = sightings.filter((s) => s.rebar_relevant);
+      if (onRebar.length === 0) {
+        const note = `Bar mark "${mark}" only seen on non-rebar sheets (${sightings.map((s) => `${s.sheet_id || "?"}:${s.category}`).join(", ")})`;
+        conflicts.push(note);
+        await supabase.from("reconciliation_records").insert({
+          user_id: userId,
+          project_id,
+          issue_type: "BAR_MARK_NOT_ON_STRUCTURAL",
+          notes: note,
+          candidates: { mark, sightings },
+          automated_reasoning: {
+            source: "populate-search-index",
+            action: "cross_page_reconcile",
+            extraction_version: EXTRACTION_VERSION,
+          },
+        });
+        continue;
+      }
+      const sizes = new Set(onRebar.map((s) => s.size).filter(Boolean) as string[]);
+      if (sizes.size > 1) {
+        const note = `Bar mark "${mark}" has conflicting sizes across sheets: ${[...sizes].join(" vs ")}`;
+        conflicts.push(note);
+        await supabase.from("reconciliation_records").insert({
+          user_id: userId,
+          project_id,
+          issue_type: "BAR_MARK_SIZE_CONFLICT",
+          notes: note,
+          candidates: { mark, sizes: [...sizes], sightings: onRebar },
+          automated_reasoning: {
+            source: "populate-search-index",
+            action: "cross_page_reconcile",
+            extraction_version: EXTRACTION_VERSION,
+          },
+        });
       }
     }
 
