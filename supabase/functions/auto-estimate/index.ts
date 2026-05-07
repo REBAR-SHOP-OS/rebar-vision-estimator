@@ -1912,6 +1912,50 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       }
     }
 
+    // ───────────────────────────────────────────────────────────────
+    // CROSS-ENGINE RECONCILIATION
+    // Compare estimator Σ total_weight vs auto-bar-schedule Σ (qty × cut_length × mass).
+    // Thresholds match mem://logic/reconciliation-thresholds:
+    //   <5%  → ok    (no issue)
+    //   5–15% → warning
+    //   >15% → error (blocks approval)
+    // ───────────────────────────────────────────────────────────────
+    let crossEngineDelta = 0;
+    try {
+      const { data: barRows } = await supabase
+        .from("bar_items")
+        .select("size, cut_length, quantity")
+        .eq("segment_id", segment_id);
+      if (Array.isArray(barRows) && barRows.length > 0) {
+        const barWeight = barRows.reduce((s: number, b: any) => {
+          const m = massFor(String(b.size || ""), "rebar");
+          const len = (Number(b.cut_length) || 0) / 1000; // mm → m
+          const q = Number(b.quantity) || 0;
+          return s + m * len * q;
+        }, 0);
+        const estWeight = dedupedRows.reduce((s: number, r: any) => s + (Number(r.total_weight) || 0), 0);
+        if (barWeight > 0 && estWeight > 0) {
+          crossEngineDelta = Math.abs(estWeight - barWeight) / Math.max(estWeight, barWeight);
+          if (crossEngineDelta >= 0.05) {
+            const sev = crossEngineDelta > 0.15 ? "error" : "warning";
+            await supabase.from("validation_issues").insert({
+              user_id: user.id,
+              project_id,
+              segment_id,
+              issue_type: "cross_engine_drift",
+              severity: sev,
+              title: `Estimate vs bar-schedule weight differs by ${(crossEngineDelta * 100).toFixed(1)}%`,
+              description: `Estimator total = ${estWeight.toFixed(0)}kg; bar-schedule total = ${barWeight.toFixed(0)}kg. ${sev === "error" ? "Blocks approval" : "Review"} per RSIC reconciliation thresholds.`,
+              status: "open",
+              source_refs: [{ estimator_kg: estWeight, bar_schedule_kg: barWeight, delta_pct: crossEngineDelta }],
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[auto-estimate] cross-engine reconciliation failed:", (e as Error).message);
+    }
+
     const { data: inserted, error: insertErr } = await supabase
       .from("estimate_items")
       .insert(dedupedRows)
