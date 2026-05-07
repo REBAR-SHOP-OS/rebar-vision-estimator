@@ -24,7 +24,9 @@ const REBAR_DIA_MM: Record<string, number> = {
 };
 const REBAR_MASS_KG_PER_M: Record<string, number> = {
   "10M": 0.785, "15M": 1.570, "20M": 2.355, "25M": 3.925, "30M": 5.495, "35M": 7.850,
+  "45M": 11.775, "55M": 19.625,
   "#3": 0.561, "#4": 0.994, "#5": 1.552, "#6": 2.235, "#7": 3.042, "#8": 3.973,
+  "#9": 5.060, "#10": 6.404, "#11": 7.907, "#14": 11.384, "#18": 20.238,
 };
 const WWM_MASS_KG_PER_M2: Record<string, number> = {
   "6X6-W1.4/W1.4": 0.93, "6X6-W2.1/W2.1": 1.37, "6X6-W2.9/W2.9": 1.90,
@@ -32,7 +34,7 @@ const WWM_MASS_KG_PER_M2: Record<string, number> = {
 };
 const sizeKey = (s: string) => {
   const k = String(s || "").toUpperCase().trim();
-  const m = k.match(/^(10M|15M|20M|25M|30M|35M|#[3-8])/);
+  const m = k.match(/^(10M|15M|20M|25M|30M|35M|45M|55M|#1[0148]|#[3-9])/);
   return m ? m[1] : k;
 };
 const massFor = (size: string, type: string): number => {
@@ -40,6 +42,55 @@ const massFor = (size: string, type: string): number => {
   if (type === "wwm") return WWM_MASS_KG_PER_M2[k] || 0;
   return REBAR_MASS_KG_PER_M[sizeKey(k)] || 0;
 };
+
+// Parse WWM coverage area (m²) from a description like
+// "6X6-W2.9/W2.9 - 250 m2", "WWM 4X4 ... 1,200 sqft", "MESH 85 SF".
+// Returns 0 when nothing usable is present so callers can flag UNRESOLVED.
+function parseWwmAreaM2(text: string): number {
+  const t = String(text || "").toUpperCase().replace(/,/g, "");
+  const m2 = t.match(/(\d+(?:\.\d+)?)\s*(?:M\^?2|M²|SQ\s*M|SQM)/);
+  if (m2) return Number(m2[1]);
+  const sf = t.match(/(\d+(?:\.\d+)?)\s*(?:SF|SQ\s*FT|SQFT|FT\^?2|FT²)/);
+  if (sf) return Number(sf[1]) * 0.092903;
+  return 0;
+}
+
+// RSIC stock length (m). Bars longer than this need splices.
+// Default ≈60 ft = 18.288 m. Configurable via standards_profile.naming_rules.stock_length_m.
+function pickStockLengthM(naming: any): number {
+  const v = Number(naming?.stock_length_m);
+  return v && v > 0 ? v : 18.288;
+}
+
+// Add lap splices when a single bar exceeds stock length.
+// barLenM = developed bar length per piece; lapMm = lap-splice length per joint.
+function applySpliceWaste(barLenM: number, lapMm: number, stockM: number): { lenM: number; splices: number } {
+  if (!(barLenM > 0) || !(stockM > 0) || barLenM <= stockM) return { lenM: barLenM, splices: 0 };
+  const splices = Math.ceil(barLenM / stockM) - 1;
+  return { lenM: +(barLenM + splices * (Math.max(0, lapMm) / 1000)).toFixed(3), splices };
+}
+
+// RSIC standard hook addition (mm) by bar size.
+// 90° hook ≈ 12·db, 180° hook ≈ 6·db + 4·db tail. db taken from sizeKey.
+function dbMmFor(sizeKey0: string): number {
+  const k = sizeKey0.toUpperCase();
+  const map: Record<string, number> = {
+    "10M":11.3,"15M":16,"20M":19.5,"25M":25.2,"30M":29.9,"35M":35.7,"45M":43.7,"55M":56.4,
+    "#3":9.5,"#4":12.7,"#5":15.9,"#6":19.1,"#7":22.2,"#8":25.4,"#9":28.7,"#10":32.3,"#11":35.8,"#14":43,"#18":57.3,
+  };
+  return map[k] || 0;
+}
+function hookAddMm(sizeKey0: string, descUpper: string): number {
+  const db = dbMmFor(sizeKey0);
+  if (!db) return 0;
+  const has180 = /\b180(?:\s*°|DEG)?\b|\bSTD\s*HK\b/.test(descUpper);
+  const has135 = /\b135(?:\s*°|DEG)?\b/.test(descUpper);
+  const has90 = /\b90(?:\s*°|DEG)?\b|\bHOOK\b|\bHK\b/.test(descUpper);
+  if (has180) return Math.round(10 * db);
+  if (has135) return Math.round(8 * db);
+  if (has90) return Math.round(12 * db);
+  return 0;
+}
 // NOTE: hardcoded lap fallback (e.g. 40·db) removed by policy.
 // Lap lengths must come from Manual-Standard-Practice-2018 (via Brain) or
 // from an explicit LAP table in the structural OCR. If neither source
