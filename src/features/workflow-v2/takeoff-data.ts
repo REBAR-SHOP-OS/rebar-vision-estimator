@@ -29,6 +29,8 @@ export interface WorkflowTakeoffRow {
   geometry_status: "resolved" | "partial" | "unresolved";
   missing_refs: string[];
   page_number?: number | null;
+  synthetic?: boolean;
+  synthetic_basis?: string | null;
 }
 
 export interface WorkflowQaIssue {
@@ -567,6 +569,8 @@ async function loadLegacyTakeoffRows(projectId: string, files: WorkflowFileRef[]
       geometry_status,
       missing_refs,
       page_number: Number(assum.page_number || 0) || null,
+      synthetic: Boolean(assum.synthetic_estimate),
+      synthetic_basis: typeof assum.synthetic_basis === "string" ? assum.synthetic_basis as string : null,
     };
   });
 }
