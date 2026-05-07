@@ -1,64 +1,59 @@
 ## Goal
 
-Every unresolved QA question in Blueprint Estimator must read like:
+Keep the app running on Lovable Cloud (primary, unchanged) and maintain a **read-only mirror** of every table in your own Supabase project (`aogvxeiltgsyxdndvwja`) so you have full Supabase dashboard access to a complete copy of the data.
 
-> Look at Sheet S-403, Page 8. Find housekeeping pad HKP1. Enter the pad length and pad width from the drawing.
+## Decisions (assumed — tell me to change before approving)
 
-…not the current:
+- **Direction:** one-way, Cloud → mirror. The app never reads/writes the mirror. Safer, no conflicts.
+- **Frequency:** hourly. Adjustable later.
+- **Scope:** all 36 public tables (full row mirror, not schema-only).
+- **Storage / Auth users / Edge Functions:** NOT mirrored in v1. Only Postgres data. (Auth users and Storage objects can be added in a v2 if needed — they require separate flows.)
 
-> Look at Page 1. Find the housekeeping pad. Enter…
+## Secrets you'll provide (I'll request via add_secret after approval)
 
-The element **type** ("housekeeping pad") is not enough. We must surface and persist the specific **element ID** (HKP1, F12, WF3, GB2, W3, T.D.33, etc.) so the estimator knows exactly which object to inspect, on the correct sheet/page.
+1. `MIRROR_SUPABASE_URL` = `https://aogvxeiltgsyxdndvwja.supabase.co` (already have)
+2. `MIRROR_SUPABASE_SERVICE_ROLE_KEY` — Supabase project → Project Settings → API Keys → `service_role` (secret)
+3. `MIRROR_SUPABASE_DB_URL` — Project Settings → Database → Connection string → URI (`postgresql://postgres:<pwd>@db.aogvxeiltgsyxdndvwja.supabase.co:5432/postgres`)
 
-## Root causes (audited in code)
+Anon key is not needed since the app never reads the mirror.
 
-1. `supabase/functions/auto-estimate/index.ts` — `inferQaAnchorMeta()` extracts `callout_tag` (HKP1, F12, W3…) and `element_reference` *separately*, but `element_reference` is forced to the generic lowercased noun ("housekeeping pad"). The question builder lower in the file then uses only `element` (the generic noun) for the "marked …" phrase, dropping the actual ID.
-2. The callout pattern `\b(BS?\d{2,4}|B\d{4}|F\d{1,3}|W\d{1,3}|GB\d{1,3}|D\d{2}(?:-\d+)?|P\d{1,3})\b` is missing common rebar element IDs (HKP\d+, FW\d+, WF\d+, SF\d+, SOG\d+, SL\d+, FZ\d+, COL\d+, PR\d+, T.D.\d+/TD\d+ as a *callout-style* ref, schedule keys like S-1, S-2).
-3. `source_file_id` for unresolved rows defaults to whatever sheet matches the chosen anchor — but when no anchor is found, `_page_number` is null and `resolveRowSource()` falls back to the first non-architectural file → **Page 1 cover sheet** is shown as evidence.
-4. `src/features/workflow-v2/takeoff-data.ts` — the same pattern is mirrored client-side in `inferObjectAnchor()` and `rewriteToRawInputAsk()`. The question text uses `calloutText` (which currently equals the generic element noun) for the "marked …" phrase, again dropping the ID.
-5. `WorkflowQaIssue.location` does not carry an explicit `element_id` field, so QA UI / overlay labels cannot prefer the ID over the type.
+## One-time setup you do in your Supabase project
 
-## Fix plan (minimum-patch, three files)
+Before the sync runs, the mirror needs the same schema as Cloud. Two options:
 
-### 1. `supabase/functions/auto-estimate/index.ts`
+- **Option A (recommended):** I generate a single SQL file with the full schema (tables, RLS policies, functions, triggers, enums) extracted from Cloud. You paste it into your Supabase SQL editor and run once. Takes ~2 min.
+- **Option B:** You run `pg_dump --schema-only` against Cloud and `psql` it into your project. Requires CLI access; equivalent result.
 
-- **Expand the callout regex** in `inferQaAnchorMeta()` to also match: `HKP\d+`, `EQP\d+`, `FW\d+`, `WF\d+`, `SF\d+`, `SOG\d+`, `SL\d+`, `FZ\d+`, `COL\d+`, `PR\d+`, `PIER\d+`, `S-\d+`, `T\.?D\.?\s*\d+`. Keep existing matches.
-- **Add a new structured field** `element_id` returned from `inferQaAnchorMeta()`, set to the *first ID-style token* found in description + excerpt + sheet (callout_tag for the host element). `element_reference` stays as the human noun ("housekeeping pad"). Both are persisted.
-- **Persist `element_id`** in `assumptions_json` (alongside `callout_tag`, `element_reference`) and in `source_refs[0]` of the validation issue.
-- **Use `element_id` in the question text**: change `findPart` to
-  `the ${noun} ${element_id}` when `element_id` exists,
-  else `the ${noun} marked "${element_reference}"`,
-  else current excerpt fallback.
-- **Use `element_id` in the title and `locLabel`**: append `element_id` after the noun (e.g. `"S-403 · P8 · HKP1: housekeeping pad — enter drawing dimensions"`).
-- **Block Page-1 fallback for evidence**: in `resolveRowSource()`, if `_page_number` is null AND no sheet-tag match is found, return `null` instead of `defaultSourceId`, so the QA UI does not show a cover sheet as the source for an unresolved row. The QA panel already handles missing source gracefully.
-- **Anchor candidates**: in `buildCandidates()`, push `element_id` first (highest-priority kind `"element_id"` with score `0.99`, treated as `"exact"`). This ensures page selection prefers the page where the actual ID appears, not a page where the generic noun appears.
+## Implementation (after approval + secrets)
 
-### 2. `src/features/workflow-v2/takeoff-data.ts`
+1. **New edge function `mirror-sync`** (`supabase/functions/mirror-sync/index.ts`)
+   - Runs with `verify_jwt = false` + a shared-secret header so only cron can call it.
+   - For each table in a hard-coded list (the 36 public tables), in dependency order:
+     - Reads rows from Cloud changed since `last_sync_at` (uses `created_at` / `updated_at` where available, full-table refresh for tables without timestamps — small ones only).
+     - Upserts into mirror via `service_role` key, using primary key `id`.
+   - Writes a row to a new local table `mirror_sync_runs` (started_at, finished_at, rows_per_table jsonb, error).
 
-- **Mirror the regex expansion** in `inferObjectAnchor()` so legacy-loaded issues without re-running auto-estimate also surface `element_id`.
-- **Add `element_id`** to the `WorkflowQaIssue["location"]` shape (optional string).
-- **Read `element_id`** from `aj.element_id` / `ref.element_id` first in `extractLocationFromRef()`, fall back to inferred.
-- **Update `buildLocationLabel()`**: when `element_id` is present, the compact label becomes `"<sheet>·P<page>·<element_id>"` (e.g. `"S-403·P8·HKP1"`), and `element_id` overrides the current `obj` chain.
-- **Update `rewriteToRawInputAsk()`**: build `findPart` as `the ${noun} ${element_id}` when present; only fall back to `marked "<noun>"` when no ID exists.
-- **Pass `element_id` through `linked_item`** so the QA card and overlay can render it as a badge.
+2. **New table `mirror_sync_runs`** in Cloud (small bookkeeping table, RLS off, only edge function writes it).
 
-### 3. `src/features/workflow-v2/stages/QAStage.tsx`
+3. **Cron schedule** via `pg_cron` + `pg_net` — fires `mirror-sync` hourly.
 
-- Where the issue title / overlay label is rendered, prefer `issue.location?.element_id` as the primary chip (e.g. `[HKP1]` badge). Keep the existing label for context. No layout/overlay-lifecycle changes (preserves the dedicated overlay layer + stable PDF raster from the previous fix).
+4. **Settings page panel** (`/settings` or Cloud view → small "Mirror status" card): shows last run time, row counts, last error. Read-only.
 
-## Acceptance criteria
+## What this plan does NOT do
 
-- Every unresolved-geometry question text contains the specific element ID when one exists in the OCR/description (HKP1, F12, W3, FW2, WF3, S-1, T.D.33, etc.).
-- QA card title shows: `S-403 · P8 · HKP1` (or the best available object reference) — never just `Page 1`.
-- When the row has no resolvable source page, the QA card does **not** show the cover sheet as evidence; it shows "source pending" instead of Page 1.
-- Overlay/title chips display the element ID prominently.
-- No re-render thrash: only label/text changes; PDF raster + overlay layer are untouched.
-- Fallback chain when no ID exists is unchanged: detail → section → callout → grid → schedule → element noun.
+- Does not migrate auth users (passwords can't be exported in plaintext; Supabase has a separate "Auth migration" flow if you need it later).
+- Does not mirror Storage bucket files (would need a separate `storage.objects` walker — can be added in v2).
+- Does not sync deletes by default. Hard-deletes in Cloud will leave stale rows in the mirror. If you want deletes mirrored, say so and I'll add a soft-delete tracker or a periodic full-diff pass (more expensive).
+- Does not change anything about how the app reads/writes data today. Zero risk to the live app.
 
-## Files touched
+## Rollback
 
-- `supabase/functions/auto-estimate/index.ts` (regex, anchor meta, persistence, question text, source-file fallback)
-- `src/features/workflow-v2/takeoff-data.ts` (regex, location shape, label builder, question rewriter)
-- `src/features/workflow-v2/stages/QAStage.tsx` (small render tweak to surface `element_id`)
+The mirror is additive. To undo: delete the cron job, delete the `mirror-sync` function, drop `mirror_sync_runs`. The app is unaffected.
 
-No DB migration required — `element_id` lives inside existing `assumptions_json` / `source_refs` JSON columns.
+## What I need from you to proceed
+
+1. **Approve this plan** (or tell me what to change — direction, frequency, scope, deletes, etc.).
+2. After approval, in build mode I will:
+   - Request the 2 missing secrets via `add_secret`
+   - Generate the schema-mirror SQL file and tell you to run it in your Supabase SQL editor
+   - Build the edge function, cron job, bookkeeping table, and status panel
