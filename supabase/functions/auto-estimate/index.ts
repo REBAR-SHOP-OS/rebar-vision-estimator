@@ -83,6 +83,23 @@ interface WallGeometryEvidence {
   reason: string;
 }
 
+interface LinearElementGeometryEvidence {
+  objectLabel: string | null;
+  lengthMm: number | null;
+  heightMm: number | null;
+  barCallout: string | null;
+  spacingMm: number | null;
+  orientation: "vertical" | "horizontal" | "unknown";
+  method: "explicit_text" | "schedule" | "scale_measurement" | "not_found";
+  confidence: "high" | "medium" | "low";
+  needsConfirmation: boolean;
+  pageNumber?: number | null;
+  sheetTag?: string | null;
+  excerpt?: string | null;
+  scaleRaw?: string | null;
+  reason: string;
+}
+
 function buildStructuralGraph(structuralText: string): StructuralGraph {
   const g: StructuralGraph = {
     barMarks: new Map(),
@@ -209,6 +226,144 @@ function resolveWallGeometryFromPages(params: {
   };
 }
 
+function isScaleMeasurableLinearElement(text: string | null | undefined): boolean {
+  return /\b(brick\s+ledge|ledge|curb|slab\s+edge|pad|foundation\s+wall|frost\s+wall|wall)\b/i.test(String(text || ""));
+}
+
+function inferLinearObject(text: string): string | null {
+  const t = text.toLowerCase();
+  if (/brick\s+ledge/.test(t)) return "brick ledge";
+  if (/\bcurb\b/.test(t)) return "curb";
+  if (/slab\s+edge/.test(t)) return "slab edge";
+  if (/foundation\s+wall|frost\s+wall|\bwall\b/.test(t)) return "foundation wall";
+  if (/\bpad\b/.test(t)) return "pad";
+  if (/\bledge\b/.test(t)) return "ledge";
+  return null;
+}
+
+function extractLinearBarCallout(text: string): Pick<LinearElementGeometryEvidence, "barCallout" | "spacingMm" | "orientation"> {
+  const normalized = String(text || "").replace(/\s+/g, " ");
+  const verbose = normalized.match(/\b(10M|15M|20M|25M|30M|35M)\s+(?:(vertical|horizontal)\s+)?bars?\s*@\s*(\d+(?:\.\d+)?)\s*mm\s*(?:\([^)]*\)\s*)?O\.?\s*C\.?(?:\s*(typical|staggered))?/i);
+  if (verbose) {
+    const orientation = verbose[2]?.toLowerCase() === "vertical" || verbose[2]?.toLowerCase() === "horizontal"
+      ? verbose[2].toLowerCase() as "vertical" | "horizontal"
+      : "unknown";
+    return {
+      barCallout: [verbose[1].toUpperCase(), orientation !== "unknown" ? orientation : null, "bars @", `${Number(verbose[3])}mm`, "O.C.", verbose[4]?.toLowerCase()].filter(Boolean).join(" "),
+      spacingMm: Number(verbose[3]),
+      orientation,
+    };
+  }
+  const compact = normalized.match(/\b(10M|15M|20M|25M|30M|35M)\s*@\s*(\d+(?:\.\d+)?)\s*mm\s*(?:\([^)]*\)\s*)?O\.?\s*C\.?(?:\s*(vertical|horizontal|typical|staggered))?/i);
+  if (!compact) return { barCallout: null, spacingMm: null, orientation: "unknown" };
+  const tail = compact[3]?.toLowerCase() || "";
+  return {
+    barCallout: [compact[1].toUpperCase(), "@", `${Number(compact[2])}mm`, "O.C.", tail || null].filter(Boolean).join(" "),
+    spacingMm: Number(compact[2]),
+    orientation: tail === "vertical" || tail === "horizontal" ? tail : "unknown",
+  };
+}
+
+function scoreLinearPage(page: WallGeometryPage, params: { objectText?: string | null; calloutText?: string | null; sourceSheet?: string | null }, objectLabel: string | null) {
+  const text = page.rawText.toLowerCase();
+  let score = 0;
+  if (objectLabel && text.includes(objectLabel)) score += 4;
+  if (params.sourceSheet && String(page.sheetTag || "").toLowerCase().includes(String(params.sourceSheet).toLowerCase())) score += 2;
+  for (const token of distinctiveTokens(`${params.objectText || ""} ${params.calloutText || ""}`)) {
+    if (text.includes(token)) score += 1;
+  }
+  if (isScaleMeasurableLinearElement(text)) score += 1;
+  return score;
+}
+
+function extractLinearDimensions(text: string, objectLabel: string | null) {
+  const labels = objectLabel ? [`${objectLabel} length`, `${objectLabel} run length`, "run length", "length"] : ["run length", "length"];
+  const lengthMm = findLabeledMm(text, labels);
+  const heightMm = findLabeledMm(text, ["bar height", "ledge height", "height"]);
+  const schedule = objectLabel ? text.match(new RegExp(`\\b${objectLabel.replace(/\s+/g, "\\s+")}\\b[^.\\n]{0,80}?(\\d{3,6})\\s*(?:mm)?\\s*[xX]\\s*(\\d{3,5})\\s*(?:mm)?`, "i")) : null;
+  if (schedule) {
+    const a = Number(schedule[1]);
+    const b = Number(schedule[2]);
+    return { lengthMm: Math.max(a, b), heightMm: Math.min(a, b), method: "schedule" as const, excerpt: schedule[0].trim() };
+  }
+  return { lengthMm, heightMm, method: "explicit_text" as const, excerpt: lengthMm || heightMm ? wallSnippet(text) : null };
+}
+
+function resolveLinearElementGeometryFromPages(params: {
+  pages: WallGeometryPage[];
+  objectText?: string | null;
+  calloutText?: string | null;
+  sourceSheet?: string | null;
+}): LinearElementGeometryEvidence {
+  const objectLabel = inferLinearObject(`${params.objectText || ""} ${params.calloutText || ""}`);
+  const itemCallout = extractLinearBarCallout(`${params.objectText || ""} ${params.calloutText || ""}`);
+  const candidates = params.pages
+    .filter((page) => isStructuralWallPage({ ...page, rawText: `${page.rawText} wall` }) || isScaleMeasurableLinearElement(page.rawText))
+    .map((page) => ({ page, score: scoreLinearPage(page, params, objectLabel) }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  for (const { page } of candidates) {
+    const text = page.rawText.replace(/\s+/g, " ");
+    const dimensions = extractLinearDimensions(text, objectLabel);
+    const pageCallout = itemCallout.barCallout ? itemCallout : extractLinearBarCallout(text);
+    if (dimensions.lengthMm || dimensions.heightMm || pageCallout.barCallout) {
+      return {
+        objectLabel,
+        lengthMm: dimensions.lengthMm,
+        heightMm: dimensions.heightMm,
+        barCallout: pageCallout.barCallout,
+        spacingMm: pageCallout.spacingMm,
+        orientation: pageCallout.orientation,
+        method: dimensions.method,
+        confidence: dimensions.lengthMm && dimensions.heightMm && pageCallout.barCallout ? "high" : "medium",
+        needsConfirmation: !(dimensions.lengthMm && dimensions.heightMm && pageCallout.barCallout),
+        pageNumber: page.pageNumber,
+        sheetTag: page.sheetTag,
+        scaleRaw: page.scaleRaw,
+        excerpt: dimensions.excerpt || wallSnippet(text),
+        reason: dimensions.lengthMm || dimensions.heightMm ? "Found linear element dimensions in OCR text." : "Found linear element callout but dimensions still need confirmation.",
+      };
+    }
+  }
+
+  for (const { page } of candidates) {
+    const scale = page.scaleRatio || parseScaleRatio(page.scaleRaw);
+    const measured = measureLinearFromBbox(page.bbox, scale);
+    if (measured) {
+      return {
+        objectLabel,
+        lengthMm: measured.lengthMm,
+        heightMm: measured.heightMm,
+        barCallout: itemCallout.barCallout,
+        spacingMm: itemCallout.spacingMm,
+        orientation: itemCallout.orientation,
+        method: "scale_measurement",
+        confidence: itemCallout.barCallout && measured.heightMm ? "high" : "low",
+        needsConfirmation: !(itemCallout.barCallout && measured.heightMm),
+        pageNumber: page.pageNumber,
+        sheetTag: page.sheetTag,
+        scaleRaw: page.scaleRaw,
+        excerpt: wallSnippet(page.rawText),
+        reason: "Measured element bbox using sheet scale.",
+      };
+    }
+  }
+
+  return {
+    objectLabel,
+    lengthMm: null,
+    heightMm: null,
+    barCallout: itemCallout.barCallout,
+    spacingMm: itemCallout.spacingMm,
+    orientation: itemCallout.orientation,
+    method: "not_found",
+    confidence: itemCallout.barCallout ? "medium" : "low",
+    needsConfirmation: true,
+    reason: itemCallout.barCallout ? "Found bar callout, but no reliable element dimensions were found." : "No reliable linear element geometry was found.",
+  };
+}
+
 function isStructuralWallPage(page: WallGeometryPage): boolean {
   const hay = `${page.discipline || ""} ${page.sheetTag || ""} ${page.rawText.slice(0, 500)}`.toLowerCase();
   return !/\barchitectural\b|^a[-\s]?\d/.test(hay)
@@ -265,6 +420,20 @@ function measureWallFromBbox(bbox?: [number, number, number, number] | null, sca
   const heightPx = Math.abs(bbox[3] - bbox[1]);
   if (widthPx < 20 || heightPx < 2) return null;
   return Math.round(Math.max(widthPx, heightPx) * scaleRatio);
+}
+
+function measureLinearFromBbox(bbox?: [number, number, number, number] | null, scaleRatio?: number | null) {
+  if (!bbox || !scaleRatio || scaleRatio <= 0) return null;
+  const widthPx = Math.abs(bbox[2] - bbox[0]);
+  const heightPx = Math.abs(bbox[3] - bbox[1]);
+  if (widthPx < 20 || heightPx < 4) return null;
+  const longPx = Math.max(widthPx, heightPx);
+  const shortPx = Math.min(widthPx, heightPx);
+  if (longPx / Math.max(shortPx, 1) > 80) return null;
+  return {
+    lengthMm: Math.round(longPx * scaleRatio),
+    heightMm: Math.round(shortPx * scaleRatio),
+  };
 }
 
 function wallSnippet(text: string) {
@@ -366,6 +535,10 @@ function isWallItem(it: { description?: string; source_excerpt?: string | null }
   return /\b(foundation\s+wall|frost\s+wall|stem\s+wall|\bwall\b)/i.test(`${it.description || ""} ${it.source_excerpt || ""}`);
 }
 
+function isLinearElementItem(it: { description?: string; source_excerpt?: string | null }) {
+  return isScaleMeasurableLinearElement(`${it.description || ""} ${it.source_excerpt || ""}`);
+}
+
 function wallBarOrientation(text: string): "vertical" | "horizontal" | "unknown" {
   const t = text.toUpperCase();
   if (/\b(HORIZONTAL|HORIZ|HEF|TOP|BOTTOM)\b/.test(t)) return "horizontal";
@@ -449,6 +622,64 @@ function applyWallGeometryResolution(
     totalWeightKg,
     status,
     missing: remaining.length ? remaining : status === "partial" ? ["needs_confirmation"] : [],
+    derivation: derivationParts.join("; "),
+  };
+}
+
+function applyLinearGeometryResolution(
+  it: any,
+  current: ResolveResult,
+  evidence: LinearElementGeometryEvidence,
+): ResolveResult {
+  if (!isLinearElementItem(it) || (!evidence.lengthMm && !evidence.heightMm && !evidence.barCallout)) return current;
+  const desc = `${it.description || ""} ${it.source_excerpt || ""} ${evidence.barCallout || ""}`;
+  const spacing = evidence.spacingMm || parseWallSpacingMm(desc);
+  const orientation = evidence.orientation !== "unknown" ? evidence.orientation : wallBarOrientation(desc);
+  const size = String(it.bar_size || "").toUpperCase();
+  const mass = massFor(size, String(it.item_type || "rebar"));
+  const missing = new Set<string>(current.missing || []);
+  if (evidence.barCallout) missing.delete("rebar callout");
+  if (evidence.lengthMm && evidence.heightMm) missing.delete("element dimensions");
+
+  let qty = current.qty;
+  let totalLengthM = current.totalLengthM;
+  let totalWeightKg = current.totalWeightKg;
+  const derivationParts = [
+    current.derivation,
+    `linear_geometry=${evidence.method}`,
+    evidence.objectLabel ? `object=${evidence.objectLabel}` : null,
+    evidence.lengthMm ? `length=${Math.round(evidence.lengthMm)}mm` : null,
+    evidence.heightMm ? `height=${Math.round(evidence.heightMm)}mm` : null,
+  ].filter(Boolean) as string[];
+
+  if (spacing && evidence.lengthMm) {
+    qty = Math.floor(evidence.lengthMm / spacing) + 1;
+    derivationParts.push(`qty=floor(${Math.round(evidence.lengthMm)}/${spacing})+1=${qty}`);
+    if (orientation !== "horizontal" && evidence.heightMm) {
+      totalLengthM = Number((qty * evidence.heightMm / 1000).toFixed(3));
+      totalWeightKg = mass ? Number((totalLengthM * mass).toFixed(2)) : undefined;
+    } else if (orientation === "horizontal" && evidence.lengthMm && evidence.heightMm) {
+      const hQty = Math.floor(evidence.heightMm / spacing) + 1;
+      qty = hQty;
+      totalLengthM = Number((hQty * evidence.lengthMm / 1000).toFixed(3));
+      totalWeightKg = mass ? Number((totalLengthM * mass).toFixed(2)) : undefined;
+    } else {
+      missing.add("bar height");
+    }
+  } else if (!spacing) {
+    missing.add("bar spacing");
+  }
+
+  const finalMissing = Array.from(missing).filter(Boolean);
+  const status: GeometryStatus = qty && totalLengthM && totalWeightKg && finalMissing.length === 0
+    ? "resolved"
+    : (qty || evidence.barCallout || evidence.lengthMm || evidence.heightMm) ? "partial" : current.status;
+  return {
+    qty,
+    totalLengthM,
+    totalWeightKg,
+    status,
+    missing: status === "resolved" ? [] : finalMissing,
     derivation: derivationParts.join("; "),
   };
 }
@@ -1192,8 +1423,17 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
           sourceSheet: it.source_sheet || null,
         })
         : null;
+      const linearGeometry = !wallGeometry && isLinearElementItem(it)
+        ? resolveLinearElementGeometryFromPages({
+          pages: wallGeometryPages,
+          objectText: it.description || null,
+          calloutText: it.source_excerpt || it.description || null,
+          sourceSheet: it.source_sheet || null,
+        })
+        : null;
       const baseResolution = resolveLine(it, graph);
-      const r = wallGeometry ? applyWallGeometryResolution(it, baseResolution, wallGeometry) : baseResolution;
+      const wallResolved = wallGeometry ? applyWallGeometryResolution(it, baseResolution, wallGeometry) : baseResolution;
+      const r = linearGeometry ? applyLinearGeometryResolution(it, wallResolved, linearGeometry) : wallResolved;
       const baseDesc = String(it.description || "").trim();
       const isUnresolved = r.status === "unresolved";
       const cleanDesc = baseDesc.replace(/^UNRESOLVED:\s*/i, "");
@@ -1211,6 +1451,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         _missing_refs: r.missing,
         _derivation: r.derivation || null,
         _wall_geometry: wallGeometry,
+        _linear_geometry: linearGeometry,
       };
     });
     items = enriched.filter((it: any) => itemMatchesSegment(it, segTypeKey, String(segment?.name || "")));
@@ -1380,6 +1621,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         anchor_confidence: typeof item._anchor_confidence === "number" ? item._anchor_confidence : null,
         anchor_mode: item._anchor_mode || (item._page_number ? "approximate" : "unavailable"),
         wall_geometry: item._wall_geometry || null,
+        linear_geometry: item._linear_geometry || null,
         authority_document: "Manual-Standard-Practice-2018",
         authority_section: item.authority_section || null,
         authority_page: item.authority_page || null,
@@ -1494,6 +1736,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
             : (excerpt ? `the ${noun} for "${String(excerpt).slice(0, 80)}"` : `the ${noun}`);
         const baseTitle = `${noun} — enter drawing dimensions`;
         const wallGeo = aj.wall_geometry || null;
+        const linearGeo = aj.linear_geometry || null;
         const wallFoundParts = wallGeo && (wallGeo.lengthMm || wallGeo.heightMm)
           ? [
             wallGeo.lengthMm ? `wall length ${Math.round(wallGeo.lengthMm)}mm` : null,
@@ -1501,9 +1744,19 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
             wallGeo.sheetTag || wallGeo.pageNumber ? `from ${wallGeo.sheetTag || `page ${wallGeo.pageNumber}`}` : null,
           ].filter(Boolean).join("; ")
           : null;
+        const linearFoundParts = linearGeo && (linearGeo.barCallout || linearGeo.lengthMm || linearGeo.heightMm)
+          ? [
+            linearGeo.objectLabel || noun,
+            linearGeo.barCallout ? `bar callout ${linearGeo.barCallout}` : null,
+            linearGeo.lengthMm ? `length ${Math.round(linearGeo.lengthMm)}mm` : null,
+            linearGeo.heightMm ? `height ${Math.round(linearGeo.heightMm)}mm` : null,
+          ].filter(Boolean).join("; ")
+          : null;
         const foundPrefix = wallFoundParts
           ? `Found ${wallFoundParts}. Evidence quality: ${wallGeo.confidence}; ${wallGeo.reason} `
-          : "";
+          : linearFoundParts
+            ? `Found ${linearFoundParts}. Evidence quality: ${linearGeo.confidence}; ${linearGeo.reason} `
+            : "";
         const baseDesc = `${foundPrefix}Look at ${lookAt}. Find ${findPart}. Enter ${inputList} from the drawing.`;
         return ({
         user_id: user.id,
@@ -1541,6 +1794,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
           anchor_confidence: typeof aj.anchor_confidence === "number" ? aj.anchor_confidence : null,
           anchor_mode: aj.anchor_mode || (aj.page_number ? "approximate" : "unavailable"),
           wall_geometry: wallGeo,
+          linear_geometry: linearGeo,
         }],
       });
       });

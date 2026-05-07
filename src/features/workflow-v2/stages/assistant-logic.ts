@@ -38,6 +38,24 @@ export type AssistantSuggestion = {
   sourceExcerpt?: string | null;
 };
 
+export type EngineerAnswerRecord = {
+  values: Record<string, string>;
+  answer_text: string;
+  note: string;
+  status: string;
+  answered_at: string;
+  location_label?: string | null;
+  issue_id?: string | null;
+  source?: string;
+};
+
+export type ApplyEngineerAnswerResult = {
+  updated: boolean;
+  values: ReturnType<typeof parseAssistantAnswerValues>;
+  geometryStatus: "resolved" | "partial" | "unresolved";
+  missingRefs: unknown;
+};
+
 export type AssistantProjectSnapshot = {
   files: WorkflowFileRef[];
   takeoffRows: WorkflowTakeoffRow[];
@@ -174,6 +192,7 @@ export function buildAssistantSuggestion(prompt: string, snapshot: AssistantProj
     title: issue.title,
     sourceExcerpt: issue.location?.source_excerpt || issue.locator?.anchor_text || issue.linked_item?.description || null,
     missingRefs,
+    linearGeometry: firstRef?.linear_geometry || null,
     wallGeometry: firstRef?.wall_geometry || null,
   });
   const sourceExcerpt = issue.location?.source_excerpt || issue.locator?.anchor_text || issue.linked_item?.description || null;
@@ -248,6 +267,15 @@ export function parseAssistantAnswerValues(text: string, structuredValues: Recor
   };
 }
 
+export function linkedEstimateItemIdFromRefs(sourceRefs: unknown): string | null {
+  const refs = Array.isArray(sourceRefs) ? sourceRefs : [];
+  for (const ref of refs as any[]) {
+    const id = ref?.estimate_item_id || ref?.linked_estimate_item_id;
+    if (id) return String(id);
+  }
+  return null;
+}
+
 function extractRunLengthMm(text: string, structuredLength?: string): number | null {
   if (structuredLength) {
     const plain = structuredLength.match(/^\s*(\d+(?:,\d{3})*(?:\.\d+)?)\s*(mm|m)\s*$/i);
@@ -269,7 +297,7 @@ export async function applyAssistantSuggestion(
   const values = suggestion.structuredValues || {};
   const text = responseText.trim() || suggestion.answerText;
   const note = text || summarizeEngineerAnswer(values);
-  const engineerAnswer = {
+  const engineerAnswer: EngineerAnswerRecord = {
     values,
     answer_text: text,
     note,
@@ -279,6 +307,22 @@ export async function applyAssistantSuggestion(
     issue_id: suggestion.issueId,
     source: "workflow_v2_assistant",
   };
+
+  const itemPatch = await applyEngineerAnswerToEstimateItem(supabase, {
+    estimateItemId: suggestion.linkedEstimateItemId || null,
+    responseText: text,
+    structuredValues: values,
+    requestedStatus: status,
+    engineerAnswer,
+  });
+  const effectiveStatus = status === "resolved" && itemPatch.updated && itemPatch.geometryStatus !== "resolved"
+    ? "answered"
+    : status;
+  const effectiveNote = status === "resolved" && itemPatch.updated && itemPatch.geometryStatus !== "resolved"
+    ? `${note}\n\nTakeoff update is ${itemPatch.geometryStatus}; quantity, length, and weight are not all proven yet. Confirm the remaining dimensions before resolving.`
+    : note;
+  engineerAnswer.status = effectiveStatus;
+  engineerAnswer.note = effectiveNote;
 
   if (suggestion.issueId.startsWith("legacy:")) {
     const issueId = suggestion.issueId.replace(/^legacy:/, "");
@@ -294,52 +338,76 @@ export async function applyAssistantSuggestion(
 
     const { error } = await supabase
       .from("validation_issues")
-      .update({ status, resolution_note: note, source_refs: nextRefs, updated_at: now })
+      .update({ status: effectiveStatus, resolution_note: effectiveNote, source_refs: nextRefs, updated_at: now })
       .eq("id", issueId);
     if (error) throw error;
   }
 
-  const itemPatch = await buildEstimateItemPatch(supabase, suggestion.linkedEstimateItemId || null, text, values, status, engineerAnswer);
   return {
-    issueStatus: status,
+    issueStatus: effectiveStatus,
     estimateUpdated: itemPatch.updated,
     estimateValues: itemPatch.values,
   };
 }
 
-async function buildEstimateItemPatch(
+export async function applyEngineerAnswerToEstimateItem(
   supabase: SupabaseClient<any>,
-  estimateItemId: string | null,
-  text: string,
-  structuredValues: Record<string, string>,
-  status: string,
-  engineerAnswer: Record<string, unknown>,
-) {
-  if (!estimateItemId) return { updated: false, values: {} };
+  params: {
+    estimateItemId: string | null;
+    responseText: string;
+    structuredValues?: Record<string, string>;
+    requestedStatus: string;
+    engineerAnswer: EngineerAnswerRecord;
+  },
+): Promise<ApplyEngineerAnswerResult> {
+  const { estimateItemId, responseText, requestedStatus, engineerAnswer } = params;
+  const structuredValues = params.structuredValues || {};
+  if (!estimateItemId) {
+    return {
+      updated: false,
+      values: parseAssistantAnswerValues(responseText, structuredValues),
+      geometryStatus: "unresolved",
+      missingRefs: [],
+    };
+  }
   const { data: item, error: readError } = await supabase
     .from("estimate_items")
     .select("id,assumptions_json,bar_size")
     .eq("id", estimateItemId)
     .maybeSingle();
   if (readError) throw readError;
-  if (!item) return { updated: false, values: {} };
+  if (!item) {
+    return {
+      updated: false,
+      values: parseAssistantAnswerValues(responseText, structuredValues),
+      geometryStatus: "unresolved",
+      missingRefs: [],
+    };
+  }
 
-  const parsed = parseAssistantAnswerValues(text, structuredValues);
+  const parsed = parseAssistantAnswerValues(responseText, structuredValues);
   const hasComputableValue = Boolean(parsed.quantity || parsed.totalLengthM || parsed.weightKg || parsed.barSize);
   const assumptions = (item.assumptions_json && typeof item.assumptions_json === "object" && !Array.isArray(item.assumptions_json))
     ? item.assumptions_json as Record<string, unknown>
     : {};
-  const geometryStatus = status === "resolved" && (parsed.quantity || parsed.totalLengthM)
+  const previousGeometry = String(assumptions.geometry_status || "unresolved");
+  const normalizedPrevious = previousGeometry === "resolved" || previousGeometry === "partial" ? previousGeometry : "unresolved";
+  const geometryStatus: ApplyEngineerAnswerResult["geometryStatus"] = requestedStatus === "resolved" && parsed.quantity && parsed.totalLengthM && parsed.weightKg
     ? "resolved"
     : hasComputableValue
       ? "partial"
-      : String(assumptions.geometry_status || "unresolved");
+      : normalizedPrevious;
+  const storedEngineerAnswer = {
+    ...engineerAnswer,
+    status: requestedStatus === "resolved" && geometryStatus !== "resolved" ? "answered" : engineerAnswer.status,
+  };
   const update: Record<string, unknown> = {
     assumptions_json: {
       ...assumptions,
-      engineer_answer: engineerAnswer,
+      engineer_answer: storedEngineerAnswer,
       geometry_status: geometryStatus,
       missing_refs: geometryStatus === "resolved" ? [] : assumptions.missing_refs,
+      answer_derivation: parsed.rule || assumptions.answer_derivation || null,
       assistant_updated_at: new Date().toISOString(),
     },
   };
@@ -351,5 +419,10 @@ async function buildEstimateItemPatch(
 
   const { error } = await supabase.from("estimate_items").update(update).eq("id", estimateItemId);
   if (error) throw error;
-  return { updated: true, values: parsed };
+  return {
+    updated: true,
+    values: parsed,
+    geometryStatus,
+    missingRefs: (update.assumptions_json as Record<string, unknown>).missing_refs,
+  };
 }

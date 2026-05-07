@@ -21,6 +21,17 @@ type SmartQuestionInput = {
     pageNumber?: number | null;
     excerpt?: string | null;
   } | null;
+  linearGeometry?: {
+    objectLabel?: string | null;
+    lengthMm?: number | null;
+    heightMm?: number | null;
+    barCallout?: string | null;
+    confidence?: "high" | "medium" | "low" | string | null;
+    reason?: string | null;
+    sheetTag?: string | null;
+    pageNumber?: number | null;
+    excerpt?: string | null;
+  } | null;
 };
 
 export type EngineerAnswerDraft = {
@@ -89,11 +100,22 @@ function extractThickness(text: string): string | null {
 function extractRebarCallout(text: string): string | null {
   const normalized = normalizeCalloutText(text);
   const match = normalized.match(/\b(10M|15M|20M|25M|30M|35M)\s*@\s*(\d+\s*mm)\s*O\.C\.?/i);
-  if (!match) return null;
-  const tail = normalized.slice((match.index || 0) + match[0].length);
-  const qualifierMatch = tail.match(/^[\s.:-]*(each way|e\/w|vert(?:ical)?|horiz(?:ontal)?)/i);
-  const qualifier = qualifierMatch ? ` ${qualifierMatch[1].toLowerCase().replace("e/w", "each way")}` : "";
-  return `${match[1].toUpperCase()} @ ${match[2].replace(/\s+/g, "")} O.C.${qualifier}`;
+  if (match) {
+    const tail = normalized.slice((match.index || 0) + match[0].length);
+    const qualifierMatch = tail.match(/^[\s.:-]*(each way|e\/w|vert(?:ical)?|horiz(?:ontal)?|typical|staggered)/i);
+    const qualifier = qualifierMatch ? ` ${qualifierMatch[1].toLowerCase().replace("e/w", "each way")}` : "";
+    return `${match[1].toUpperCase()} @ ${match[2].replace(/\s+/g, "")} O.C.${qualifier}`;
+  }
+  const verbose = normalized.match(/\b(10M|15M|20M|25M|30M|35M)\s+(?:(vertical|horizontal)\s+)?bars?\s*@\s*(\d+\s*mm)\s*(?:\([^)]*\)\s*)?O\.C\.?(?:\s*(typical|staggered))?/i);
+  if (!verbose) return null;
+  return [
+    verbose[1].toUpperCase(),
+    verbose[2]?.toLowerCase(),
+    "bars @",
+    verbose[3].replace(/\s+/g, ""),
+    "O.C.",
+    verbose[4]?.toLowerCase(),
+  ].filter(Boolean).join(" ");
 }
 
 function cleanDescriptiveCallout(value: string): string {
@@ -141,6 +163,10 @@ function extractPlacementNote(text: string): string | null {
 function inferDrawingObject(text: string, fallback?: string | null): string {
   const t = text.toLowerCase();
   if (/frost\s+slab/.test(t)) return "frost slab";
+  if (/brick\s+ledge/.test(t)) return "brick ledge";
+  if (/\bledge\b/.test(t)) return "ledge";
+  if (/\bcurb\b/.test(t)) return "curb";
+  if (/slab\s+edge/.test(t)) return "slab edge";
   if (/\bslab\b/.test(t)) return "slab";
   if (/foundation\s+wall|frost\s+wall|\bwall\b/.test(t)) return "foundation wall";
   if (/strip\s+footing|wall\s+footing|footing/.test(t)) return "footing";
@@ -150,6 +176,7 @@ function inferDrawingObject(text: string, fallback?: string | null): string {
 
 function missingDimensionAsk(object: string, missingRefs: string[]): string {
   const missing = missingRefs.join(" ").toLowerCase();
+  if (/brick\s+ledge|ledge|curb|slab edge/.test(object)) return "brick ledge length and bar height";
   if (/slab/.test(object)) return "slab length and width";
   if (/wall/.test(object)) return "wall length and height";
   if (/pad/.test(object)) return "pad length and width";
@@ -195,6 +222,8 @@ export function inferEngineerAnswerFields(missingRefs: string[] = [], text = "")
   if (/\b(length|run|perimeter|edge|dimension|dimensions|long)\b/.test(haystack)) addField(keys, "length");
   if (/\b(width|wide)\b/.test(haystack)) addField(keys, "width");
   if (/\b(height|high|depth)\b/.test(haystack)) addField(keys, "height");
+  if (/\belement_dimensions\b|\bdimensions\b/.test(haystack)
+    && (/\b(vertical|brick\s+ledge|ledge|curb)\b/.test(haystack) || (/\bwall\b/.test(haystack) && !/\bpad\b/.test(haystack)))) addField(keys, "height");
   if (/\b(thick|thickness)\b/.test(haystack) || extractThickness(text)) addField(keys, "thickness");
   if (/\b(bar|rebar|callout|spacing|o\.?c\.?|@\b|15m|20m|10m|25m|hook)\b/.test(haystack) || extractDescriptiveRebarCallout(text)) addField(keys, "bar_callout");
   if (/\b(quantity|qty|count|number)\b/.test(haystack)) addField(keys, "quantity");
@@ -223,6 +252,34 @@ export function buildEngineerAnswerDraft(input: SmartQuestionInput): EngineerAns
   const loc = input.locationLabel || (input.pageNumber ? `P${input.pageNumber}` : "the highlighted drawing area");
   const excerpt = String(input.sourceExcerpt || "").trim();
   const wallGeometry = input.wallGeometry;
+  const linearGeometry = input.linearGeometry;
+
+  if (linearGeometry && (linearGeometry.lengthMm || linearGeometry.heightMm || linearGeometry.barCallout)) {
+    const object = linearGeometry.objectLabel || inferDrawingObject(sourceText, input.objectIdentity);
+    const visibleBarCallout = linearGeometry.barCallout || extractRebarCallout(sourceText) || extractDescriptiveRebarCallout(sourceText);
+    const foundParts = [
+      object,
+      visibleBarCallout ? `bar callout ${visibleBarCallout}` : null,
+      linearGeometry.lengthMm ? `scale-measured run length ${formatMm(Number(linearGeometry.lengthMm))}` : null,
+      linearGeometry.heightMm ? `bar height ${formatMm(Number(linearGeometry.heightMm))}` : null,
+    ].filter(Boolean);
+    const missingParts = [
+      !linearGeometry.lengthMm ? `${object} length` : null,
+      !linearGeometry.heightMm ? "bar height" : null,
+      !visibleBarCallout ? "bar callout" : null,
+    ].filter(Boolean) as string[];
+    const structuredValues: Record<string, string> = {};
+    if (linearGeometry.lengthMm) structuredValues.length = formatMm(Number(linearGeometry.lengthMm));
+    if (linearGeometry.heightMm) structuredValues.height = formatMm(Number(linearGeometry.heightMm));
+    if (visibleBarCallout) structuredValues.bar_callout = visibleBarCallout;
+    return {
+      question: `On ${loc}, find the ${object}. Found ${foundParts.join("; ")}. ${missingParts.length ? `What ${missingParts.join(" and ")} should be used?` : "Should these values be used?"}`,
+      draftAnswer: `Found: ${foundParts.join("; ")}. Evidence quality: ${linearGeometry.confidence || "medium"}. ${linearGeometry.reason || ""} ${missingParts.length ? `Please confirm ${missingParts.join(" and ")}.` : "Please confirm or correct."}`.replace(/\s+/g, " ").trim(),
+      confidence: linearGeometry.confidence === "high" ? "high" : linearGeometry.confidence === "medium" ? "medium" : "low",
+      needsConfirmation: true,
+      structuredValues,
+    };
+  }
 
   if (wallGeometry && (wallGeometry.lengthMm || wallGeometry.heightMm)) {
     const visibleBarCallout = extractRebarCallout(sourceText) || extractDescriptiveRebarCallout(sourceText);
@@ -322,6 +379,10 @@ export function buildEngineerAnswerDraft(input: SmartQuestionInput): EngineerAns
 function inferObjectFromText(text: string): string | null {
   const t = text.toLowerCase();
   if (/housekeeping\s*pad|leveling\s*pad|equipment\s*pad/.test(t)) return "housekeeping pad";
+  if (/brick\s*ledge/.test(t)) return "brick ledge";
+  if (/\bledge\b/.test(t)) return "ledge";
+  if (/\bcurb\b/.test(t)) return "curb";
+  if (/slab\s*edge/.test(t)) return "slab edge";
   if (/foundation\s*wall|frost\s*wall|stem\s*wall|\bwall\b/.test(t)) return "foundation wall";
   if (/strip\s*footing|wall\s*footing|footing/.test(t)) return "footing";
   if (/slab\s*edge|frost\s*slab|slab/.test(t)) return "slab";

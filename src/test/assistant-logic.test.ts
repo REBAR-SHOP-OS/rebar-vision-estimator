@@ -112,6 +112,15 @@ describe("workflow assistant logic", () => {
     });
   });
 
+  it("parses brick ledge vertical bars into Canadian quantity and weight", () => {
+    expect(parseAssistantAnswerValues('Brick ledge length 10000mm; bar height 1200mm; 10M vertical bars @ 300mm O.C. typical')).toMatchObject({
+      barSize: "10M",
+      quantity: 34,
+      totalLengthM: 40.8,
+      weightKg: 32.03,
+    });
+  });
+
   it("updates validation issue and linked estimate item on confirmed apply", async () => {
     const calls: Array<{ table: string; update: Record<string, unknown>; id?: string }> = [];
     const sourceRefs = [{ estimate_item_id: "item-1" }];
@@ -164,5 +173,50 @@ describe("workflow assistant logic", () => {
       total_weight: 10.68,
     });
     expect((itemPatch?.assumptions_json as Record<string, unknown>).geometry_status).toBe("resolved");
+  });
+
+  it("keeps linked estimate item partial when only bar callout is confirmed", async () => {
+    const calls: Array<{ table: string; update: Record<string, unknown>; id?: string }> = [];
+    const from = vi.fn((table: string) => {
+      const query: any = {
+        select: vi.fn(() => query),
+        eq: vi.fn((column: string, value: string) => {
+          if (column === "id") query.id = value;
+          return query;
+        }),
+        maybeSingle: vi.fn(() => Promise.resolve({
+          data: table === "validation_issues"
+            ? { source_refs: [{ estimate_item_id: "item-1" }] }
+            : { id: "item-1", assumptions_json: { geometry_status: "unresolved", missing_refs: ["element_dimensions"] }, bar_size: null },
+          error: null,
+        })),
+        update: vi.fn((patch: Record<string, unknown>) => {
+          calls.push({ table, update: patch, id: query.id });
+          return { eq: vi.fn(() => Promise.resolve({ error: null })) };
+        }),
+      };
+      return query;
+    });
+    const supabase = { from } as any;
+    const suggestion: AssistantSuggestion = {
+      issueId: "legacy:issue-2",
+      issueTitle: "P17: brick ledge",
+      locationLabel: "P17",
+      linkedEstimateItemId: "item-1",
+      question: "Question",
+      answerText: 'Found: brick ledge; bar callout 10M vertical bars @ 300mm O.C. typical. Please confirm dimensions.',
+      confidence: "medium",
+      needsConfirmation: true,
+      structuredValues: { bar_callout: "10M vertical bars @ 300mm O.C. typical" },
+      missingRefs: ["element_dimensions"],
+    };
+
+    const result = await applyAssistantSuggestion(supabase, suggestion, suggestion.answerText, "resolved");
+
+    expect(result.estimateUpdated).toBe(true);
+    const itemPatch = calls.find((call) => call.table === "estimate_items")?.update;
+    expect(itemPatch).toMatchObject({ bar_size: "10M" });
+    expect(itemPatch).not.toHaveProperty("quantity_count");
+    expect((itemPatch?.assumptions_json as Record<string, unknown>).geometry_status).toBe("partial");
   });
 });

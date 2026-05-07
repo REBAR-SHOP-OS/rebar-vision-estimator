@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseScaleRatio, resolveWallGeometryFromPages } from "@/lib/wall-geometry-resolver";
+import {
+  extractLinearBarCallout,
+  isScaleMeasurableLinearElement,
+  parseScaleRatio,
+  resolveLinearElementGeometryFromPages,
+  resolveWallGeometryFromPages,
+} from "@/lib/wall-geometry-resolver";
 
 describe("wall geometry resolver", () => {
   it("finds wall length and height from explicit OCR text", () => {
@@ -76,5 +82,55 @@ describe("wall geometry resolver", () => {
   it("parses common Canadian sheet scales", () => {
     expect(parseScaleRatio("1:50")).toBe(50);
     expect(parseScaleRatio("1mm = 0.05m")).toBe(50);
+  });
+
+  it("extracts brick ledge vertical bar callouts", () => {
+    expect(extractLinearBarCallout('10M VERTICAL BARS @ 300mm (12") O.C. TYPICAL')).toEqual({
+      barCallout: "10M vertical bars @ 300mm O.C. typical",
+      spacingMm: 300,
+      orientation: "vertical",
+    });
+    expect(isScaleMeasurableLinearElement("brick ledge")).toBe(true);
+  });
+
+  it("resolves brick ledge dimensions and callout from OCR text", () => {
+    const result = resolveLinearElementGeometryFromPages({
+      pages: [{
+        pageNumber: 17,
+        sheetTag: "S-1.0",
+        discipline: "structural",
+        rawText: 'BRICK LEDGE length 10000mm height 1200mm 10M VERTICAL BARS @ 300mm (12") O.C. TYPICAL',
+      }],
+      objectText: "brick ledge",
+      calloutText: '10M VERTICAL BARS @ 300mm (12") O.C. TYPICAL',
+    });
+
+    expect(result).toMatchObject({
+      objectLabel: "brick ledge",
+      lengthMm: 10000,
+      heightMm: 1200,
+      barCallout: "10M vertical bars @ 300mm O.C. typical",
+      spacingMm: 300,
+      orientation: "vertical",
+      confidence: "high",
+      needsConfirmation: false,
+    });
+  });
+
+  it("does not resolve brick ledge quantity basis from callout alone", () => {
+    const result = resolveLinearElementGeometryFromPages({
+      pages: [{
+        pageNumber: 17,
+        sheetTag: "S-1.0",
+        discipline: "structural",
+        rawText: 'BRICK LEDGE 10M VERTICAL BARS @ 300mm (12") O.C. TYPICAL',
+      }],
+      objectText: "brick ledge",
+    });
+
+    expect(result.barCallout).toBe("10M vertical bars @ 300mm O.C. typical");
+    expect(result.lengthMm).toBeNull();
+    expect(result.heightMm).toBeNull();
+    expect(result.needsConfirmation).toBe(true);
   });
 });

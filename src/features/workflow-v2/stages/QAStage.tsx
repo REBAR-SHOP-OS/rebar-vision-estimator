@@ -14,6 +14,7 @@ import {
   type BBox,
 } from "./qa-overlay-geometry";
 import { buildEngineerAnswerDraft, inferEngineerAnswerFields, summarizeEngineerAnswer } from "./qa-answer-fields";
+import { applyEngineerAnswerToEstimateItem, linkedEstimateItemIdFromRefs, type EngineerAnswerRecord } from "./assistant-logic";
 
 type TabKey = "change" | "impact" | "evidence" | "action";
 
@@ -390,6 +391,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     title: sel?.title,
     sourceExcerpt: sel?.location?.source_excerpt,
     missingRefs,
+    linearGeometry: Array.isArray(sel?.source_refs) ? (sel?.source_refs?.[0] as any)?.linear_geometry : null,
     wallGeometry: Array.isArray(sel?.source_refs) ? (sel?.source_refs?.[0] as any)?.wall_geometry : null,
   }), [missingRefs, objectIdentity, sel?.description, sel?.location?.page_number, sel?.location?.source_excerpt, sel?.location_label, sel?.locator?.page_number, sel?.source_refs, sel?.title]);
   const engineerQuestion = engineerDraft.question;
@@ -443,28 +445,59 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     setAnswerError(null);
     const now = new Date().toISOString();
     const refs = Array.isArray(sel.source_refs) ? [...sel.source_refs] : [];
+    const engineerAnswer: EngineerAnswerRecord = {
+      values,
+      answer_text: text,
+      note,
+      status,
+      answered_at: now,
+      location_label: sel.location_label || null,
+      issue_id: sel.id,
+      source: "workflow_v2_qa",
+    };
     const nextRefs = refs.filter((ref: any) => !ref?.engineer_answer);
-    nextRefs.push({
-      engineer_answer: {
-        values,
-        answer_text: text,
-        note,
-        status,
-        answered_at: now,
-        location_label: sel.location_label || null,
-        issue_id: sel.id,
-      },
-    });
 
     try {
+      const linkedEstimateItemId = sel.linked_item?.id || linkedEstimateItemIdFromRefs(refs);
+      const itemResult = await applyEngineerAnswerToEstimateItem(supabase, {
+        estimateItemId: linkedEstimateItemId,
+        responseText: text,
+        structuredValues: values,
+        requestedStatus: status,
+        engineerAnswer,
+      });
+      const effectiveStatus = status === "resolved" && itemResult.updated && itemResult.geometryStatus !== "resolved"
+        ? "answered"
+        : status;
+      const effectiveNote = status === "resolved" && itemResult.updated && itemResult.geometryStatus !== "resolved"
+        ? `${note}\n\nTakeoff update is ${itemResult.geometryStatus}; quantity, length, and weight are not all proven yet. Confirm the remaining dimensions before resolving.`
+        : note;
+      nextRefs.push({
+        engineer_answer: {
+          ...engineerAnswer,
+          note: effectiveNote,
+          status: effectiveStatus,
+          estimate_item_update: itemResult,
+        },
+      });
       if (sel.id.startsWith("legacy:")) {
         const { error } = await supabase
           .from("validation_issues")
-          .update({ status, resolution_note: note, source_refs: nextRefs, updated_at: now })
+          .update({ status: effectiveStatus, resolution_note: effectiveNote, source_refs: nextRefs, updated_at: now })
           .eq("id", sel.id.replace(/^legacy:/, ""));
         if (error) throw error;
       }
-      updateSelectedIssue({ status, resolution_note: note, source_refs: nextRefs });
+      const linkedPatch = itemResult.updated && sel.linked_item ? {
+        linked_item: {
+          ...sel.linked_item,
+          bar_size: itemResult.values.barSize || sel.linked_item.bar_size,
+          quantity_count: itemResult.values.quantity || sel.linked_item.quantity_count,
+          total_length: itemResult.values.totalLengthM || sel.linked_item.total_length,
+          total_weight: itemResult.values.weightKg || sel.linked_item.total_weight,
+          missing_refs: itemResult.geometryStatus === "resolved" ? [] : sel.linked_item.missing_refs,
+        },
+      } : {};
+      updateSelectedIssue({ status: effectiveStatus, resolution_note: effectiveNote, source_refs: nextRefs, ...linkedPatch });
     } catch (err) {
       setAnswerError(err instanceof Error ? err.message : "Could not save engineer answer.");
     } finally {

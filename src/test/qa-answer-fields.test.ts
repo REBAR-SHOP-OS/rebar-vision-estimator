@@ -127,6 +127,50 @@ describe("qa answer fields", () => {
     });
   });
 
+  it("drafts suggestions from brick ledge vertical bar callouts", () => {
+    const excerpt = '10M VERTICAL BARS @ 300mm (12") O.C. TYPICAL.';
+    const fields = inferEngineerAnswerFields(["rebar_callout", "element_dimensions"], `brick ledge ${excerpt}`).map((field) => field.key);
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P17",
+      objectIdentity: "brick ledge",
+      missingRefs: ["rebar_callout", "element_dimensions"],
+      sourceExcerpt: excerpt,
+      title: "P17: brick ledge",
+    });
+
+    expect(fields).toContain("length");
+    expect(fields).toContain("height");
+    expect(fields).toContain("bar_callout");
+    expect(draft.question).toBe('On P17, find the brick ledge. The drawing shows brick ledge with 10M vertical bars @ 300mm O.C. typical. What brick ledge length and bar height should be used?');
+    expect(draft.draftAnswer).toBe("Found: brick ledge; rebar 10M vertical bars @ 300mm O.C. typical. Please confirm the brick ledge length and bar height.");
+    expect(draft.structuredValues.bar_callout).toBe("10M vertical bars @ 300mm O.C. typical");
+  });
+
+  it("drafts scale-backed linear geometry when available", () => {
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P17",
+      objectIdentity: "brick ledge",
+      missingRefs: ["element_dimensions"],
+      sourceExcerpt: '10M VERTICAL BARS @ 300mm (12") O.C. TYPICAL.',
+      linearGeometry: {
+        objectLabel: "brick ledge",
+        lengthMm: 10000,
+        heightMm: 1200,
+        barCallout: "10M vertical bars @ 300mm O.C. typical",
+        confidence: "high",
+        reason: "Measured from element bbox using sheet scale 1:50.",
+      },
+    });
+
+    expect(draft.question).toContain("scale-measured run length 10000mm");
+    expect(draft.draftAnswer).toContain("bar height 1200mm");
+    expect(draft.structuredValues).toMatchObject({
+      length: "10000mm",
+      height: "1200mm",
+      bar_callout: "10M vertical bars @ 300mm O.C. typical",
+    });
+  });
+
   it("still drafts a low-confidence suggestion from unrelated descriptive text", () => {
     const draft = buildEngineerAnswerDraft({
       locationLabel: "P2",
