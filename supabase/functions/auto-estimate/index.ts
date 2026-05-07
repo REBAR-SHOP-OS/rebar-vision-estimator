@@ -523,7 +523,7 @@ function resolveLine(
       return {
         qty: aiQty,
         totalLengthM: aiLen,
-        totalWeightKg: Number(it.total_weight) > 0 ? Number(it.total_weight) : +(aiLen * mass).toFixed(2),
+        totalWeightKg: mass > 0 ? +(aiLen * mass).toFixed(2) : 0,
         status: "resolved",
         missing: [],
         derivation: known ? `mark ${markMatch![1]} from schedule` : "explicit dimensions in callout",
@@ -532,7 +532,7 @@ function resolveLine(
     // AI guessed without provenance — downgrade to partial
     return {
       qty: aiQty, totalLengthM: aiLen,
-      totalWeightKg: Number(it.total_weight) > 0 ? Number(it.total_weight) : +(aiLen * mass).toFixed(2),
+      totalWeightKg: mass > 0 ? +(aiLen * mass).toFixed(2) : 0,
       status: "partial",
       missing: ["provenance: no bar mark or explicit dimension found in description"],
     };
