@@ -483,19 +483,19 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
                                     {editing ? (
                                       <input type="number" className="w-16 bg-background border border-border px-1 text-[11px] text-right"
                                         value={editPatch.count ?? 0} onChange={(e) => setEditPatch((p) => ({ ...p, count: Number(e.target.value) }))} />
-                                    ) : r.geometry_status === "unresolved" ? <UnresolvedValue value={foundDisplay.qty} /> : r.count}
+                                     ) : r.geometry_status !== "resolved" ? <UnresolvedValue value={foundDisplay.qty} /> : r.count}
                                   </td>
                                   <td className="px-3 text-right">
                                     {editing ? (
                                       <input type="number" step="0.01" className="w-20 bg-background border border-border px-1 text-[11px] text-right"
                                         value={editPatch.length ?? 0} onChange={(e) => setEditPatch((p) => ({ ...p, length: Number(e.target.value) }))} />
-                                    ) : r.geometry_status === "unresolved" ? <UnresolvedValue value={foundDisplay.length} /> : r.length.toFixed(2)}
+                                     ) : r.geometry_status !== "resolved" ? <UnresolvedValue value={foundDisplay.length} /> : r.length.toFixed(2)}
                                   </td>
                                   <td className="px-3 text-right font-semibold">
                                     {editing ? (
                                       <input type="number" step="0.1" className="w-20 bg-background border border-border px-1 text-[11px] text-right"
                                         value={editPatch.weight ?? 0} onChange={(e) => setEditPatch((p) => ({ ...p, weight: Number(e.target.value) }))} />
-                                    ) : r.geometry_status === "unresolved" ? <UnresolvedValue value={foundDisplay.weight} /> : r.weight.toFixed(1)}
+                                     ) : r.geometry_status !== "resolved" ? <UnresolvedValue value={foundDisplay.weight} /> : r.weight.toFixed(1)}
                                   </td>
                                   <td className="px-3">
                                     {r.geometry_status === "unresolved" ? (
@@ -586,11 +586,11 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
         </div>
         {sel && (
           <div className="border-t border-border p-3 bg-card text-foreground">
-            {sel.geometry_status === "unresolved" && (
+            {sel.geometry_status !== "resolved" && (
               <UnresolvedFoundPanel row={sel} />
             )}
             <div className="grid grid-cols-3 gap-2 text-[11px] font-mono mb-3">
-              {sel.geometry_status === "unresolved" ? (
+              {sel.geometry_status !== "resolved" ? (
                 <>
                   <Field label="Qty" value={extractFoundDisplay(sel).qty} />
                   <Field label="Len" value={extractFoundDisplay(sel).length} />
