@@ -60,6 +60,10 @@ export interface WorkflowQaIssue {
     section_reference?: string | null;
     callout_tag?: string | null;
     element_id?: string | null;
+    footing_id?: string | null;
+    wall_id?: string | null;
+    pad_id?: string | null;
+    slab_zone_id?: string | null;
     grid_reference?: string | null;
     zone_reference?: string | null;
     element_reference?: string | null;
@@ -112,6 +116,21 @@ function pickAnchorStr(...vals: any[]): string | null {
     if (s && !isPageTag(s)) return s;
   }
   return null;
+}
+
+function pickObjectIdentity(loc: WorkflowQaIssue["location"]): string | null {
+  return pickAnchorStr(
+    loc?.element_id,
+    loc?.pad_id,
+    loc?.footing_id,
+    loc?.wall_id,
+    loc?.slab_zone_id,
+    loc?.callout_tag,
+    loc?.schedule_row_identity,
+    loc?.detail_reference,
+    loc?.grid_reference,
+    loc?.section_reference,
+  );
 }
 
 export function buildLocationLabel(loc: WorkflowQaIssue["location"], fallbackSheet?: string | null): string | null {
@@ -407,10 +426,10 @@ function rewriteToRawInputAsk(
   const lookAt = label && label.trim().length > 0
     ? label.trim()
     : (loc?.page_number ? `Page ${loc.page_number}` : "the drawing");
-  const elementId = (loc?.element_id || "").trim();
-  const findPart = elementId
-    ? `${noun} ${elementId}`
-    : calloutText
+  const objectIdentity = pickObjectIdentity(loc);
+  const findPart = objectIdentity
+    ? `${noun} ${objectIdentity}`
+    : calloutText && !isPageTag(calloutText)
       ? `the ${noun} marked "${calloutText}"`
       : `the ${noun}`;
   return `Look at ${lookAt}. Find ${findPart}. Enter ${inputList} from the drawing.`;
@@ -432,6 +451,10 @@ function extractLocationFromRef(ref: any, aj: Record<string, any>, fallback: { s
     section_reference: pickAnchorStr(nestedR.section, nestedA.section, r.section, r.section_reference, aj.section, aj.section_reference, inferred.section_reference),
     callout_tag: pickAnchorStr(r.callout_tag, aj.callout_tag, inferred.callout_tag),
     element_id: pickAnchorStr(r.element_id, aj.element_id, inferred.element_id),
+    footing_id: pickAnchorStr(r.footing_id, aj.footing_id),
+    wall_id: pickAnchorStr(r.wall_id, aj.wall_id),
+    pad_id: pickAnchorStr(r.pad_id, aj.pad_id),
+    slab_zone_id: pickAnchorStr(r.slab_zone_id, aj.slab_zone_id),
     grid_reference: pickAnchorStr(nestedR.grid, nestedA.grid, r.grid, r.grid_reference, aj.grid, aj.grid_reference, inferred.grid_reference),
     zone_reference: pickAnchorStr(nestedR.zone, nestedA.zone, r.zone, r.zone_reference, aj.zone, aj.zone_reference, aj.area, r.area, nestedR.area, nestedA.area, inferred.zone_reference),
     element_reference: pickAnchorStr(

@@ -300,27 +300,71 @@ function cleanAnchorPhrase(value: string | null | undefined): string | null {
   return s || null;
 }
 
+function isPageTag(value: string | null | undefined): boolean {
+  const s = String(value || "").trim();
+  return !s || /^(?:p|page)?\s*\d+$/i.test(s);
+}
+
+function cleanObjectAnchor(value: string | null | undefined): string | null {
+  const s = cleanAnchorPhrase(value);
+  return s && !isPageTag(s) ? s : null;
+}
+
+function normalizeDetailReference(value: string | null | undefined): string | null {
+  const s = cleanObjectAnchor(value);
+  if (!s) return null;
+  const td = s.match(/^(?:T\.?\s*D\.?|TD)[\s#:.-]*([A-Z0-9][A-Z0-9./-]*)$/i);
+  return td ? `T.D.${td[1]}` : s;
+}
+
+function classifyElementIds(elementId: string | null | undefined) {
+  const id = cleanObjectAnchor(elementId)?.toUpperCase() || null;
+  return {
+    footing_id: id && /^(?:F|WF|SF|GB)\d+/i.test(id) ? id : null,
+    wall_id: id && /^(?:W|FW)\d+/i.test(id) ? id : null,
+    pad_id: id && /^(?:HKP|EQP)\d+/i.test(id) ? id : null,
+    slab_zone_id: id && /^(?:SOG|SL|FZ|S-)\d+/i.test(id) ? id : null,
+  };
+}
+
+function pickObjectIdentity(meta: Record<string, any>): string | null {
+  return cleanObjectAnchor(
+    meta.element_id
+      || meta.callout_tag
+      || meta.schedule_row_identity
+      || meta.detail_reference
+      || meta.grid_reference
+      || meta.section_reference
+  );
+}
+
 function inferQaAnchorMeta(...vals: Array<string | null | undefined>) {
   const text = vals.filter(Boolean).join(" \n ");
   const zoneMatch = text.match(/\b(?:AT|ALONG|NEAR)\s+(EXTENT OF\s+[A-Z][A-Z\s]+|ENTRANCE DOOR|WEST SIDE|EAST SIDE|NORTH SIDE|SOUTH SIDE)\b/i);
-  const section = cleanAnchorPhrase(text.match(/\bSECTION\s+([A-Z0-9.\-\/]+)/i)?.[1] || null);
-  const detail = cleanAnchorPhrase(text.match(/\b(?:DETAIL|DET\.?|T\.D\.?|TD\.?)[\s#:]*([A-Z0-9.\-\/]+)/i)?.[1] || null);
+  const section = cleanObjectAnchor(text.match(/\bSECTION\s+([A-Z0-9./-]+)/i)?.[1] || null);
+  const detail = normalizeDetailReference(
+    text.match(/\b(?:DETAIL|DET\.?)[\s#:]*((?:T\.?\s*D\.?|TD)[\s#:.-]*[A-Z0-9][A-Z0-9./-]*|[A-Z0-9][A-Z0-9./-]*)/i)?.[1]
+      || text.match(/\b((?:T\.?\s*D\.?|TD)[\s#:.-]*[A-Z0-9][A-Z0-9./-]*)\b/i)?.[1]
+      || null
+  );
   // Element-ID style callouts (HKP1, F12, WF3, GB2, W3, COL5, S-1, etc.)
-  const ELEMENT_ID_RX = /\b(HKP\d+|EQP\d+|FW\d+|WF\d+|SF\d+|SOG\d+|SL\d+|FZ\d+|COL\d+|PIER\d+|PR\d+|BS?\d{2,4}|B\d{4}|F\d{1,3}|W\d{1,3}|GB\d{1,3}|D\d{2}(?:-\d+)?|P\d{1,3}|S-\d+|TD-?\d+)\b/i;
-  const callout = cleanAnchorPhrase(text.match(ELEMENT_ID_RX)?.[1] || null);
+  const ELEMENT_ID_RX = /\b(HKP\d+|EQP\d+|FW\d+|WF\d+|SF\d+|SOG\d+|SL\d+|FZ\d+|COL\d+|PIER\d+|PR\d+|BS?\d{2,4}|B\d{4}|F\d{1,3}|W\d{1,3}|GB\d{1,3}|D\d{2}(?:-\d+)?|S-\d+)\b/i;
+  const callout = cleanObjectAnchor(text.match(ELEMENT_ID_RX)?.[1] || null);
   const elementId = callout ? callout.toUpperCase() : null;
-  const grid = cleanAnchorPhrase(text.match(/\bGRID\s+([A-Z]+-?\d+[A-Z]?)\b/i)?.[1] || null);
-  const zone = cleanAnchorPhrase(zoneMatch?.[1] || null);
+  const typedIds = classifyElementIds(elementId);
+  const grid = cleanObjectAnchor(text.match(/\bGRID\s+([A-Z]+-?\d+[A-Z]?)\b/i)?.[1] || null);
+  const zone = cleanObjectAnchor(zoneMatch?.[1] || null);
   let element = cleanAnchorPhrase(
     text.match(/\b(HOUSEKEEPING PAD|EQUIPMENT PAD|LEVEL(?:I|E)NG PAD(?: AT ENTRANCE DOOR)?|FOUNDATION WALL(?: AT ENTRANCE DOOR)?|TOP OF BRICK LEDGE|BRICK LEDGE|FROST SLAB EDGE|SLAB EDGE|STRIP FOOTING|CONT(?:INUOUS)? FOOTING|DOOR OPENING)\b/i)?.[1] || null
   );
   if (element) element = element.toLowerCase();
-  const schedule = cleanAnchorPhrase(text.match(/\b(?:SCHEDULE|ROW)\s+([A-Z0-9.\-\/]+)/i)?.[1] || callout || null);
+  const schedule = cleanObjectAnchor(text.match(/\b(?:SCHEDULE|ROW)\s+([A-Z0-9./-]+)/i)?.[1] || callout || null);
   return {
     detail_reference: detail,
     section_reference: section,
     callout_tag: callout,
     element_id: elementId,
+    ...typedIds,
     grid_reference: grid,
     zone_reference: zone,
     element_reference: element,
@@ -922,7 +966,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         const out: Array<{ text: string; kind: AnchorKind }> = [];
         const push = (raw: any, kind: AnchorKind) => {
           const t = cleanTok(raw);
-          if (!t || isGenericExcerpt(t)) return;
+          if (!t || isPageTag(t) || isGenericExcerpt(t)) return;
           if (out.some((c) => c.text === t)) return;
           out.push({ text: t, kind });
         };
@@ -939,7 +983,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
           push(tok, "excerpt");
         }
         const desc = String(it.description || "").toUpperCase();
-        const markMatch = desc.match(/\b(BS\d+|BS-\d+|F\d+|FW\d+|W\d+|P\d+|C\d+|GB\d+|B\d+|S\d+|PC\d+)\b/);
+        const markMatch = desc.match(/\b(BS\d+|BS-\d+|F\d+|FW\d+|W\d+|HKP\d+|EQP\d+|GB\d+|B\d+|S-\d+|PC\d+)\b/);
         if (markMatch) push(markMatch[1], "mark");
         const sz = cleanTok(it.bar_size);
         if (sz) push(sz, "size");
@@ -1046,6 +1090,10 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         section_reference: qaAnchor.section_reference,
         callout_tag: qaAnchor.callout_tag,
         element_id: qaAnchor.element_id,
+        footing_id: qaAnchor.footing_id,
+        wall_id: qaAnchor.wall_id,
+        pad_id: qaAnchor.pad_id,
+        slab_zone_id: qaAnchor.slab_zone_id,
         grid_reference: qaAnchor.grid_reference,
         zone_reference: qaAnchor.zone_reference,
         element_reference: qaAnchor.element_reference,
@@ -1120,6 +1168,14 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         const calloutTag = aj.callout_tag || null;
         const elementId = aj.element_id || null;
         const scheduleRowIdentity = aj.schedule_row_identity || null;
+        const objectIdentity = pickObjectIdentity({
+          element_id: elementId,
+          callout_tag: calloutTag,
+          schedule_row_identity: scheduleRowIdentity,
+          detail_reference: detail,
+          grid_reference: grid,
+          section_reference: section,
+        });
         const element = aj.element || aj.element_reference || aj.mark || aj.callout
           || aj.wall_name || aj.footing_name || aj.pad_name || null;
         const excerpt = aj.excerpt || aj.source_excerpt || null;
@@ -1128,8 +1184,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         if (aj.page_number) locParts.push(`Page ${aj.page_number}`);
         if (detail) locParts.push(`Detail ${detail}`);
         if (section) locParts.push(`Section ${section}`);
-        if (elementId) locParts.push(elementId);
-        else if (calloutTag) locParts.push(`Callout ${calloutTag}`);
+        if (objectIdentity && objectIdentity !== detail && objectIdentity !== section) locParts.push(objectIdentity);
         if (grid) locParts.push(`Grid ${grid}`);
         if (zone) locParts.push(String(zone));
         if (element) locParts.push(String(element));
@@ -1149,9 +1204,9 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
           ? phrases[0]
           : phrases.slice(0, -1).join(", ") + ", and " + phrases[phrases.length - 1];
         const lookAt = locLabel || (aj.page_number ? `Page ${aj.page_number}` : "the drawing");
-        const findPart = elementId
-          ? `${noun} ${elementId}`
-          : element
+        const findPart = objectIdentity
+          ? `${noun} ${objectIdentity}`
+          : element && !isPageTag(element)
             ? `the ${noun} marked "${element}"`
             : (excerpt ? `the ${noun} for "${String(excerpt).slice(0, 80)}"` : `the ${noun}`);
         const baseTitle = `${noun} — enter drawing dimensions`;
@@ -1176,6 +1231,10 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
           section,
           callout_tag: calloutTag,
           element_id: elementId,
+          footing_id: aj.footing_id || null,
+          wall_id: aj.wall_id || null,
+          pad_id: aj.pad_id || null,
+          slab_zone_id: aj.slab_zone_id || null,
           grid,
           zone,
           element,
