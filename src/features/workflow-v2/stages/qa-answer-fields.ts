@@ -62,6 +62,7 @@ function normalizeCalloutText(text: string): string {
   return text
     .replace(/\s+/g, " ")
     .replace(/\bW\/\b/gi, "with")
+    .replace(/@(?=\w)/g, "at ")
     .replace(/\bEA\.?\s*WAY\b/gi, "each way")
     .replace(/\bE\.?\s*W\.?\b/gi, "each way")
     .replace(/\bO\.?\s*C\.?\b/gi, "O.C.")
@@ -84,6 +85,41 @@ function extractRebarCallout(text: string): string | null {
   const qualifierMatch = tail.match(/^[\s.:-]*(each way|e\/w|vert(?:ical)?|horiz(?:ontal)?)/i);
   const qualifier = qualifierMatch ? ` ${qualifierMatch[1].toLowerCase().replace("e/w", "each way")}` : "";
   return `${match[1].toUpperCase()} @ ${match[2].replace(/\s+/g, "")} O.C.${qualifier}`;
+}
+
+function cleanDescriptiveCallout(value: string): string {
+  return normalizeCalloutText(value)
+    .replace(/\bFOUNDATION\s+WALL\b/gi, "foundation wall")
+    .replace(/\bCONTINUOUS\b/gi, "continuous")
+    .replace(/\bHORIZONTAL\b/gi, "horizontal")
+    .replace(/\bVERTICAL\b/gi, "vertical")
+    .replace(/\bBARS?\b/gi, (m) => m.toLowerCase())
+    .replace(/\bHOOK\b/gi, "hook")
+    .replace(/\bTOP\b/gi, "top")
+    .replace(/\bAT\s+TOP\b/gi, "at top")
+    .replace(/\bWITH\b/gi, "with")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([.;,])/g, "$1")
+    .replace(/[.;,\s]+$/g, "")
+    .trim();
+}
+
+function extractDescriptiveRebarCallout(text: string): string | null {
+  const normalized = normalizeCalloutText(text);
+  const barMatch = normalized.match(/\b(?:continuous\s+)?(?:horizontal|vertical)\s+bars?\b/i);
+  if (!barMatch) return null;
+
+  const start = barMatch.index || 0;
+  const after = normalized.slice(start);
+  const hook = after.match(/\b\d+\s*mm\s*(?:\([^)]*\)\s*)?hook\b/i)?.[0];
+  const location = after.match(/\bat\s+(?:the\s+)?top\s+of\s+foundation\s+wall\b/i)?.[0]
+    || after.match(/\bat\s+(?:the\s+)?(?:top|bottom|middle)\b/i)?.[0];
+  const raw = [
+    barMatch[0],
+    location,
+    hook ? `with ${hook}` : null,
+  ].filter(Boolean).join(" ");
+  return cleanDescriptiveCallout(raw);
 }
 
 function extractPlacementNote(text: string): string | null {
@@ -151,7 +187,7 @@ export function inferEngineerAnswerFields(missingRefs: string[] = [], text = "")
   if (/\b(width|wide)\b/.test(haystack)) addField(keys, "width");
   if (/\b(height|high|depth)\b/.test(haystack)) addField(keys, "height");
   if (/\b(thick|thickness)\b/.test(haystack) || extractThickness(text)) addField(keys, "thickness");
-  if (/\b(bar|rebar|callout|spacing|o\.?c\.?|@\b|15m|20m|10m|25m)\b/.test(haystack)) addField(keys, "bar_callout");
+  if (/\b(bar|rebar|callout|spacing|o\.?c\.?|@\b|15m|20m|10m|25m|hook)\b/.test(haystack) || extractDescriptiveRebarCallout(text)) addField(keys, "bar_callout");
   if (/\b(quantity|qty|count|number)\b/.test(haystack)) addField(keys, "quantity");
 
   if (keys.size === 0) addField(keys, "answer");
@@ -200,7 +236,7 @@ export function buildEngineerAnswerDraft(input: SmartQuestionInput): EngineerAns
   }
 
   const visibleThickness = extractThickness(sourceText);
-  const visibleBarCallout = extractRebarCallout(sourceText);
+  const visibleBarCallout = extractRebarCallout(sourceText) || extractDescriptiveRebarCallout(sourceText);
   if (visibleThickness || visibleBarCallout) {
     const object = inferDrawingObject(sourceText, input.objectIdentity);
     const dimensions = missingDimensionAsk(object, missingRefs);

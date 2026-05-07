@@ -108,4 +108,32 @@ describe("qa answer fields", () => {
     expect(draft.draftAnswer).toContain("Found: 203mm foundation wall; rebar 15M @ 406mm O.C.");
     expect(draft.structuredValues.thickness).toBe("203mm");
   });
+
+  it("drafts suggestions from descriptive foundation wall hook callouts", () => {
+    const excerpt = 'Continuous horizontal bars @top of foundation wall w/ 800mm (32") hook';
+    const fields = inferEngineerAnswerFields(["rebar_callout", "element_dimensions"], excerpt).map((field) => field.key);
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P12",
+      objectIdentity: "foundation wall",
+      missingRefs: ["rebar_callout", "element_dimensions"],
+      sourceExcerpt: excerpt,
+    });
+
+    expect(fields).toContain("bar_callout");
+    expect(draft.question).toBe('On P12, find the foundation wall. The drawing shows foundation wall with continuous horizontal bars at top of foundation wall with 800mm (32") hook. What wall length and height should be used?');
+    expect(draft.draftAnswer).toBe('Found: foundation wall; rebar continuous horizontal bars at top of foundation wall with 800mm (32") hook. Please confirm the wall length and height.');
+    expect(draft.structuredValues).toEqual({
+      bar_callout: 'continuous horizontal bars at top of foundation wall with 800mm (32") hook',
+    });
+  });
+
+  it("does not draft an answer from unrelated descriptive text", () => {
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P2",
+      sourceExcerpt: "Refer to architectural drawings for information.",
+    });
+
+    expect(draft.draftAnswer).toBe("");
+    expect(draft.structuredValues).toEqual({});
+  });
 });
