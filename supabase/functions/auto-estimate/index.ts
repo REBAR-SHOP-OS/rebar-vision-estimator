@@ -909,8 +909,9 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       const pages = (searchPages || [])
         .filter((p: any) => p && (p.raw_text || "").length > 20)
         .map((p: any) => ({ page_number: Number(p.page_number) || 1, text: String(p.raw_text || "").toUpperCase() }));
-      type AnchorKind = "detail" | "section" | "callout" | "grid" | "element" | "schedule" | "excerpt" | "mark" | "size";
+      type AnchorKind = "element_id" | "detail" | "section" | "callout" | "grid" | "element" | "schedule" | "excerpt" | "mark" | "size";
       const KIND_SCORE: Record<AnchorKind, number> = {
+        element_id: 0.99,
         detail: 0.99, section: 0.98, callout: 0.97, grid: 0.94,
         schedule: 0.92, element: 0.9, excerpt: 0.78, mark: 0.7, size: 0.55,
       };
@@ -927,6 +928,7 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         };
         push(meta.detail_reference, "detail");
         push(meta.section_reference, "section");
+        push(meta.element_id, "element_id");
         push(meta.callout_tag, "callout");
         push(meta.grid_reference, "grid");
         push(meta.schedule_row_identity, "schedule");
