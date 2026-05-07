@@ -93,12 +93,32 @@ function isLocalizedSpan(items: PageTextItem[], imgW: number, imgH: number): boo
 }
 
 function getExcerptTokens(value: string | null | undefined): string[] {
-  const stop = new Set(["look", "sheet", "page", "find", "enter", "drawing", "from", "note"]);
+  const stop = new Set(["look", "sheet", "page", "find", "enter", "drawing", "from", "note", "typical", "rebar", "bars", "vertical", "cont", "reinforcement"]);
   return Array.from(new Set(
     normalizeText(value)
       .split(" ")
       .filter((tok) => tok && !stop.has(tok) && (tok.length >= 4 || /\d/.test(tok)))
   )).slice(0, 8);
+}
+
+function buildAnchorCandidates(sel: WorkflowQaIssue | undefined | null): Array<{ value: string; kind: "detail" | "section" | "callout" | "grid" | "element" | "schedule" | "excerpt" | "ocr"; score: number }> {
+  const loc = sel?.location || {};
+  const candidates: Array<{ value: string; kind: "detail" | "section" | "callout" | "grid" | "element" | "schedule" | "excerpt" | "ocr"; score: number }> = [];
+  const push = (value: string | null | undefined, kind: "detail" | "section" | "callout" | "grid" | "element" | "schedule" | "excerpt" | "ocr", score: number) => {
+    const s = String(value || "").trim();
+    if (!s || /^page\s*\d+$/i.test(s)) return;
+    candidates.push({ value: s, kind, score });
+  };
+  push(loc.detail_reference, "detail", 0.99);
+  push(loc.section_reference, "section", 0.98);
+  push(loc.callout_tag, "callout", 0.97);
+  push(loc.grid_reference, "grid", 0.94);
+  push(loc.schedule_row_identity, "schedule", 0.92);
+  push(loc.element_reference, "element", 0.91);
+  for (const tok of getExcerptTokens(loc.source_excerpt)) push(tok, "excerpt", 0.82);
+  const quoted = String(loc.source_excerpt || "").match(/"([^"]{3,60})"/);
+  if (quoted?.[1]) push(quoted[1], "ocr", 0.65);
+  return candidates.filter((cand, idx, arr) => arr.findIndex((c) => `${c.kind}:${normalizeText(c.value)}` === `${cand.kind}:${normalizeText(cand.value)}`) === idx);
 }
 
 function tightBox(
@@ -307,34 +327,13 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const approxResult = useMemo<{ bbox: [number, number, number, number] | null; reason: string; confidence: number; mode: "exact" | "approximate" | "unavailable" }>(() => {
     if (exactBbox) return { bbox: null, reason: "", confidence: 1, mode: "exact" };
     if (!pageText || pageText.length === 0) return { bbox: null, reason: "no OCR text on page", confidence: 0, mode: "unavailable" };
-    const loc = sel?.location || {};
     const lines = buildTextLines(pageText);
-    const candidates: Array<{ value: string; kind: "detail" | "element" | "excerpt" | "ocr"; score: number }> = [];
-    const push = (v?: string | null) => {
-      if (!v) return;
-      const s = String(v).trim();
-      if (s.length < 3) return;
-      if (/^page\s*\d+$/i.test(s)) return;
-      candidates.push({ value: s, kind: "ocr", score: 0.55 });
-    };
-    if (loc.detail_reference) candidates.unshift({ value: String(loc.detail_reference), kind: "detail", score: 0.98 });
-    if (loc.element_reference) candidates.push({ value: String(loc.element_reference), kind: "element", score: 0.92 });
-    for (const tok of getExcerptTokens(loc.source_excerpt)) {
-      candidates.push({ value: tok, kind: "excerpt", score: 0.82 });
-    }
-    if (loc.source_excerpt) {
-      const quoted = String(loc.source_excerpt).match(/"([^"]{3,60})"/);
-      if (quoted?.[1]) candidates.push({ value: quoted[1], kind: "ocr", score: 0.68 });
-      push(loc.source_excerpt);
-    }
-    if (sel?.linked_item?.bar_size) candidates.push({ value: String(sel.linked_item.bar_size), kind: "excerpt", score: 0.78 });
+    const candidates = buildAnchorCandidates(sel);
     if (candidates.length === 0) {
-      return { bbox: null, reason: "no specific detail, label, or excerpt to match on this page", confidence: 0, mode: "unavailable" };
+      return { bbox: null, reason: "no specific detail, section, callout, grid, or labeled object to match on this page", confidence: 0, mode: "unavailable" };
     }
 
-    const deduped = candidates.filter((cand, idx, arr) => arr.findIndex((c) => `${c.kind}:${normalizeText(c.value)}` === `${cand.kind}:${normalizeText(cand.value)}`) === idx);
-
-    for (const candidate of deduped) {
+    for (const candidate of candidates) {
       const normalized = normalizeText(candidate.value);
       if (!normalized) continue;
       const lineHit = lines.find((ln) => ln.text.includes(normalized));
@@ -342,7 +341,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
       if (span && isLocalizedSpan(span, imgW, imgH)) {
         return {
           bbox: clampBbox(tightBox(span, imgW, imgH), imgW, imgH),
-          reason: `${candidate.kind === "detail" ? "detail" : candidate.kind === "element" ? "element label" : candidate.kind === "excerpt" ? "source excerpt" : "OCR phrase"} match on "${candidate.value}"`,
+          reason: `${candidate.kind === "detail" ? "detail" : candidate.kind === "section" ? "section" : candidate.kind === "callout" ? "callout" : candidate.kind === "grid" ? "grid" : candidate.kind === "schedule" ? "schedule row" : candidate.kind === "element" ? "element label" : candidate.kind === "excerpt" ? "source excerpt" : "OCR phrase"} match on "${candidate.value}"`,
           confidence: candidate.score,
           mode: candidate.score >= 0.9 ? "exact" : "approximate",
         };
@@ -351,7 +350,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
       if (tokenHit && isLocalizedSpan([tokenHit], imgW, imgH)) {
         return {
           bbox: clampBbox(tightBox([tokenHit], imgW, imgH), imgW, imgH),
-          reason: `${candidate.kind === "detail" ? "detail" : candidate.kind === "element" ? "element label" : candidate.kind === "excerpt" ? "source excerpt" : "OCR phrase"} token match on "${candidate.value}"`,
+          reason: `${candidate.kind === "detail" ? "detail" : candidate.kind === "section" ? "section" : candidate.kind === "callout" ? "callout" : candidate.kind === "grid" ? "grid" : candidate.kind === "schedule" ? "schedule row" : candidate.kind === "element" ? "element label" : candidate.kind === "excerpt" ? "source excerpt" : "OCR phrase"} token match on "${candidate.value}"`,
           confidence: Math.max(0.55, candidate.score - 0.1),
           mode: candidate.score >= 0.9 ? "exact" : "approximate",
         };
