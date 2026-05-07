@@ -7,6 +7,28 @@ import { Sparkles, FileText, CheckCircle2, Loader2, Wand2, Pencil, Save, X, Chev
 import PdfRenderer from "@/components/chat/PdfRenderer";
 import { loadWorkflowTakeoffRows, type WorkflowTakeoffRow } from "../takeoff-data";
 import { parseAndIndexFile } from "@/lib/parse-file";
+function getFunctionErrorMessage(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  const jsonStart = message.indexOf("{");
+  if (jsonStart >= 0) {
+    try {
+      const payload = JSON.parse(message.slice(jsonStart));
+      if (payload?.error === "DIMENSIONS_INCOMPLETE") {
+        const blockers = Array.isArray(payload.blockers)
+          ? payload.blockers.map((b: { name?: string }) => b?.name).filter(Boolean).join(", ")
+          : "";
+        return blockers
+          ? `Dimensions still need review for: ${blockers}.`
+          : "Dimensions still need review before takeoff.";
+      }
+      if (typeof payload?.message === "string" && payload.message.trim()) return payload.message;
+    } catch {
+      // keep fallback
+    }
+  }
+  return message || fallback;
+}
+
 import { buildEngineerAnswerDraft } from "./qa-answer-fields";
 import { computeSyntheticEstimate } from "../lib/synthetic-estimate";
 import {
@@ -164,7 +186,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
       state.refresh();
     } catch (err) {
       console.warn("Per-segment re-run failed:", err);
-      toast.error(`Re-run failed for "${segName}"`);
+      toast.error(getFunctionErrorMessage(err, `Re-run failed for "${segName}"`));
     } finally {
       setSegRunning(null);
     }
@@ -340,6 +362,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
           ok++;
         } catch (err) {
           console.warn(`auto-estimate failed for segment ${seg.name}:`, err);
+          toast.error(getFunctionErrorMessage(err, `Takeoff failed for ${seg.name}`));
           failed++;
         }
       }
