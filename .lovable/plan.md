@@ -1,39 +1,46 @@
-## Problem
+## Patch — show extracted hints on Partial rows (no zeros, no inventions)
 
-The "Construction Buckets" panel on the Scope stage (`src/features/workflow-v2/stages/ScopeStage.tsx`) shows fake values that look like real estimates:
+**File:** `src/features/workflow-v2/stages/TakeoffStage.tsx`
 
-- **Line 266** — Header `Total Tonnage`: `(accepted.length * 14.2).toFixed(1)` — synthetic `14.2 TN per item`.
-- **Line 294** — Each bucket row: `(2.5 + (i * 0.7)).toFixed(1)` — synthetic per-item TN.
+Change in 4 spots: treat `geometry_status === "partial"` the same as `"unresolved"` for value display only. The `Partial` orange badge, tooltip, missing_refs chips, and DB values stay exactly as-is.
 
-Neither value is sourced from `estimate_items`, `verified_estimate_results`, or any real takeoff data. They are pure UI placeholders, which is exactly what the user is complaining about ("what is this guess?").
+### Edits
 
-## Fix (minimum-patch)
-
-Replace the two hardcoded math expressions with honest placeholders until real estimate data is wired in.
-
-### Change 1 — Line 294 (per-item weight)
+**1. Qty cell (~line 486)**
 ```tsx
-<span className="text-muted-foreground">— TN</span>
+) : r.geometry_status !== "resolved" ? <UnresolvedValue value={foundDisplay.qty} /> : r.count}
 ```
 
-### Change 2 — Line 266 (header total tonnage)
+**2. Length cell (~line 492)**
 ```tsx
-<span>Total Tonnage <span className="text-foreground font-semibold ml-1">— TN</span></span>
+) : r.geometry_status !== "resolved" ? <UnresolvedValue value={foundDisplay.length} /> : r.length.toFixed(2)}
 ```
 
-That's it. Two lines, one file. No logic, no data fetching, no schema, no edge-function changes.
+**3. Weight cell (~line 498)**
+```tsx
+) : r.geometry_status !== "resolved" ? <UnresolvedValue value={foundDisplay.weight} /> : r.weight.toFixed(1)}
+```
 
-## Why not wire real numbers in the same patch?
+**4. Right pane Field block (~lines 593-605)** — change the ternary from `=== "unresolved"` to `!== "resolved"` and reuse `extractFoundDisplay(sel)` for partial rows too. Also render the `UnresolvedFoundPanel` when `!== "resolved"` (line 589).
 
-Wiring real per-segment weights into this card requires:
-- Querying `estimate_items` joined to `segments` and grouped by the bucket's segment-type mapping (5 buckets).
-- Reconciling with `verified_estimate_results.result_json`.
-- Handling the case where `auto-estimate` hasn't run or returned 0 weight.
+### Result for the 8 rows currently at 0/0/0
 
-That's a follow-up feature, not a bug fix. The user's complaint here is the **lie** (fake numbers shown as if real). Removing the lie is the smallest safe patch and matches the project's `MINIMAL CHANGE / PATCH-FIRST / PRODUCTION SAFE` rules.
+| Row | Was | Will show (extracted from OCR) |
+|---|---|---|
+| 152mm FROST SLAB W/ 15M @ 305 EW | 0/0.00/0.0 | bar 15M; thickness 152mm; spacing 305mm O.C.; each way → Need run / 152mm / Need run |
+| C10M @750 ALONG PAD EDGE (HKP>1500x1500) | 0/0.00/0.0 | bar 10M; spacing 750mm O.C. → Ask / Ask / Need run |
+| 4-C10M IN CORNERS (HKP) | 0/0.00/0.0 | qty=4; bar 10M → 4 / Ask / Need run |
+| 203mm FW W/ 15M @ 406 MEW | 0/0.00/0.0 | bar 15M; thickness 203mm; spacing 406mm O.C.; each way → Need run / 203mm / Need run |
+| (2) 20M door openings | 0/0.00/0.0 | bar 20M → Ask / Ask / Need run |
+| 15M @ 406 STAGGERED | 0/0.00/0.0 | bar 15M; spacing 406mm O.C.; staggered → Need run / Ask / Need run |
+| 15M x 457 @ 610 STAGGERED | 0/0.00/0.0 | bar 15M; piece length 0.457m; spacing 610mm O.C. → Need run / 0.457m ea / Need run |
+| 400mm 10M dowels @ 300 | 0/0.00/0.0 | bar 10M; piece length 0.400m; spacing 300mm O.C. → Need run / 0.400m ea / Need run |
 
-## Files touched
-- `src/features/workflow-v2/stages/ScopeStage.tsx` — 2 lines changed.
+No row shows `0` after the patch — every cell shows either the parsed value or the honest token `Need run` / `Ask`. Confirm Takeoff Data button still routes to QA, where each missing dimension can be filled.
 
-## Follow-up (separate request, not part of this patch)
-When ready, add a `useEffect` in `ScopeStage` that loads `estimate_items` for the project, sums `total_weight` per bucket via `segment_type → bucket` map, and renders real kg/TN. Show `—` whenever the sum is 0 or the estimate hasn't run.
+### Out of scope
+- Parser improvement to extract element dimensions (real follow-up).
+- Verifying the 3 already-`answered` validation_issues actually wrote back to `estimate_items` — separate audit task.
+
+### Files touched
+- `src/features/workflow-v2/stages/TakeoffStage.tsx` (~6 lines, UI only).
