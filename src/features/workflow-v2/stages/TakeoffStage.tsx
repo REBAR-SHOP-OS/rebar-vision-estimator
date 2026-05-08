@@ -13,6 +13,14 @@ function getFunctionErrorMessage(error: unknown, fallback: string) {
   if (jsonStart >= 0) {
     try {
       const payload = JSON.parse(message.slice(jsonStart));
+      if (payload?.error === "DRAWING_DATA_MISSING") {
+        const blockers = Array.isArray(payload.blockers)
+          ? payload.blockers.map((b: { name?: string }) => b?.name).filter(Boolean).join(", ")
+          : "";
+        return blockers
+          ? `No indexed drawing text is available yet. Re-index the drawings, then review dimensions for: ${blockers}.`
+          : "No indexed drawing text is available yet. Re-index the drawings before takeoff.";
+      }
       if (payload?.error === "DIMENSIONS_INCOMPLETE") {
         const blockers = Array.isArray(payload.blockers)
           ? payload.blockers.map((b: { name?: string }) => b?.name).filter(Boolean).join(", ")
