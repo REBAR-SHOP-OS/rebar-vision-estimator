@@ -1,58 +1,64 @@
-## Problem
+## Goal
 
-CI lint step uses a hardcoded warning budget (`--max-warnings=454`). Every time someone adds code that introduces a new ESLint warning, the count drifts above the cap and CI fails. Today it's 463 vs 454. Tomorrow it will be 465 vs 463. This is a recurring failure pattern, not a one-off.
+PR #7 is 10 ahead / 666 behind `main` and GitHub marks it `mergeable: false` with branch status `diverged`. Per your decision, we will diagnose the drift and then **replace PR #7** with a fresh, clean equivalent PR rebuilt on top of current `main`.
 
-## Root-cause fix (permanent)
+## Diagnosis (what's actually wrong)
 
-Stop hardcoding a numeric warning budget in CI. Two complementary changes:
+- The local Lovable working branch is already in sync with `origin/main` (HEAD = `448002a`, same commit as `origin/main`). So **PR #7's branch only exists on GitHub**, not in the Lovable workspace.
+- "10 ahead / 666 behind" means PR #7 was opened from a snapshot of `main` taken ~666 commits ago. GitHub will not auto-merge because:
+  1. The merge base is far in the past.
+  2. Many of those 666 commits almost certainly touch the same files PR #7's 10 commits touch (lint config, CI workflow, vitest config, ChatArea, verified-estimate, workflow-v2 stages — all of which we've modified again recently).
+- Trying to "Update branch" from the GitHub UI will produce a large, hand-conflicted merge that is risky and noisy. Replacement is safer and cleaner.
 
-### 1. Remove the brittle `--max-warnings=N` cap from CI
+## Strategy: replace PR #7 with a fresh PR
 
-Edit `.github/workflows/ci.yml`:
+We do **not** rewrite or force-push the old branch. We build a new branch from current `main`, port over only the *intent* of PR #7's 10 commits, push, open a new PR, then close PR #7 with a pointer to the replacement.
 
-```yaml
-- name: Lint
-  run: bun run lint
-```
+## Steps
 
-Lint warnings will still be visible in CI output but will not fail the build. Errors (count = 0 today) will still fail the build, which is the correct gate.
+1. **Inventory PR #7's 10 commits**
+   - Use the GitHub API (read-only) to list the 10 commits on PR #7 and the union of files they changed. This gives us the exact "intent" payload we need to re-apply.
+   - Classify each commit as one of:
+     - (a) already present on `main` (skip),
+     - (b) still relevant and cleanly portable (re-apply),
+     - (c) obsolete or superseded by newer `main` work (drop, with note in PR description).
 
-### 2. Auto-fix the 7 fixable warnings now
+2. **Create a fresh branch from current `main`**
+   - Branch name: `fix/pr7-replacement` off `origin/main` (`448002a`).
+   - This branch starts mergeable by definition (0 behind).
 
-Run `bun run lint -- --fix` locally as part of this change so the repo starts clean (463 → ~456 warnings). Commit the resulting formatting/import fixes.
+3. **Re-apply the still-relevant changes as small patches**
+   - For each (b) commit, apply the minimum diff needed against today's `main`. We do **not** `git cherry-pick` blindly — many hunks will not match after 666 commits. We re-author the change as a minimal patch using current file contents, preserving the original commit's intent and message.
+   - Honor project rules: minimum patch policy, no unrelated refactors, no rename churn, semantic tokens only, no edits to `src/integrations/supabase/{client,types}.ts`.
 
-### 3. Add a `lint:strict` script for opt-in zero-warning runs
+4. **Validate locally before pushing**
+   - `bun install --frozen-lockfile`
+   - `bun run lint` (must exit 0 — CI now uses no `--max-warnings` cap, but we still want a clean run)
+   - `bun run test`
+   - `bun run build`
+   - `bun run check:bundle-size`
+   - Only push if all four pass.
 
-In `package.json`:
+5. **Open the replacement PR**
+   - Title: same as PR #7, suffixed with `(rebuilt on main)`.
+   - Body: link to PR #7, list which of the 10 original commits were ported, which were dropped as obsolete, and why.
+   - Target: `main`. Expect `mergeable: true`, `ahead_by: N`, `behind_by: 0`.
 
-```json
-"lint": "eslint .",
-"lint:strict": "eslint . --max-warnings=0"
-```
+6. **Close PR #7**
+   - Add a comment on PR #7 pointing to the new PR, then close (do not delete the branch immediately — keep it for 1 week as a safety reference).
 
-Devs who want to enforce zero warnings on their own branch can run `bun run lint:strict`. CI stays permissive on warnings.
+## Guardrails
 
-### 4. (Optional) Keep regression protection without numeric drift
+- No force-push to any shared branch.
+- No edits to `src/integrations/supabase/client.ts`, `src/integrations/supabase/types.ts`, `.env`, or files under `supabase/migrations/`.
+- If a ported change conflicts semantically with newer `main` behavior, we **stop and ask** rather than guess.
+- Old PR #7 branch is preserved on GitHub until the replacement PR is merged and verified.
 
-If you want to prevent *new* warning categories from sneaking in without locking a magic number, the right tool is to promote specific rules from `warn` → `error` in `eslint.config.js` over time. That way the gate is "no errors", which is stable, instead of "exactly N warnings", which drifts on every commit.
+## Prerequisite I need from you before executing
 
-## Why this is the correct root fix
+I cannot reach `api.github.com` for `REBAR-SHOP-OS/rebar-vision-estimator` without a token in this sandbox. To execute step 1 deterministically I need **one** of:
 
-- The numeric `--max-warnings=454` value was a snapshot in time. It has no semantic meaning and guarantees future CI breakage on any warning-introducing change.
-- Removing it eliminates the entire class of "CI fails because warning count went up by 1" failures.
-- Errors are still enforced, so real regressions are still blocked.
-- `lint:strict` preserves an opt-in path for stricter local checks.
-- Promoting rules to errors (step 4) is the durable way to tighten quality without numeric drift.
+- a fine-grained GitHub PAT with `pull_requests: read` + `contents: read` on this repo (stored via the secrets tool as `GITHUB_TOKEN`), **or**
+- you paste the output of: PR #7 → "Files changed" tab → "..." → "View file" for each of the 10 commits (or just the commit SHAs and I'll fetch via `curl` once the token is set).
 
-## Files to change
-
-- `.github/workflows/ci.yml` — drop `-- --max-warnings=454`
-- `package.json` — add `lint:strict` script
-- Auto-fix output across whatever files `eslint --fix` touches (formatting only)
-
-## Verification
-
-- Run `bun run lint` locally → exits 0 (warnings printed, no error).
-- Run `bun run lint:strict` locally → exits non-zero (expected, documents remaining warnings).
-- Run `bun run test` and `bun run build` → still pass.
-- Push to confirm CI green.
+Once I have either, I'll execute steps 2–6 in build mode.
