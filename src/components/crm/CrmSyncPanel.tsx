@@ -22,7 +22,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-// Stage definitions from REBAR SHOP OS pipeline
 const PIPELINE_STAGES: Record<string, { label: string; color: string }> = {
   estimation_ben: { label: "Estimation - Ben", color: "bg-amber-500" },
   estimation_karthick: { label: "Estimation - Karthick", color: "bg-orange-500" },
@@ -37,7 +36,8 @@ export interface LeadAttachment {
   name: string;
   size: number;
   mimeType: string;
-  url: string;
+  url?: string | null;
+  odooId?: string | null;
 }
 
 interface PipelineLead {
@@ -134,7 +134,6 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose, onStartE
       return;
     }
 
-    // Link to estimate_outcomes
     await supabase.from("estimate_outcomes").insert({
       user_id: user.id,
       project_id: data.id,
@@ -144,7 +143,6 @@ const CrmSyncPanel: React.FC<CrmSyncPanelProps> = ({ projects, onClose, onStartE
     toast.success(`Project "${projectName}" created from lead`);
     setCreatingLeadId(null);
 
-    // If lead has attachments, use the new handler that passes files
     if (lead.attachments.length > 0 && onStartEstimationWithFiles) {
       onStartEstimationWithFiles(data.id, lead.attachments);
     } else if (onStartEstimation) {
