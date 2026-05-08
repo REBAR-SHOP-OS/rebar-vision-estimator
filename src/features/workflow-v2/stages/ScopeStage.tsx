@@ -84,7 +84,7 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
       }
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [projectId, state.files.length]);
 
   const decisions = (state.local.scope || {}) as Record<string, Decision>;
