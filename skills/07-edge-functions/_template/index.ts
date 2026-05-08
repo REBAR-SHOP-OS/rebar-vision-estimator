@@ -29,7 +29,8 @@ serve(async (req) => {
     const result = { ok: true, echo: body, userId: user.id };
     return json(result);
   } catch (err) {
-    return json({ error: String(err) }, 500);
+    console.error("edge function template error:", err);
+    return json({ error: "Internal server error" }, 500);
   }
 });
 
