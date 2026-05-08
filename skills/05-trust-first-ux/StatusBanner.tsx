@@ -7,7 +7,12 @@ interface StatusBannerProps {
   drawingGenerationAllowed: boolean;
 }
 
-export default function StatusBanner({ blockedCount, needsReviewCount, pricingAllowed }: StatusBannerProps) {
+export default function StatusBanner({
+  blockedCount,
+  needsReviewCount,
+  pricingAllowed,
+  drawingGenerationAllowed,
+}: StatusBannerProps) {
   if (blockedCount === 0 && needsReviewCount === 0) {
     return (
       <div className="flex items-center gap-2 px-4 py-2 bg-[hsl(var(--status-approved)/.08)] border border-[hsl(var(--status-approved)/.2)] rounded-lg text-sm">
@@ -31,8 +36,14 @@ export default function StatusBanner({ blockedCount, needsReviewCount, pricingAl
           {needsReviewCount} needs review
         </span>
       )}
-      {!pricingAllowed && (
+      {!drawingGenerationAllowed && (
         <span className="flex items-center gap-1.5 text-muted-foreground ml-auto">
+          <Lock className="h-3.5 w-3.5" />
+          Drawing Generation Locked
+        </span>
+      )}
+      {!pricingAllowed && (
+        <span className="flex items-center gap-1.5 text-muted-foreground">
           <Lock className="h-3.5 w-3.5" />
           Pricing Locked
         </span>
