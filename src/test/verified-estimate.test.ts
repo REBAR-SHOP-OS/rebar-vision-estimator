@@ -7,6 +7,8 @@ import {
   buildCanonicalResultFromChatQuote,
 } from "@/lib/verified-estimate/build-canonical-result";
 import type { CanonicalEstimateLine } from "@/lib/verified-estimate/canonical-types";
+import { validateStage2Quote } from "@/lib/verified-estimate/stage2-schema";
+import { persistVerifiedEstimateFromChat } from "@/lib/verified-estimate/verified-estimate-store";
 
 describe("canonical-hash", () => {
   it("produces same string for key reorder", () => {
@@ -192,15 +194,90 @@ describe("buildCanonicalResultFromWorkspace", () => {
 
 describe("buildCanonicalResultFromChatQuote", () => {
   it("marks fallback and missing provenance as review_required", () => {
+    const parsed = validateStage2Quote({
+      bar_list: [{ size: "20M", qty: 1, length_mm: 6000, element_id: "E1" }],
+      size_breakdown_kg: { "20M": 14 },
+      total_weight_kg: 14,
+    });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) throw new Error("Expected parsed quote");
+
     const r = buildCanonicalResultFromChatQuote({
       elements: [],
-      quote: {
-        bar_list: [{ size: "20M", qty: 1, length_mm: 6000, element_id: "E1" }],
-        total_weight_kg: 14,
-      },
+      quote: parsed.data,
       usedFallbackJson: true,
     });
     expect(r.lines[0].review_required).toBe(true);
     expect(r.lines[0].extraction_method).toBe("llm_fallback_json");
+  });
+});
+
+describe("validateStage2Quote", () => {
+  it("accepts a valid stage 2 quote", () => {
+    const result = validateStage2Quote({
+      bar_list: [
+        { size: "20M", qty: "2", length_mm: "6000", multiplier: "1", weight_kg: "28.4", element_id: "C1" },
+      ],
+      size_breakdown_kg: { "20M": "28.4" },
+      total_weight_kg: "28.4",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects missing bar_list", () => {
+    const result = validateStage2Quote({
+      size_breakdown_kg: { "20M": 28.4 },
+      total_weight_kg: 28.4,
+    });
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Expected schema failure");
+    expect(result.error.blockedReasons[0]).toContain("quote.bar_list");
+  });
+
+  it("rejects non-array bar_list", () => {
+    const result = validateStage2Quote({
+      bar_list: {},
+      size_breakdown_kg: { "20M": 28.4 },
+      total_weight_kg: 28.4,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects malformed bar rows", () => {
+    const result = validateStage2Quote({
+      bar_list: [{ qty: 1, length_mm: "oops" }],
+      size_breakdown_kg: { "20M": 28.4 },
+      total_weight_kg: 28.4,
+    });
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Expected schema failure");
+    expect(result.error.issues.some((issue) => issue.includes("quote.bar_list[0].size"))).toBe(true);
+  });
+
+  it("rejects invalid size_breakdown values", () => {
+    const result = validateStage2Quote({
+      bar_list: [{ size: "20M", qty: 2, length_mm: 6000 }],
+      size_breakdown_kg: { "20M": "bad" },
+      total_weight_kg: 28.4,
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("persistVerifiedEstimateFromChat", () => {
+  it("fails fast on schema mismatch before persistence", async () => {
+    const result = await persistVerifiedEstimateFromChat({} as never, {
+      projectId: "p1",
+      userId: "u1",
+      elements: [],
+      quote: { total_weight_kg: 12 },
+      usedFallbackJson: false,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected persistence failure");
+    expect(result.kind).toBe("schema_validation_failed");
+    expect(result.gate.canExport).toBe(false);
+    expect(result.gate.blocked_reasons.some((reason) => reason.includes("quote.bar_list"))).toBe(true);
   });
 });

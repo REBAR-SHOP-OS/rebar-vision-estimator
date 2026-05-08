@@ -1,5 +1,6 @@
 import { getMassKgPerM, getWwmMassKgPerM2 } from "@/lib/rebar-weights";
 import type { CanonicalEstimateLine, CanonicalEstimateResultV1 } from "./canonical-types";
+import type { Stage2Quote } from "./stage2-schema";
 
 export interface WorkspaceBarRow {
   id: string;
@@ -230,32 +231,25 @@ export function buildCanonicalResultFromWorkspace(input: {
  */
 export function buildCanonicalResultFromChatQuote(input: {
   elements: unknown[];
-  quote: {
-    bar_list?: Record<string, unknown>[];
-    size_breakdown_kg?: Record<string, number>;
-    total_weight_kg?: number;
-    job_status?: string;
-    reconciliation?: Record<string, unknown>;
-    risk_flags?: unknown[];
-  };
+  quote: Stage2Quote;
   usedFallbackJson?: boolean;
 }): CanonicalEstimateResultV1 {
-  const barList = input.quote.bar_list || [];
+  const barList = input.quote.bar_list;
   const lines: CanonicalEstimateLine[] = [];
 
   const sorted = [...barList].sort((a, b) => stableKey(a).localeCompare(stableKey(b)));
 
   sorted.forEach((raw, i) => {
-    const r = raw as Record<string, unknown>;
-    const size = String(r.size || "");
-    const qty = Number(r.qty || 0);
-    const lengthMm = Number(r.length_mm || 0);
-    const weight_kg = Number(r.weight_kg != null ? r.weight_kg : lineWeightKg(size, qty, lengthMm));
+    const r = raw;
+    const size = r.size;
+    const qty = r.qty;
+    const lengthMm = r.length_mm;
+    const weight_kg = r.weight_kg != null ? r.weight_kg : lineWeightKg(size, qty, lengthMm);
     const extraction_method = input.usedFallbackJson
       ? "llm_fallback_json"
-      : String(r.extraction_method || "llm_structured");
-    const source_file_id = (r.source_file_id as string) || null;
-    const source_sheet = (r.source_sheet as string) || null;
+      : r.extraction_method || "llm_structured";
+    const source_file_id = r.source_file_id || null;
+    const source_sheet = r.source_sheet || null;
     const review_required =
       !source_file_id ||
       !source_sheet ||
@@ -264,31 +258,29 @@ export function buildCanonicalResultFromChatQuote(input: {
 
     lines.push({
       line_key: `chat|${i}|${String(r.element_id || r.bar_mark || i)}`,
-      description: String(r.sub_element || r.description || r.bar_mark || "Line"),
+      description: r.sub_element || r.description || r.bar_mark || "Line",
       size,
       qty,
-      multiplier: Number(r.multiplier || 1),
+      multiplier: r.multiplier,
       length_mm: lengthMm,
       weight_kg,
       unit: "kg",
-      bar_mark: r.bar_mark != null ? String(r.bar_mark) : undefined,
-      shape_code: r.shape_code != null ? String(r.shape_code) : undefined,
-      element_type: String(r.element_type || "OTHER"),
+      bar_mark: r.bar_mark,
+      shape_code: r.shape_code,
+      element_type: r.element_type || "OTHER",
       source_file_id,
-      source_file_name: r.source_file_name != null ? String(r.source_file_name) : null,
+      source_file_name: r.source_file_name || null,
       source_sheet,
-      source_region: r.source_region != null ? String(r.source_region) : null,
+      source_region: r.source_region || null,
       extraction_method,
-      confidence: Number(r.confidence ?? 0.55),
+      confidence: r.confidence ?? 0.55,
       validation_status: review_required ? "pending" : "ok",
       review_required,
     });
   });
 
   const size_breakdown_kg = { ...input.quote.size_breakdown_kg };
-  const total_weight_kg =
-    input.quote.total_weight_kg ??
-    Object.values(size_breakdown_kg).reduce((a, b) => a + b, 0);
+  const total_weight_kg = input.quote.total_weight_kg;
 
   return {
     schema_version: 1,
@@ -297,7 +289,7 @@ export function buildCanonicalResultFromChatQuote(input: {
       bar_list: barList as Record<string, unknown>[],
       size_breakdown_kg,
       total_weight_kg,
-      total_weight_lbs: total_weight_kg / 0.453592,
+      total_weight_lbs: input.quote.total_weight_lbs ?? total_weight_kg / 0.453592,
       reconciliation: input.quote.reconciliation,
       risk_flags: input.quote.risk_flags,
       job_status: input.quote.job_status,
