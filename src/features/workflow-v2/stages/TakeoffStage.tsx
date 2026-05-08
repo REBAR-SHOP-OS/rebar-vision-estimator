@@ -575,7 +575,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
                 className={`mt-1.5 inline-flex items-center gap-1 text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 border ${segRunning === g.name ? "border-muted-foreground/30 text-muted-foreground" : "border-primary/40 text-primary hover:bg-primary/10"}`}
               >
                 {segRunning === g.name ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Wand2 className="w-2.5 h-2.5" />}
-                {segRunning === g.name ? "Running…" : g.empty ? "Run segment" : "Re-run segment"}
+                {segRunning === g.name ? (segPhase || "Running…") : g.empty ? "Run segment" : "Re-run segment"}
               </div>
             </button>
           ))}
