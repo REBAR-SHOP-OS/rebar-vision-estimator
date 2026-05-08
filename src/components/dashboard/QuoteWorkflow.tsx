@@ -38,7 +38,6 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
 
-  // New quote form
   const [selectedEstimate, setSelectedEstimate] = useState("");
   const [quotedPrice, setQuotedPrice] = useState("");
   const [termsText, setTermsText] = useState("Standard terms apply. Quote valid for 30 days.");
@@ -63,7 +62,7 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
     if (!user || !selectedEstimate) return;
     setCreating(true);
 
-    const nextVersion = quotes.length > 0 ? Math.max(...quotes.map(q => q.version_number)) + 1 : 1;
+    const nextVersion = quotes.length > 0 ? Math.max(...quotes.map((q) => q.version_number)) + 1 : 1;
 
     const { data, error } = await supabase.from("quote_versions").insert({
       project_id: projectId,
@@ -81,9 +80,8 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
       toast.error("Failed to create quote");
     } else {
       toast.success(`Quote v${nextVersion} created`);
-      setQuotes(prev => [data as QuoteVersion, ...prev]);
+      setQuotes((prev) => [data as QuoteVersion, ...prev]);
 
-      // Log to audit
       await supabase.from("audit_log").insert({
         user_id: user.id,
         project_id: projectId,
@@ -103,34 +101,43 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
       toast.error("Failed to issue quote");
     } else {
       toast.success("Quote issued");
-      setQuotes(prev => prev.map(q => q.id === quoteId ? { ...q, status: "issued" } : q));
+      setQuotes((prev) => prev.map((q) => q.id === quoteId ? { ...q, status: "issued" } : q));
     }
   };
 
   const sendForReview = async (quoteId: string) => {
-    // Create a review share link
     if (!user) return;
-    const quote = quotes.find(q => q.id === quoteId);
+    const quote = quotes.find((q) => q.id === quoteId);
     if (!quote) return;
 
-    const shareToken = crypto.randomUUID();
-    const { error } = await supabase.from("review_shares").insert({
-      project_id: projectId,
-      user_id: user.id,
-      reviewer_email: "reviewer@example.com",
-      share_token: shareToken,
-      review_type: "quote_review",
-      review_data: { quote_id: quoteId, quoted_price: quote.quoted_price },
-      status: "pending",
+    const reviewerEmail = window.prompt("Reviewer email");
+    if (!reviewerEmail) return;
+    const reviewerName = window.prompt("Reviewer name (optional)") || undefined;
+
+    const { data, error } = await supabase.functions.invoke("send-review-invite", {
+      body: {
+        project_id: projectId,
+        reviewer_email: reviewerEmail.trim(),
+        reviewer_name: reviewerName?.trim() || null,
+        review_type: "quote_approval",
+        review_data: {
+          quote_id: quote.id,
+          version_number: quote.version_number,
+          quoted_price: quote.quoted_price,
+          currency: quote.currency,
+          terms_text: quote.terms_text,
+          exclusions_text: quote.exclusions_text,
+        },
+      },
     });
 
-    if (error) {
+    if (error || !data?.shareUrl) {
       toast.error("Failed to create review link");
-    } else {
-      const reviewUrl = `${window.location.origin}/review/${shareToken}`;
-      navigator.clipboard.writeText(reviewUrl);
-      toast.success("Review link copied to clipboard!");
+      return;
     }
+
+    await navigator.clipboard.writeText(data.shareUrl);
+    toast.success("Review link copied to clipboard");
   };
 
   const handlePdfExport = async (q: QuoteVersion) => {
@@ -146,12 +153,32 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
   };
 
   const pushToCrm = async (quoteId: string) => {
-    const { data: deals } = await supabase.from("crm_deals").select("crm_deal_id").limit(1);
-    if (!deals || deals.length === 0) { toast.error("No CRM deal linked"); return; }
+    const { data: outcome, error: outcomeError } = await supabase
+      .from("estimate_outcomes")
+      .select("crm_deal_id")
+      .eq("project_id", projectId)
+      .not("crm_deal_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (outcomeError) {
+      toast.error("Could not load linked CRM deal");
+      return;
+    }
+
+    if (!outcome?.crm_deal_id) {
+      toast.error("No CRM deal linked to this project");
+      return;
+    }
+
     const { data, error } = await supabase.functions.invoke("push-quote-to-crm", {
-      body: { quote_id: quoteId, crm_deal_id: deals[0].crm_deal_id },
+      body: { quote_id: quoteId, crm_deal_id: outcome.crm_deal_id },
     });
-    if (error) { toast.error("CRM push failed"); return; }
+    if (error) {
+      toast.error("CRM push failed");
+      return;
+    }
     toast.success(`Quote pushed to CRM (${data?.method || "done"})`);
   };
 
@@ -173,7 +200,6 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
         <div className="text-sm text-muted-foreground">Loading...</div>
       ) : (
         <>
-          {/* Create New Quote */}
           <Card className="border-primary/20">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -192,8 +218,7 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
                     <option key={est.id} value={est.id}>
                       v{est.version_number} — {fmtDate(est.created_at)} ({est.status})
                     </option>
-                  ))
-                  }
+                  ))}
                 </select>
               </div>
               <div>
@@ -230,7 +255,6 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
             </CardContent>
           </Card>
 
-          {/* Existing Quotes */}
           <Card className="border-border">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm">Quotes ({quotes.length})</CardTitle>
@@ -243,9 +267,9 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
                       <div className="flex items-center gap-2">
                         <Badge variant="outline" className="text-[9px]">v{q.version_number}</Badge>
                         <Badge className={`text-[9px] ${
-                          q.status === "issued" ? "bg-primary/15 text-primary" :
-                          q.status === "accepted" ? "bg-green-500/15 text-green-600" :
-                          "bg-muted text-muted-foreground"
+                          q.status === "issued" ? "bg-primary/15 text-primary"
+                            : q.status === "accepted" ? "bg-green-500/15 text-green-600"
+                              : "bg-muted text-muted-foreground"
                         }`}>{q.status}</Badge>
                         <span className="text-xs font-medium text-foreground ml-auto">
                           {fmtPrice(q.quoted_price, q.currency)}
@@ -270,8 +294,7 @@ const QuoteWorkflow: React.FC<{ projectId: string; onClose: () => void }> = ({ p
                         </Button>
                       </div>
                     </div>
-                  ))
-                  }
+                  ))}
                   {quotes.length === 0 && (
                     <p className="text-xs text-muted-foreground text-center py-8">No quotes yet. Create one above.</p>
                   )}
