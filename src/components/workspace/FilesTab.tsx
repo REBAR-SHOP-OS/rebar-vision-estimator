@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FileText, Loader2, AlertTriangle, CheckCircle2, Clock, Archive, Upload, Eye } from "lucide-react";
+import { FileText, Loader2, AlertTriangle, CheckCircle2, Clock, Archive, Upload, Eye, CheckCircle } from "lucide-react";
 import { computeSHA256 } from "@/lib/file-hash";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -16,6 +16,7 @@ import {
   inferRebarFileKind,
 } from "@/lib/rebar-intake";
 import { getCanonicalProjectFiles, type CanonicalProjectFileView } from "@/lib/rebar-read-model";
+import { supersedePreviousActiveFile } from "@/lib/revision-lifecycle";
 
 interface FileRow {
   id: string;
@@ -29,6 +30,7 @@ interface FileRow {
   revision_label?: string;
   parse_status?: string;
   is_superseded?: boolean;
+  is_active?: boolean;
 }
 
 export default function FilesTab({ projectId, onProjectRefresh }: { projectId: string; onProjectRefresh?: () => void }) {
@@ -277,20 +279,31 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       }
 
       await logAuditEvent(user.id, "uploaded", "project_file", legacyFileId, projectId);
+      const classification = classifyUploadedFile(file.name, file.type);
       try {
         await (supabase as any).from("document_registry").upsert(
           {
             project_id: projectId,
             user_id: user.id,
             file_id: legacyFileId,
-            classification: classifyUploadedFile(file.name, file.type),
+            classification,
             validation_role: /answer|reference|correct|benchmark/i.test(file.name) ? "reference_answer" : "input",
             parse_status: "pending",
             extraction_status: "pending",
             detected_discipline: discipline,
+            is_active: true,
           },
           { onConflict: "project_id,file_id" },
         );
+
+        // Supersede any previously active file with the same classification + discipline
+        await supersedePreviousActiveFile(supabase, {
+          projectId,
+          userId: user.id,
+          newFileId: legacyFileId,
+          classification,
+          detectedDiscipline: discipline || null,
+        });
       } catch {
         /* document_registry may not exist until migration applied */
       }
@@ -426,11 +439,18 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       supabase.from("document_versions").select("file_id, source_system, pdf_metadata, page_count, is_scanned").eq("project_id", projectId),
       supabase.from("segments").select("id").eq("project_id", projectId),
       supabase.from("validation_issues").select("source_file_id, status").eq("project_id", projectId),
-    ]).then(async ([canonicalFiles, filesRes, versionsRes, segmentsRes, issuesRes]) => {
+      (supabase as any).from("document_registry").select("file_id, is_active").eq("project_id", projectId).catch(() => ({ data: [] })),
+    ]).then(async ([canonicalFiles, filesRes, versionsRes, segmentsRes, issuesRes, registryRes]) => {
       const rawFiles = filesRes.data || [];
       const versions = versionsRes.data || [];
       const versionMap = new Map<string, any>();
       versions.forEach((v: any) => { if (v.file_id) versionMap.set(v.file_id, v); });
+
+      // Build a map of file_id -> is_active from document_registry
+      const registryActiveMap = new Map<string, boolean>();
+      ((registryRes as any)?.data || []).forEach((r: any) => {
+        if (r.file_id != null) registryActiveMap.set(r.file_id, r.is_active !== false);
+      });
 
       const segmentIds = (segmentsRes.data || []).map((segment: any) => segment.id);
       const linksRes = segmentIds.length > 0
@@ -449,12 +469,23 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       });
       setIssueCounts(issCounts);
 
+      const applyRegistryActive = (row: FileRow, legacyId: string | null | undefined): FileRow => {
+        if (legacyId && registryActiveMap.has(legacyId)) {
+          const active = registryActiveMap.get(legacyId)!;
+          return { ...row, is_active: active, is_superseded: !active || row.is_superseded };
+        }
+        // No registry row: default to active (backwards compatible)
+        return { ...row, is_active: row.is_active ?? true };
+      };
+
       const enriched: FileRow[] = canonicalFiles.length > 0
-        ? mergeCanonicalFiles(canonicalFiles, rawFiles, versions)
+        ? mergeCanonicalFiles(canonicalFiles, rawFiles, versions).map((r) =>
+            applyRegistryActive(r, r.legacy_file_id),
+          )
         : rawFiles.map((f: any) => {
             const ver = versionMap.get(f.id);
             const isParsed = ver?.page_count !== null && ver?.page_count !== undefined;
-            return {
+            const base: FileRow = {
               ...f,
               legacy_file_id: f.id,
               discipline: ver?.pdf_metadata?.discipline || undefined,
@@ -462,7 +493,16 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
               parse_status: isParsed ? "parsed" : "pending",
               is_superseded: ver?.pdf_metadata?.is_superseded || false,
             };
+            return applyRegistryActive(base, f.id);
           });
+
+      // Active files first, then superseded/inactive
+      enriched.sort((a, b) => {
+        const aActive = a.is_active !== false;
+        const bActive = b.is_active !== false;
+        if (aActive === bActive) return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        return aActive ? -1 : 1;
+      });
 
       setFiles(enriched);
       setLoading(false);
@@ -489,6 +529,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
   }
 
   const parseablePendingFiles = files.filter((f) => f.parse_status === "pending" && f.legacy_file_id);
+  const activeFileCount = files.filter((f) => f.is_active !== false).length;
 
   const fmtSize = (bytes: number | null) => {
     if (!bytes) return "-";
@@ -504,12 +545,31 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
     return <Clock className="h-3 w-3 text-muted-foreground" />;
   };
 
+  const revisionBadge = (f: FileRow) => {
+    const isActive = f.is_active !== false;
+    const isSuperseded = !isActive || f.is_superseded;
+    if (!isSuperseded) {
+      return (
+        <Badge variant="outline" className="text-[8px] border-green-500/40 text-green-600 flex-shrink-0">
+          <CheckCircle className="h-2.5 w-2.5 mr-0.5" />Current
+        </Badge>
+      );
+    }
+    return (
+      <Badge variant="outline" className="text-[8px] border-destructive/30 text-destructive flex-shrink-0">
+        <Archive className="h-2.5 w-2.5 mr-0.5" />Superseded
+      </Badge>
+    );
+  };
+
   return (
     <div className="p-4 md:p-6">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-foreground">Files & Revisions</h3>
         <div className="flex items-center gap-2">
-          <Badge variant="secondary" className="text-[10px]">{files.length} file{files.length !== 1 ? "s" : ""}</Badge>
+          <Badge variant="secondary" className="text-[10px]">
+            {activeFileCount} active{files.length !== activeFileCount ? ` / ${files.length} total` : ""}
+          </Badge>
           {parseablePendingFiles.length > 0 && (
             <Button size="sm" variant="default" className="gap-1.5 h-7 text-xs" disabled={parsing} onClick={handleParseAll}>
               {parsing ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
@@ -539,44 +599,47 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
             </tr>
           </thead>
           <tbody>
-            {files.map((f) => (
-              <tr key={f.id} className={`border-t border-border/50 hover:bg-muted/20 transition-colors ${f.is_superseded ? "opacity-50" : ""}`}>
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                    <span className="font-medium text-foreground truncate max-w-[250px]">{f.file_name}</span>
-                    {f.is_superseded && <Badge variant="outline" className="text-[8px] border-destructive/30 text-destructive flex-shrink-0"><Archive className="h-2.5 w-2.5 mr-0.5" />Superseded</Badge>}
-                  </div>
-                </td>
-                <td className="px-3 py-2.5">
-                  {f.discipline ? <Badge variant="outline" className="text-[9px]">{f.discipline}</Badge> : <span className="text-muted-foreground">-</span>}
-                </td>
-                <td className="px-3 py-2.5 text-muted-foreground font-mono">{f.revision_label || "-"}</td>
-                <td className="px-3 py-2.5 text-center">
-                  <div className="flex items-center justify-center gap-1">
-                    {parseIcon(f.parse_status || "pending")}
-                    <span className="text-[9px] text-muted-foreground capitalize">{f.parse_status || "pending"}</span>
-                  </div>
-                </td>
-                <td className="px-3 py-2.5 text-right text-muted-foreground">{fmtSize(f.file_size)}</td>
-                <td className="px-3 py-2.5 text-center">
-                  {(segmentCounts[f.legacy_file_id || f.id] || 0) > 0 ? (
-                    <Badge variant="secondary" className="text-[9px]">{segmentCounts[f.legacy_file_id || f.id]} seg</Badge>
-                  ) : <span className="text-muted-foreground">-</span>}
-                </td>
-                <td className="px-3 py-2.5 text-center">
-                  {(issueCounts[f.legacy_file_id || f.id] || 0) > 0 ? (
-                    <Badge variant="destructive" className="text-[9px]">{issueCounts[f.legacy_file_id || f.id]}</Badge>
-                  ) : <span className="text-muted-foreground">-</span>}
-                </td>
-                <td className="px-3 py-2.5 text-right text-muted-foreground">{new Date(f.created_at).toLocaleDateString()}</td>
-                <td className="px-3 py-2.5 text-center">
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewFile(f.file_path)} title="View file">
-                    <Eye className="h-3 w-3" />
-                  </Button>
-                </td>
-              </tr>
-            ))}
+            {files.map((f) => {
+              const isActive = f.is_active !== false;
+              return (
+                <tr key={f.id} className={`border-t border-border/50 hover:bg-muted/20 transition-colors ${!isActive ? "opacity-50" : ""}`}>
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                      <span className="font-medium text-foreground truncate max-w-[220px]">{f.file_name}</span>
+                      {revisionBadge(f)}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {f.discipline ? <Badge variant="outline" className="text-[9px]">{f.discipline}</Badge> : <span className="text-muted-foreground">-</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-muted-foreground font-mono">{f.revision_label || "-"}</td>
+                  <td className="px-3 py-2.5 text-center">
+                    <div className="flex items-center justify-center gap-1">
+                      {parseIcon(f.parse_status || "pending")}
+                      <span className="text-[9px] text-muted-foreground capitalize">{f.parse_status || "pending"}</span>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5 text-right text-muted-foreground">{fmtSize(f.file_size)}</td>
+                  <td className="px-3 py-2.5 text-center">
+                    {(segmentCounts[f.legacy_file_id || f.id] || 0) > 0 ? (
+                      <Badge variant="secondary" className="text-[9px]">{segmentCounts[f.legacy_file_id || f.id]} seg</Badge>
+                    ) : <span className="text-muted-foreground">-</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-center">
+                    {(issueCounts[f.legacy_file_id || f.id] || 0) > 0 ? (
+                      <Badge variant="destructive" className="text-[9px]">{issueCounts[f.legacy_file_id || f.id]}</Badge>
+                    ) : <span className="text-muted-foreground">-</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-right text-muted-foreground">{new Date(f.created_at).toLocaleDateString()}</td>
+                  <td className="px-3 py-2.5 text-center">
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewFile(f.file_path)} title="View file">
+                      <Eye className="h-3 w-3" />
+                    </Button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

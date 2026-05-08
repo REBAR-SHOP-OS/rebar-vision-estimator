@@ -724,6 +724,7 @@ export type Database = {
           drawing_set_ids: string[] | null
           estimator_notes: string | null
           id: string
+          is_current: boolean
           issued_at: string | null
           line_items: Json | null
           project_id: string
@@ -731,6 +732,8 @@ export type Database = {
           scope_source_reference: string | null
           scope_source_type: string | null
           status: string | null
+          superseded_at: string | null
+          superseded_by_estimate_version_id: string | null
           total_estimated_cost: number | null
           total_quoted_price: number | null
           user_id: string
@@ -744,6 +747,7 @@ export type Database = {
           drawing_set_ids?: string[] | null
           estimator_notes?: string | null
           id?: string
+          is_current?: boolean
           issued_at?: string | null
           line_items?: Json | null
           project_id: string
@@ -751,6 +755,8 @@ export type Database = {
           scope_source_reference?: string | null
           scope_source_type?: string | null
           status?: string | null
+          superseded_at?: string | null
+          superseded_by_estimate_version_id?: string | null
           total_estimated_cost?: number | null
           total_quoted_price?: number | null
           user_id: string
@@ -764,6 +770,7 @@ export type Database = {
           drawing_set_ids?: string[] | null
           estimator_notes?: string | null
           id?: string
+          is_current?: boolean
           issued_at?: string | null
           line_items?: Json | null
           project_id?: string
@@ -771,6 +778,8 @@ export type Database = {
           scope_source_reference?: string | null
           scope_source_type?: string | null
           status?: string | null
+          superseded_at?: string | null
+          superseded_by_estimate_version_id?: string | null
           total_estimated_cost?: number | null
           total_quoted_price?: number | null
           user_id?: string

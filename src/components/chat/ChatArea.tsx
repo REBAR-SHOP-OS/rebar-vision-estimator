@@ -28,6 +28,7 @@ import BendingScheduleTable from "./BendingScheduleTable";
 import ApprovalWorkflow from "./ApprovalWorkflow";
 import { persistVerifiedEstimateFromChat, getCurrentVerifiedEstimate } from "@/lib/verified-estimate";
 import type { ExportGateResult } from "@/lib/verified-estimate/export-gate";
+import { promotePublicEstimateVersion } from "@/lib/revision-lifecycle";
 
 interface MessageFile {
   name: string;
@@ -924,7 +925,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       });
       const resolved = resolveResp.data || {};
 
-      await supabase.from("estimate_versions").insert({
+      const { data: newVersion } = await supabase.from("estimate_versions").insert({
         project_id: projectId,
         user_id: user.id,
         line_items: elements,
@@ -934,7 +935,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         scope_source_reference: projectId,
         scope_confidence: resolved.confidence || 0,
         status: "draft",
-      });
+        is_current: false,
+      } as any).select("id").single();
+
+      if (newVersion?.id) {
+        await promotePublicEstimateVersion(supabase, {
+          projectId,
+          userId: user.id,
+          newEstimateVersionId: newVersion.id,
+        });
+      }
 
       await supabase.from("audit_log").insert({
         user_id: user.id,
