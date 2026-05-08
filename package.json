@@ -9,6 +9,8 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
+    "analyze": "ANALYZE=true vite build",
+    "check:bundle-size": "node scripts/check-bundle-size.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
