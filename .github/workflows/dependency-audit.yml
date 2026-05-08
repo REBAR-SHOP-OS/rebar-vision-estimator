@@ -1,0 +1,30 @@
+name: Dependency Audit
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run npm audit
+        run: npm audit --audit-level=high --json > audit.json || true
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit
+          path: audit.json
+      - name: Fail on high/critical
+        run: |
+          HIGH=$(jq '.metadata.vulnerabilities.high // 0' audit.json)
+          CRIT=$(jq '.metadata.vulnerabilities.critical // 0' audit.json)
+          echo "High: $HIGH  Critical: $CRIT"
+          if [ "$HIGH" -gt 0 ] || [ "$CRIT" -gt 0 ]; then exit 1; fi
