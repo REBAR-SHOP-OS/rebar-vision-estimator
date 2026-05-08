@@ -147,6 +147,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   const [pdfPageCount, setPdfPageCount] = useState(0);
   const [pdfImg, setPdfImg] = useState<string | null>(null);
   const [segRunning, setSegRunning] = useState<string | null>(null);
+  const [segPhase, setSegPhase] = useState<string>("");
   const [bestGuessRunning, setBestGuessRunning] = useState(false);
   const [reindexRunning, setReindexRunning] = useState(false);
   const [allSegments, setAllSegments] = useState<{ id: string; name: string }[]>([]);
@@ -182,7 +183,45 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
       allSegments.find((s) => s.name === segName)?.id;
     if (!seg) { toast.error("No segment id for this group."); return; }
     setSegRunning(segName);
+    setSegPhase("Starting…");
     try {
+      // Step 1: ensure project drawings are indexed
+      const { count: dvCount } = await supabase
+        .from("document_versions")
+        .select("id", { count: "exact", head: true })
+        .eq("project_id", projectId);
+      if (!dvCount || dvCount === 0) {
+        const files = state.files || [];
+        if (files.length === 0) {
+          toast.error("No files uploaded. Add drawings in Stage 01 first.");
+          setSegRunning(null); setSegPhase(""); return;
+        }
+        for (let i = 0; i < files.length; i++) {
+          const f = files[i];
+          setSegPhase(`Indexing ${i + 1}/${files.length}…`);
+          try {
+            await parseAndIndexFile(projectId, {
+              id: f.id,
+              legacy_file_id: (f as any).legacy_file_id || f.id,
+              file_name: f.file_name,
+              file_path: f.file_path,
+            });
+          } catch (e) {
+            console.warn("parseAndIndexFile failed:", f.file_name, e);
+          }
+        }
+      }
+
+      // Step 2: refresh OCR entities (best-effort)
+      setSegPhase("Reading drawings…");
+      try {
+        await supabase.functions.invoke("reindex-extractors", { body: { project_id: projectId } });
+      } catch (e) {
+        console.warn("reindex-extractors (per-segment) failed:", e);
+      }
+
+      // Step 3: scoped takeoff
+      setSegPhase("Running segment…");
       const { data, error } = await supabase.functions.invoke("auto-estimate", {
         body: { segment_id: seg, project_id: projectId },
       });
@@ -197,6 +236,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
       toast.error(getFunctionErrorMessage(err, `Re-run failed for "${segName}"`));
     } finally {
       setSegRunning(null);
+      setSegPhase("");
     }
   };
 
@@ -535,7 +575,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
                 className={`mt-1.5 inline-flex items-center gap-1 text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 border ${segRunning === g.name ? "border-muted-foreground/30 text-muted-foreground" : "border-primary/40 text-primary hover:bg-primary/10"}`}
               >
                 {segRunning === g.name ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Wand2 className="w-2.5 h-2.5" />}
-                {segRunning === g.name ? "Running…" : g.empty ? "Run segment" : "Re-run segment"}
+                {segRunning === g.name ? (segPhase || "Running…") : g.empty ? "Run segment" : "Re-run segment"}
               </div>
             </button>
           ))}

@@ -1,48 +1,61 @@
-# Fix: Save Answer & Mark Resolved appear inactive
+## Goal
 
-## Root cause
+When the user clicks **Run Segment** on a row in Stage 03 (Takeoff), the app should:
 
-The buttons *are* wired and the click reaches the database (the brick‑ledge issue in the screenshot is already `status='answered'` in `validation_issues`). Two things make them feel "not active":
+1. Make sure the project's drawings are OCR-indexed (no more `DRAWING_DATA_MISSING` 422).
+2. Run takeoff for **only that one segment**, so the AI focuses on a small portion → better accuracy.
+3. Show clear progress: `Indexing… → OCR entities → Takeoff…`.
 
-1. **`persistIssueStatus` silently downgrades `resolved` → `answered`**
-   In `src/features/workflow-v2/stages/QAStage.tsx` (lines 469‑474), if `applyEngineerAnswerToEstimateItem` reports `geometryStatus !== "resolved"`, the requested status is rewritten to `"answered"`. Because only `"resolved"` / `"closed"` are in `CLOSED_QA_STATUSES`, the issue is **not removed from the list** and the side panel re‑renders with the same content. The engineer clicks "Mark Resolved" and visually nothing happens → "button not active".
+Today the button calls `auto-estimate` directly with `segment_id`. If the project has zero indexed pages (current case), it fails with 422 and nothing happens.
 
-2. **`applyEngineerAnswerToEstimateItem` only treats geometry as resolved when *quantity, length AND weight* are all parsed numerically** (`assistant-logic.ts` line 649). Free‑text answers like *"115 mm typical; 152 mm where wall > 300 mm"* never produce all three numbers, so geometry stays `partial` and the downgrade above kicks in every time.
+## Behavior change (single button, smarter)
 
-The result: Mark Resolved is effectively unreachable from any text-only engineer answer, and Save Answer looks like a no‑op because the same row stays selected.
+`Run Segment` becomes a 3-step pipeline executed in order, only doing what's needed:
 
-## Fix (minimum patch, two files)
+```text
+[1] Ensure indexed
+    ├─ Check document_versions / drawing_search_index for project
+    ├─ If 0 indexed pages → run parseAndIndexFile() for each project_files row
+    │      (same helper FilesStage already uses; force=false so it's idempotent)
+    └─ Update button label: "Indexing 1/2…"
 
-### 1. `src/features/workflow-v2/stages/QAStage.tsx` — respect explicit user intent
+[2] Refresh OCR entities (light)
+    └─ Invoke reindex-extractors (already wired) so callouts/dims are fresh
+       Label: "Reading drawings…"
 
-Inside `persistIssueStatus`:
+[3] Run takeoff scoped to this segment only
+    └─ supabase.functions.invoke("auto-estimate", { segment_id, project_id })
+       Label: "Running segment…"
+```
 
-- Remove the silent downgrade. When the engineer clicks **Mark Resolved**, persist `status="resolved"` and let `updateSelectedIssue` advance to the next issue.
-- Keep the takeoff‑geometry warning, but surface it as an **appended note** on the saved record only — do **not** rewrite the status.
-- After a successful Save Answer (`status="answered"`), give visible feedback by:
-  - clearing `answerError`,
-  - setting a transient `answerSavedAt` flag (already have `answerSaving`) so the button label briefly reads "Saved ✓" for ~1.2 s.
+Steps 1 and 2 are skipped automatically when already done, so re-runs stay fast.
 
-### 2. `src/features/workflow-v2/stages/assistant-logic.ts` — broaden "resolved" criteria
+## Scope of edits (minimal patch)
 
-In `applyEngineerAnswerToEstimateItem` (lines 642‑653):
+Only one file changes: `src/features/workflow-v2/stages/TakeoffStage.tsx`.
 
-- If the caller passes `requestedStatus === "resolved"`, treat it as resolved when **either** all numeric values parse **or** the engineer supplied any structured value / non‑empty answer text. This matches the human contract: "engineer reviewed and signed off".
-- Continue to compute `geometryStatus = "partial"` when only some numbers are present, but no longer block the issue‑level status from going to `resolved`.
+- Extend the existing `runSingleSegment(segName)` function:
+  - Before invoking `auto-estimate`, query `document_versions` count for the project.
+  - If 0 → loop through `state.files` and call `parseAndIndexFile(projectId, file)` (already imported at the top of this file).
+  - Then call `reindex-extractors` (already wired via `handleReindex`) — extracted into a small inner helper so it can be reused without the toast spam.
+  - Then call `auto-estimate` exactly as today.
+- Replace the single `segRunning` boolean label with a `segPhase` string: `"indexing" | "ocr" | "takeoff"` so the button text reflects the current step.
+- Keep the existing toast for 422 errors as a fallback (shouldn't fire anymore once indexing runs first).
 
-### Optional polish (same QAStage file, ~3 lines)
+No edge-function changes, no DB schema changes, no UI restructuring. The "Re-index OCR Entities" and "Generate Takeoff" buttons in the header keep working unchanged.
 
-- Make the secondary buttons (`Mark Resolved`, `Needs Review`) use `bg-secondary text-secondary-foreground` instead of `bg-card`, so they read as actionable instead of dimmed against the dark panel (the user’s screenshot shows them looking grayed out).
+## Out of scope (intentionally)
 
-## Out of scope
+- Page-level OCR scoping (only OCR pages relevant to a segment). The `auto-estimate` function already filters by `segment_id`; OCR is project-wide because we don't yet have a reliable segment→page mapping. If the user later wants true per-page scoping, that's a follow-up.
+- Renaming the button or restyling the segment cards.
+- Changing how `Best-Guess Estimate` or `Generate Takeoff` work.
 
-- No DB schema changes.
-- No changes to `auto-estimate` / `extract-dimensions` edge functions.
-- No changes to the takeoff geometry parser; we only stop it from overriding the engineer’s explicit decision.
+## Acceptance check
 
-## Verification
+On the current project (`38c049c8…`, 2 PDFs, 0 indexed pages):
 
-1. Open a QA issue with a free‑text answer (e.g. brick ledge on P17).
-2. Click **Save Answer** → button shows "Saved ✓" briefly, issue stays selected, `validation_issues.status='answered'`, panel shows "Saved: …".
-3. Click **Mark Resolved** → issue is removed from the list, selection moves to the next open issue, `validation_issues.status='resolved'`.
-4. Click **Needs Review** → issue stays in the list with `status='review'` badge.
+1. Click **Run Segment** on `Pile Caps / Pad Footings`.
+2. Button cycles: `Indexing 1/2 → Indexing 2/2 → Reading drawings → Running segment…`.
+3. Toast: `Segment "Pile Caps / Pad Footings" re-run: N item(s)`.
+4. No `DRAWING_DATA_MISSING` 422.
+5. Clicking Run Segment on a second segment skips step 1 (already indexed) and is fast.
