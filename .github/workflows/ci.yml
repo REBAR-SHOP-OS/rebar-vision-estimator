@@ -20,10 +20,14 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Lint
-        run: bun run lint
+        run: bun run lint -- --max-warnings=454
 
       - name: Test
         run: bun run test
 
       - name: Build
         run: bun run build
+
+      - name: Dependency audit (non-blocking)
+        continue-on-error: true
+        run: bun pm audit || npm audit --audit-level=high || true
