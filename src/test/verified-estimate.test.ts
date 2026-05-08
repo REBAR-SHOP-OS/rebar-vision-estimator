@@ -230,7 +230,7 @@ describe("validateStage2Quote", () => {
       total_weight_kg: 28.4,
     });
     expect(result.success).toBe(false);
-    if (result.success) throw new Error("Expected schema failure");
+    if (!("error" in result)) throw new Error("Expected schema failure");
     expect(result.error.blockedReasons[0]).toContain("quote.bar_list");
   });
 
@@ -250,7 +250,7 @@ describe("validateStage2Quote", () => {
       total_weight_kg: 28.4,
     });
     expect(result.success).toBe(false);
-    if (result.success) throw new Error("Expected schema failure");
+    if (!("error" in result)) throw new Error("Expected schema failure");
     expect(result.error.issues.some((issue) => issue.includes("quote.bar_list[0].size"))).toBe(true);
   });
 
@@ -275,7 +275,7 @@ describe("persistVerifiedEstimateFromChat", () => {
     });
 
     expect(result.ok).toBe(false);
-    if (result.ok) throw new Error("Expected persistence failure");
+    if (!("kind" in result)) throw new Error("Expected persistence failure");
     expect(result.kind).toBe("schema_validation_failed");
     expect(result.gate.canExport).toBe(false);
     expect(result.gate.blocked_reasons.some((reason) => reason.includes("quote.bar_list"))).toBe(true);

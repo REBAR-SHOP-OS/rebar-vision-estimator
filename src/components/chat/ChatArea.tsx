@@ -204,7 +204,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
 
   const applyPersistResult = useCallback((result: Awaited<ReturnType<typeof persistVerifiedEstimateFromChat>>) => {
     setExportGate(result.gate);
-    if (!result.ok) {
+    if ("kind" in result) {
       if (result.kind === "schema_validation_failed") {
         setQuoteResult(null);
       }
