@@ -372,10 +372,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       const clientOcrResults: OcrResult[] = [];
 
       if (pdfUrls.length > 0) {
-        console.log(`Pre-extracting text from ${pdfUrls.length} PDF(s) sequentially...`);
+        import.meta.env.DEV && console.log(`Pre-extracting text from ${pdfUrls.length} PDF(s) sequentially...`);
         for (const pdfUrl of pdfUrls) {
           try {
-            console.log(`Extracting text from: ${pdfUrl.substring(0, 60)}...`);
+            import.meta.env.DEV && console.log(`Extracting text from: ${pdfUrl.substring(0, 60)}...`);
             const { data, error } = await supabase.functions.invoke('extract-pdf-text', {
               body: { pdf_url: pdfUrl },
             });
@@ -383,12 +383,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
               console.error(`PDF text extraction failed for ${pdfUrl}:`, error);
             } else if (data) {
               preExtractedText.push(data);
-              console.log(`Extracted ${data.total_pages || 0} pages, has_text_layer: ${data.has_text_layer}, skipped_reason: ${data.skipped_reason || 'none'}`);
+              import.meta.env.DEV && console.log(`Extracted ${data.total_pages || 0} pages, has_text_layer: ${data.has_text_layer}, skipped_reason: ${data.skipped_reason || 'none'}`);
 
               // If PDF is scanned/skipped, render pages to images client-side then OCR each
               const isScanned = data.has_text_layer === false || data.skipped_reason;
               if (isScanned) {
-                console.log(`[OCR Routing] PDF is scanned/skipped. Rendering pages to images client-side...`);
+                import.meta.env.DEV && console.log(`[OCR Routing] PDF is scanned/skipped. Rendering pages to images client-side...`);
                 try {
                   // Refresh session before long-running client-side rendering to prevent JWT expiry
                   await supabase.auth.refreshSession();
@@ -396,10 +396,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                     maxPages: 10,
                     scale: 1.5,
                     onProgress: (current, total) => {
-                      console.log(`[OCR Routing] Rendering page ${current}/${total}...`);
+                      import.meta.env.DEV && console.log(`[OCR Routing] Rendering page ${current}/${total}...`);
                     },
                   });
-                  console.log(`[OCR Routing] ${pageImages.length} page images uploaded. Running Vision OCR on each...`);
+                  import.meta.env.DEV && console.log(`[OCR Routing] ${pageImages.length} page images uploaded. Running Vision OCR on each...`);
                   
                    // OCR each page image in parallel batches of 4
                    let ocrFailCount = 0;
@@ -409,7 +409,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                      const batchResults = await Promise.allSettled(
                        batch.map(async (img) => {
                          scannedPdfPageImageUrls.push(img.signedUrl);
-                         console.log(`[OCR Routing] OCR page ${img.pageNumber}...`);
+                         import.meta.env.DEV && console.log(`[OCR Routing] OCR page ${img.pageNumber}...`);
                          const { data: ocrData, error: ocrErr } = await supabase.functions.invoke('ocr-image', {
                            body: { image_url: img.signedUrl },
                          });
@@ -423,7 +423,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
                            image_name: `page_${result.value.pageNumber}.png`,
                            ocr_results: result.value.ocrData.ocr_results,
                          });
-                         console.log(`[OCR Routing] OCR page ${result.value.pageNumber} done — ${(result.value.ocrData.ocr_results as OcrPass[]).reduce((s: number, r) => s + ((r.blocks?.length) || 0), 0)} blocks`);
+                         import.meta.env.DEV && console.log(`[OCR Routing] OCR page ${result.value.pageNumber} done — ${(result.value.ocrData.ocr_results as OcrPass[]).reduce((s: number, r) => s + ((r.blocks?.length) || 0), 0)} blocks`);
                        } else {
                          console.error(`[OCR Routing] OCR failed for batch page:`, result.status === 'rejected' ? result.reason : 'no results');
                          ocrFailCount++;
@@ -459,7 +459,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           fullText: (pass.fullText || "").substring(0, perPageLimit),
         })),
       }));
-      console.log(`[Payload] OCR pages: ${clientOcrResults.length}, per-page limit: ${perPageLimit} chars`);
+      import.meta.env.DEV && console.log(`[Payload] OCR pages: ${clientOcrResults.length}, per-page limit: ${perPageLimit} chars`);
 
       // Don't send scanned page image URLs if we already have OCR text for them
       effectiveImageUrls = trimmedOcrResults.length > 0 ? nonPdfUrls : [...nonPdfUrls, ...scannedPdfPageImageUrls];
@@ -493,7 +493,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           projectId,
       };
       let payloadStr = JSON.stringify(payloadObj);
-      console.log(`[Payload] Total size: ${Math.round(payloadStr.length / 1024)} KB`);
+      import.meta.env.DEV && console.log(`[Payload] Total size: ${Math.round(payloadStr.length / 1024)} KB`);
 
       // If still over 400KB, aggressively trim OCR fullText
       if (payloadStr.length > 400 * 1024 && payloadObj.pre_ocr_results.length > 0) {
@@ -509,7 +509,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           }
         }
         payloadStr = JSON.stringify(payloadObj);
-        console.log(`[Payload] After trim: ${Math.round(payloadStr.length / 1024)} KB`);
+        import.meta.env.DEV && console.log(`[Payload] After trim: ${Math.round(payloadStr.length / 1024)} KB`);
       }
 
       // Final safety valve — hard cap at 480KB
@@ -522,7 +522,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           }
         }
         payloadStr = JSON.stringify(payloadObj);
-        console.log(`[Payload] Hard-capped to: ${Math.round(payloadStr.length / 1024)} KB`);
+        import.meta.env.DEV && console.log(`[Payload] Hard-capped to: ${Math.round(payloadStr.length / 1024)} KB`);
       }
 
       const resp = await fetch(CHAT_URL, {
@@ -1039,7 +1039,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
         const parsed = JSON.parse(jsonBlockMatch[1]);
         const elements = parsed?.elements || (Array.isArray(parsed) ? parsed : null);
         if (elements && elements.length > 0) {
-          console.log("[Fallback] Extracted elements from JSON code block:", elements.length);
+          import.meta.env.DEV && console.log("[Fallback] Extracted elements from JSON code block:", elements.length);
           return elements;
         }
       }
@@ -1060,7 +1060,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           if (depth === 0) {
             const parsed = JSON.parse(content.slice(startIdx, endIdx));
             if (parsed?.elements?.length > 0) {
-              console.log("[Fallback-aggressive] Extracted elements:", parsed.elements.length);
+              import.meta.env.DEV && console.log("[Fallback-aggressive] Extracted elements:", parsed.elements.length);
               return parsed.elements;
             }
           }
@@ -1468,11 +1468,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           const isPdf = /\.pdf/i.test(url) || url.includes("/blueprints/");
           if (isPdf) {
             try {
-              console.log("[detect] Pre-rendering PDF pages for detection:", url.substring(0, 60));
+              import.meta.env.DEV && console.log("[detect] Pre-rendering PDF pages for detection:", url.substring(0, 60));
               const pageImages = await renderPdfPagesToImages(url, projectId, { maxPages: 3, scale: 1.0 });
               if (pageImages.length > 0) {
                 detectUrls.push(...pageImages.map(p => p.signedUrl));
-                console.log(`[detect] Rendered ${pageImages.length} page images from PDF`);
+                import.meta.env.DEV && console.log(`[detect] Rendered ${pageImages.length} page images from PDF`);
               } else {
                 detectUrls.push(url); // fallback to original
               }
