@@ -11,6 +11,7 @@ import {
   ensureCurrentProjectRebarBridge,
   inferRebarFileKind,
 } from "@/lib/rebar-intake";
+import { parseAndIndexFile } from "@/lib/parse-file";
 
 interface Row {
   id: string;
@@ -41,6 +42,7 @@ export default function FilesStage({ projectId, state }: StageProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [reindexing, setReindexing] = useState(false);
 
   const rows: Row[] = state.files.map((f) => ({
     ...f,
@@ -101,6 +103,24 @@ export default function FilesStage({ projectId, state }: StageProps) {
           continue;
         }
 
+        // Trigger parse + index so downstream estimation has drawing text.
+        try {
+          const res = await parseAndIndexFile(projectId, {
+            id: fileRow.id,
+            legacy_file_id: fileRow.id,
+            file_name: file.name,
+            file_path: path,
+          }, (msg) => toast.message(`${file.name}: ${msg}`));
+          if (res.status === "failed") {
+            toast.error(`Indexing failed for ${file.name}: ${res.error || "unknown error"}`);
+          } else if (res.status === "indexed") {
+            toast.success(`${file.name} indexed (${res.pages_indexed} pages)`);
+          }
+        } catch (parseErr: any) {
+          console.warn(`parseAndIndexFile failed for ${file.name}:`, parseErr);
+          toast.error(`Indexing failed for ${file.name}: ${parseErr?.message || parseErr}`);
+        }
+
         ok++;
       } catch (saveErr) {
         console.warn(`Canonical V2 upload failed for ${file.name}:`, saveErr);
@@ -119,6 +139,29 @@ export default function FilesStage({ projectId, state }: StageProps) {
     state.setLocal({ fileStatus: { ...cur, [id]: status } });
   };
 
+  const handleReindexAll = async () => {
+    if (!user || rows.length === 0) return;
+    setReindexing(true);
+    let ok = 0;
+    for (const r of rows) {
+      try {
+        const res = await parseAndIndexFile(projectId, {
+          id: r.id,
+          legacy_file_id: (r as any).legacy_file_id || r.id,
+          file_name: r.file_name,
+          file_path: r.file_path,
+        }, (msg) => toast.message(`${r.file_name}: ${msg}`), { force: true });
+        if (res.status === "indexed") ok++;
+        else if (res.status === "failed") toast.error(`Re-index failed: ${r.file_name} — ${res.error || "unknown"}`);
+      } catch (e: any) {
+        toast.error(`Re-index error: ${r.file_name} — ${e?.message || e}`);
+      }
+    }
+    setReindexing(false);
+    if (ok) toast.success(`Re-indexed ${ok} file${ok > 1 ? "s" : ""}`);
+    state.refresh();
+  };
+
   return (
     <div className="grid grid-cols-12 h-full">
       <input ref={inputRef} type="file" multiple accept="*" onChange={handleUpload} className="hidden" />
@@ -129,13 +172,25 @@ export default function FilesStage({ projectId, state }: StageProps) {
           title="Document Register"
           subtitle="Files create downstream awareness, not final decisions."
           right={
-            <button
-              onClick={() => inputRef.current?.click()}
-              disabled={uploading}
-              className="inline-flex items-center gap-2 px-3 h-8 text-[11px] font-semibold uppercase tracking-[0.12em] border border-primary text-primary hover:bg-primary/10 disabled:opacity-50"
-            >
-              <Upload className="w-3.5 h-3.5" /> {uploading ? "Uploading..." : "Upload New Sheets"}
-            </button>
+            <div className="flex items-center gap-2">
+              {rows.length > 0 && (
+                <button
+                  onClick={handleReindexAll}
+                  disabled={reindexing || uploading}
+                  className="inline-flex items-center gap-2 px-3 h-8 text-[11px] font-semibold uppercase tracking-[0.12em] border border-border text-muted-foreground hover:bg-accent/40 disabled:opacity-50"
+                >
+                  {reindexing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                  {reindexing ? "Re-indexing..." : "Re-index All"}
+                </button>
+              )}
+              <button
+                onClick={() => inputRef.current?.click()}
+                disabled={uploading || reindexing}
+                className="inline-flex items-center gap-2 px-3 h-8 text-[11px] font-semibold uppercase tracking-[0.12em] border border-primary text-primary hover:bg-primary/10 disabled:opacity-50"
+              >
+                <Upload className="w-3.5 h-3.5" /> {uploading ? "Uploading..." : "Upload New Sheets"}
+              </button>
+            </div>
           }
         />
         {rows.length > 0 && (
