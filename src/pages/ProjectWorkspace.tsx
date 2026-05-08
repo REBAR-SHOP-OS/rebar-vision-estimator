@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2 } from "lucide-react";
 import WorkflowShell from "@/features/workflow-v2/WorkflowShell";
-import { getCanonicalProjectByLegacyId } from "@/lib/rebar-read-model";
+import { loadWorkspaceProject } from "./project-workspace-loader";
 
 export default function ProjectWorkspace() {
   const { id } = useParams<{ id: string }>();
@@ -17,41 +17,10 @@ export default function ProjectWorkspace() {
 
     const loadProject = async (withLoading = true) => {
       if (withLoading) setLoading(true);
-
-      const { data: legacyProject, error: legacyError } = await supabase
-        .from("projects")
-        .select("*")
-        .eq("id", id)
-        .single();
-
-      if (legacyError) {
-        console.warn("Failed to load legacy project:", legacyError);
-      }
-
-      let canonicalProject = null;
-      if (legacyProject) {
-        try {
-          canonicalProject = await getCanonicalProjectByLegacyId(supabase, id);
-        } catch (error) {
-          console.warn("Failed to load canonical project:", error);
-        }
-      }
+      const project = await loadWorkspaceProject(supabase, id);
 
       if (cancelled) return;
-
-      if (legacyProject) {
-        setProject({
-          ...legacyProject,
-          canonicalProject,
-          project_name: canonicalProject?.projectName || legacyProject.name,
-          customer_name: canonicalProject?.customerName ?? legacyProject.client_name,
-          location: canonicalProject?.location ?? legacyProject.address ?? null,
-          rebar_project_id: canonicalProject?.rebarProjectId || null,
-          status: canonicalProject?.status || legacyProject.status,
-        });
-      } else if (withLoading) {
-        setProject(null);
-      }
+      setProject(project);
 
       if (withLoading && !cancelled) {
         setLoading(false);

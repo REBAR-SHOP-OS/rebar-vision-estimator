@@ -187,16 +187,23 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
         ? supabase.from("bar_items").select("id", { count: "exact" }).in("segment_id", segIds)
         : Promise.resolve({ count: 0 });
 
-      const [est, shop, issues, quotes, appRes, openRes, estItems, barItemsRes] = await Promise.all([
-        supabase.from("estimate_versions").select("id", { count: "exact" }).eq("project_id", projectId),
-        supabase.from("shop_drawings").select("id", { count: "exact" }).eq("project_id", projectId),
-        supabase.from("validation_issues").select("id", { count: "exact" }).eq("project_id", projectId),
-        supabase.from("quote_versions").select("id", { count: "exact" }).eq("project_id", projectId),
-        supabase.from("approvals").select("status").eq("project_id", projectId).is("segment_id", null).order("created_at", { ascending: false }).limit(1),
-        supabase.from("validation_issues").select("id", { count: "exact" }).eq("project_id", projectId).eq("status", "open"),
-        supabase.from("estimate_items").select("id", { count: "exact" }).eq("project_id", projectId),
-        barItemsCountPromise,
-      ]);
+        const [est, shop, issues, quotes, appRes, openRes, estItems, barItemsRes] = await Promise.all([
+          supabase.from("estimate_versions").select("id", { count: "exact" }).eq("project_id", projectId),
+          supabase.from("shop_drawings").select("id", { count: "exact" }).eq("project_id", projectId),
+          supabase.from("validation_issues").select("id", { count: "exact" }).eq("project_id", projectId),
+          supabase.from("quote_versions").select("id", { count: "exact" }).eq("project_id", projectId),
+          supabase
+            .from("approvals")
+            .select("approval_type,status")
+            .eq("project_id", projectId)
+            .is("segment_id", null)
+            .neq("approval_type", "estimator_signoff")
+            .order("created_at", { ascending: false })
+            .limit(1),
+          supabase.from("validation_issues").select("id", { count: "exact" }).eq("project_id", projectId).eq("status", "open"),
+          supabase.from("estimate_items").select("id", { count: "exact" }).eq("project_id", projectId),
+          barItemsCountPromise,
+        ]);
 
       const estCount = (est.count || 0) + (estItems.count || 0);
       const shopCount = (shop.count || 0);
