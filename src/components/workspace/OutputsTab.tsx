@@ -18,9 +18,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/audit-logger";
-import { exportExcelFile } from "@/lib/excel-export";
-import html2canvas from "html2canvas";
-import { jsPDF } from "jspdf";
+// Heavy export libs are dynamically imported inside the handlers below
+// (renderHtmlToPdf / Excel export) to keep them out of the workspace's
+// eager bundle graph.
 import { getLogoDataUri } from "@/lib/logo-base64";
 import { validateDrawingMetadata, normalizeProjectName, type DrawingMode } from "@/lib/shop-drawing/validate-metadata";
 import {
@@ -45,6 +45,10 @@ interface OutputItem {
 }
 
 async function renderHtmlToPdf(html: string, filename: string): Promise<void> {
+  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+    import("html2canvas"),
+    import("jspdf"),
+  ]);
   // Extract <style> blocks and body contents from the full HTML string so they
   // survive being mounted into a <div> (innerHTML drops <html>/<head>/<body>).
   const styleMatches = Array.from(html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi))
@@ -355,6 +359,7 @@ export default function OutputsTab({ projectId, filter }: { projectId: string; f
           deviations: proj?.deviations || "None noted",
         };
         const quoteResult = { quote: result.quote, elements: [] as any[] };
+        const { exportExcelFile } = await import("@/lib/excel-export");
         await exportExcelFile({ quoteResult, elements: [], scopeData });
         try {
           await (supabase as any).from("export_jobs").insert({

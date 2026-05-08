@@ -39,7 +39,7 @@ export default defineConfig(({ mode }) => ({
             "@radix-ui/react-tooltip",
             "@radix-ui/react-toast",
           ],
-          pdf: ["pdfjs-dist", "jspdf", "html2canvas", "html2pdf.js"],
+          pdf: ["pdfjs-dist", "jspdf", "html2canvas"],
           excel: ["exceljs"],
           charts: ["recharts"],
         },

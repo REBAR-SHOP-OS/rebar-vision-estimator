@@ -100,7 +100,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       const sha256 = extraction?.sha256 || `file_${fileId}`;
 
       if (extractErr || !hasText) {
-        console.log(`[FilesTab] Server extraction empty for ${fileName}, falling back to client-side OCR`);
+        import.meta.env.DEV && console.log(`[FilesTab] Server extraction empty for ${fileName}, falling back to client-side OCR`);
         onProgress?.("Rendering pages...");
 
         try {
@@ -145,7 +145,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
             }
           }
 
-          console.log(`[FilesTab] OCR completed: ${pages.filter((p: any) => p.raw_text?.length > 0).length}/${totalPages} pages with text`);
+          import.meta.env.DEV && console.log(`[FilesTab] OCR completed: ${pages.filter((p: any) => p.raw_text?.length > 0).length}/${totalPages} pages with text`);
         } catch (ocrErr) {
           console.error(`[FilesTab] Client-side OCR failed for ${fileName}:`, ocrErr);
           return false;

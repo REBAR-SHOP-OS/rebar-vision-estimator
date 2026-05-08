@@ -52,7 +52,6 @@
     "embla-carousel-react": "^8.6.0",
     "exceljs": "^4.4.0",
     "html2canvas": "^1.4.1",
-    "html2pdf.js": "0.10.2",
     "input-otp": "^1.4.2",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.462.0",
