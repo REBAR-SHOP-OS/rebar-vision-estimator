@@ -202,6 +202,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
     return true;
   }, [exportGate]);
 
+  const applyPersistResult = useCallback((result: Awaited<ReturnType<typeof persistVerifiedEstimateFromChat>>) => {
+    setExportGate(result.gate);
+    if (!result.ok) {
+      if (result.kind === "schema_validation_failed") {
+        setQuoteResult(null);
+      }
+      toast.error(result.message);
+    }
+  }, []);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -844,7 +854,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           elements,
           quote: data.quote,
           usedFallbackJson: false,
-        }).then(setExportGate);
+        }).then(applyPersistResult);
       }
     } catch (err) {
       toast.error("Pricing failed: " + ((err as Error).message || "Unknown error"));
@@ -966,13 +976,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
       // Persist estimate to DB
       persistEstimateVersion(atomicData.elements, syntheticQuote);
       if (user) {
-        void persistVerifiedEstimateFromChat(supabase, {
-          projectId,
-          userId: user.id,
-          elements: atomicData.elements,
-          quote: syntheticQuote,
-          usedFallbackJson: false,
-        }).then(setExportGate);
+          void persistVerifiedEstimateFromChat(supabase, {
+            projectId,
+            userId: user.id,
+            elements: atomicData.elements,
+            quote: syntheticQuote,
+            usedFallbackJson: false,
+          }).then(applyPersistResult);
       }
       // Background: run validation and merge results
       setSubStep("validating");
@@ -986,7 +996,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             elements: vdata.elements,
             quote: sq2,
             usedFallbackJson: false,
-          }).then(setExportGate);
+          }).then(applyPersistResult);
         }
         setSubStep("ready");
         setTimeout(() => setSubStep(null), 2000);
@@ -1007,7 +1017,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
           elements: fallbackElements,
           quote: syntheticQuote,
           usedFallbackJson: true,
-        }).then(setExportGate);
+        }).then(applyPersistResult);
       }
       setSubStep("validating");
       runValidation(fallbackElements).then((vdata) => {
@@ -1020,7 +1030,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ projectId, initialFiles, onInitialF
             elements: vdata.elements,
             quote: sq2,
             usedFallbackJson: true,
-          }).then(setExportGate);
+          }).then(applyPersistResult);
         }
         setSubStep("ready");
         setTimeout(() => setSubStep(null), 2000);

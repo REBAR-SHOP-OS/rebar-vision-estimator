@@ -12,10 +12,25 @@ import {
 import { diffReferenceVsCanonical } from "./reference-diff";
 import { evaluateExportGate, type ExportGateResult } from "./export-gate";
 import { persistRebarTakeoffFromCanonical } from "@/lib/rebar-takeoff-persistence";
+import { validateStage2Quote } from "./stage2-schema";
 
 // Helper to bypass type checking for tables not yet in generated types
 const fromAny = (supabase: SupabaseClient<Database>, table: string) =>
   (supabase as any).from(table);
+
+export interface PersistVerifiedEstimateSuccess {
+  ok: true;
+  gate: ExportGateResult;
+}
+
+export interface PersistVerifiedEstimateFailure {
+  ok: false;
+  kind: "schema_validation_failed" | "persistence_failed";
+  message: string;
+  gate: ExportGateResult;
+}
+
+export type PersistVerifiedEstimateResult = PersistVerifiedEstimateSuccess | PersistVerifiedEstimateFailure;
 
 export async function fetchWorkspaceCanonicalInputs(
   supabase: SupabaseClient<Database>,
@@ -267,10 +282,23 @@ export async function persistVerifiedEstimateFromChat(
     quote: Record<string, unknown>;
     usedFallbackJson: boolean;
   },
-): Promise<ExportGateResult> {
+): Promise<PersistVerifiedEstimateResult> {
+  const parsedQuote = validateStage2Quote(params.quote);
+  if (!parsedQuote.success) {
+    return {
+      ok: false,
+      kind: "schema_validation_failed",
+      message: "Stage 2 output did not match the expected export schema.",
+      gate: {
+        canExport: false,
+        blocked_reasons: parsedQuote.error.blockedReasons,
+      },
+    };
+  }
+
   const result = buildCanonicalResultFromChatQuote({
     elements: params.elements,
-    quote: params.quote as CanonicalEstimateResultV1["quote"],
+    quote: parsedQuote.data,
     usedFallbackJson: params.usedFallbackJson,
   });
 
@@ -300,11 +328,6 @@ export async function persistVerifiedEstimateFromChat(
       status: gate.canExport ? "verified" : "blocked",
       blockedReasons: gate.blocked_reasons,
     });
-  } catch (e) {
-    console.warn("[persistVerifiedEstimateFromChat] verified_estimate_results unavailable:", e);
-  }
-
-  try {
     await persistRebarTakeoffFromCanonical(supabase, {
       legacyProjectId: params.projectId,
       userId: params.userId,
@@ -312,8 +335,14 @@ export async function persistVerifiedEstimateFromChat(
       parserProvider: params.usedFallbackJson ? "gpt_fallback_json" : "gpt_structured",
     });
   } catch (e) {
-    console.warn("[persistVerifiedEstimateFromChat] rebar takeoff persistence unavailable:", e);
+    console.warn("[persistVerifiedEstimateFromChat] persistence unavailable:", e);
+    return {
+      ok: false,
+      kind: "persistence_failed",
+      message: e instanceof Error ? e.message : "Could not persist canonical snapshot.",
+      gate,
+    };
   }
 
-  return gate;
+  return { ok: true, gate };
 }
