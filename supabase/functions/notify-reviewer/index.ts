@@ -25,17 +25,23 @@ Deno.serve(async (req) => {
     if (!recipient_email || !notification_type) {
       return new Response(
         JSON.stringify({ error: "recipient_email and notification_type are required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const authHeader = req.headers.get("Authorization");
+    if (authHeader !== `Bearer ${supabaseKey}`) {
+      return new Response(
+        JSON.stringify({ error: "Forbidden" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
+    const supabase = createClient(supabaseUrl, supabaseKey);
     const results: { email?: string; sms?: string } = {};
 
-    // --- EMAIL via Resend (if key exists) ---
     const resendKey = Deno.env.get("RESEND_API_KEY");
     if (resendKey) {
       try {
@@ -76,7 +82,6 @@ Deno.serve(async (req) => {
       results.email = "skipped_no_key";
     }
 
-    // --- SMS via Twilio (if keys exist) ---
     const twilioSid = Deno.env.get("TWILIO_ACCOUNT_SID");
     const twilioToken = Deno.env.get("TWILIO_AUTH_TOKEN");
     const twilioPhone = Deno.env.get("TWILIO_PHONE_NUMBER");
@@ -98,7 +103,7 @@ Deno.serve(async (req) => {
               From: twilioPhone,
               Body: smsBody,
             }),
-          }
+          },
         );
 
         if (twilioRes.ok) {
@@ -116,7 +121,6 @@ Deno.serve(async (req) => {
       results.sms = recipient_phone ? "skipped_no_key" : "skipped_no_phone";
     }
 
-    // --- Log to notifications table ---
     const emailStatus = results.email === "sent" ? "sent" : results.email === "skipped_no_key" ? "logged" : "failed";
     const { error: insertErr } = await supabase.from("notifications").insert({
       project_id: project_id || "00000000-0000-0000-0000-000000000000",
@@ -134,13 +138,13 @@ Deno.serve(async (req) => {
 
     return new Response(
       JSON.stringify({ success: true, results }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {
     console.error("notify-reviewer error:", err);
     return new Response(
       JSON.stringify({ error: (err as Error).message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 });
