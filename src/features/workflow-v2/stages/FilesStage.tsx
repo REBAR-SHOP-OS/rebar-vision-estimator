@@ -11,6 +11,7 @@ import {
   ensureCurrentProjectRebarBridge,
   inferRebarFileKind,
 } from "@/lib/rebar-intake";
+import { parseAndIndexFile } from "@/lib/parse-file";
 
 interface Row {
   id: string;
@@ -99,6 +100,24 @@ export default function FilesStage({ projectId, state }: StageProps) {
           console.warn(`document_versions insert failed for ${file.name}:`, docVersionErr);
           toast.error(`Uploaded ${file.name}, but indexing setup failed. Re-upload this file from the workspace Files tab.`);
           continue;
+        }
+
+        // Trigger parse + index so downstream estimation has drawing text.
+        try {
+          const res = await parseAndIndexFile(projectId, {
+            id: fileRow.id,
+            legacy_file_id: fileRow.id,
+            file_name: file.name,
+            file_path: path,
+          }, (msg) => toast.message(`${file.name}: ${msg}`));
+          if (res.status === "failed") {
+            toast.error(`Indexing failed for ${file.name}: ${res.error || "unknown error"}`);
+          } else if (res.status === "indexed") {
+            toast.success(`${file.name} indexed (${res.pages_indexed} pages)`);
+          }
+        } catch (parseErr: any) {
+          console.warn(`parseAndIndexFile failed for ${file.name}:`, parseErr);
+          toast.error(`Indexing failed for ${file.name}: ${parseErr?.message || parseErr}`);
         }
 
         ok++;
