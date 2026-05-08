@@ -606,7 +606,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
                       <FileText className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                      <span className="font-medium text-foreground truncate max-w-[220px]">{f.file_name}</span>
+                      <span className="font-medium text-foreground truncate max-w-[250px]">{f.file_name}</span>
                       {revisionBadge(f)}
                     </div>
                   </td>
