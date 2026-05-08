@@ -27,6 +27,7 @@ export default tseslint.config(
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
       "@typescript-eslint/no-unused-vars": "off",
       "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/no-unused-expressions": ["error", { "allowShortCircuit": true, "allowTernary": true }],
       "no-empty": ["warn", { "allowEmptyCatch": true }],
       "@typescript-eslint/no-empty-object-type": "off",
       "no-useless-escape": "warn",
