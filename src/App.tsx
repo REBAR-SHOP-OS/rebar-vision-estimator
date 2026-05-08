@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { LanguageProvider } from "@/contexts/LanguageContext";
@@ -21,6 +21,7 @@ import OrdersPage from "./pages/OrdersPage";
 import OrderDetail from "./pages/OrderDetail";
 
 const queryClient = new QueryClient();
+const LEGACY_TABS = new Set(["files", "segments", "qa", "estimate", "shop-drawings", "outputs", "settings"]);
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuth();
@@ -46,6 +47,16 @@ const AuthRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return user ? <Navigate to="/app" replace /> : <>{children}</>;
 };
 
+const LegacyRouteRedirect: React.FC = () => {
+  const { id, legacyTab } = useParams<{ id: string; legacyTab: string }>();
+
+  if (!id || !legacyTab || !LEGACY_TABS.has(legacyTab)) {
+    return <Navigate to={id ? `/app/project/${id}` : "/app"} replace />;
+  }
+
+  return <Navigate to={`/app/legacy/project/${id}/${legacyTab}`} replace />;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
@@ -63,6 +74,7 @@ const App = () => (
                 <Route path="/app" element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
                   <Route index element={<Dashboard />} />
                   <Route path="project/:id" element={<ProjectWorkspace />} />
+                  <Route path="project/:id/:legacyTab" element={<LegacyRouteRedirect />} />
                   <Route path="project/:id/segments/:segId" element={<SegmentDetail />} />
                   {/* Legacy archive — kept reachable but not the primary path */}
                   <Route path="legacy/project/:id" element={<LegacyProjectWorkspace />} />
