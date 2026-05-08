@@ -8,7 +8,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { logAuditEvent } from "@/lib/audit-logger";
-import { findSupersedableRegistryRow } from "@/lib/revision-lifecycle-helpers";
+import {
+  findCurrentEstimateVersionId,
+  findSupersedableRegistryRow,
+} from "@/lib/revision-lifecycle-helpers";
 
 // Re-export pure helpers so callers can use a single import path if desired
 export { findSupersedableRegistryRow, findCurrentEstimateVersionId } from "@/lib/revision-lifecycle-helpers";
@@ -31,12 +34,13 @@ export async function supersedePreviousActiveFile(
     detectedDiscipline: string | null;
   },
 ): Promise<string | null> {
-  // 1. Load active registry rows for this project
+  // 1. Load active registry rows for this project, excluding the new file
   const { data: registryRows } = await (supabase as any)
     .from("document_registry")
     .select("id, file_id, classification, detected_discipline, is_active")
     .eq("project_id", params.projectId)
-    .eq("is_active", true);
+    .eq("is_active", true)
+    .neq("file_id", params.newFileId);
 
   if (!registryRows || registryRows.length === 0) return null;
 
@@ -102,19 +106,11 @@ export async function promotePublicEstimateVersion(
     .from("estimate_versions")
     .select("id, is_current, version_number")
     .eq("project_id", params.projectId)
-    .eq("is_current", true)
-    .neq("id", params.newEstimateVersionId)
-    .limit(1);
+    .neq("id", params.newEstimateVersionId);
 
-  const prevId = prevRows?.[0]?.id ?? null;
+  const prevId = findCurrentEstimateVersionId(prevRows ?? []);
 
-  // 2. Mark new row as current
-  await supabase
-    .from("estimate_versions")
-    .update({ is_current: true } as any)
-    .eq("id", params.newEstimateVersionId);
-
-  // 3. Archive previous current row
+  // 2. Archive previous current row before promoting to satisfy the unique current index
   if (prevId) {
     await supabase
       .from("estimate_versions")
@@ -135,6 +131,12 @@ export async function promotePublicEstimateVersion(
       { new_version_id: params.newEstimateVersionId },
     );
   }
+
+  // 3. Mark new row as current
+  await supabase
+    .from("estimate_versions")
+    .update({ is_current: true } as any)
+    .eq("id", params.newEstimateVersionId);
 
   await logAuditEvent(
     params.userId,
@@ -169,20 +171,11 @@ export async function promoteRebarEstimateVersion(
     .from("estimate_versions")
     .select("id, is_current, version_number")
     .eq("project_id", params.rebarProjectId)
-    .eq("is_current", true)
-    .neq("id", params.newEstimateVersionId)
-    .limit(1);
+    .neq("id", params.newEstimateVersionId);
 
-  const prevId = prevRows?.[0]?.id ?? null;
+  const prevId = findCurrentEstimateVersionId(prevRows ?? []);
 
-  // 2. Mark new row as current
-  await sb
-    .schema("rebar")
-    .from("estimate_versions")
-    .update({ is_current: true })
-    .eq("id", params.newEstimateVersionId);
-
-  // 3. Archive previous
+  // 2. Archive previous before promoting to satisfy the unique current index
   if (prevId) {
     await sb
       .schema("rebar")
@@ -204,6 +197,13 @@ export async function promoteRebarEstimateVersion(
       { new_version_id: params.newEstimateVersionId },
     );
   }
+
+  // 3. Mark new row as current
+  await sb
+    .schema("rebar")
+    .from("estimate_versions")
+    .update({ is_current: true })
+    .eq("id", params.newEstimateVersionId);
 
   await logAuditEvent(
     params.userId,
