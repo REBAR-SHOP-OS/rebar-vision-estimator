@@ -37,7 +37,6 @@ async function authenticateOdoo(odoo: ReturnType<typeof getOdooCreds>): Promise<
     }),
   });
   const json = await resp.json();
-  console.log("Odoo auth response:", JSON.stringify(json));
   const uid = json?.result;
   if (!uid || typeof uid !== "number") {
     throw new Error(`Odoo authentication failed: ${JSON.stringify(json?.error || json)}`);
@@ -60,8 +59,7 @@ async function fetchOdooAttachment(odooId: string) {
         params: {
           service: "object",
           method: "execute_kw",
-          args: [odoo.db, uid, odoo.apiKey, "ir.attachment", "read",
-            [[parseInt(odooId)]], { fields }],
+          args: [odoo.db, uid, odoo.apiKey, "ir.attachment", "read", [[parseInt(odooId)]], { fields }],
         },
       }),
     }).then((r) => r.json());
@@ -71,13 +69,10 @@ async function fetchOdooAttachment(odooId: string) {
     makeRpc(["datas"]),
   ]);
 
-  console.log("Odoo meta response keys:", JSON.stringify({ result: !!metaJson?.result, error: metaJson?.error }));
-  console.log("Odoo data response keys:", JSON.stringify({ result: !!dataJson?.result, hasDatas: !!dataJson?.result?.[0]?.datas, error: dataJson?.error }));
-
   const meta = metaJson?.result?.[0];
   const dataRec = dataJson?.result?.[0];
   if (!meta || !dataRec?.datas) {
-    throw new Error(`Attachment ${odooId} not found or empty. Meta: ${JSON.stringify(metaJson?.error || metaJson?.result)}, Data: ${JSON.stringify(dataJson?.error || 'no datas field')}`);
+    throw new Error(`Attachment ${odooId} not found or empty.`);
   }
 
   const binaryStr = atob(dataRec.datas);
@@ -99,10 +94,60 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const body = await req.json();
-    const { url, odoo_id } = body;
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-    // Mode 1: Fetch by Odoo attachment ID directly via JSON-RPC
+    const body = await req.json();
+    const { url, odoo_id, project_id } = body;
+    if (!project_id) {
+      return new Response(JSON.stringify({ error: "project_id is required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const userClient = (await import("https://esm.sh/@supabase/supabase-js@2")).createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user }, error: userError } = await userClient.auth.getUser();
+    if (userError || !user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const adminClient = (await import("https://esm.sh/@supabase/supabase-js@2")).createClient(supabaseUrl, serviceKey);
+    const { data: project, error: projectError } = await adminClient
+      .from("projects")
+      .select("id")
+      .eq("id", project_id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (projectError) {
+      console.error("Project lookup error:", projectError);
+      return new Response(JSON.stringify({ error: "Failed to verify project access" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!project) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (odoo_id) {
       const result = await fetchOdooAttachment(String(odoo_id));
       return new Response(result.bytes, {
@@ -115,7 +160,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Mode 2: Proxy a URL (for storage/non-Odoo URLs)
     if (!url || typeof url !== "string") {
       return new Response(JSON.stringify({ error: "Missing url or odoo_id" }), {
         status: 400,
