@@ -284,7 +284,7 @@ export async function persistVerifiedEstimateFromChat(
   },
 ): Promise<PersistVerifiedEstimateResult> {
   const parsedQuote = validateStage2Quote(params.quote);
-  if (!parsedQuote.success) {
+  if ("error" in parsedQuote) {
     return {
       ok: false,
       kind: "schema_validation_failed",

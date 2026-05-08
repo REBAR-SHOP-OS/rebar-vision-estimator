@@ -275,7 +275,7 @@ describe("persistVerifiedEstimateFromChat", () => {
     });
 
     expect(result.ok).toBe(false);
-    if (result.ok) throw new Error("Expected persistence failure");
+    if (!("kind" in result)) throw new Error("Expected persistence failure");
     expect(result.kind).toBe("schema_validation_failed");
     expect(result.gate.canExport).toBe(false);
     expect(result.gate.blocked_reasons.some((reason) => reason.includes("quote.bar_list"))).toBe(true);
