@@ -1255,7 +1255,9 @@ function BBoxPointer({
   const borderPx = Math.max(1, 2 / z);
   const haloPx = Math.max(0.5, 1.5 / z);
   const isShortBox = heightPx * z < 26 || widthPx * z < 42;
-  const labelScale = Math.min(1, Math.max(0.72, 1 / z));
+  // Counteract canvas zoom so the attention badge stays visually stable
+  // instead of growing excessively at high zoom levels.
+  const labelScale = Math.min(1, Math.max(0.16, 1 / z));
   const fillBg = approximate ? "rgba(245,158,11,0.035)" : "rgba(255,122,26,0.025)";
   return (
     <div
