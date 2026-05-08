@@ -1,61 +1,58 @@
 ## Goal
 
-When the user clicks **Run Segment** on a row in Stage 03 (Takeoff), the app should:
+Act on the four prioritized recommendations in `docs/full-audit-2026-05-08.md` without breaking working features. Tests and build are green today; this plan focuses on **performance, type-safety debt, and CI/security visibility**.
 
-1. Make sure the project's drawings are OCR-indexed (no more `DRAWING_DATA_MISSING` 422).
-2. Run takeoff for **only that one segment**, so the AI focuses on a small portion → better accuracy.
-3. Show clear progress: `Indexing… → OCR entities → Takeoff…`.
+## Phased plan
 
-Today the button calls `auto-estimate` directly with `segment_id`. If the project has zero indexed pages (current case), it fails with 422 and nothing happens.
+### Phase 1 — Bundle splitting (High priority)
 
-## Behavior change (single button, smarter)
+Target: bring the main `index-*.js` chunk from ~3.2 MB (~930 KB gzip) down by route + heavy-lib lazy loading.
 
-`Run Segment` becomes a 3-step pipeline executed in order, only doing what's needed:
+1. **Route-level lazy loading** in `src/App.tsx`:
+   - Convert page imports to `React.lazy(() => import(...))` for: `Dashboard`, `ProjectWorkspace`, `LegacyProjectWorkspace`, `BlueprintViewerPage`, `ReviewPage`, `OrdersPage`, `OrderDetail`, `SegmentDetail`, `StandardsPage`. Keep `LandingPage`, `AuthPage`, `NotFound` eager.
+   - Wrap `<Routes>` in `<Suspense fallback={...}>` using existing loading UI.
+2. **Heavy-lib dynamic imports** (only inside the handlers that use them):
+   - `src/lib/pdf-export.ts`, `src/lib/quote-pdf-export.ts`, `src/lib/excel-export.ts` — already export functions; switch call sites to `await import(...)` so jsPDF / xlsx / pdfjs land in their own chunks.
+   - `src/lib/pdf-to-images.ts` — dynamic-import `pdfjs-dist` inside `renderPdfPagesToImages`.
+3. **Manual chunks** in `vite.config.ts` `build.rollupOptions.output.manualChunks` for: `react`, `radix` (`@radix-ui/*`), `pdf` (`pdfjs-dist`, `jspdf`, `html2canvas`), `xlsx`, `charts` (`recharts`).
+4. Re-run `npm run build`, confirm main chunk shrinks and no chunk-size warning fires (or budget < 800 KB).
 
-```text
-[1] Ensure indexed
-    ├─ Check document_versions / drawing_search_index for project
-    ├─ If 0 indexed pages → run parseAndIndexFile() for each project_files row
-    │      (same helper FilesStage already uses; force=false so it's idempotent)
-    └─ Update button label: "Indexing 1/2…"
+### Phase 2 — Lint / type-safety guardrails (High priority)
 
-[2] Refresh OCR entities (light)
-    └─ Invoke reindex-extractors (already wired) so callouts/dims are fresh
-       Label: "Reading drawings…"
+Goal: stop the bleeding now; burn down later.
 
-[3] Run takeoff scoped to this segment only
-    └─ supabase.functions.invoke("auto-estimate", { segment_id, project_id })
-       Label: "Running segment…"
-```
+1. Add a CI gate: `npm run lint -- --max-warnings=454` in `.github/workflows/ci.yml` (and `pr-validation.yml`) so new warnings fail PRs. Lower the cap as warnings are fixed.
+2. Remove unused `eslint-disable` directives in any file we touch this round (mechanical, low risk).
+3. Document the burn-down policy in `AGENTS.md`: new code must be `any`-free; touched files lose one `any` per PR opportunistically.
 
-Steps 1 and 2 are skipped automatically when already done, so re-runs stay fast.
+No code-wide refactor of `any` in this phase — explicitly out of scope per minimum-patch policy.
 
-## Scope of edits (minimal patch)
+### Phase 3 — Dependency vulnerability visibility (High priority)
 
-Only one file changes: `src/features/workflow-v2/stages/TakeoffStage.tsx`.
+1. Add a scheduled job `.github/workflows/dependency-audit.yml`: weekly cron + manual dispatch, runs `npm audit --audit-level=high` and uploads JSON as an artifact. Failures only on `high`/`critical`.
+2. Add the same step (non-blocking, `continue-on-error: true`) to `ci.yml` so every PR gets a snapshot.
+3. Note in `README.md` how to run locally (`npm audit --json > audit.json`).
 
-- Extend the existing `runSingleSegment(segName)` function:
-  - Before invoking `auto-estimate`, query `document_versions` count for the project.
-  - If 0 → loop through `state.files` and call `parseAndIndexFile(projectId, file)` (already imported at the top of this file).
-  - Then call `reindex-extractors` (already wired via `handleReindex`) — extracted into a small inner helper so it can be reused without the toast spam.
-  - Then call `auto-estimate` exactly as today.
-- Replace the single `segRunning` boolean label with a `segPhase` string: `"indexing" | "ocr" | "takeoff"` so the button text reflects the current step.
-- Keep the existing toast for 422 errors as a fallback (shouldn't fire anymore once indexing runs first).
+### Phase 4 — Performance guardrails (Medium priority)
 
-No edge-function changes, no DB schema changes, no UI restructuring. The "Re-index OCR Entities" and "Generate Takeoff" buttons in the header keep working unchanged.
+1. Add `vite-bundle-visualizer` (or `rollup-plugin-visualizer`) as devDependency; add `npm run analyze` script.
+2. Add bundle-size check to CI using a small node script that reads `dist/assets/*.js` sizes and fails if any single chunk exceeds an agreed budget (proposed: 800 KB raw / 250 KB gzip for the main entry).
 
-## Out of scope (intentionally)
+## Out of scope
 
-- Page-level OCR scoping (only OCR pages relevant to a segment). The `auto-estimate` function already filters by `segment_id`; OCR is project-wide because we don't yet have a reliable segment→page mapping. If the user later wants true per-page scoping, that's a follow-up.
-- Renaming the button or restyling the segment cards.
-- Changing how `Best-Guess Estimate` or `Generate Takeoff` work.
+- Mass `any → typed` refactor (deferred to ongoing burn-down).
+- Rewriting edge functions for lint compliance.
+- Lighthouse / runtime perf instrumentation beyond bundle size.
+- Any product/UX changes.
 
-## Acceptance check
+## Acceptance
 
-On the current project (`38c049c8…`, 2 PDFs, 0 indexed pages):
+- `npm run build`: no Rollup chunk-size warning; main entry < 800 KB raw.
+- `npm run test`: still 106/106 passing.
+- `npm run lint`: warnings ≤ current cap; CI fails on new warnings.
+- New weekly dependency-audit workflow visible in GitHub Actions.
+- README documents local audit command.
 
-1. Click **Run Segment** on `Pile Caps / Pad Footings`.
-2. Button cycles: `Indexing 1/2 → Indexing 2/2 → Reading drawings → Running segment…`.
-3. Toast: `Segment "Pile Caps / Pad Footings" re-run: N item(s)`.
-4. No `DRAWING_DATA_MISSING` 422.
-5. Clicking Run Segment on a second segment skips step 1 (already indexed) and is fast.
+## Risk / rollback
+
+All changes are additive (CI workflows, vite config, lazy-loading wrappers). Rollback = revert the PR; no DB or edge-function impact.
