@@ -85,8 +85,7 @@ export default function FilesStage({ projectId, state }: StageProps) {
           fileKind: inferRebarFileKind(file.name, file.type || null),
         });
 
-        try {
-          await supabase.from("document_versions").insert({
+        const { error: docVersionErr } = await supabase.from("document_versions").insert({
             project_id: projectId,
             user_id: user.id,
             file_id: fileRow.id,
@@ -96,8 +95,10 @@ export default function FilesStage({ projectId, state }: StageProps) {
             source_system: "upload",
             pdf_metadata: detectDiscipline(file.name) ? { discipline: detectDiscipline(file.name) } : {},
           });
-        } catch (docVersionErr) {
+        if (docVersionErr) {
           console.warn(`document_versions insert failed for ${file.name}:`, docVersionErr);
+          toast.error(`Uploaded ${file.name}, but indexing setup failed. Re-upload this file from the workspace Files tab.`);
+          continue;
         }
 
         ok++;
