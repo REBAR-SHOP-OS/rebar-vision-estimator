@@ -246,7 +246,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     const p = sel?.locator?.page_number;
     if (p && p > 0) setPdfPage(p);
     bump(`select issue ${sel?.id?.slice(0, 8) || "—"} → page ${p || "?"}`);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [sel?.id, sel?.locator?.page_number]);
 
   useEffect(() => { setZoomMode("tight"); setZoomLevel(1); setPan({ dx: 0, dy: 0 }); setTab("change"); }, [sel?.id]);
@@ -313,7 +313,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     return () => { cancelled = true; };
     // Intentionally only depend on the source file id — switching between
     // issues that share the same drawing must NOT reload the PDF.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [sel?.source_file_id, sel?.linked_item?.source_file_id]);
 
   useEffect(() => {
@@ -325,7 +325,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
       setRenderError(null);
       setPageText([]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [previewKind, previewUrl, pdfPage]);
 
   useEffect(() => {
@@ -336,8 +336,8 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     setPageBox(null);
   }, [previewKind, previewUrl]);
 
-  useEffect(() => { bump(`view mode → ${viewMode}`); /* eslint-disable-next-line */ }, [viewMode]);
-  useEffect(() => { bump(`zoom mode → ${zoomMode}`); /* eslint-disable-next-line */ }, [zoomMode]);
+  useEffect(() => { bump(`view mode → ${viewMode}`);   }, [viewMode]);
+  useEffect(() => { bump(`zoom mode → ${zoomMode}`);   }, [zoomMode]);
   // Note: do NOT bump on pdfImg/zoomLevel changes — extra renders here were
   // causing the overlay/page lifecycle to thrash and the drawing to blink.
 
@@ -353,7 +353,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     const ro = new ResizeObserver(() => updatePageBox());
     ro.observe(host);
     return () => ro.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [renderStatus, imgSize?.w, imgSize?.h, pdfImg]);
 
   // Group issues by source sheet for the left navigator
