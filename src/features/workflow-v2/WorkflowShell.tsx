@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import { STAGES, type StageKey } from "./types";
 import { Lock, CheckCircle2, Circle, AlertTriangle, FolderOpen, Layers, Ruler, ShieldCheck, Stamp, FileSpreadsheet, Search, Bell, HelpCircle, MessageSquareText } from "lucide-react";
 import FilesStage from "./stages/FilesStage";
@@ -10,6 +10,7 @@ import AssistantStage from "./stages/AssistantStage";
 import ConfirmStage from "./stages/ConfirmStage";
 import OutputsStage from "./stages/OutputsStage";
 import { useWorkflowState } from "./useWorkflowState";
+import { useActiveStage, setStageStatus } from "./active-stage";
 
 interface Props {
   projectId: string;
@@ -38,7 +39,7 @@ const STAGE_ICONS: Record<StageKey, React.ComponentType<{ className?: string }>>
 };
 
 export default function WorkflowShell({ projectId, project }: Props) {
-  const [active, setActive] = useState<StageKey>("files");
+  const [active, setActive] = useActiveStage();
   const state = useWorkflowState(projectId);
 
   const displayProjectName = project.project_name || project.canonicalProject?.projectName || project.name || "Untitled Project";
@@ -55,6 +56,9 @@ export default function WorkflowShell({ projectId, project }: Props) {
     confirm: !calibrationConfirmed ? "locked" : state.estimatorConfirmed ? "complete" : (state.qaCriticalOpen === 0 && state.takeoffRows > 0) ? "active" : "locked",
     outputs: !calibrationConfirmed ? "locked" : state.estimatorConfirmed ? "active" : "locked",
   }) as Record<StageKey, "complete" | "active" | "locked" | "blocked" | "pending">, [state, calibrationConfirmed]);
+
+  // Broadcast current stage status so the global AppSidebar can mirror it.
+  useEffect(() => { setStageStatus(status); }, [status]);
 
   const StageBody = () => {
     const props = { projectId, state, goToStage: (stage: StageKey) => setActive(stage) };
@@ -81,44 +85,6 @@ export default function WorkflowShell({ projectId, project }: Props) {
 
   return (
     <div className="workflow-v2 flex h-full text-foreground" style={{ background: "hsl(var(--background))" }}>
-      {/* Left Rail */}
-      <aside className="w-[200px] shrink-0 border-r border-border flex flex-col" style={{ background: "hsl(var(--card))" }}>
-        <div className="px-4 py-4 border-b border-border">
-          <div className="text-[11px] font-bold tracking-[0.18em] uppercase text-foreground">RebarEstimate Pro</div>
-          <div className="text-[9px] tracking-[0.22em] uppercase text-muted-foreground mt-0.5">Precision Estimating</div>
-        </div>
-        <nav className="flex-1 py-2">
-          {STAGES.map((s) => {
-            const Icon = STAGE_ICONS[s.key];
-            const st = status[s.key];
-            const isActive = active === s.key;
-            const locked = st === "locked";
-            return (
-              <button
-                key={s.key}
-                disabled={locked}
-                onClick={() => setActive(s.key)}
-                className={[
-                  "w-full flex items-center gap-2.5 px-4 py-2.5 text-left text-[12px] tracking-wide transition-colors border-l-2 relative",
-                  isActive ? "border-l-primary bg-primary/10 text-primary" : "border-l-transparent text-foreground/80 hover:bg-accent/40",
-                  locked ? "opacity-40 cursor-not-allowed" : "cursor-pointer",
-                ].join(" ")}
-              >
-                <Icon className="w-4 h-4 shrink-0" />
-                <span className="flex-1 truncate">{s.short}</span>
-                {st === "blocked" && <AlertTriangle className="w-3 h-3 text-destructive" />}
-                {st === "complete" && <CheckCircle2 className="w-3 h-3 text-primary/70" />}
-                {locked && <Lock className="w-3 h-3" />}
-              </button>
-            );
-          })}
-        </nav>
-        <div className="px-4 py-3 border-t border-border text-[9px] uppercase tracking-[0.2em] text-muted-foreground">
-          <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 bg-[hsl(var(--status-supported))] inline-block" /> System Online</div>
-          <div className="mt-1">v2.0 · Industrial</div>
-        </div>
-      </aside>
-
       {/* Main column */}
       <div className="flex-1 min-w-0 flex flex-col overflow-x-auto">
         {/* Top header */}
