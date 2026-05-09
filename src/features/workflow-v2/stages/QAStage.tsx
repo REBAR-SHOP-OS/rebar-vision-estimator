@@ -1101,40 +1101,27 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 }
 
 function BBoxPointer({
-  bbox, imgW, imgH, zoom, viewZoom, pageBox, title, onFix, approximate,
+  bbox, imgW, imgH, viewZoom, title, onFix, approximate,
 }: {
   bbox: BBox;
   imgW: number;
   imgH: number;
-  zoom: number;
   viewZoom?: number;
-  pageBox: { left: number; top: number; width: number; height: number };
   title: string;
   onFix: () => void;
   approximate?: boolean;
 }) {
-  // Bbox is in image-pixel space; the image is rendered with object-contain
-  // so percentages of imgW/imgH applied within the same containing box align
-  // with the visible drawing region.
-  const left = (bbox[0] / imgW) * 100;
-  const top = (bbox[1] / imgH) * 100;
-  const width = ((bbox[2] - bbox[0]) / imgW) * 100;
-  const height = ((bbox[3] - bbox[1]) / imgH) * 100;
-  const leftPx = pageBox.left + (left / 100) * pageBox.width;
-  const topPx = pageBox.top + (top / 100) * pageBox.height;
-  const widthPx = (width / 100) * pageBox.width;
-  const heightPx = (height / 100) * pageBox.height;
-  // `zoom` is used for positioning math; `viewZoom` reflects the actual CSS
-  // scale applied to the parent wrapper, used only to keep border + badge
-  // visually stable as the user zooms in/out.
-  const z = Math.max(1, zoom);
-  const vz = Math.max(1, viewZoom ?? zoom);
+  // Positioned via % relative to the image-fit wrapper (which auto-sizes to
+  // the rendered <img> box), so the pointer always sits exactly on the bbox
+  // regardless of canvas zoom/pan or measurement timing.
+  const leftPct = (bbox[0] / imgW) * 100;
+  const topPct = (bbox[1] / imgH) * 100;
+  const widthPct = ((bbox[2] - bbox[0]) / imgW) * 100;
+  const heightPct = ((bbox[3] - bbox[1]) / imgH) * 100;
+  const vz = Math.max(1, viewZoom ?? 1);
   const stroke = approximate ? "#f59e0b" : "#ff7a1a";
   const borderPx = Math.max(1, 2 / vz);
   const haloPx = Math.max(0.5, 1.5 / vz);
-  const isShortBox = heightPx * vz < 26 || widthPx * vz < 42;
-  // Counteract canvas zoom so the attention badge stays visually stable
-  // instead of growing excessively at high zoom levels.
   const labelScale = Math.min(1, Math.max(0.16, 1 / vz));
   const fillBg = approximate ? "rgba(245,158,11,0.035)" : "rgba(255,122,26,0.025)";
   return (
@@ -1143,10 +1130,10 @@ function BBoxPointer({
       onClick={(e) => { e.stopPropagation(); onFix(); }}
       title={title}
       style={{
-        left: `${leftPx}px`,
-        top: `${topPx}px`,
-        width: `${widthPx}px`,
-        height: `${heightPx}px`,
+        left: `${leftPct}%`,
+        top: `${topPct}%`,
+        width: `${widthPct}%`,
+        height: `${heightPct}%`,
         border: `${borderPx}px ${approximate ? "dashed" : "solid"} ${stroke}`,
         background: fillBg,
         boxShadow: `0 0 0 ${haloPx}px ${stroke}44`,
@@ -1155,17 +1142,6 @@ function BBoxPointer({
       <div className="absolute -top-2 -right-2 w-4 h-4 rounded-full grid place-items-center text-white shadow-md" style={{ background: stroke, transform: `scale(${labelScale})`, transformOrigin: "center" }}>
         <span className="text-[10px] font-bold">{approximate ? "≈" : "!"}</span>
       </div>
-      {isShortBox && (
-        <div
-          className="absolute left-0 h-px"
-          style={{
-            top: "50%",
-            width: `${Math.max(18, 34 / z)}px`,
-            transform: "translateX(-100%)",
-            background: stroke,
-          }}
-        />
-      )}
     </div>
   );
 }
