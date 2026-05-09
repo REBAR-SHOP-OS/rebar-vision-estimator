@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { StageHeader, Pill, EmptyState, GateBanner, type StageProps } from "./_shared";
 import {
   ArrowLeft, ArrowRight, Wand2, Filter, Layers, Columns2, GitCompare,
-  ZoomIn, ZoomOut, Maximize2, Eye, Edit3, AlertTriangle, RefreshCw,
+  ZoomIn, ZoomOut, Maximize2, Eye, Edit3, AlertTriangle, RefreshCw, Hand,
   Fingerprint, History, GitBranch, Scale, Edit2, RefreshCw as Sync, Bug,
 } from "lucide-react";
 import { loadWorkflowQaIssues, type WorkflowQaIssue } from "../takeoff-data";
@@ -182,6 +182,9 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [zoomMode, setZoomMode] = useState<"tight" | "full">("tight");
   const [zoomLevel, setZoomLevel] = useState(1);
   const [pan, setPan] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
+  const [tool, setTool] = useState<"select" | "pan">("select");
+  const panStateRef = useRef<{ startX: number; startY: number; startDx: number; startDy: number } | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
   const [viewMode, setViewMode] = useState<"overlay" | "side" | "diff">("overlay");
   const [changedOnly, setChangedOnly] = useState(true);
   const [debug, setDebug] = useState(false);
@@ -673,12 +676,44 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
               <button onClick={() => setViewMode("diff")} className={`p-2 border ${viewMode === "diff" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}><GitBranch className="w-4 h-4" /></button>
               <button onClick={() => setZoomLevel((z) => Math.min(4, z + 0.1))} className="p-2 border border-border hover:bg-accent/40"><ZoomIn className="w-4 h-4" /></button>
               <button onClick={() => setZoomLevel((z) => Math.max(0.5, z - 0.1))} className="p-2 border border-border hover:bg-accent/40"><ZoomOut className="w-4 h-4" /></button>
-              <button onClick={() => setZoomMode((m) => m === "tight" ? "full" : "tight")} className={`p-2 border ${zoomMode === "tight" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}><Maximize2 className="w-4 h-4" /></button>
+              <button onClick={() => setTool((t) => t === "pan" ? "select" : "pan")} className={`p-2 border ${tool === "pan" ? "border-primary text-primary" : "border-border text-muted-foreground"}`} title="Pan / hand tool"><Hand className="w-4 h-4" /></button>
+              <button onClick={() => { setZoomLevel(1); setPan({ dx: 0, dy: 0 }); setZoomMode((m) => m === "tight" ? "full" : "tight"); }} className={`p-2 border ${zoomMode === "tight" ? "border-primary text-primary" : "border-border text-muted-foreground"}`} title="Reset & toggle fit"><Maximize2 className="w-4 h-4" /></button>
               <button onClick={() => setDebug((v) => !v)} className={`p-2 border ${debug ? "border-primary text-primary" : "border-border text-muted-foreground"}`}><Bug className="w-4 h-4" /></button>
             </div>
           </div>
 
-          <div ref={canvasRef} className="relative flex-1 min-h-0 overflow-hidden bg-[#101216]">
+          <div
+            ref={canvasRef}
+            className="relative flex-1 min-h-0 overflow-hidden bg-[#101216]"
+            style={{ cursor: tool === "pan" ? (isPanning ? "grabbing" : "grab") : "default" }}
+            onMouseDown={(e) => {
+              if (tool !== "pan" && e.button !== 1) return;
+              e.preventDefault();
+              panStateRef.current = { startX: e.clientX, startY: e.clientY, startDx: pan.dx, startDy: pan.dy };
+              setIsPanning(true);
+            }}
+            onMouseMove={(e) => {
+              const s = panStateRef.current;
+              if (!s) return;
+              setPan({ dx: s.startDx + (e.clientX - s.startX), dy: s.startDy + (e.clientY - s.startY) });
+            }}
+            onMouseUp={() => { panStateRef.current = null; setIsPanning(false); }}
+            onMouseLeave={() => { panStateRef.current = null; setIsPanning(false); }}
+            onWheel={(e) => {
+              if (!e.ctrlKey && !e.metaKey) return;
+              e.preventDefault();
+              setZoomLevel((z) => Math.max(0.5, Math.min(4, z + (e.deltaY < 0 ? 0.1 : -0.1))));
+            }}
+          >
+            <div
+              className="absolute inset-0"
+              style={{
+                transform: `translate(${pan.dx}px, ${pan.dy}px) scale(${zoomLevel})`,
+                transformOrigin: "center center",
+                transition: isPanning ? "none" : "transform 120ms ease-out",
+                willChange: "transform",
+              }}
+            >
             {!previewUrl ? (
               <div className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">{previewLoading ? "Loading drawing…" : renderError || "Select an issue to load the source drawing."}</div>
             ) : previewKind === "pdf" ? (
@@ -745,6 +780,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                 />
               </div>
             )}
+            </div>
 
             {renderStatus === "ready" && previewUrl && imgSize && pageBox && (
               <>
