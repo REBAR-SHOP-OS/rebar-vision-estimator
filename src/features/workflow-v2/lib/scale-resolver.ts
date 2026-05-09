@@ -14,6 +14,7 @@
 export type CalibrationSource =
   | "title_block"
   | "dimension"
+  | "auto_dimension"
   | "known_object"
   | "user";
 
