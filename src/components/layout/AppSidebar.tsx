@@ -107,7 +107,7 @@ export default function AppSidebar({ activeProjectId, activeProjectName }: AppSi
   };
 
   return (
-    <Sidebar collapsible="icon" className="border-r border-sidebar-border">
+    <Sidebar collapsible="offcanvas" className="border-r border-sidebar-border">
       <SidebarContent className="bg-sidebar text-sidebar-foreground">
         <div className="flex items-center gap-3 px-3 pb-3 pt-4">
           <img src={logoBg} alt="Logo" className="h-9 w-9 rounded-xl border border-sidebar-border object-cover" />
