@@ -100,8 +100,12 @@ const PHASE_TOOLTIPS = [
 ];
 function PhaseChips({ items, segName }: { items: WorkflowTakeoffRow[]; segName: string }) {
   const states = derivePhaseStates(items, segName);
+  const hiddenCount = items.filter((r) =>
+    /\b(dowel|corner|opening|step\s*bar|top\s*tie|thicken|T\.?D\.?\s*\d+)\b/i.test(`${r.mark} ${r.shape} ${r.source}`)
+  ).length;
+  const wasteRow = items.find((r) => /waste\s*factor/i.test(`${r.shape} ${r.mark}`));
   return (
-    <div className="flex flex-wrap gap-1 px-3 py-1.5 bg-muted/10 border-t border-border/40">
+    <div className="flex flex-wrap items-center gap-1 px-3 py-1.5 bg-muted/10 border-t border-border/40">
       {PHASE_LABELS.map((lbl, i) => {
         const s = states[i];
         const cls = s === "done"
@@ -117,6 +121,17 @@ function PhaseChips({ items, segName }: { items: WorkflowTakeoffRow[]; segName: 
           </span>
         );
       })}
+      {hiddenCount > 0 && (
+        <span title="Hidden scope detected: dowels, corners, openings, step bars, top ties, or thickenings (R7/R9-R12)"
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 border border-fuchsia-500/50 text-fuchsia-500 bg-fuchsia-500/5 text-[9px] font-mono uppercase tracking-wider">
+          🔍 Hidden Scope ({hiddenCount})
+        </span>
+      )}
+      {wasteRow && wasteRow.weight > 0 && (
+        <span className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 border border-muted-foreground/30 text-muted-foreground text-[9px] font-mono uppercase tracking-wider">
+          +{wasteRow.weight.toFixed(1)} kg waste (G4)
+        </span>
+      )}
     </div>
   );
 }
@@ -219,6 +234,53 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   const [bestGuessRunning, setBestGuessRunning] = useState(false);
   const [reindexRunning, setReindexRunning] = useState(false);
   const [allSegments, setAllSegments] = useState<{ id: string; name: string }[]>([]);
+  const [wastePct, setWastePct] = useState<5 | 7 | 10>(7);
+
+  // Load + persist global waste factor from user's standards_profile.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("standards_profiles")
+        .select("id, waste_factors, is_default")
+        .eq("user_id", user.id)
+        .order("is_default", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled) return;
+      const wf = (data?.waste_factors as any) || {};
+      const g = Number(wf.global);
+      if (g === 0.05) setWastePct(5);
+      else if (g === 0.10) setWastePct(10);
+      else setWastePct(7);
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+  const updateWastePct = async (pct: 5 | 7 | 10) => {
+    setWastePct(pct);
+    if (!user) return;
+    const value = pct / 100;
+    const { data: existing } = await supabase
+      .from("standards_profiles")
+      .select("id, waste_factors")
+      .eq("user_id", user.id)
+      .order("is_default", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const nextWf = { ...(existing?.waste_factors as any || {}), global: value };
+    if (existing?.id) {
+      await supabase.from("standards_profiles").update({ waste_factors: nextWf }).eq("id", existing.id);
+    } else {
+      await supabase.from("standards_profiles").insert({
+        user_id: user.id,
+        name: "Default",
+        is_default: true,
+        waste_factors: { small: 1.03, large: 1.05, stirrup: 1.08, global: value },
+      } as any);
+    }
+    toast.success(`Waste factor set to ${pct}% (re-run takeoff to apply)`);
+  };
 
   const handleReindex = async () => {
     setReindexRunning(true);
@@ -662,6 +724,16 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
             <Pill tone="direct">{totals.rows} ROWS</Pill>
             <Pill tone="supported">{totals.weight.toFixed(0)} KG</Pill>
             {totals.blocked > 0 && <Pill tone="blocked" solid>{totals.blocked} BLOCKED</Pill>}
+            <div className="inline-flex items-center border border-border h-7" title="Waste factor (G4) — applied at segment total. Re-run takeoff to apply.">
+              <span className="px-2 text-[9px] font-mono uppercase tracking-wider text-muted-foreground">Waste</span>
+              {([5, 7, 10] as const).map((p) => (
+                <button key={p}
+                  onClick={() => updateWastePct(p)}
+                  className={`h-7 px-2 text-[10px] font-mono border-l border-border ${wastePct === p ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent/40"}`}>
+                  {p}%
+                </button>
+              ))}
+            </div>
             <button
               onClick={computeBestGuessAll}
               disabled={bestGuessRunning || generating}

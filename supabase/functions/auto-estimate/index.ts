@@ -46,6 +46,17 @@ R5  Phase 3 VERTICALS (piers/columns): verticals from schedule x (height + lap +
 R6  Phase 4 FLATWORK (mesh/WWF): weight = mass(kg/m2) x area(m2). Add 10-15% lap waste. NEVER multiply by linear m. Slab thickenings: +3 x 15M continuous per partition run.
 R7  Phase 5 HIDDEN: scan typical-detail sheets (S6.x) for corner bars, opening trim (2 x 20M T&B), dowels, step bars. Each match is a Phase 5 row.
 R8  Phase 6 CONVERT: weight = total_length(m) x kg/m. LOCKED kg/m: 10M=0.785, 15M=1.570, 20M=2.355, 25M=3.925, 30M=5.495, 35M=7.850. NEVER re-derive.`;
+
+// Golden Rules + Hidden Scope (Phase 2). Mirrored to Agent Brain rules G1-G4, R9-R12.
+const GOLDEN_RULES = `GOLDEN RULES (always apply, tag rule_cited accordingly):
+G1  qty = floor(L/spacing) + 1. The +1 starter bar is mandatory.
+G2  Written dimensions beat scaled. Only use scaled values when no written value exists; tag dimension_source: scaled.
+G3  Clear cover: effective length = nominal - 2*cover. Default cover = 75 mm earth face unless spec overrides. Tag assumptions_json.cover_applied = true.
+G4  Waste factor: applied at segment total by the resolver (do NOT add a per-row waste). Default 7%, configurable 5/7/10.
+R9  Dowels: footing-to-wall connections per typical detail. Compute over full perimeter when a DOWEL detail is referenced. Phase 5.
+R10 Slab thickenings: each interior partition crossing the slab adds the typical thickening reinforcement (default +3 x 15M continuous). Phase 4.
+R11 Top-tie rule: when pier/column note says "top tie" or "extra ties at top", add 2 extra ties in top 100 mm. Phase 3.
+R12 Step bars: at each footing step, add L-bars and U-bars from the typical step detail. Phase 5, confidence 0.4 for user verification.`;
 const sizeKey = (s: string) => {
   const k = String(s || "").toUpperCase().trim();
   const m = k.match(/^(10M|15M|20M|25M|30M|35M|45M|55M|#1[0148]|#[3-9])/);
@@ -1435,6 +1446,7 @@ serve(async (req) => {
 
     const systemPrompt = `You are a rebar EXTRACTION assistant. You DO NOT compute geometry. A deterministic resolver downstream will calculate qty, length and weight. Your job is to faithfully extract rebar callouts from the drawing text and CITE THE MANUAL for any assumption.
 ${PHASE_RULES}
+${GOLDEN_RULES}
 - Every emitted object MUST include "phase" (integer 1..6) and "rule_cited" (one of "R0".."R8") indicating which phase produced the row.
 Rules:
 - Return ONLY a JSON array of objects, no markdown, no explanation.
@@ -1971,6 +1983,43 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
       if (!prev || (r.confidence as number) > (prev.confidence as number)) dedupMap.set(k, r);
     }
     const dedupedRows = Array.from(dedupMap.values());
+
+    // G4 Waste Factor — append one synthetic waste row per segment.
+    // Configurable via standards_profiles.waste_factors.global (default 0.07).
+    const wasteGlobal = (() => {
+      const v = Number((standard?.waste_factors as any)?.global);
+      return Number.isFinite(v) && v >= 0.03 && v <= 0.20 ? v : 0.07;
+    })();
+    const segWeightSum = dedupedRows.reduce(
+      (s: number, r: any) => s + (Number(r.total_weight) || 0),
+      0,
+    );
+    if (segWeightSum > 0) {
+      const wastePct = Math.round(wasteGlobal * 100);
+      dedupedRows.push({
+        segment_id,
+        project_id,
+        user_id: user.id,
+        description: `Waste factor ${wastePct}% (G4)`,
+        bar_size: "",
+        quantity_count: 0,
+        total_length: 0,
+        total_weight: +(segWeightSum * wasteGlobal).toFixed(1),
+        confidence: 1,
+        item_type: "waste",
+        waste_factor: 1,
+        status: "draft",
+        source_file_id: null,
+        assumptions_json: {
+          geometry_status: "resolved",
+          rule_cited: "G4",
+          waste_pct: wastePct,
+          source: "G4",
+          configurable: true,
+          base_segment_weight_kg: +segWeightSum.toFixed(1),
+        },
+      } as any);
+    }
 
     // ───────────────────────────────────────────────────────────────
     // OUTLIER GUARD (MAD check on length-per-piece, grouped by bar_size)
