@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { StageHeader, Pill, EmptyState, type StageProps } from "./_shared";
 import { ArrowRight, Check, X, GitMerge, Split, Layers, Loader2 } from "lucide-react";
 import TakeoffCanvas, { type TakeoffCanvasLayer } from "@/components/takeoff-canvas/TakeoffCanvas";
-import { inferSegmentType } from "@/lib/segment-type";
+import { inferSegmentType, methodologyStep, METHODOLOGY_STEP_LABELS } from "@/lib/segment-type";
 
 type Decision = "accept" | "hold" | "reroute";
 
@@ -30,7 +30,13 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
       const prev = seen.get(key);
       if (!prev || (c.confidence || 0) > (prev.confidence || 0)) seen.set(key, c);
     }
-    return Array.from(seen.values());
+    // Bottom-to-Top: Foundation → Verticals → Flatwork → Transitions → Site Misc.
+    return Array.from(seen.values()).sort((a, b) => {
+      const sa = methodologyStep(a.label);
+      const sb = methodologyStep(b.label);
+      if (sa !== sb) return sa - sb;
+      return a.label.localeCompare(b.label);
+    });
   }, [cached]);
 
   // Run real OCR-driven scope detection once per project (and re-run on file count change).
@@ -165,6 +171,13 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
   const accepted = candidates.filter((c) => getDecision(c) === "accept");
   const newCount = candidates.filter((c) => !getDecision(c)).length;
 
+  // Final Summary Checklist — derived from approved candidates by methodology step.
+  const checklist = useMemo(() => {
+    const counts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+    for (const c of accepted) counts[methodologyStep(c.label)] += 1;
+    return counts;
+  }, [accepted]);
+
   // Build canvas layers from approved buckets (one layer per archetype label).
   const canvasLayers: TakeoffCanvasLayer[] = useMemo(() => {
     const m = new Map<string, { name: string; type: string; count: number }>();
@@ -256,6 +269,23 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
           title="Takeoff Canvas"
           right={
             <div className="flex items-center gap-3">
+              <div className="hidden md:flex items-center gap-1" title="Bottom-to-Top methodology coverage">
+                {[1, 2, 3, 4, 5].map((step) => {
+                  const n = checklist[step] || 0;
+                  const cls = n > 0
+                    ? "border-primary/60 bg-primary/15 text-primary"
+                    : "border-border bg-card text-muted-foreground/70";
+                  return (
+                    <span
+                      key={step}
+                      title={`Step ${step}: ${METHODOLOGY_STEP_LABELS[step]} — ${n} approved`}
+                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 border text-[9px] font-mono uppercase tracking-wider ${cls}`}
+                    >
+                      {n > 0 ? "✓" : "—"} {step}·{METHODOLOGY_STEP_LABELS[step].slice(0, 4)}
+                    </span>
+                  );
+                })}
+              </div>
               <div className="flex gap-4 text-[11px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
                 <span>Total Tonnage <span className="text-foreground font-semibold ml-1">— TN</span></span>
                 <span>Items <span className="text-foreground font-semibold ml-1">{accepted.length}</span></span>
