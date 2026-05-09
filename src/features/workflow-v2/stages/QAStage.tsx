@@ -687,11 +687,12 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                   key={`${previewUrl}:${pdfPage}`}
                   file={previewUrl}
                   page={pdfPage}
-                  onRender={({ imageUrl, width, height, pageCount, textItems }) => {
+                  onRender={({ imageUrl, width, height, pageCount, pageNumber, textItems }) => {
                     setPdfImg(imageUrl);
                     setImgSize({ w: width, h: height });
                     setPdfPageCount(pageCount || 1);
-                    setRenderedPage(pdfPage);
+                    if (pageNumber && pageNumber !== pdfPage) setPdfPage(pageNumber);
+                    setRenderedPage(pageNumber || pdfPage);
                     setPageText(textItems || []);
                     setRenderStatus("ready");
                     setRenderError(null);
