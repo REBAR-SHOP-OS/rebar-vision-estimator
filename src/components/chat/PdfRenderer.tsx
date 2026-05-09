@@ -59,31 +59,47 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({
     setError(null);
     pdfDocRef.current = null;
 
+    const emitLoadError = (message: string) => {
+      setError(message);
+      setLoading(false);
+      onRenderStateChange?.({ status: "error", error: message });
+      onError?.(message);
+    };
+
     const loadPdf = async () => {
       if (!resolvedUrl) {
         if (cancelled) return;
-        const message = "Failed to load PDF";
-        setError(message);
-        setLoading(false);
-        onRenderStateChange?.({ status: "error", error: message });
-        onError?.(message);
+        emitLoadError("Failed to load PDF");
         return;
       }
 
       try {
-        const doc = await pdfjsLib.getDocument(resolvedUrl).promise;
+        const response = await fetch(resolvedUrl, { method: "GET" });
+        if (cancelled) return;
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const buffer = await response.arrayBuffer();
+        if (cancelled) return;
+        const doc = await pdfjsLib.getDocument({ data: buffer }).promise;
         if (cancelled) return;
         pdfDocRef.current = doc;
         onPageCount?.(doc.numPages);
         setLoading(false);
-      } catch (err) {
+      } catch (fetchErr) {
         if (cancelled) return;
-        console.error("PDF load error:", err);
-        const message = "Failed to load PDF";
-        setError(message);
-        setLoading(false);
-        onRenderStateChange?.({ status: "error", error: message });
-        onError?.(message);
+        console.warn("PDF binary fetch failed, falling back to direct pdfjs URL load:", fetchErr);
+        try {
+          const doc = await pdfjsLib.getDocument(resolvedUrl).promise;
+          if (cancelled) return;
+          pdfDocRef.current = doc;
+          onPageCount?.(doc.numPages);
+          setLoading(false);
+        } catch (err) {
+          if (cancelled) return;
+          console.error("PDF load error:", err);
+          emitLoadError("Failed to load PDF");
+        }
       }
     };
 
