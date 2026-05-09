@@ -612,14 +612,13 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
       <GateBanner
         tone={critCount > 0 ? "blocked" : "warn"}
         title={critCount > 0 ? "Critical QA issues require action" : warnCount > 0 ? "QA warnings remain open" : "No open QA blockers"}
-      >
-        <div className="grid grid-cols-4 gap-4 text-[11px] uppercase tracking-[0.14em]">
-          <div>Rows Require Action <span className="block text-[18px] font-black tracking-normal text-foreground">{totalImpact}</span></div>
-          <div>Warnings <span className="block text-[18px] font-black tracking-normal text-[hsl(var(--status-inferred))]">{warnCount}</span></div>
-          <div>Critical <span className="block text-[18px] font-black tracking-normal text-[hsl(var(--status-blocked))]">{critCount}</span></div>
-          <div>Outputs Stale <span className="block text-[18px] font-black tracking-normal text-foreground">{staleOutputs}</span></div>
-        </div>
-      </GateBanner>
+      />
+      <div className="grid grid-cols-4 gap-4 border-b border-border bg-card px-4 py-3 text-[11px] uppercase tracking-[0.14em]">
+        <div>Rows Require Action <span className="block text-[18px] font-black tracking-normal text-foreground">{totalImpact}</span></div>
+        <div>Warnings <span className="block text-[18px] font-black tracking-normal text-[hsl(var(--status-inferred))]">{warnCount}</span></div>
+        <div>Critical <span className="block text-[18px] font-black tracking-normal text-[hsl(var(--status-blocked))]">{critCount}</span></div>
+        <div>Outputs Stale <span className="block text-[18px] font-black tracking-normal text-foreground">{staleOutputs}</span></div>
+      </div>
 
       <div className="grid grid-cols-12 h-[calc(100%-112px)] min-h-0">
         <aside className="col-span-2 border-r border-border bg-card/70 min-h-0 flex flex-col">
