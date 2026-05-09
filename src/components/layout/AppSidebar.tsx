@@ -30,7 +30,6 @@ import {
   Moon,
   Package,
   Ruler,
-  Settings,
   Sun,
 } from "lucide-react";
 import logoBg from "@/assets/logo.png";
