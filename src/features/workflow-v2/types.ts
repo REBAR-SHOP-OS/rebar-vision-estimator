@@ -1,6 +1,7 @@
 export type StageKey =
   | "files"
   | "scope"
+  | "calibration"
   | "takeoff"
   | "qa"
   | "assistant"
@@ -17,11 +18,12 @@ export interface StageDef {
 export const STAGES: StageDef[] = [
   { key: "files", label: "Files + Revisions", short: "Files", index: 1 },
   { key: "scope", label: "Scope Review", short: "Scope", index: 2 },
-  { key: "takeoff", label: "Takeoff Workspace", short: "Takeoff", index: 3 },
-  { key: "qa", label: "QA Gate", short: "QA", index: 4 },
-  { key: "assistant", label: "Assistant Chat", short: "Assistant", index: 5 },
-  { key: "confirm", label: "Estimator Confirmation", short: "Confirm", index: 6 },
-  { key: "outputs", label: "Outputs", short: "Outputs", index: 7 },
+  { key: "calibration", label: "Scale Calibration", short: "Calibrate", index: 3 },
+  { key: "takeoff", label: "Takeoff Workspace", short: "Takeoff", index: 4 },
+  { key: "qa", label: "QA Gate", short: "QA", index: 5 },
+  { key: "assistant", label: "Assistant Chat", short: "Assistant", index: 6 },
+  { key: "confirm", label: "Estimator Confirmation", short: "Confirm", index: 7 },
+  { key: "outputs", label: "Outputs", short: "Outputs", index: 8 },
 ];
 
 export type RowStatus = "ready" | "review" | "blocked";
