@@ -1,64 +1,43 @@
-## Goal
+# Fix QA overlay zoom/pan controls
 
-PR #7 is 10 ahead / 666 behind `main` and GitHub marks it `mergeable: false` with branch status `diverged`. Per your decision, we will diagnose the drift and then **replace PR #7** with a fresh, clean equivalent PR rebuilt on top of current `main`.
+## Problem
 
-## Diagnosis (what's actually wrong)
+In `src/features/workflow-v2/stages/QAStage.tsx`, the toolbar buttons (ZoomIn / ZoomOut / Maximize2 / Hand) update `zoomLevel` and `pan` state, but **nothing actually applies them to the rendered drawing**. The `<img>` for both the PDF page and the raster preview is rendered with only `className="max-w-full max-h-full object-contain"` — no `transform`, no drag handlers, no wheel handler. So clicking zoom in/out does nothing visible, and there is no hand tool to pan.
 
-- The local Lovable working branch is already in sync with `origin/main` (HEAD = `448002a`, same commit as `origin/main`). So **PR #7's branch only exists on GitHub**, not in the Lovable workspace.
-- "10 ahead / 666 behind" means PR #7 was opened from a snapshot of `main` taken ~666 commits ago. GitHub will not auto-merge because:
-  1. The merge base is far in the past.
-  2. Many of those 666 commits almost certainly touch the same files PR #7's 10 commits touch (lint config, CI workflow, vitest config, ChatArea, verified-estimate, workflow-v2 stages — all of which we've modified again recently).
-- Trying to "Update branch" from the GitHub UI will produce a large, hand-conflicted merge that is risky and noisy. Replacement is safer and cleaner.
+`zoomLevel` is only consumed by `BBoxPointer` for the focus highlight, never by the image itself.
 
-## Strategy: replace PR #7 with a fresh PR
+## Fix (minimal patch, single file: `QAStage.tsx`)
 
-We do **not** rewrite or force-push the old branch. We build a new branch from current `main`, port over only the *intent* of PR #7's 10 commits, push, open a new PR, then close PR #7 with a pointer to the replacement.
+1. **Apply transform to the drawing layer.** Wrap the existing PDF `<img>` and raster `<img>` blocks (lines 705–725 and 727–747) in a positioned div with:
+   ```
+   transform: `translate(${pan.dx}px, ${pan.dy}px) scale(${zoomLevel})`
+   transformOrigin: 'center center'
+   transition: isPanning ? 'none' : 'transform 120ms ease-out'
+   ```
+   Image keeps `object-contain` so the base fit is unchanged at `zoomLevel=1, pan=0,0`.
 
-## Steps
+2. **Add a Hand / pan tool button** to the toolbar row (after the Maximize2 button, before Bug). New local state `tool: 'select' | 'pan'`. Icon: `Hand` from lucide-react.
 
-1. **Inventory PR #7's 10 commits**
-   - Use the GitHub API (read-only) to list the 10 commits on PR #7 and the union of files they changed. This gives us the exact "intent" payload we need to re-apply.
-   - Classify each commit as one of:
-     - (a) already present on `main` (skip),
-     - (b) still relevant and cleanly portable (re-apply),
-     - (c) obsolete or superseded by newer `main` work (drop, with note in PR description).
+3. **Drag-to-pan on the canvas container** (`canvasRef` div, line 681). Add `onMouseDown / onMouseMove / onMouseUp / onMouseLeave` handlers that:
+   - Activate when `tool === 'pan'` OR when middle-mouse / space-held drag.
+   - Track start pos + start pan, update `pan` on move.
+   - Switch cursor to `grab` / `grabbing` when pan tool is active.
 
-2. **Create a fresh branch from current `main`**
-   - Branch name: `fix/pr7-replacement` off `origin/main` (`448002a`).
-   - This branch starts mergeable by definition (0 behind).
+4. **Wheel-to-zoom** on the canvas container: `onWheel` with `preventDefault`, adjusts `zoomLevel` between 0.5 and 4 in 0.1 steps based on `deltaY` sign. Ctrl+wheel only, to avoid hijacking page scroll.
 
-3. **Re-apply the still-relevant changes as small patches**
-   - For each (b) commit, apply the minimum diff needed against today's `main`. We do **not** `git cherry-pick` blindly — many hunks will not match after 666 commits. We re-author the change as a minimal patch using current file contents, preserving the original commit's intent and message.
-   - Honor project rules: minimum patch policy, no unrelated refactors, no rename churn, semantic tokens only, no edits to `src/integrations/supabase/{client,types}.ts`.
+5. **Reset behavior.** The Maximize2 (tight/full) button additionally resets `zoomLevel=1` and `pan={dx:0,dy:0}` so users can recover from a zoomed/panned state. Existing `useEffect` on `sel?.id` (line 252) already resets these on issue change — keep as-is.
 
-4. **Validate locally before pushing**
-   - `bun install --frozen-lockfile`
-   - `bun run lint` (must exit 0 — CI now uses no `--max-warnings` cap, but we still want a clean run)
-   - `bun run test`
-   - `bun run build`
-   - `bun run check:bundle-size`
-   - Only push if all four pass.
+6. **Keep BBoxPointer correct.** It currently receives `zoom = computeFocusTransformForImage(...)` which already factors in `zoomLevel` and `pan`. Since we're now also transforming the underlying image with the same `zoomLevel`/`pan`, the pointer should follow naturally because it's positioned relative to `pageBox` inside the same `canvasRef` container — verify by leaving the pointer rendering inside the new transformed wrapper so it scales/translates with the image. Move the `BBoxPointer` and the debug text-line overlays into the transformed wrapper, while keeping the badges (anchor status, selected-target action card) outside it (they should stay screen-fixed).
 
-5. **Open the replacement PR**
-   - Title: same as PR #7, suffixed with `(rebuilt on main)`.
-   - Body: link to PR #7, list which of the 10 original commits were ported, which were dropped as obsolete, and why.
-   - Target: `main`. Expect `mergeable: true`, `ahead_by: N`, `behind_by: 0`.
+## Out of scope
 
-6. **Close PR #7**
-   - Add a comment on PR #7 pointing to the new PR, then close (do not delete the branch immediately — keep it for 1 week as a safety reference).
+- No changes to `qa-overlay-geometry.ts`, `PdfRenderer`, or any other stage.
+- No keyboard shortcuts beyond optional space-to-pan (skip if it complicates focus handling).
+- No touch/pinch gestures.
 
-## Guardrails
+## Verification
 
-- No force-push to any shared branch.
-- No edits to `src/integrations/supabase/client.ts`, `src/integrations/supabase/types.ts`, `.env`, or files under `supabase/migrations/`.
-- If a ported change conflicts semantically with newer `main` behavior, we **stop and ask** rather than guess.
-- Old PR #7 branch is preserved on GitHub until the replacement PR is merged and verified.
-
-## Prerequisite I need from you before executing
-
-I cannot reach `api.github.com` for `REBAR-SHOP-OS/rebar-vision-estimator` without a token in this sandbox. To execute step 1 deterministically I need **one** of:
-
-- a fine-grained GitHub PAT with `pull_requests: read` + `contents: read` on this repo (stored via the secrets tool as `GITHUB_TOKEN`), **or**
-- you paste the output of: PR #7 → "Files changed" tab → "..." → "View file" for each of the 10 commits (or just the commit SHAs and I'll fetch via `curl` once the token is set).
-
-Once I have either, I'll execute steps 2–6 in build mode.
+- Click ZoomIn/ZoomOut → drawing visibly scales, footer "Zoom: NNN%" updates.
+- Click Hand → cursor becomes grab; drag moves the drawing; release stops.
+- Click Maximize2 → resets zoom/pan and toggles tight/full mode.
+- BBoxPointer stays anchored to the same drawing feature while zooming/panning.
