@@ -34,3 +34,32 @@ const TYPE_COLORS: Record<string, string> = {
 export function colorForSegmentType(type: string | null | undefined): string {
   return TYPE_COLORS[(type || "miscellaneous").toLowerCase()] || TYPE_COLORS.miscellaneous;
 }
+
+// "Bottom-to-Top" methodology step inferred from a free-form name.
+// Step 1 — Foundation Map (WF, F-pads)
+// Step 2 — Vertical Elements (Piers, Columns, Foundation Walls)
+// Step 3 — Horizontal Flatwork (SOG, Slab Thickenings, mesh)
+// Step 4 — Transitions (Steps, Corners, Openings)
+// Step 5 — Site Misc (Curbs, Sign Bases, Bollards)
+// Step 6 — Unclassified (sorted last)
+export function methodologyStep(label: string): number {
+  const n = (label || "").toLowerCase();
+  if (/\b(curb|bollard|sign\s*base|menu\s*board|directional|pole\s*base|barrier|site\s*paving|stoop)\b/.test(n)) return 5;
+  if (/\b(stair|step|corner|opening|door|lap|hook|trim|t\.?d\.?\s*\d+)\b/.test(n)) return 4;
+  if (/\b(sog|slab[- ]on[- ]grade|slab\s*thickening|thickened|wwm|wwf|mesh|equipment\s*pad|housekeeping\s*pad)\b/.test(n)) return 3;
+  if (/\bslab\b/.test(n)) return 3;
+  if (/\b(pier|p-?\d|column|col-?\d|foundation\s*wall|fw-?\d|shear\s*wall|sw-?\d|basement\s*wall|icf\s*wall)\b/.test(n)) return 2;
+  if (/\bwall\b/.test(n)) return 2;
+  if (/\b(wf-?\d|wall\s*footing|strip\s*footing|pad\s*footing|pile\s*cap|grade\s*beam|raft|pile|caisson|f-?\d)\b/.test(n)) return 1;
+  if (/footing/.test(n)) return 1;
+  return 6;
+}
+
+export const METHODOLOGY_STEP_LABELS: Record<number, string> = {
+  1: "Foundation",
+  2: "Verticals",
+  3: "Flatwork",
+  4: "Transitions",
+  5: "Site Misc",
+  6: "Other",
+};
