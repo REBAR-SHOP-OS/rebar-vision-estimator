@@ -83,34 +83,34 @@ export default function AppShell() {
 
   return (
     <SidebarProvider defaultOpen={true}>
-      <div className="min-h-screen flex w-full bg-[linear-gradient(180deg,#f7f3ec_0%,#f2eee7_100%)]">
+      <div className="min-h-screen flex w-full bg-background">
         <AppSidebar activeProjectId={activeProjectId} activeProjectName={projectName} />
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 border-b border-slate-200 bg-[rgba(251,250,247,0.86)] px-3 py-3 backdrop-blur-sm md:px-5">
+          <header className="sticky top-0 z-20 border-b border-border bg-background/85 px-3 py-3 backdrop-blur-sm md:px-5">
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
-                <SidebarTrigger className="h-9 w-9 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50" />
+                <SidebarTrigger className="h-9 w-9 rounded-xl border border-border bg-card text-foreground hover:bg-muted" />
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1">
-                      <Sparkles className="h-3.5 w-3.5 text-teal-600" />
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1">
+                      <Sparkles className="h-3.5 w-3.5 text-primary" />
                       RebarForge Pro
                     </span>
                     {activeProjectId ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1">
-                        <Layers3 className="h-3.5 w-3.5 text-slate-500" />
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1">
+                        <Layers3 className="h-3.5 w-3.5 text-muted-foreground" />
                         Active project
                       </span>
                     ) : null}
                   </div>
-                  <h1 className="mt-2 truncate font-['Bahnschrift','Segoe_UI',sans-serif] text-lg font-bold tracking-tight text-slate-950 md:text-xl">
+                  <h1 className="mt-2 truncate font-['Bahnschrift','Segoe_UI',sans-serif] text-lg font-bold tracking-tight text-foreground md:text-xl">
                     {currentTitle}
                   </h1>
                 </div>
               </div>
               <div className="hidden items-center gap-2 md:flex">
-                <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  <span className="h-2 w-2 rounded-full bg-primary" />
                   Hosted Supabase connected
                 </span>
               </div>
