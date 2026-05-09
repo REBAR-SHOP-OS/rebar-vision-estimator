@@ -77,3 +77,27 @@ export function EmptyState({ title, hint }: { title: string; hint?: string }) {
     </div>
   );
 }
+
+export function CalibrationGate({ state, goToStage, stageLabel }: { state: StageProps["state"]; goToStage?: StageProps["goToStage"]; stageLabel: string }) {
+  if (state.local.calibrationConfirmed) return null;
+  return (
+    <div className="p-4">
+      <GateBanner
+        tone="blocked"
+        title={`${stageLabel} blocked: scale calibration required`}
+        message="Confirm sheet scales in Stage 03 — Scale Calibration before quantities can be computed from drawings."
+        actions={
+          goToStage ? (
+            <button
+              onClick={() => goToStage("calibration")}
+              className="text-[11px] uppercase tracking-wider font-semibold border border-current px-2 py-1 hover:bg-current/10"
+              style={{ borderRadius: 2 }}
+            >
+              Open Calibration →
+            </button>
+          ) : null
+        }
+      />
+    </div>
+  );
+}
