@@ -4,6 +4,13 @@ import AppSidebar from "./AppSidebar";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { getCanonicalProjectByLegacyId } from "@/lib/rebar-read-model";
+import { Layers3, Sparkles } from "lucide-react";
+
+const routeTitles: Record<string, string> = {
+  "/app": "Estimator Dashboard",
+  "/app/orders": "Orders",
+  "/app/standards": "Standards",
+};
 
 export default function AppShell() {
   const location = useLocation();
@@ -13,6 +20,11 @@ export default function AppShell() {
     const m = location.pathname.match(/\/app\/project\/([^/]+)/);
     return m ? m[1] : null;
   }, [location.pathname]);
+
+  const currentTitle = useMemo(() => {
+    if (activeProjectId) return projectName || "Project Workspace";
+    return routeTitles[location.pathname] || "RebarForge Pro";
+  }, [activeProjectId, location.pathname, projectName]);
 
   useEffect(() => {
     if (!activeProjectId) {
@@ -70,17 +82,41 @@ export default function AppShell() {
   }, [activeProjectId]);
 
   return (
-    <SidebarProvider defaultOpen={false}>
-      <div className="min-h-screen flex w-full">
+    <SidebarProvider defaultOpen={true}>
+      <div className="min-h-screen flex w-full bg-[linear-gradient(180deg,#f7f3ec_0%,#f2eee7_100%)]">
         <AppSidebar activeProjectId={activeProjectId} activeProjectName={projectName} />
-        <div className="flex-1 flex flex-col min-w-0">
-          <header className="h-12 flex items-center border-b border-border bg-background/80 backdrop-blur-sm px-3 gap-2 flex-shrink-0">
-            <SidebarTrigger className="h-8 w-8" />
-            <h1 className="text-sm font-medium text-foreground truncate">
-              {projectName || "Rebar Vision Estimator"}
-            </h1>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="sticky top-0 z-20 border-b border-slate-200 bg-[rgba(251,250,247,0.86)] px-3 py-3 backdrop-blur-sm md:px-5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <SidebarTrigger className="h-9 w-9 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50" />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1">
+                      <Sparkles className="h-3.5 w-3.5 text-teal-600" />
+                      RebarForge Pro
+                    </span>
+                    {activeProjectId ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1">
+                        <Layers3 className="h-3.5 w-3.5 text-slate-500" />
+                        Active project
+                      </span>
+                    ) : null}
+                  </div>
+                  <h1 className="mt-2 truncate font-['Bahnschrift','Segoe_UI',sans-serif] text-lg font-bold tracking-tight text-slate-950 md:text-xl">
+                    {currentTitle}
+                  </h1>
+                </div>
+              </div>
+              <div className="hidden items-center gap-2 md:flex">
+                <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  Hosted Supabase connected
+                </span>
+              </div>
+            </div>
           </header>
-          <main className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <Outlet />
           </main>
         </div>
