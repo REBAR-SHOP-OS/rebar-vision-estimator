@@ -676,7 +676,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
           <div
             ref={canvasRef}
-            className="relative flex-1 min-h-0 overflow-hidden bg-[#101216]"
+            className="relative flex-1 min-h-0 overflow-hidden bg-sidebar"
             style={{ cursor: tool === "pan" ? (isPanning ? "grabbing" : "grab") : "default" }}
             onMouseDown={(e) => {
               if (tool !== "pan" && e.button !== 1) return;
