@@ -9,7 +9,6 @@ import { loadWorkflowQaIssues, type WorkflowQaIssue } from "../takeoff-data";
 import { supabase } from "@/integrations/supabase/client";
 import PdfRenderer from "@/components/chat/PdfRenderer";
 import {
-  computeFocusTransformForImage,
   normalizeBboxToImagePixels,
   type BBox,
 } from "./qa-overlay-geometry";
