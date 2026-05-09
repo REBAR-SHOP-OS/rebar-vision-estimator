@@ -403,6 +403,17 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     wallGeometry: Array.isArray(sel?.source_refs) ? (sel?.source_refs?.[0] as any)?.wall_geometry : null,
   }), [missingRefs, objectIdentity, sel?.description, sel?.location?.page_number, sel?.location?.source_excerpt, sel?.location_label, sel?.locator?.page_number, sel?.source_refs, sel?.title]);
   const engineerQuestion = engineerDraft.question;
+  const isWireDrawingIssue = useMemo(() => {
+    if (!sel) return false;
+    const issueText = [
+      sel.title,
+      sel.description,
+      sel.location?.source_excerpt,
+      engineerQuestion,
+    ].filter(Boolean).join("\n").toLowerCase();
+    const looksDrawingDriven = /enter .* from the drawing|what .* should be used|confirm .* dimensions|drawing note already defines|found drawing callout/.test(issueText);
+    return engineerDraft.needsConfirmation && (missingRefs.length > 0 || looksDrawingDriven);
+  }, [engineerDraft.needsConfirmation, engineerQuestion, missingRefs.length, sel?.description, sel?.location?.source_excerpt, sel?.title]);
 
   useEffect(() => {
     if (!sel || answerEdited) return;
@@ -520,86 +531,53 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const saveEngineerAnswer = async (status = "answered") => {
     const structured = summarizeEngineerAnswer(answerValues);
     const note = answerText.trim() || structured;
-    await persistIssueStatus(status, note, answerValues, answerText.trim());
+    await persistIssueStatus(status, note, answerValues, answerText.trim() || note);
   };
 
-  // Bbox-driven crop
-  const locator = sel?.locator || null;
-  const exactBboxRaw = (locator?.bbox || null) as BBox | null;
-  const imgW = locator?.image_size?.w || imgSize?.w || 0;
-  const imgH = locator?.image_size?.h || imgSize?.h || 0;
-  const exactBboxNormalized = useMemo(
-    () => normalizeBboxToImagePixels(exactBboxRaw, imgW, imgH),
-    [exactBboxRaw, imgW, imgH],
-  );
-  const exactBbox = exactBboxNormalized.bbox;
-  // Fallback: derive an approximate bbox by matching the issue's anchor text
-  // (callout / element ref / source excerpt) against extracted PDF text items.
-  const approxResult = useMemo<{ bbox: BBox | null; reason: string; confidence: number; mode: "exact" | "approximate" | "unavailable" }>(() => {
-    if (exactBbox) return { bbox: null, reason: "", confidence: 1, mode: "exact" };
-    if (!pageText || pageText.length === 0) return { bbox: null, reason: "no OCR text on page", confidence: 0, mode: "unavailable" };
-    const lines = buildTextLines(pageText);
-    const candidates = buildAnchorCandidates(sel);
-    if (candidates.length === 0) {
-      return { bbox: null, reason: "no specific detail, section, callout, grid, or labeled object to match on this page", confidence: 0, mode: "unavailable" };
-    }
+  const jumpToTakeoff = () => {
+    goToStage("takeoff");
+  };
 
-    for (const candidate of candidates) {
-      const normalized = normalizeText(candidate.value);
-      if (!normalized) continue;
-      const lineHit = lines.find((ln) => ln.text.includes(normalized));
-      const span = lineHit ? findSpanInLine(lineHit.items, candidate.value) : null;
-      if (span && isLocalizedSpan(span, imgW, imgH)) {
-        return {
-          bbox: clampBbox(tightBox(span, imgW, imgH), imgW, imgH),
-          reason: `${candidate.kind === "trusted" ? "estimator anchor" : candidate.kind === "detail" ? "detail" : candidate.kind === "section" ? "section" : candidate.kind === "callout" ? "callout" : candidate.kind === "grid" ? "grid" : candidate.kind === "schedule" ? "schedule row" : candidate.kind === "element" ? "element label" : candidate.kind === "excerpt" ? "source excerpt" : "OCR phrase"} match on "${candidate.value}"`,
-          confidence: candidate.score,
-          mode: candidate.score >= 0.9 ? "exact" : "approximate",
-        };
-      }
-      const tokenHit = pageText.find((t) => normalizeText(t.str).includes(normalized));
-      if (tokenHit && isLocalizedSpan([tokenHit], imgW, imgH)) {
-        return {
-          bbox: clampBbox(tightBox([tokenHit], imgW, imgH), imgW, imgH),
-          reason: `${candidate.kind === "trusted" ? "estimator anchor" : candidate.kind === "detail" ? "detail" : candidate.kind === "section" ? "section" : candidate.kind === "callout" ? "callout" : candidate.kind === "grid" ? "grid" : candidate.kind === "schedule" ? "schedule row" : candidate.kind === "element" ? "element label" : candidate.kind === "excerpt" ? "source excerpt" : "OCR phrase"} token match on "${candidate.value}"`,
-          confidence: Math.max(0.55, candidate.score - 0.1),
-          mode: candidate.score >= 0.9 ? "exact" : "approximate",
-        };
+  const selIndex = issues.findIndex((i) => i.id === selectedId);
+  const prevIssue = selIndex > 0 ? issues[selIndex - 1] : null;
+  const nextIssue = selIndex >= 0 && selIndex < issues.length - 1 ? issues[selIndex + 1] : null;
+
+  const anchorCandidates = useMemo(() => buildAnchorCandidates(sel), [sel]);
+  const textLines = useMemo(() => buildTextLines(pageText), [pageText]);
+  const textSearch = useMemo(() => {
+    if (!sel || !pageText.length || !imgSize) return null;
+    for (const cand of anchorCandidates) {
+      for (const ln of textLines) {
+        if (!ln.text.includes(normalizeText(cand.value))) continue;
+        const span = findSpanInLine(ln.items, cand.value);
+        if (span && isLocalizedSpan(span, imgSize.w, imgSize.h)) {
+          return {
+            bbox: clampBbox(tightBox(span, imgSize.w, imgSize.h), imgSize.w, imgSize.h),
+            kind: cand.kind,
+            score: cand.score,
+            text: cand.value,
+          };
+        }
       }
     }
+    return null;
+  }, [sel, pageText, imgSize, anchorCandidates, textLines]);
 
-    return { bbox: null, reason: "no exact drawing object matched on the rendered page", confidence: 0, mode: "unavailable" };
-  }, [exactBbox, pageText, sel?.id, sel?.location, sel?.linked_item?.bar_size, imgW, imgH]);
-  const approxBbox = approxResult.bbox;
-  const approxReason = approxResult.reason;
-  const exactAnchorConfidence = Number((sel?.source_refs?.[0] as { anchor_confidence?: number } | undefined)?.anchor_confidence ?? sel?.locator?.anchor_confidence ?? 1);
-  const exactAnchorMode = String((sel?.source_refs?.[0] as { anchor_mode?: string } | undefined)?.anchor_mode ?? sel?.locator?.anchor_mode ?? "exact");
-  const exactBboxValid = !!exactBbox && exactAnchorConfidence >= MIN_ANCHOR_CONFIDENCE && exactAnchorMode !== "approximate";
-  const inferredExact = !exactBboxValid && approxResult.mode === "exact" && approxResult.confidence >= MIN_ANCHOR_CONFIDENCE;
-  const safeApproxBbox = approxResult.confidence >= MIN_ANCHOR_CONFIDENCE ? approxBbox : null;
-  const bbox = clampBbox(exactBboxValid ? exactBbox : safeApproxBbox, imgW, imgH);
-  const bboxIsApprox = !exactBboxValid && !inferredExact && !!bbox;
-  const anchorStatus: "exact" | "approximate" | "unavailable" = exactBboxValid || inferredExact ? "exact" : bbox ? "approximate" : "unavailable";
-  const anchorReason = exactBboxValid ? "" : approxReason || (exactBboxRaw ? exactBboxNormalized.reason || "saved anchor confidence is too low for a precise box" : "no trusted drawing object was found on this page");
-  const bboxW = bbox ? Math.max(1, bbox[2] - bbox[0]) : 0;
-  const bboxH = bbox ? Math.max(1, bbox[3] - bbox[1]) : 0;
-  const PAD = 1.3;
-  const fitZoom = bbox && imgW && imgH ? Math.min(imgW / (bboxW * PAD), imgH / (bboxH * PAD)) : 1;
-  const autoZoom = zoomMode === "tight" && bbox ? Math.min(8, Math.max(1.5, fitZoom)) : 1;
-  const zoom = Math.min(24, Math.max(0.5, autoZoom * zoomLevel));
-  const isRenderedPageCurrent = previewKind !== "pdf" || renderedPage === pdfPage;
-  const canShowPointer = isRenderedPageCurrent && renderStatus === "ready";
-  const focusTransform = computeFocusTransformForImage({
-    bbox,
-    imgW,
-    imgH,
-    pageBox,
-    canvas: canvasSize,
-    zoom,
-    pan,
-  });
-  const tx = focusTransform.x;
-  const ty = focusTransform.y;
+  const bbox = useMemo(() => {
+    if (sel?.locator?.bbox && imgSize) {
+      const normalized = normalizeBboxToImagePixels(sel.locator.bbox, sel.locator.image_size || imgSize, imgSize);
+      const clamped = clampBbox(normalized, imgSize.w, imgSize.h);
+      if (clamped) return clamped;
+    }
+    return textSearch?.bbox || null;
+  }, [sel?.locator?.bbox, sel?.locator?.image_size, textSearch, imgSize]);
+
+  const anchorStatus = sel?.locator?.anchor_mode || (textSearch ? (textSearch.score >= MIN_ANCHOR_CONFIDENCE ? "exact" : "approximate") : "unavailable");
+  const anchorReason = textSearch?.text ? `Matched ${textSearch.kind} anchor: ${textSearch.text}` : null;
+  const zoom = zoomMode === "tight" && bbox && imgSize && canvasSize.width > 0 && canvasSize.height > 0
+    ? computeFocusTransformForImage(bbox, imgSize.w, imgSize.h, canvasSize.width, canvasSize.height, zoomLevel).zoom
+    : zoomLevel;
+  const canShowPointer = Boolean(renderStatus === "ready" && previewUrl && imgSize && pageBox && bbox);
 
   const TABS: Array<{ k: TabKey; label: string }> = [
     { k: "change", label: "Change" },
@@ -608,348 +586,144 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     { k: "action", label: "Action" },
   ];
 
-  const jumpToTakeoff = () => {
-    const linked = sel?.linked_item;
-    state.setLocal({
-      takeoffFocus: linked
-        ? {
-            raw_id: linked.id,
-            raw_kind: "legacy",
-            source_file_id: linked.source_file_id || sel?.source_file_id || null,
-            segment_id: linked.segment_id || null,
-            page_number: linked.page_number ?? sel?.locator?.page_number ?? null,
-            issue_id: sel?.id || null,
-          }
-        : {
-            source_file_id: sel?.source_file_id || null,
-            page_number: sel?.locator?.page_number ?? null,
-            issue_id: sel?.id || null,
-          },
-    });
-    goToStage?.("takeoff");
-  };
-
-  const sheetTone = (items: WorkflowQaIssue[]): "blocked" | "inferred" | "direct" | "default" => {
-    if (items.some((i) => ["critical", "error"].includes(i.severity?.toLowerCase()))) return "blocked";
-    if (items.some((i) => i.severity?.toLowerCase() === "warning")) return "inferred";
-    if (items.length > 0) return "direct";
-    return "default";
-  };
-
   return (
-    <div className="flex flex-col h-full">
-      {critCount > 0 && (
-        <div className="px-4 pt-3">
-          <GateBanner
-            tone="blocked"
-            title="Approval Gate Blocked"
-            message={`${critCount} Critical Blocker${critCount === 1 ? "" : "s"} remaining. Export functionality is currently disabled.`}
-          />
+    <div className="h-full bg-background text-foreground">
+      <StageHeader title="QA Gate" subtitle="Compare revisions, validate anchors, and clear estimator questions" />
+      <GateBanner tone={critCount > 0 ? "blocked" : warnCount > 0 ? "warning" : "ok"}>
+        <div className="grid grid-cols-4 gap-4 text-[11px] uppercase tracking-[0.14em]">
+          <div>Rows Require Action <span className="block text-[18px] font-black tracking-normal text-foreground">{totalImpact}</span></div>
+          <div>Warnings <span className="block text-[18px] font-black tracking-normal text-[hsl(var(--status-inferred))]">{warnCount}</span></div>
+          <div>Critical <span className="block text-[18px] font-black tracking-normal text-[hsl(var(--status-blocked))]">{critCount}</span></div>
+          <div>Outputs Stale <span className="block text-[18px] font-black tracking-normal text-foreground">{staleOutputs}</span></div>
         </div>
-      )}
-      <div className="grid grid-cols-12 flex-1 min-h-0">
-        {/* LEFT — Revision Navigator */}
-        <aside className="col-span-3 border-r border-border bg-card flex flex-col min-h-0">
-          <div className="p-3 border-b border-border space-y-3">
-            <div className="flex justify-between items-center">
-              <h2 className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Revision Navigator</h2>
-              <Filter className="w-3.5 h-3.5 text-muted-foreground" />
-            </div>
-            <label className="flex items-center justify-between bg-background/60 px-2 py-1.5 cursor-pointer">
-              <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Changed Sheets Only</span>
-              <input type="checkbox" checked={changedOnly} onChange={(e) => setChangedOnly(e.target.checked)} className="accent-primary h-3 w-3" />
-            </label>
-            <div className="grid grid-cols-2 gap-1.5">
-              <div className="bg-background/60 p-2 border border-border">
-                <p className="text-[9px] text-muted-foreground uppercase font-bold">Base Rev</p>
-                <p className="text-[12px] font-bold">Rev 2 (IFC)</p>
-              </div>
-              <div className="bg-background/60 p-2 border border-primary/40">
-                <p className="text-[9px] text-primary uppercase font-bold">Target Rev</p>
-                <p className="text-[12px] font-bold">Rev 3 (Delta)</p>
-              </div>
-            </div>
+      </GateBanner>
+
+      <div className="grid grid-cols-12 h-[calc(100%-112px)] min-h-0">
+        <aside className="col-span-2 border-r border-border bg-card/70 min-h-0 flex flex-col">
+          <div className="p-3 border-b border-border flex items-center justify-between">
+            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Source Sheets</div>
+            <button onClick={() => setChangedOnly((v) => !v)} className={`px-2 py-1 border text-[9px] uppercase tracking-[0.12em] ${changedOnly ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>{changedOnly ? "Changed" : "All"}</button>
           </div>
-          <div className="flex-1 overflow-auto">
+          <div className="flex-1 overflow-auto divide-y divide-border">
             {loading ? (
-              <EmptyState title="Loading…" />
+              <div className="p-4 text-sm text-muted-foreground">Loading QA issues…</div>
             ) : visibleSheets.length === 0 ? (
-              <EmptyState title="No QA issues" hint="Advance to confirmation when takeoff looks correct." />
-            ) : (
-              visibleSheets.map((sh) => {
-                const tone = sheetTone(sh.items);
-                const isActive = sh.items.some((i) => i.id === selectedId);
-                return (
-                  <Fragment key={sh.key}>
-                    {sh.items.map((it, idx) => {
-                      const sev = it.severity?.toLowerCase();
-                      const tag = ["critical", "error"].includes(sev) ? "Changed" : sev === "warning" ? "Impacted" : "Blocked";
-                      const tagTone = ["critical", "error"].includes(sev) ? "blocked" : sev === "warning" ? "inferred" : "direct";
-                      const isSel = it.id === selectedId;
-                      return (
-                        <button
-                          key={it.id}
-                          onClick={() => setSelectedId(it.id)}
-                          className={`w-full text-left px-3 py-2.5 border-b border-border/60 transition-colors ${isSel ? "bg-primary/10 border-r-2 border-r-primary" : "hover:bg-accent/40 border-r-2 border-r-transparent"}`}
-                        >
-                          <div className="flex justify-between items-start mb-1 gap-2">
-                            <span className="text-[12px] font-mono font-bold truncate">{idx === 0 ? sh.name.toUpperCase() : `· ${(it.title || it.id).slice(0, 22)}`}</span>
-                            <Pill tone={tagTone as any} solid>{tag}</Pill>
-                          </div>
-                          <div className="flex gap-3 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-                            <span className="flex items-center gap-1"><Edit2 className="w-2.5 h-2.5" /> {it.issue_type || "issue"}</span>
-                            {it.linked_item && <span className="flex items-center gap-1"><Scale className="w-2.5 h-2.5" /> {(it.linked_item.total_weight || 0).toFixed(2)}t</span>}
-                          </div>
-                          {sev === "warning" && (
-                            <p className="text-[10px] text-[hsl(var(--status-blocked))] mt-1 italic font-medium truncate">{(it.location_label ? `${it.location_label} — ` : "") + (it.description || "").replace(it.location_label ? `${it.location_label}: ` : "", "")}</p>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </Fragment>
-                );
-              })
-            )}
+              <EmptyState title="No QA issues" />
+            ) : visibleSheets.map((sheet) => (
+              <div key={sheet.key} className="p-2">
+                <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground mb-1">{sheet.name}</div>
+                <div className="space-y-1">
+                  {sheet.items.map((issue) => {
+                    const active = issue.id === selectedId;
+                    return (
+                      <button
+                        key={issue.id}
+                        onClick={() => setSelectedId(issue.id)}
+                        className={`w-full text-left px-2 py-2 border ${active ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-accent/30"}`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-[11px] font-medium truncate">{issue.location_label || issue.title}</div>
+                          <Pill tone={["critical", "error"].includes(issue.severity?.toLowerCase()) ? "blocked" : "inferred"}>{issue.severity || "open"}</Pill>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground truncate mt-1">{issue.description || issue.issue_type}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </aside>
 
-        {/* CENTER — Drawing Canvas */}
-        <main className="col-span-6 flex flex-col relative min-h-0 bg-background">
-          {/* Summary bar */}
-          <div className="h-10 bg-card border-b border-border flex items-center px-4 gap-5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            <span className="flex items-center gap-1.5"><GitBranch className="w-3.5 h-3.5 text-primary" /><span className="text-primary font-bold">{totalImpact}</span> changes detected</span>
-            <span className="w-px h-3 bg-border" />
-            <span><span className="text-foreground font-bold">{warnCount}</span> quantity impacts</span>
-            <span><span className="text-[hsl(var(--status-inferred))] font-bold">{warnCount}</span> rows require re-run</span>
-            <span><span className="text-[hsl(var(--status-blocked))] font-bold">{staleOutputs}</span> outputs stale</span>
-            <div className="flex-1" />
-            <button
-              disabled={loading || critCount > 0}
-              onClick={() => goToStage?.("confirm")}
-              className="inline-flex h-7 items-center gap-1.5 border border-primary/50 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Advance <ArrowRight className="w-3 h-3" />
-            </button>
+        <main className="col-span-7 min-h-0 flex flex-col bg-background">
+          <div className="h-11 border-b border-border flex items-center justify-between px-3 gap-2 bg-card/50">
+            <div className="flex items-center gap-2 min-w-0">
+              <button disabled={!prevIssue} onClick={() => prevIssue && setSelectedId(prevIssue.id)} className="p-2 border border-border hover:bg-accent/40 disabled:opacity-40"><ArrowLeft className="w-4 h-4" /></button>
+              <button disabled={!nextIssue} onClick={() => nextIssue && setSelectedId(nextIssue.id)} className="p-2 border border-border hover:bg-accent/40 disabled:opacity-40"><ArrowRight className="w-4 h-4" /></button>
+              <div className="min-w-0">
+                <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Focused issue</div>
+                <div className="text-[12px] font-bold truncate">{sel?.location_label || sel?.title || "No issue selected"}</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setViewMode("overlay")} className={`p-2 border ${viewMode === "overlay" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}><Layers className="w-4 h-4" /></button>
+              <button onClick={() => setViewMode("side")} className={`p-2 border ${viewMode === "side" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}><Columns2 className="w-4 h-4" /></button>
+              <button onClick={() => setViewMode("diff")} className={`p-2 border ${viewMode === "diff" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}><GitBranch className="w-4 h-4" /></button>
+              <button onClick={() => setZoomLevel((z) => Math.min(4, z + 0.1))} className="p-2 border border-border hover:bg-accent/40"><ZoomIn className="w-4 h-4" /></button>
+              <button onClick={() => setZoomLevel((z) => Math.max(0.5, z - 0.1))} className="p-2 border border-border hover:bg-accent/40"><ZoomOut className="w-4 h-4" /></button>
+              <button onClick={() => setZoomMode((m) => m === "tight" ? "full" : "tight")} className={`p-2 border ${zoomMode === "tight" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}><Maximize2 className="w-4 h-4" /></button>
+              <button onClick={() => setDebug((v) => !v)} className={`p-2 border ${debug ? "border-primary text-primary" : "border-border text-muted-foreground"}`}><Bug className="w-4 h-4" /></button>
+            </div>
           </div>
 
-          {/* Floating toolbar */}
-          <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 flex gap-1 p-1 bg-card border border-border shadow-2xl">
-            {[
-              { k: "overlay", label: "Overlay", icon: Layers },
-              { k: "side", label: "Side-by-Side", icon: Columns2 },
-              { k: "diff", label: "Difference", icon: GitCompare },
-            ].map((m) => {
-              const Active = m.icon;
-              const on = viewMode === m.k;
-              return (
-                <button
-                  key={m.k}
-                  onClick={() => setViewMode(m.k as any)}
-                  className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] flex items-center gap-1.5 ${on ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent/40"}`}
-                >
-                  <Active className="w-3.5 h-3.5" /> {m.label}
-                </button>
-              );
-            })}
-            <div className="w-px h-6 bg-border mx-1 my-0.5" />
-            <button onClick={() => setZoomLevel((z) => Math.min(4, Number((z * 1.25).toFixed(2))))} className="p-1.5 text-muted-foreground hover:text-foreground" title="Zoom in"><ZoomIn className="w-4 h-4" /></button>
-            <button onClick={() => setZoomLevel((z) => Math.max(0.5, Number((z / 1.25).toFixed(2))))} className="p-1.5 text-muted-foreground hover:text-foreground" title="Zoom out"><ZoomOut className="w-4 h-4" /></button>
-            <button onClick={() => { setZoomMode((m) => m === "tight" ? "full" : "tight"); setZoomLevel(1); }} className="p-1.5 text-muted-foreground hover:text-foreground" title="Toggle fit mode"><Maximize2 className="w-4 h-4" /></button>
-            <div className="w-px h-6 bg-border mx-1 my-0.5" />
-            <button className="p-1.5 text-muted-foreground hover:text-foreground"><Eye className="w-4 h-4" /></button>
-            <button
-              onClick={() => setDebug((d) => !d)}
-              className={`p-1.5 ${debug ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
-              title="Toggle debug overlay"
-            >
-              <Bug className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Canvas */}
-          <div
-            ref={canvasRef}
-            className="flex-1 overflow-hidden relative blueprint-bg cursor-grab active:cursor-grabbing select-none"
-            onWheel={(e) => {
-              if (!sel) return;
-              e.preventDefault();
-              const delta = -e.deltaY;
-              const factor = delta > 0 ? 1.1 : 1 / 1.1;
-              setZoomLevel((z) => Math.min(8, Math.max(0.25, Number((z * factor).toFixed(3)))));
-              bump(`wheel zoom ${delta > 0 ? "in" : "out"}`);
-            }}
-            onPointerDown={(e) => {
-              if (e.button !== 0) return;
-              const el = e.currentTarget;
-              el.setPointerCapture(e.pointerId);
-              const startX = e.clientX, startY = e.clientY;
-              const startPan = { ...pan };
-              const move = (ev: PointerEvent) => {
-                const ddx = ev.clientX - startX;
-                const ddy = ev.clientY - startY;
-                setPan({ dx: startPan.dx + ddx, dy: startPan.dy + ddy });
-              };
-              const up = (ev: PointerEvent) => {
-                el.releasePointerCapture(ev.pointerId);
-                el.removeEventListener("pointermove", move);
-                el.removeEventListener("pointerup", up);
-                el.removeEventListener("pointercancel", up);
-                bump("drag end");
-              };
-              el.addEventListener("pointermove", move);
-              el.addEventListener("pointerup", up);
-              el.addEventListener("pointercancel", up);
-            }}
-            onDoubleClick={() => { setPan({ dx: 0, dy: 0 }); setZoomLevel(1); bump("dbl click reset"); }}
-          >
-            {!sel ? (
-              <div className="absolute inset-0 grid place-items-center text-[10px] uppercase tracking-widest text-muted-foreground">Select an issue from the navigator</div>
+          <div ref={canvasRef} className="relative flex-1 min-h-0 overflow-hidden bg-[#101216]">
+            {!previewUrl ? (
+              <div className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">{previewLoading ? "Loading drawing…" : renderError || "Select an issue to load the source drawing."}</div>
+            ) : previewKind === "pdf" ? (
+              <PdfRenderer
+                key={`${previewUrl}:${pdfPage}`}
+                file={previewUrl}
+                page={pdfPage}
+                zoom={zoom}
+                pan={pan}
+                debug={debug}
+                viewMode={viewMode}
+                onRender={({ imageUrl, width, height, pageCount, textItems }) => {
+                  setPdfImg(imageUrl);
+                  setImgSize({ w: width, h: height });
+                  setPdfPageCount(pageCount || 1);
+                  setRenderedPage(pdfPage);
+                  setPageText(textItems || []);
+                  setRenderStatus("ready");
+                  setRenderError(null);
+                }}
+                onError={(message) => {
+                  setRenderStatus("error");
+                  setRenderError(message);
+                }}
+              />
             ) : (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <img
+                  data-qa-preview="true"
+                  src={previewUrl}
+                  alt={previewName || "Drawing preview"}
+                  className="max-w-full max-h-full object-contain"
+                  onLoad={(event) => {
+                    const img = event.currentTarget;
+                    setImgSize({ w: img.naturalWidth, h: img.naturalHeight });
+                    setRenderStatus("ready");
+                    setRenderError(null);
+                    updatePageBox();
+                  }}
+                  onError={() => {
+                    setRenderStatus("error");
+                    setRenderError(`Could not render ${previewName || "the source file"}.`);
+                  }}
+                />
+              </div>
+            )}
+
+            {renderStatus === "ready" && previewUrl && imgSize && pageBox && (
               <>
-                {previewKind === "pdf" && previewUrl && (
-                  <PdfRenderer
-                    url={previewUrl}
-                    currentPage={pdfPage}
-                    onPageCount={setPdfPageCount}
-                    onPageRendered={(dataUrl, w, h) => {
-                      setPdfImg(dataUrl);
-                      setImgSize({ w, h });
-                      setRenderedPage(pdfPage);
-                      setRenderStatus("ready");
-                      setRenderError(null);
-                    }}
-                    onPageText={setPageText}
-                    onRenderStateChange={(state) => {
-                      setRenderStatus(state.status);
-                      setRenderError(state.error ?? null);
-                      // IMPORTANT: do NOT clear pdfImg / pageBox here. Keep
-                      // the last rendered page visible while the next page
-                      // (or a re-render of the same page) is in flight. The
-                      // page-change effect above is the only place allowed
-                      // to blank the raster, and only when pdfPage changes.
-                    }}
-                    scale={2}
+                {canShowPointer && bbox && (
+                  <BBoxPointer
+                    bbox={bbox}
+                    imgW={imgSize.w}
+                    imgH={imgSize.h}
+                    zoom={zoom}
+                    pageBox={pageBox}
+                    title={sel?.location_label || sel?.title || "Selected target"}
+                    onFix={openAnswerTab}
+                    approximate={anchorStatus === "approximate"}
                   />
                 )}
-                {(previewKind === "image" || (previewKind === "pdf" && pdfImg)) && (
-                  <div
-                    className={`absolute inset-0 ${viewMode === "side" ? "grid grid-cols-2 gap-px bg-border" : ""}`}
-                    style={viewMode === "side" ? undefined : {
-                      transform: `translate(${tx}px, ${ty}px) scale(${zoom})`,
-                      transformOrigin: "0 0",
-                      transition: "transform 0.05s linear",
-                    }}
-                  >
-                    {viewMode === "side" ? (
-                      <>
-                        <div className="relative w-full h-full bg-background overflow-hidden">
-                          <div className="absolute top-1 left-1 z-10 px-1.5 py-0.5 bg-card/90 border border-border text-[9px] uppercase tracking-[0.12em] font-bold">Rev 2 (Base)</div>
-                          <img src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")} alt={previewName} className="w-full h-full object-contain" style={{ transform: `scale(${zoom})`, transformOrigin: "center center", transition: "transform 0.05s linear" }} draggable={false} />
-                        </div>
-                        <div className="relative w-full h-full bg-background overflow-hidden">
-                          <div className="absolute top-1 left-1 z-10 px-1.5 py-0.5 bg-primary/20 border border-primary/50 text-[9px] uppercase tracking-[0.12em] font-bold text-primary">Rev 3 (Target)</div>
-                          <img src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")} alt={`${previewName} target`} className="w-full h-full object-contain" style={{ filter: "sepia(1) hue-rotate(150deg) saturate(2.2) contrast(1.1)", transform: `scale(${zoom})`, transformOrigin: "center center", transition: "transform 0.05s linear" }} draggable={false} />
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <img
-                          src={previewKind === "pdf" ? (pdfImg || "") : (previewUrl || "")}
-                          alt={previewName}
-                          data-qa-preview="true"
-                          onLoad={(e) => {
-                            const t = e.currentTarget;
-                            const naturalW = t.naturalWidth;
-                            const naturalH = t.naturalHeight;
-                            if (!naturalW || !naturalH) return;
-                            if (previewKind === "image") {
-                              setImgSize({ w: naturalW, h: naturalH });
-                              setRenderedPage(sel?.locator?.page_number ?? 1);
-                              setRenderStatus("ready");
-                              setRenderError(null);
-                            }
-                            updatePageBox();
-                          }}
-                          className="absolute inset-0 w-full h-full object-contain"
-                          style={viewMode === "diff" ? { mixBlendMode: "difference", filter: "invert(1) hue-rotate(180deg)" } : undefined}
-                          draggable={false}
-                        />
-                        {canShowPointer && bbox && imgW && imgH && pageBox && (
-                          <BBoxPointer
-                            bbox={bbox}
-                            imgW={imgW}
-                            imgH={imgH}
-                            zoom={zoom}
-                            pageBox={pageBox}
-                            approximate={bboxIsApprox}
-                            title={sel?.title || "Modification"}
-                            onFix={openAnswerTab}
-                          />
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
-                {/* DEBUG OVERLAY */}
-                {debug && (
-                  <div className="absolute top-14 right-4 z-30 w-[300px] bg-card/95 border border-primary/60 shadow-2xl text-[10px] font-mono p-2 space-y-0.5 pointer-events-auto">
-                    <div className="font-bold text-primary uppercase tracking-[0.12em] flex justify-between">
-                      <span>QA Debug</span>
-                      <span>#{redrawCount}</span>
-                    </div>
-                    <div>last: <span className="text-foreground">{lastTrigger}</span></div>
-                    <div>view: <span className="text-primary">{viewMode}</span> · zoom: {zoomMode} × {zoomLevel.toFixed(2)} ({Math.round(zoom * 100)}%)</div>
-                    <div>blend: {viewMode === "diff" ? "difference / invert(1)" : viewMode === "side" ? "sepia+hue (rev3)" : "none"}</div>
-                    <div>tx/ty: {tx.toFixed(1)}px / {ty.toFixed(1)}px</div>
-                    <div>page req: {pdfPage} · rendered: {renderedPage ?? "—"} / {pdfPageCount}</div>
-                    <div>imgSize: {imgW || "?"}×{imgH || "?"}</div>
-                    <div>canvas: {canvasSize.width || "?"}x{canvasSize.height || "?"}</div>
-                    <div>bbox mode: {exactBboxNormalized.mode}{exactBboxNormalized.reason ? ` (${exactBboxNormalized.reason})` : ""}</div>
-                    <div>bbox: {bbox ? `[${bbox.map((v) => Math.round(v)).join(",")}]` : "none"}</div>
-                    <div>file: <span className="truncate inline-block max-w-[220px] align-bottom">{previewName || "—"}</span></div>
-                    <div>kind: {previewKind || "—"} · loading: {String(previewLoading)}</div>
-                    <div>issue: {sel?.id?.slice(0, 24) || "—"}</div>
-                    <div className="text-[hsl(var(--status-blocked))]">compare src: single (no Rev2/Rev3 assets linked)</div>
-                  </div>
-                )}
-                {/* DEBUG canvas + image bounds */}
-                {debug && (
-                  <>
-                    <div className="absolute inset-0 pointer-events-none border-2 border-dashed border-[hsl(var(--status-inferred))]/70 z-20" />
-                    {bbox && imgW && imgH && (
-                      <div className="absolute inset-0 pointer-events-none z-20" style={{ transform: viewMode === "side" ? undefined : `translate(${tx}px, ${ty}px) scale(${zoom})`, transformOrigin: "0 0" }}>
-                        <div className="absolute" style={{
-                          left: `${(bbox[0] / imgW) * 100}%`, top: `${(bbox[1] / imgH) * 100}%`,
-                          width: `${((bbox[2] - bbox[0]) / imgW) * 100}%`, height: `${((bbox[3] - bbox[1]) / imgH) * 100}%`,
-                          border: "1px dashed cyan",
-                        }} />
-                      </div>
-                    )}
-                  </>
-                )}
-                {!previewUrl && !previewLoading && (
-                  <div className="absolute inset-0 grid place-items-center text-[10px] uppercase tracking-widest text-muted-foreground">No linked drawing for this issue</div>
-                )}
-                {(previewLoading || (previewKind === "pdf" && previewUrl && !isRenderedPageCurrent && renderStatus === "loading")) && (
-                  <div className="absolute inset-0 grid place-items-center text-[10px] uppercase tracking-widest text-muted-foreground">Loading drawing…</div>
-                )}
-                {previewKind === "pdf" && previewUrl && !isRenderedPageCurrent && renderedPage !== null && (
-                  <div className="absolute inset-0 z-10 pointer-events-none grid place-items-center bg-background/10 backdrop-blur-[1px]">
-                    <div className="border border-border bg-card/90 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground shadow-xl">
-                      Rendering page {pdfPage}…
-                    </div>
-                  </div>
-                )}
-                {renderStatus === "error" && (
-                  <div className="absolute inset-0 grid place-items-center px-6 text-center">
-                    <div className="border border-border bg-card px-4 py-3 text-sm text-foreground max-w-md">
-                      <div className="font-bold mb-1">Could not render {previewName || "drawing"}</div>
-                      <div className="text-muted-foreground text-xs">{renderError || `Page ${pdfPage} could not be displayed.`}</div>
-                    </div>
-                  </div>
-                )}
-                {renderStatus === "ready" && !bbox && previewUrl && (
-                  <div className="absolute top-14 right-4 z-10 text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--status-inferred))] border border-[hsl(var(--status-inferred))]/30 bg-[hsl(var(--status-inferred))]/10 px-2 py-1">
+                {debug && textLines.map((line, idx) => {
+                  const top = pageBox.top + (line.y / imgSize.h) * pageBox.height;
+                  return <div key={idx} className="absolute left-0 right-0 border-t border-amber-500/20" style={{ top }} />;
+                })}
+                {anchorStatus === "unavailable" && renderStatus === "ready" && previewUrl && (
+                  <div className="absolute top-14 right-4 z-10 text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--status-blocked))] border border-[hsl(var(--status-blocked))]/40 bg-[hsl(var(--status-blocked))]/10 px-2 py-1">
                     Page linked · no trusted object box on this page
                   </div>
                 )}
@@ -964,8 +738,17 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                       <div className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground">Selected target</div>
                       <div className="text-[11px] font-bold text-foreground truncate max-w-[180px]">{sel.location_label || sel.title}</div>
                     </div>
-                    <button onClick={openAnswerTab} className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] hover:opacity-90 ${tab === "action" ? "bg-primary text-primary-foreground" : "bg-card border border-border text-foreground"}`}>Answer</button>
-                    <button onClick={() => setTab("impact")} className={`px-3 py-1.5 border border-border text-[10px] font-bold uppercase tracking-[0.1em] hover:bg-accent/40 ${tab === "impact" ? "bg-primary text-primary-foreground border-primary" : "bg-card text-foreground"}`}>Impact</button>
+                    {isWireDrawingIssue ? (
+                      <>
+                        <button onClick={() => setTab("change")} className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] hover:opacity-90 ${tab === "change" ? "bg-primary text-primary-foreground" : "bg-card border border-border text-foreground"}`}>Change</button>
+                        <button onClick={openAnswerTab} className={`px-3 py-1.5 border border-border text-[10px] font-bold uppercase tracking-[0.1em] hover:bg-accent/40 ${tab === "action" ? "bg-primary text-primary-foreground border-primary" : "bg-card text-foreground"}`}>Action</button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={openAnswerTab} className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] hover:opacity-90 ${tab === "action" ? "bg-primary text-primary-foreground" : "bg-card border border-border text-foreground"}`}>Answer</button>
+                        <button onClick={() => setTab("impact")} className={`px-3 py-1.5 border border-border text-[10px] font-bold uppercase tracking-[0.1em] hover:bg-accent/40 ${tab === "impact" ? "bg-primary text-primary-foreground border-primary" : "bg-card text-foreground"}`}>Impact</button>
+                      </>
+                    )}
                   </div>
                 )}
               </>
