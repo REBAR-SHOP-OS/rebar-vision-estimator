@@ -58,6 +58,37 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
   const [panelOpen, setPanelOpen] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
   const imageBoxRef = useRef<HTMLDivElement>(null);
+  const [stageSize, setStageSize] = useState<{ w: number; h: number } | null>(null);
+
+  // Resolve project file id + signed URL.
+  // Track stage size for fitted image box.
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        const r = e.contentRect;
+        setStageSize({ w: r.width, h: r.height });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const fittedBox = useMemo(() => {
+    if (!imgSize || !stageSize) return null;
+    const padding = 16; // matches p-2 on stage (~8px each side)
+    const availW = Math.max(0, stageSize.w - padding);
+    const availH = Math.max(0, stageSize.h - padding);
+    const ar = imgSize.w / imgSize.h;
+    let w = availW;
+    let h = w / ar;
+    if (h > availH) {
+      h = availH;
+      w = h * ar;
+    }
+    return { w, h };
+  }, [imgSize, stageSize]);
 
   // Resolve project file id + signed URL.
   useEffect(() => {
