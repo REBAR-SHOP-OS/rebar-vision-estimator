@@ -158,6 +158,18 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
 
   const layerColor = useCallback((l: CanvasLayer) => l.color || colorForSegmentType(l.segment_type), []);
 
+  useEffect(() => {
+    if (layers.length === 0) {
+      if (activeLayer !== null) setActiveLayer(null);
+      return;
+    }
+
+    const activeExists = activeLayer ? layers.some((layer) => layer.id === activeLayer) : false;
+    if (!activeExists) {
+      setActiveLayer(layers[0].id);
+    }
+  }, [layers, activeLayer]);
+
   const toggleLayer = (id: string) => {
     setHidden((prev) => {
       const next = new Set(prev);
@@ -411,7 +423,16 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
               return (
                 <button
                   key={l.id}
-                  onClick={() => { setActiveLayer(l.id); setTool("polygon"); }}
+                  onClick={() => {
+                    setHidden((prev) => {
+                      if (!prev.has(l.id)) return prev;
+                      const next = new Set(prev);
+                      next.delete(l.id);
+                      return next;
+                    });
+                    setActiveLayer(l.id);
+                    setTool("polygon");
+                  }}
                   title={`${l.name} — ${drawnHere} drawn`}
                   className={`flex h-9 w-full items-center justify-center rounded border ${isActive ? "border-primary ring-1 ring-primary" : "border-transparent hover:bg-muted/50"}`}
                 >
@@ -422,7 +443,16 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
             return (
               <button
                 key={l.id}
-                onClick={() => { setActiveLayer(l.id); setTool("polygon"); }}
+                onClick={() => {
+                  setHidden((prev) => {
+                    if (!prev.has(l.id)) return prev;
+                    const next = new Set(prev);
+                    next.delete(l.id);
+                    return next;
+                  });
+                  setActiveLayer(l.id);
+                  setTool("polygon");
+                }}
                 className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-xs transition-colors ${isActive ? "border-primary bg-primary/15 ring-1 ring-primary" : "border-transparent hover:bg-muted/50"}`}
               >
                 <span className="h-3 w-3 flex-shrink-0 rounded-sm" style={{ backgroundColor: color, opacity: isHidden ? 0.3 : 1 }} />
