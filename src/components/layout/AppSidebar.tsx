@@ -52,6 +52,7 @@ import {
   Sun,
   Trash2,
 } from "lucide-react";
+import type { ComponentType } from "react";
 import logoBg from "@/assets/logo.png";
 import BrainKnowledgeDialog from "@/components/chat/BrainKnowledgeDialog";
 import { STAGES, type StageKey } from "@/features/workflow-v2/types";
@@ -71,7 +72,7 @@ const mainNav = [
   { title: "Standards", url: "/app/standards", icon: Ruler },
 ];
 
-const STAGE_ICONS: Record<StageKey, React.ComponentType<{ className?: string }>> = {
+const STAGE_ICONS: Record<StageKey, ComponentType<{ className?: string }>> = {
   files: FolderOpen,
   scope: Layers,
   calibration: Ruler,
