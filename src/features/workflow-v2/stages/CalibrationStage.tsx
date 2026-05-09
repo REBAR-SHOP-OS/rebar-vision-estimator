@@ -132,9 +132,24 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
 
   const structural = sheets.filter((r) => r.discipline === "Structural");
   const reference = sheets.filter((r) => r.discipline !== "Structural");
+  const architectural = sheets.filter((r) => r.discipline === "Architectural");
+  // Gate cohort: BOTH Structural and Architectural sheets must resolve.
+  // If neither discipline is present (only "Other"), fall back to all sheets so the project doesn't deadlock.
+  const gateRows = (structural.length + architectural.length > 0)
+    ? [...structural, ...architectural]
+    : sheets;
   const isResolved = (r: SheetRow) => !!r.calibration && r.calibration.pixelsPerFoot > 0 && r.calibration.confidence !== "low";
   const structuralResolved = structural.filter(isResolved).length;
-  const allConfirmable = structural.length > 0 && structural.every(isResolved);
+  const gateResolved = gateRows.filter(isResolved).length;
+  const allConfirmable = gateRows.length > 0 && gateRows.every(isResolved);
+
+  const promoteAllToStructural = () => {
+    const cur = (state.local.disciplineOverride || {}) as Record<string, Discipline>;
+    const next: Record<string, Discipline> = { ...cur };
+    for (const r of sheets) next[r.id] = "Structural";
+    state.setLocal({ disciplineOverride: next, calibrationPrimary: "structural" });
+    setSheets((prev) => prev.map((r) => ({ ...r, discipline: "Structural" })));
+  };
 
   const confirmAll = () => {
     state.setLocal({ calibrationConfirmed: true, calibrationPrimary: "structural" });
@@ -166,7 +181,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
       {confirmed && (
         <div className="px-4 py-2 border-b border-border bg-[hsl(var(--status-supported))]/10 text-[12px] flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-[hsl(var(--status-supported))]" />
-          Structural calibration confirmed ({structuralResolved}/{structural.length} sheets). Takeoff can proceed.
+          Calibration confirmed ({gateResolved}/{gateRows.length} sheets across Structural + Architectural). Takeoff can proceed.
           {goToStage && <Button size="sm" variant="ghost" className="ml-auto" onClick={() => goToStage("takeoff")}>Open Takeoff →</Button>}
         </div>
       )}
@@ -185,9 +200,12 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
               rows={structural}
               resolvedCount={structuralResolved}
               empty={
-                <div className="flex items-center gap-2 px-3 py-2.5 border border-[hsl(var(--status-blocked))]/40 bg-[hsl(var(--status-blocked))]/5 text-[12px]">
-                  <AlertTriangle className="w-4 h-4 text-[hsl(var(--status-blocked))]" />
-                  No Structural sheets detected. Reclassify a reference sheet below or upload structural drawings before takeoff.
+                <div className="flex items-center gap-2 px-3 py-2.5 border border-[hsl(var(--status-inferred))]/40 bg-[hsl(var(--status-inferred))]/5 text-[12px]">
+                  <AlertTriangle className="w-4 h-4 text-[hsl(var(--status-inferred))]" />
+                  <span className="flex-1">No Structural sheets detected. Architectural sheets will be used for calibration; reclassify any sheet below if needed.</span>
+                  {sheets.length > 0 && (
+                    <Button size="sm" variant="outline" onClick={promoteAllToStructural}>Mark all as Structural</Button>
+                  )}
                 </div>
               }
               onUpdateOverride={updateOverride}
@@ -195,7 +213,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
             />
             <DisciplineSection
               title="Architectural / Reference"
-              subtitle="Shown for context. Not required for the takeoff gate. Reclassify if structural intent is documented here."
+              subtitle="Required for takeoff — every Architectural sheet must also resolve to a usable px/ft. Structural still wins on conflicting dimensions."
               tone="muted"
               rows={reference}
               resolvedCount={reference.filter(isResolved).length}
@@ -211,12 +229,16 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
         <div className="border-t border-border px-4 py-2">
           <GateBanner
             tone={allConfirmable ? "warn" : "blocked"}
-            title={allConfirmable ? "Ready to confirm" : structural.length === 0 ? "No Structural sheets detected" : "Structural calibration required"}
+            title={allConfirmable
+              ? "Ready to confirm"
+              : gateRows.length === 0
+                ? "No discipline-tagged sheets"
+                : "Calibration required"}
             message={allConfirmable
-              ? "Every Structural sheet has a usable scale. Architectural sheets are reference only. Confirm to unlock Takeoff."
-              : structural.length === 0
-                ? "Reclassify at least one sheet as Structural, or upload structural drawings, before takeoff can run."
-                : `Resolve every Structural sheet (${structuralResolved}/${structural.length} done). Architectural sheets are skipped from this gate.`}
+              ? "Ready to confirm — every Structural and Architectural sheet has a usable scale."
+              : gateRows.length === 0
+                ? "No discipline-tagged sheets. Reclassify at least one sheet, or confirm to proceed with the available pages."
+                : `Resolve every Structural and Architectural sheet (${gateResolved}/${gateRows.length} done).`}
           />
         </div>
       )}
