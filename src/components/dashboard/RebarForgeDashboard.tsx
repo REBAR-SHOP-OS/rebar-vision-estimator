@@ -258,7 +258,7 @@ export default function RebarForgeDashboard({
             },
             {
               label: "Project health",
-              value: `${healthScore}%",
+              value: `${healthScore}%`,
               note: "Estimated readiness based on current intake completion",
               icon: ShieldCheck,
             },
