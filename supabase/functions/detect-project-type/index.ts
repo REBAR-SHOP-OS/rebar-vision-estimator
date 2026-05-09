@@ -183,6 +183,26 @@ ${ocrText ? `## OCR Text Extracted:\n${ocrText}` : "No OCR text available - anal
 
 ${keywordHints.length > 0 ? `## Keyword Analysis Hints:\n${keywordHints.map(h => `- ${h}`).join("\n")}\n` : ""}
 
+## STEP 0: THE "BIG THREE" PROJECT-TYPE IDENTIFIERS (do this FIRST)
+Before any scope work, classify the project using these three signals — in priority order — and report what you saw for each in classificationEvidence:
+
+1. **Title Block** (cover sheet A-0.0 / S-0.0):
+   - Commercial: "Retail", "Unit X Development", "Plaza", developer names (e.g. "Westdell").
+   - Industrial: "Warehouse", "Factory", "Distribution Center", "Plant".
+   - Residential: "Multi-family", "Apartment", "Condominium", "Townhouse".
+
+2. **Floor Plan Layout** (A-2.2 or first architectural plan):
+   - Commercial: large open spaces, "Storefront" glass, multiple washrooms in a row, "Signage" labels.
+   - Industrial: very few interior walls, "Loading Docks", "Drive-in Doors", clear-span bays.
+   - Residential: many small rooms, kitchens, bedrooms, bathtubs.
+
+3. **Framing Material** (S-1.1 or first structural framing plan):
+   - Commercial: O.W.S.J. (Open Web Steel Joists) + metal deck.
+   - Industrial: heavy structural steel (W-shapes) or pre-cast concrete.
+   - Residential: wood trusses or thin-slab concrete on metal studs.
+
+If two of three signals agree, use that classification with high confidence. If signals conflict, prefer the structural framing material and lower confidence.
+
 ## STEP 1: DISCIPLINE IDENTIFICATION (Critical First Step)
 Before analyzing scope, identify the DISCIPLINE of each page/image from the title block or sheet number:
 - **S** = Structural (S1.1, S2.1, etc.)
