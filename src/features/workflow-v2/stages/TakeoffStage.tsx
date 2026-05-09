@@ -753,8 +753,8 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
             <Pill tone="supported">{totals.weight.toFixed(0)} KG</Pill>
             {totals.blocked > 0 && <Pill tone="blocked" solid>{totals.blocked} BLOCKED</Pill>}
             <div className="inline-flex items-center border border-border h-7" title="Switch between table and canvas view">
-              <button onClick={() => setViewMode("table")} className={`h-7 px-2 text-[10px] font-mono uppercase tracking-wider inline-flex items-center gap-1 ${viewMode === "table" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent/40"}`}><TableIcon className="w-3 h-3" /> Table</button>
-              <button onClick={() => setViewMode("canvas")} className={`h-7 px-2 text-[10px] font-mono uppercase tracking-wider inline-flex items-center gap-1 border-l border-border ${viewMode === "canvas" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent/40"}`}><Layers className="w-3 h-3" /> Canvas</button>
+              <button onClick={() => setViewMode("table")} className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider inline-flex items-center gap-1 bg-primary text-primary-foreground"><TableIcon className="w-3 h-3" /> Table</button>
+              <button onClick={() => setViewMode("canvas")} className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider inline-flex items-center gap-1 border-l border-border text-muted-foreground hover:bg-accent/40"><Layers className="w-3 h-3" /> Canvas</button>
             </div>
             <div className="inline-flex items-center border border-border h-7" title="Waste factor (G4) — applied at segment total. Re-run takeoff to apply.">
               <span className="px-2 text-[9px] font-mono uppercase tracking-wider text-muted-foreground">Waste</span>
