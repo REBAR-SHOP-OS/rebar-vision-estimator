@@ -291,7 +291,7 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
                 <span>Items <span className="text-foreground font-semibold ml-1">{accepted.length}</span></span>
               </div>
               <button
-                disabled={accepted.length === 0}
+                disabled={candidates.length === 0}
                 onClick={() => goToStage?.("calibration")}
                 className="inline-flex h-8 items-center justify-center gap-1.5 border border-primary/60 bg-primary/15 px-3 text-[10px] font-mono uppercase tracking-wider text-primary transition-colors hover:bg-primary/25 disabled:cursor-not-allowed disabled:border-border disabled:bg-transparent disabled:text-muted-foreground"
               >
