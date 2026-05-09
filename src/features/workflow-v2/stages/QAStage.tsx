@@ -589,17 +589,6 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
   const anchorStatus = sel?.locator?.anchor_mode || (textSearch ? (textSearch.score >= MIN_ANCHOR_CONFIDENCE ? "exact" : "approximate") : "unavailable");
   const anchorReason = textSearch?.text ? `Matched ${textSearch.kind} anchor: ${textSearch.text}` : null;
-  const zoom = zoomMode === "tight" && bbox && imgSize
-    ? computeFocusTransformForImage({
-        bbox,
-        imgW: imgSize.w,
-        imgH: imgSize.h,
-        pageBox,
-        canvas: canvasSize,
-        zoom: zoomLevel,
-        pan,
-      }).scale
-    : zoomLevel;
   const canShowPointer = Boolean(renderStatus === "ready" && previewUrl && imgSize && pageBox && bbox);
 
   const TABS: Array<{ k: TabKey; label: string }> = [

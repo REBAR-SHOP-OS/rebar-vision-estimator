@@ -1,43 +1,36 @@
-# Fix QA overlay zoom/pan controls
+# Fix: QA pointer drifts when zooming / panning
 
-## Problem
+## Root cause
 
-In `src/features/workflow-v2/stages/QAStage.tsx`, the toolbar buttons (ZoomIn / ZoomOut / Maximize2 / Hand) update `zoomLevel` and `pan` state, but **nothing actually applies them to the rendered drawing**. The `<img>` for both the PDF page and the raster preview is rendered with only `className="max-w-full max-h-full object-contain"` — no `transform`, no drag handlers, no wheel handler. So clicking zoom in/out does nothing visible, and there is no hand tool to pan.
+In `src/features/workflow-v2/stages/QAStage.tsx`, the drawing image is wrapped in a div that gets a CSS `transform: translate(pan) scale(zoomLevel)`. But the `BBoxPointer` (orange selector box) and the debug text-line overlays are rendered **outside** that wrapper, positioned in raw canvas coordinates from `pageBox` (which is measured from the un-transformed image).
 
-`zoomLevel` is only consumed by `BBoxPointer` for the focus highlight, never by the image itself.
+Result:
+- At zoom = 1, pan = 0 → pointer happens to align.
+- As soon as you zoom in/out or pan, the image moves via CSS transform but the pointer stays put → it drifts off the target.
+- Additionally, `zoom` is being passed into `BBoxPointer` and `computeFocusTransformForImage`, double-counting the scale.
 
-## Fix (minimal patch, single file: `QAStage.tsx`)
+## Change (single file, minimal patch)
 
-1. **Apply transform to the drawing layer.** Wrap the existing PDF `<img>` and raster `<img>` blocks (lines 705–725 and 727–747) in a positioned div with:
-   ```
-   transform: `translate(${pan.dx}px, ${pan.dy}px) scale(${zoomLevel})`
-   transformOrigin: 'center center'
-   transition: isPanning ? 'none' : 'transform 120ms ease-out'
-   ```
-   Image keeps `object-contain` so the base fit is unchanged at `zoomLevel=1, pan=0,0`.
+**File:** `src/features/workflow-v2/stages/QAStage.tsx`
 
-2. **Add a Hand / pan tool button** to the toolbar row (after the Maximize2 button, before Bug). New local state `tool: 'select' | 'pan'`. Icon: `Hand` from lucide-react.
+1. **Move the overlay group inside the transform wrapper.** The block at lines ~785–802 that renders `<BBoxPointer …>` and the debug `textLines` markers must live inside the same `<div style={{ transform: translate+scale }}>` that wraps the `<img>`. The "approximate / unavailable" status badges and the bottom-right "Selected target" action bar (~803–830) stay outside (they should remain screen-fixed).
 
-3. **Drag-to-pan on the canvas container** (`canvasRef` div, line 681). Add `onMouseDown / onMouseMove / onMouseUp / onMouseLeave` handlers that:
-   - Activate when `tool === 'pan'` OR when middle-mouse / space-held drag.
-   - Track start pos + start pan, update `pan` on move.
-   - Switch cursor to `grab` / `grabbing` when pan tool is active.
+2. **Stop double-applying zoom in the pointer math.** Since the parent div now scales the pointer along with the image:
+   - Pass `zoom={1}` to `BBoxPointer` (or drop the prop usage). Keep its internal `labelScale`/`borderPx` counter-scale, but base it on the actual `zoomLevel` so the badge/border don't visually balloon — pass `zoomLevel` as a separate `viewZoom` prop used only for visual compensation, not for positioning.
+   - Remove the `computeFocusTransformForImage(...).scale` branch used to derive `zoom` for the pointer; pointer positioning no longer needs it.
 
-4. **Wheel-to-zoom** on the canvas container: `onWheel` with `preventDefault`, adjusts `zoomLevel` between 0.5 and 4 in 0.1 steps based on `deltaY` sign. Ctrl+wheel only, to avoid hijacking page scroll.
-
-5. **Reset behavior.** The Maximize2 (tight/full) button additionally resets `zoomLevel=1` and `pan={dx:0,dy:0}` so users can recover from a zoomed/panned state. Existing `useEffect` on `sel?.id` (line 252) already resets these on issue change — keep as-is.
-
-6. **Keep BBoxPointer correct.** It currently receives `zoom = computeFocusTransformForImage(...)` which already factors in `zoomLevel` and `pan`. Since we're now also transforming the underlying image with the same `zoomLevel`/`pan`, the pointer should follow naturally because it's positioned relative to `pageBox` inside the same `canvasRef` container — verify by leaving the pointer rendering inside the new transformed wrapper so it scales/translates with the image. Move the `BBoxPointer` and the debug text-line overlays into the transformed wrapper, while keeping the badges (anchor status, selected-target action card) outside it (they should stay screen-fixed).
+3. **Keep `pageBox` as-is.** It already represents the image rect inside the wrapper at scale 1, which is exactly what we want now that the wrapper handles the scaling.
 
 ## Out of scope
 
-- No changes to `qa-overlay-geometry.ts`, `PdfRenderer`, or any other stage.
-- No keyboard shortcuts beyond optional space-to-pan (skip if it complicates focus handling).
-- No touch/pinch gestures.
+- `qa-overlay-geometry.ts` math (still used for any future focus auto-centering).
+- `PdfRenderer`, page text extraction, issue list, side panel.
+- Pan/zoom toolbar behavior (already working).
 
 ## Verification
 
-- Click ZoomIn/ZoomOut → drawing visibly scales, footer "Zoom: NNN%" updates.
-- Click Hand → cursor becomes grab; drag moves the drawing; release stops.
-- Click Maximize2 → resets zoom/pan and toggles tight/full mode.
-- BBoxPointer stays anchored to the same drawing feature while zooming/panning.
+- Select a QA issue → orange pointer appears on the target.
+- Zoom in / out → pointer stays glued to the same drawing feature.
+- Pan with the hand tool → pointer moves with the drawing.
+- Reset (Maximize2) → pointer returns to original position aligned with target.
+- Border thickness and the small "!" badge stay visually reasonable at all zoom levels.
