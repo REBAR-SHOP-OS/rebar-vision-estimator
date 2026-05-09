@@ -4,7 +4,8 @@ import { StageHeader, GateBanner, Pill, EmptyState, type StageProps } from "./_s
 import { Button } from "@/components/ui/button";
 import { resolveScale, type Calibration, type Discipline } from "../lib/scale-resolver";
 import { detectDiscipline } from "@/lib/rebar-intake";
-import { CheckCircle2, RefreshCcw, Ruler, AlertTriangle } from "lucide-react";
+import { CheckCircle2, RefreshCcw, Ruler, AlertTriangle, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 interface SheetRow {
   id: string;
@@ -44,14 +45,18 @@ function detectSheetDiscipline(opts: { fileName?: string | null; sheetNumber?: s
 export default function CalibrationStage({ projectId, state, goToStage }: StageProps) {
   const [sheets, setSheets] = useState<SheetRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [confirming, setConfirming] = useState(false);
 
   const load = async () => {
+    if (loading && sheets.length > 0) return; // ignore overlapping clicks once primed
     setLoading(true);
-    const { data } = await supabase
+    try {
+    const { data, error } = await supabase
       .from("drawing_search_index")
       .select("id, page_number, raw_text, sheet_revision_id, logical_drawing_id, document_version_id")
       .eq("project_id", projectId)
       .order("page_number", { ascending: true });
+    if (error) throw error;
     const indexRows = (data || []) as Array<{ id: string; page_number: number | null; raw_text: string | null; sheet_revision_id: string | null; logical_drawing_id: string | null; document_version_id: string | null }>;
     const sheetRevIds = Array.from(new Set(indexRows.map((r) => r.sheet_revision_id).filter(Boolean) as string[]));
     const logicalIds = Array.from(new Set(indexRows.map((r) => r.logical_drawing_id).filter(Boolean) as string[]));
@@ -95,12 +100,17 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
       }
     }
     setSheets(rows);
-    setLoading(false);
     // Persist auto-resolved px/ft so confirmation has a stable map even if
     // the estimator never touches a single row.
     const map: Record<string, Calibration> = {};
     for (const r of rows) if (r.calibration) map[r.id] = r.calibration;
     if (Object.keys(map).length > 0) state.setLocal({ calibration: map });
+    } catch (err: any) {
+      console.error("CalibrationStage load failed:", err);
+      toast.error(`Failed to load sheets — ${err?.message || "retry"}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -160,10 +170,21 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
   };
 
   const confirmAll = () => {
-    state.setLocal({ calibrationConfirmed: true, calibrationPrimary: "structural" });
-    state.refresh();
-    // Auto-advance to Stage 04 (Takeoff) on confirmation.
-    goToStage?.("takeoff");
+    if (confirming) return;
+    setConfirming(true);
+    try {
+      state.setLocal({ calibrationConfirmed: true, calibrationPrimary: "structural" });
+      state.refresh();
+      // Paint the disabled/spinner state before unmount.
+      requestAnimationFrame(() => {
+        goToStage?.("takeoff");
+        setConfirming(false);
+      });
+    } catch (err: any) {
+      console.error("CalibrationStage confirm failed:", err);
+      toast.error(`Could not confirm — ${err?.message || "retry"}`);
+      setConfirming(false);
+    }
   };
   const reset = () => {
     state.setLocal({ calibrationConfirmed: false });
@@ -180,10 +201,16 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
         subtitle="Structural sheets drive takeoff. Architectural sheets are reference only — Structural always wins on conflicting dimensions."
         right={
           <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={load}><RefreshCcw className="w-3.5 h-3.5 mr-1.5" /> Re-detect</Button>
+            <Button size="sm" variant="outline" onClick={load} disabled={loading}>
+              {loading ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <RefreshCcw className="w-3.5 h-3.5 mr-1.5" />}
+              {loading ? "Loading…" : "Re-detect"}
+            </Button>
             {confirmed
               ? <Button size="sm" variant="outline" onClick={reset}>Re-open</Button>
-              : <Button size="sm" disabled={!allConfirmable} onClick={confirmAll}><CheckCircle2 className="w-3.5 h-3.5 mr-1.5" /> Confirm calibration</Button>}
+              : <Button size="sm" disabled={!allConfirmable || loading || confirming} onClick={confirmAll}>
+                  {confirming ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />}
+                  {confirming ? "Confirming…" : "Confirm calibration"}
+                </Button>}
           </div>
         }
       />
@@ -198,7 +225,10 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
 
       <div className="flex-1 overflow-auto p-4">
         {loading ? (
-          <EmptyState title="Loading sheets…" />
+          <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground">
+            <Loader2 className="w-6 h-6 animate-spin" />
+            <div className="text-[12px]">Loading sheets…</div>
+          </div>
         ) : sheets.length === 0 ? (
           <EmptyState title="No indexed sheets yet" hint="Upload and parse drawings in Stage 01 first." />
         ) : (
