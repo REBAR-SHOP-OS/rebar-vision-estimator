@@ -219,6 +219,53 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   const [bestGuessRunning, setBestGuessRunning] = useState(false);
   const [reindexRunning, setReindexRunning] = useState(false);
   const [allSegments, setAllSegments] = useState<{ id: string; name: string }[]>([]);
+  const [wastePct, setWastePct] = useState<5 | 7 | 10>(7);
+
+  // Load + persist global waste factor from user's standards_profile.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("standards_profiles")
+        .select("id, waste_factors, is_default")
+        .eq("user_id", user.id)
+        .order("is_default", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled) return;
+      const wf = (data?.waste_factors as any) || {};
+      const g = Number(wf.global);
+      if (g === 0.05) setWastePct(5);
+      else if (g === 0.10) setWastePct(10);
+      else setWastePct(7);
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+  const updateWastePct = async (pct: 5 | 7 | 10) => {
+    setWastePct(pct);
+    if (!user) return;
+    const value = pct / 100;
+    const { data: existing } = await supabase
+      .from("standards_profiles")
+      .select("id, waste_factors")
+      .eq("user_id", user.id)
+      .order("is_default", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const nextWf = { ...(existing?.waste_factors as any || {}), global: value };
+    if (existing?.id) {
+      await supabase.from("standards_profiles").update({ waste_factors: nextWf }).eq("id", existing.id);
+    } else {
+      await supabase.from("standards_profiles").insert({
+        user_id: user.id,
+        name: "Default",
+        is_default: true,
+        waste_factors: { small: 1.03, large: 1.05, stirrup: 1.08, global: value },
+      } as any);
+    }
+    toast.success(`Waste factor set to ${pct}% (re-run takeoff to apply)`);
+  };
 
   const handleReindex = async () => {
     setReindexRunning(true);
