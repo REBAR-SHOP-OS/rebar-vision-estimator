@@ -22,16 +22,30 @@ const REBAR_DIA_MM: Record<string, number> = {
   "10M": 11.3, "15M": 16.0, "20M": 19.5, "25M": 25.2, "30M": 29.9, "35M": 35.7,
   "#3": 9.5,  "#4": 12.7,  "#5": 15.9,  "#6": 19.1,  "#7": 22.2,  "#8": 25.4,
 };
-const REBAR_MASS_KG_PER_M: Record<string, number> = {
+const REBAR_MASS_KG_PER_M: Record<string, number> = Object.freeze({
   "10M": 0.785, "15M": 1.570, "20M": 2.355, "25M": 3.925, "30M": 5.495, "35M": 7.850,
   "45M": 11.775, "55M": 19.625,
   "#3": 0.561, "#4": 0.994, "#5": 1.552, "#6": 2.235, "#7": 3.042, "#8": 3.973,
   "#9": 5.060, "#10": 6.404, "#11": 7.907, "#14": 11.384, "#18": 20.238,
-};
-const WWM_MASS_KG_PER_M2: Record<string, number> = {
+}) as Record<string, number>;
+const WWM_MASS_KG_PER_M2: Record<string, number> = Object.freeze({
   "6X6-W1.4/W1.4": 0.93, "6X6-W2.1/W2.1": 1.37, "6X6-W2.9/W2.9": 1.90,
   "6X6-W4.0/W4.0": 2.63, "4X4-W2.1/W2.1": 2.05, "4X4-W4.0/W4.0": 3.94,
-};
+}) as Record<string, number>;
+
+// 6-Phase Rebar Takeoff methodology (mirror of Agent Brain system rules R0-R8).
+// Injected verbatim into the AI prompt so every line item is tagged with `phase`
+// and `rule_cited`. The UI checklist in TakeoffStage reads these fields.
+const PHASE_RULES = `6-PHASE REBAR TAKEOFF (mandatory order, tag every row with "phase" 1..6 and "rule_cited" R0..R8):
+R0  Always execute Phase 1 -> 6 in order. Never skip Phase 1.
+R1  Phase 1 SPECS: extract bar grade (default 400 MPa CSA), lap table, hook table, coating from spec sheet (S-0.x, S-5.x, S-6.x). Cite the sheet. Missing -> UNVERIFIED_ASSUMPTION.
+R2  Epoxy coated bars: lap x 1.5. Apply only when "epoxy" is explicit in spec notes.
+R3  Phase 2 FOUNDATION (continuous wall footings): total length = perimeter (from grids) + sum laps; multiply by bar count from schedule (e.g. WF-1 = 4 x 20M).
+R4  Phase 2 FOUNDATION (pad footings): bars per side = floor((L - 2*cover)/spacing) + 1; per pad = bars E.W. x 2 directions; multiply by mark count.
+R5  Phase 3 VERTICALS (piers/columns): verticals from schedule x (height + lap + hook). Ties: floor(height/spacing) + 1; tie length = perimeter - 2*cover + hook.
+R6  Phase 4 FLATWORK (mesh/WWF): weight = mass(kg/m2) x area(m2). Add 10-15% lap waste. NEVER multiply by linear m. Slab thickenings: +3 x 15M continuous per partition run.
+R7  Phase 5 HIDDEN: scan typical-detail sheets (S6.x) for corner bars, opening trim (2 x 20M T&B), dowels, step bars. Each match is a Phase 5 row.
+R8  Phase 6 CONVERT: weight = total_length(m) x kg/m. LOCKED kg/m: 10M=0.785, 15M=1.570, 20M=2.355, 25M=3.925, 30M=5.495, 35M=7.850. NEVER re-derive.`;
 const sizeKey = (s: string) => {
   const k = String(s || "").toUpperCase().trim();
   const m = k.match(/^(10M|15M|20M|25M|30M|35M|45M|55M|#1[0148]|#[3-9])/);
@@ -1420,6 +1434,8 @@ serve(async (req) => {
     );
 
     const systemPrompt = `You are a rebar EXTRACTION assistant. You DO NOT compute geometry. A deterministic resolver downstream will calculate qty, length and weight. Your job is to faithfully extract rebar callouts from the drawing text and CITE THE MANUAL for any assumption.
+${PHASE_RULES}
+- Every emitted object MUST include "phase" (integer 1..6) and "rule_cited" (one of "R0".."R8") indicating which phase produced the row.
 Rules:
 - Return ONLY a JSON array of objects, no markdown, no explanation.
 - Each object: { "description": string, "bar_size": string, "quantity_count": number, "total_length": number, "total_weight": number, "confidence": number, "item_type": "rebar" | "wwm", "source_sheet": string | null, "source_excerpt": string | null, "authority_section": string | null, "authority_page": number | null, "authority_quote": string | null }

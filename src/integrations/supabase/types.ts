@@ -21,9 +21,10 @@ export type Database = {
           file_name: string | null
           file_path: string | null
           id: string
+          is_system: boolean
           title: string | null
           type: string
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           content?: string | null
@@ -31,9 +32,10 @@ export type Database = {
           file_name?: string | null
           file_path?: string | null
           id?: string
+          is_system?: boolean
           title?: string | null
           type?: string
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           content?: string | null
@@ -41,9 +43,10 @@ export type Database = {
           file_name?: string | null
           file_path?: string | null
           id?: string
+          is_system?: boolean
           title?: string | null
           type?: string
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: []
       }
