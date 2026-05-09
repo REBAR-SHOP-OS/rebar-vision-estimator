@@ -194,3 +194,41 @@ export function realFeetFromPixels(
   if (!calibration.pixelsPerFoot || calibration.pixelsPerFoot <= 0) return 0;
   return pixelLength / calibration.pixelsPerFoot;
 }
+
+/** Sheet discipline classification. Drives "Structural wins" gating. */
+export type Discipline = "Structural" | "Architectural" | "Other";
+
+export interface DisciplinedSheet {
+  id: string;
+  discipline: Discipline;
+  sheetNumber?: string | null;
+  pageNumber?: number | null;
+}
+
+/**
+ * "Structural wins" resolver: returns the calibration that should drive
+ * real-world quantities for a given sheet. Structural sheets use their own
+ * calibration; Architectural / Other sheets fall back to the nearest
+ * Structural sheet (matching sheet-number prefix when possible, otherwise the
+ * first available Structural calibration in the project).
+ */
+export function getAuthoritativeCalibration(
+  sheetId: string,
+  sheets: DisciplinedSheet[],
+  calibrations: Record<string, Calibration>,
+): { calibration: Calibration | null; sourceSheetId: string | null } {
+  const target = sheets.find((s) => s.id === sheetId);
+  if (!target) return { calibration: null, sourceSheetId: null };
+  if (target.discipline === "Structural") {
+    const c = calibrations[sheetId] || null;
+    return { calibration: c, sourceSheetId: c ? sheetId : null };
+  }
+  const structurals = sheets.filter((s) => s.discipline === "Structural" && calibrations[s.id]?.pixelsPerFoot);
+  if (structurals.length === 0) return { calibration: null, sourceSheetId: null };
+  const prefix = (target.sheetNumber || "").replace(/\d+/g, "").slice(0, 3).toUpperCase();
+  const prefixMatch = prefix
+    ? structurals.find((s) => (s.sheetNumber || "").toUpperCase().startsWith(prefix))
+    : null;
+  const pick = prefixMatch || structurals[0];
+  return { calibration: calibrations[pick.id], sourceSheetId: pick.id };
+}
