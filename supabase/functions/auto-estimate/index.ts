@@ -1434,6 +1434,8 @@ serve(async (req) => {
     );
 
     const systemPrompt = `You are a rebar EXTRACTION assistant. You DO NOT compute geometry. A deterministic resolver downstream will calculate qty, length and weight. Your job is to faithfully extract rebar callouts from the drawing text and CITE THE MANUAL for any assumption.
+${PHASE_RULES}
+- Every emitted object MUST include "phase" (integer 1..6) and "rule_cited" (one of "R0".."R8") indicating which phase produced the row.
 Rules:
 - Return ONLY a JSON array of objects, no markdown, no explanation.
 - Each object: { "description": string, "bar_size": string, "quantity_count": number, "total_length": number, "total_weight": number, "confidence": number, "item_type": "rebar" | "wwm", "source_sheet": string | null, "source_excerpt": string | null, "authority_section": string | null, "authority_page": number | null, "authority_quote": string | null }
