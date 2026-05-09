@@ -780,6 +780,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                 />
               </div>
             )}
+            </div>
 
             {renderStatus === "ready" && previewUrl && imgSize && pageBox && (
               <>
