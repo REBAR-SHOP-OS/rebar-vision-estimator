@@ -44,16 +44,17 @@ export default function WorkflowShell({ projectId, project }: Props) {
   const displayProjectName = project.project_name || project.canonicalProject?.projectName || project.name || "Untitled Project";
   const displayCustomerName = project.customer_name || project.canonicalProject?.customerName || project.client_name;
 
+  const calibrationConfirmed = !!state.local.calibrationConfirmed;
   const status = useMemo(() => ({
     files: state.fileCount > 0 ? "complete" : "pending",
     scope: state.scopeAccepted > 0 ? "complete" : state.fileCount > 0 ? "active" : "locked",
-    calibration: state.scopeAccepted > 0 ? "active" : "locked",
-    takeoff: state.takeoffRows > 0 ? "complete" : state.scopeAccepted > 0 ? "active" : "locked",
-    qa: state.takeoffRows > 0 ? (state.qaCriticalOpen > 0 ? "blocked" : "active") : "locked",
+    calibration: calibrationConfirmed ? "complete" : state.scopeAccepted > 0 ? "active" : "locked",
+    takeoff: !calibrationConfirmed ? "locked" : state.takeoffRows > 0 ? "complete" : "active",
+    qa: !calibrationConfirmed ? "locked" : state.takeoffRows > 0 ? (state.qaCriticalOpen > 0 ? "blocked" : "active") : "locked",
     assistant: state.takeoffRows > 0 || state.fileCount > 0 ? "active" : "locked",
-    confirm: state.estimatorConfirmed ? "complete" : (state.qaCriticalOpen === 0 && state.takeoffRows > 0) ? "active" : "locked",
-    outputs: state.estimatorConfirmed ? "active" : "locked",
-  }) as Record<StageKey, "complete" | "active" | "locked" | "blocked" | "pending">, [state]);
+    confirm: !calibrationConfirmed ? "locked" : state.estimatorConfirmed ? "complete" : (state.qaCriticalOpen === 0 && state.takeoffRows > 0) ? "active" : "locked",
+    outputs: !calibrationConfirmed ? "locked" : state.estimatorConfirmed ? "active" : "locked",
+  }) as Record<StageKey, "complete" | "active" | "locked" | "blocked" | "pending">, [state, calibrationConfirmed]);
 
   const StageBody = () => {
     const props = { projectId, state, goToStage: (stage: StageKey) => setActive(stage) };

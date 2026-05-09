@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { StageHeader, EmptyState, type StageProps } from "./_shared";
+import { StageHeader, EmptyState, CalibrationGate, type StageProps } from "./_shared";
 import { CheckCircle2, RotateCcw, Send, Pencil, Save, X, ChevronDown, ChevronRight } from "lucide-react";
 import PdfRenderer from "@/components/chat/PdfRenderer";
 import {
@@ -179,6 +179,10 @@ export default function ConfirmStage({ projectId, state, goToStage }: StageProps
       approved: items.filter((i) => i.decision === "approved").length,
     }));
   })();
+
+  if (!state.local.calibrationConfirmed) {
+    return <CalibrationGate state={state} goToStage={goToStage} stageLabel="Confirmation" />;
+  }
 
   return (
     <div className="grid grid-cols-12 h-full">

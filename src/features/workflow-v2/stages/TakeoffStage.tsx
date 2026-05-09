@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { StageHeader, Pill, EmptyState, type StageProps } from "./_shared";
+import { StageHeader, Pill, EmptyState, CalibrationGate, type StageProps } from "./_shared";
 import { Sparkles, FileText, CheckCircle2, Loader2, Wand2, Pencil, Save, X, ChevronDown, ChevronRight } from "lucide-react";
 import PdfRenderer from "@/components/chat/PdfRenderer";
 import { loadWorkflowTakeoffRows, type WorkflowTakeoffRow } from "../takeoff-data";
@@ -540,6 +540,10 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   const previewName = previewFile?.file_name || "";
   const isImg = /\.(png|jpe?g|webp|gif|svg)$/i.test(previewName);
   const isPdf = /\.pdf$/i.test(previewName);
+
+  if (!state.local.calibrationConfirmed) {
+    return <CalibrationGate state={state} goToStage={goToStage} stageLabel="Takeoff" />;
+  }
 
   return (
     <div className="grid h-full" style={{ gridTemplateColumns: "240px 1fr 380px" }}>

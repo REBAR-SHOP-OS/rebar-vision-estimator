@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { StageHeader, Pill, EmptyState, GateBanner, type StageProps } from "./_shared";
+import { StageHeader, Pill, EmptyState, GateBanner, CalibrationGate, type StageProps } from "./_shared";
 import {
   ArrowLeft, ArrowRight, Wand2, Filter, Layers, Columns2, GitCompare,
   ZoomIn, ZoomOut, Maximize2, Eye, Edit3, AlertTriangle, RefreshCw, Hand,
@@ -596,6 +596,10 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     { k: "evidence", label: "Evidence" },
     { k: "action", label: "Action" },
   ];
+
+  if (!state.local.calibrationConfirmed) {
+    return <CalibrationGate state={state} goToStage={goToStage} stageLabel="QA Gate" />;
+  }
 
   return (
     <div className="h-full bg-background text-foreground">
