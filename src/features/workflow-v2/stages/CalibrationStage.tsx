@@ -222,6 +222,20 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
         subtitle="Structural sheets drive takeoff. Architectural sheets are reference only — Structural always wins on conflicting dimensions."
         right={
           <div className="flex items-center gap-2">
+            {hiddenCount > 0 && !showAll && (
+              <span className="text-[11px] text-muted-foreground font-mono tabular-nums">
+                {sheets.length} relevant · {hiddenCount} hidden
+              </span>
+            )}
+            <label className="flex items-center gap-1 text-[11px] text-muted-foreground cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={showAll}
+                onChange={(e) => { setShowAll(e.target.checked); state.setLocal({ calibrationShowAll: e.target.checked }); }}
+                className="h-3 w-3"
+              />
+              Show all sheets
+            </label>
             <Button size="sm" variant="outline" onClick={load} disabled={loading}>
               {loading ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <RefreshCcw className="w-3.5 h-3.5 mr-1.5" />}
               {loading ? "Loading…" : "Re-detect"}
