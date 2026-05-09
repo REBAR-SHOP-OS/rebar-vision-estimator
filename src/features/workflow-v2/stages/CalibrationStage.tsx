@@ -96,6 +96,11 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
     }
     setSheets(rows);
     setLoading(false);
+    // Persist auto-resolved px/ft so confirmation has a stable map even if
+    // the estimator never touches a single row.
+    const map: Record<string, Calibration> = {};
+    for (const r of rows) if (r.calibration) map[r.id] = r.calibration;
+    if (Object.keys(map).length > 0) state.setLocal({ calibration: map });
   };
 
   useEffect(() => {
