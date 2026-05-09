@@ -50,23 +50,6 @@
     --chat-user: 220 10% 97%;
     --chat-assistant: 0 0% 100%;
     --chat-input: 220 10% 98%;
-
-    /* Industrial Precision palette (scoped — only used by .industrial-theme tree) */
-    --industrial-surface: 16 100% 98%;
-    --industrial-surface-low: 22 100% 96%;
-    --industrial-surface-high: 16 80% 92%;
-    --industrial-surface-highest: 16 55% 90%;
-    --industrial-on-surface: 16 35% 12%;
-    --industrial-on-variant: 17 25% 29%;
-    --industrial-outline: 17 18% 48%;
-    --industrial-outline-variant: 17 50% 80%;
-    --industrial-primary: 20 100% 32%;
-    --industrial-primary-container: 22 100% 40%;
-    --industrial-on-primary: 0 0% 100%;
-    --industrial-secondary: 217 33% 41%;
-    --industrial-tertiary: 211 100% 35%;
-    --industrial-error: 0 75% 42%;
-    --industrial-error-container: 6 100% 92%;
   }
 
   .dark {

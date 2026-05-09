@@ -58,16 +58,16 @@ export default function AppSidebar({ activeProjectId, activeProjectName }: AppSi
   const projectBase = activeProjectId ? `/app/project/${activeProjectId}` : null;
 
   return (
-    <Sidebar collapsible="icon" className="border-r border-white/10">
-      <SidebarContent className="bg-[#141c20] text-slate-100">
+    <Sidebar collapsible="icon" className="border-r border-sidebar-border">
+      <SidebarContent className="bg-sidebar text-sidebar-foreground">
         <div className="flex items-center gap-3 px-3 pb-3 pt-4">
-          <img src={logoBg} alt="Logo" className="h-9 w-9 rounded-xl border border-white/10 object-cover" />
+          <img src={logoBg} alt="Logo" className="h-9 w-9 rounded-xl border border-sidebar-border object-cover" />
           {!collapsed && (
             <div className="min-w-0">
-              <div className="truncate font-['Bahnschrift','Segoe_UI',sans-serif] text-base font-bold tracking-tight text-white">
+              <div className="truncate font-['Bahnschrift','Segoe_UI',sans-serif] text-base font-bold tracking-tight text-sidebar-foreground">
                 RebarForge Pro
               </div>
-              <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+              <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/60">
                 Estimator OS
               </div>
             </div>
@@ -75,13 +75,13 @@ export default function AppSidebar({ activeProjectId, activeProjectName }: AppSi
         </div>
 
         <SidebarGroup className="px-2">
-          <SidebarGroupLabel className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Workspace</SidebarGroupLabel>
+          <SidebarGroupLabel className="text-[10px] uppercase tracking-[0.16em] text-sidebar-foreground/60">Workspace</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {mainNav.map((item) => (
                 <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild className="rounded-xl text-slate-200 hover:bg-white/8 hover:text-white data-[active=true]:bg-teal-500/15 data-[active=true]:text-white">
-                    <NavLink to={item.url} end={item.end} className="hover:bg-transparent" activeClassName="bg-teal-500/15 text-white font-medium">
+                  <SidebarMenuButton asChild className="rounded-xl text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-primary">
+                    <NavLink to={item.url} end={item.end} className="hover:bg-transparent" activeClassName="bg-sidebar-accent text-sidebar-primary font-medium">
                       <item.icon className="mr-2 h-4 w-4" />
                       {!collapsed && <span>{item.title}</span>}
                     </NavLink>
@@ -94,15 +94,15 @@ export default function AppSidebar({ activeProjectId, activeProjectName }: AppSi
 
         {projectBase && (
           <SidebarGroup className="px-2">
-            <SidebarGroupLabel className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+            <SidebarGroupLabel className="text-[10px] uppercase tracking-[0.16em] text-sidebar-foreground/60">
               {collapsed ? "Proj" : activeProjectName || "Project"}
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {projectNav.map((item) => (
                   <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild className="rounded-xl text-slate-200 hover:bg-white/8 hover:text-white data-[active=true]:bg-teal-500/15 data-[active=true]:text-white">
-                      <NavLink to={`${projectBase}${item.suffix}`} end={item.end} className="hover:bg-transparent" activeClassName="bg-teal-500/15 text-white font-medium">
+                    <SidebarMenuButton asChild className="rounded-xl text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-primary">
+                      <NavLink to={`${projectBase}${item.suffix}`} end={item.end} className="hover:bg-transparent" activeClassName="bg-sidebar-accent text-sidebar-primary font-medium">
                         <item.icon className="mr-2 h-4 w-4" />
                         {!collapsed && <span>{item.title}</span>}
                       </NavLink>
@@ -115,11 +115,11 @@ export default function AppSidebar({ activeProjectId, activeProjectName }: AppSi
         )}
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-white/10 bg-[#141c20] p-2 space-y-1">
+      <SidebarFooter className="border-t border-sidebar-border bg-sidebar p-2 space-y-1">
         <BrainKnowledgeDialog />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="w-full justify-start gap-2 rounded-xl text-xs text-slate-300 hover:bg-white/8 hover:text-white">
+            <Button variant="ghost" size="sm" className="w-full justify-start gap-2 rounded-xl text-xs text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
               <Globe className="h-4 w-4" />
               {!collapsed && currentLanguageInfo.nativeName}
             </Button>
@@ -133,11 +133,11 @@ export default function AppSidebar({ activeProjectId, activeProjectName }: AppSi
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="ghost" size="sm" onClick={toggleTheme} className="w-full justify-start gap-2 rounded-xl text-xs text-slate-300 hover:bg-white/8 hover:text-white">
+        <Button variant="ghost" size="sm" onClick={toggleTheme} className="w-full justify-start gap-2 rounded-xl text-xs text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           {!collapsed && (theme === "dark" ? "Light Mode" : "Dark Mode")}
         </Button>
-        <Button variant="ghost" size="sm" onClick={signOut} className="w-full justify-start gap-2 rounded-xl text-xs text-slate-300 hover:bg-white/8 hover:text-rose-300">
+        <Button variant="ghost" size="sm" onClick={signOut} className="w-full justify-start gap-2 rounded-xl text-xs text-sidebar-foreground hover:bg-sidebar-accent hover:text-destructive">
           <LogOut className="h-4 w-4" />
           {!collapsed && "Sign Out"}
         </Button>

@@ -94,30 +94,30 @@ export default function RebarForgeDashboard({
   });
 
   return (
-    <div className="industrial-theme min-h-0 flex-1 overflow-y-auto bg-industrial-surface text-industrial-on-surface font-['Inter',system-ui,sans-serif]">
+    <div className="min-h-0 flex-1 overflow-y-auto bg-card text-foreground">
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 p-6">
         {/* Top bar with quick actions */}
-        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-industrial-outline-variant pb-4">
+        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
           <div className="flex items-center gap-3">
-            <h1 className="font-hanken text-[28px] font-bold leading-none text-industrial-primary">SteelEstimator AI</h1>
-            <span className="font-mono-jet text-[10px] font-semibold uppercase tracking-[0.18em] text-industrial-on-variant">
+            <h1 className="font-hanken text-[28px] font-bold leading-none text-primary">SteelEstimator AI</h1>
+            <span className="font-mono-jet text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
               v2 · Industrial
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative w-[280px] max-w-full">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-industrial-on-variant" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 onClick={onShowSearch}
                 readOnly
                 placeholder="Search projects or blueprints..."
-                className="w-full cursor-pointer rounded border border-industrial-outline-variant bg-industrial-surface-low py-1.5 pl-9 pr-3 text-sm text-industrial-on-surface placeholder:text-industrial-on-variant focus:outline-none focus:ring-1 focus:ring-industrial-primary"
+                className="w-full cursor-pointer rounded border border-border bg-muted py-1.5 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>
             <Button
               onClick={onNewEstimation}
               disabled={creatingProject}
-              className="h-9 rounded bg-industrial-primary px-4 font-bold text-industrial-on-primary hover:bg-industrial-primary-container disabled:opacity-60"
+              className="h-9 rounded bg-primary px-4 font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
             >
               {creatingProject ? <Activity className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
               Quick Upload
@@ -131,20 +131,20 @@ export default function RebarForgeDashboard({
             label="Active Projects"
             value={String(activeProjects)}
             note={`${intakeReady} intake ready`}
-            icon={<FolderKanban className="h-5 w-5 text-industrial-primary" />}
+            icon={<FolderKanban className="h-5 w-5 text-primary" />}
           />
           <MetricCard
             label="Review Queue"
             value={String(reviewCount)}
             note="Low-confidence sheets & deltas"
-            icon={<AlertTriangle className="h-5 w-5 text-industrial-primary" />}
+            icon={<AlertTriangle className="h-5 w-5 text-primary" />}
           />
           <MetricCard
             label="Intake Health"
             value={`${healthScore}`}
             unit="%"
             note="Coverage of ready-to-work projects"
-            icon={<ShieldCheck className="h-5 w-5 text-industrial-primary" />}
+            icon={<ShieldCheck className="h-5 w-5 text-primary" />}
             progress={healthScore}
           />
         </section>
@@ -153,10 +153,10 @@ export default function RebarForgeDashboard({
         <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <div className="flex flex-col gap-4 lg:col-span-2">
             <div className="flex items-center justify-between">
-              <h3 className="font-hanken text-2xl font-bold text-industrial-on-surface">Recent Projects</h3>
+              <h3 className="font-hanken text-2xl font-bold text-foreground">Recent Projects</h3>
               <button
                 onClick={onShowSearch}
-                className="flex items-center gap-1 text-sm font-bold text-industrial-primary hover:underline"
+                className="flex items-center gap-1 text-sm font-bold text-primary hover:underline"
               >
                 View All <ChevronRight className="h-4 w-4" />
               </button>
@@ -174,32 +174,32 @@ export default function RebarForgeDashboard({
 
           <section className="flex flex-col gap-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-hanken text-2xl font-bold text-industrial-on-surface">Active Logs</h3>
+              <h3 className="font-hanken text-2xl font-bold text-foreground">Active Logs</h3>
               {reviewCount > 0 && (
-                <span className="rounded bg-industrial-error-container px-2 py-0.5 text-[10px] font-bold uppercase text-industrial-error">
+                <span className="rounded bg-destructive/10 px-2 py-0.5 text-[10px] font-bold uppercase text-destructive">
                   {reviewCount} require review
                 </span>
               )}
             </div>
-            <div className="flex h-full flex-col overflow-hidden border border-industrial-outline-variant bg-industrial-surface">
+            <div className="flex h-full flex-col overflow-hidden border border-border bg-card">
               <table className="w-full border-collapse text-left">
-                <thead className="border-b border-industrial-outline-variant bg-industrial-surface-low">
+                <thead className="border-b border-border bg-muted">
                   <tr>
-                    <th className="p-3 font-mono-jet text-[12px] font-medium uppercase tracking-wide text-industrial-on-variant">
+                    <th className="p-3 font-mono-jet text-[12px] font-medium uppercase tracking-wide text-muted-foreground">
                       Project
                     </th>
-                    <th className="p-3 font-mono-jet text-[12px] font-medium uppercase tracking-wide text-industrial-on-variant">
+                    <th className="p-3 font-mono-jet text-[12px] font-medium uppercase tracking-wide text-muted-foreground">
                       State
                     </th>
-                    <th className="p-3 text-center font-mono-jet text-[12px] font-medium uppercase tracking-wide text-industrial-on-variant">
+                    <th className="p-3 text-center font-mono-jet text-[12px] font-medium uppercase tracking-wide text-muted-foreground">
                       Status
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-industrial-outline-variant">
+                <tbody className="divide-y divide-border">
                   {logRows.length === 0 ? (
                     <tr>
-                      <td colSpan={3} className="p-6 text-center text-sm text-industrial-on-variant">
+                      <td colSpan={3} className="p-6 text-center text-sm text-muted-foreground">
                         No active logs yet.
                       </td>
                     </tr>
@@ -208,12 +208,12 @@ export default function RebarForgeDashboard({
                       <tr
                         key={row.id}
                         onClick={() => onSelectProject(row.id)}
-                        className="cursor-pointer transition-colors hover:bg-industrial-surface-low"
+                        className="cursor-pointer transition-colors hover:bg-muted"
                       >
                         <td className="p-3">
                           <div className="flex flex-col">
-                            <span className="font-bold text-industrial-on-surface">{row.name}</span>
-                            <span className="text-[11px] uppercase text-industrial-on-variant">{row.sub}</span>
+                            <span className="font-bold text-foreground">{row.name}</span>
+                            <span className="text-[11px] uppercase text-muted-foreground">{row.sub}</span>
                           </div>
                         </td>
                         <td className="p-3 text-right font-mono-jet text-sm">{row.label}</td>
@@ -227,10 +227,10 @@ export default function RebarForgeDashboard({
                   )}
                 </tbody>
               </table>
-              <div className="mt-auto flex justify-center border-t border-industrial-outline-variant bg-industrial-surface-low p-3">
+              <div className="mt-auto flex justify-center border-t border-border bg-muted p-3">
                 <button
                   onClick={onShowHealth}
-                  className="font-mono-jet text-[12px] font-medium text-industrial-primary hover:underline"
+                  className="font-mono-jet text-[12px] font-medium text-primary hover:underline"
                 >
                   Open Project Health Board
                 </button>
@@ -242,47 +242,47 @@ export default function RebarForgeDashboard({
         {/* Bento bottom row */}
         <section className="grid grid-cols-1 gap-6 md:grid-cols-4">
           <div
-            className="relative overflow-hidden border border-industrial-outline-variant bg-white p-6 md:col-span-3"
+            className="relative overflow-hidden border border-border bg-white p-6 md:col-span-3"
             style={{
               backgroundImage:
-                "linear-gradient(to right, hsl(var(--industrial-outline-variant)) 1px, transparent 1px), linear-gradient(to bottom, hsl(var(--industrial-outline-variant)) 1px, transparent 1px)",
+                "linear-gradient(to right, hsl(var(--border)) 1px, transparent 1px), linear-gradient(to bottom, hsl(var(--border)) 1px, transparent 1px)",
               backgroundSize: "24px 24px",
             }}
           >
             <div className="relative z-10 flex h-full flex-col justify-between gap-6 md:flex-row md:items-end">
               <div className="max-w-md">
-                <div className="mb-2 inline-flex items-center gap-2 rounded border border-industrial-outline-variant bg-industrial-surface-low px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-industrial-on-variant">
-                  <Sparkles className="h-3 w-3 text-industrial-primary" />
+                <div className="mb-2 inline-flex items-center gap-2 rounded border border-border bg-muted px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  <Sparkles className="h-3 w-3 text-primary" />
                   Calibration-aware
                 </div>
-                <h3 className="font-hanken text-2xl font-semibold text-industrial-on-surface">
+                <h3 className="font-hanken text-2xl font-semibold text-foreground">
                   Automated Blueprint Intelligence
                 </h3>
-                <p className="mt-2 text-base leading-6 text-industrial-on-variant">
+                <p className="mt-2 text-base leading-6 text-muted-foreground">
                   Upload any CAD or PDF set. The pipeline detects sheet scale before quantities, so every segment is tied to a
                   real-world measurement instead of a pixel guess.
                 </p>
               </div>
               <Button
                 onClick={onNewEstimation}
-                className="rounded bg-industrial-on-surface px-8 py-3 font-mono-jet text-[12px] font-black uppercase tracking-widest text-industrial-surface hover:bg-industrial-primary"
+                className="rounded bg-foreground px-8 py-3 font-mono-jet text-[12px] font-black uppercase tracking-widest text-background hover:bg-primary"
               >
                 Launch Blueprint Intake
               </Button>
             </div>
           </div>
 
-          <div className="flex flex-col justify-between border border-industrial-outline bg-industrial-primary p-6 text-industrial-on-primary">
+          <div className="flex flex-col justify-between border border-border bg-primary p-6 text-primary-foreground">
             <Download className="h-10 w-10 opacity-30" />
             <div>
               <h4 className="mb-2 font-hanken text-xl leading-tight">Outcomes & Exports</h4>
-              <p className="mb-4 text-sm text-industrial-on-primary/80">
+              <p className="mb-4 text-sm text-primary-foreground/80">
                 Capture wins, losses, and shipped quantities. Export approved estimates straight to the supplier.
               </p>
               <Button
                 onClick={onShowOutcomes}
                 variant="ghost"
-                className="w-full rounded bg-industrial-surface py-2 font-bold text-industrial-primary hover:bg-industrial-surface-low"
+                className="w-full rounded bg-card py-2 font-bold text-primary hover:bg-muted"
               >
                 Capture Outcomes
               </Button>
@@ -303,7 +303,7 @@ export default function RebarForgeDashboard({
         onClick={onNewEstimation}
         disabled={creatingProject}
         aria-label="New estimate"
-        className="fixed bottom-8 right-8 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-industrial-primary text-industrial-on-primary shadow-lg transition-transform hover:scale-105 active:scale-95 disabled:opacity-60"
+        className="fixed bottom-8 right-8 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 active:scale-95 disabled:opacity-60"
       >
         <Plus className="h-7 w-7" />
       </button>
@@ -327,24 +327,24 @@ function MetricCard({
   progress?: number;
 }) {
   return (
-    <div className="flex flex-col justify-between border border-industrial-outline-variant bg-industrial-surface p-5">
+    <div className="flex flex-col justify-between border border-border bg-card p-5">
       <div className="flex items-start justify-between">
-        <span className="font-mono-jet text-[13px] font-medium uppercase tracking-wide text-industrial-on-variant">
+        <span className="font-mono-jet text-[13px] font-medium uppercase tracking-wide text-muted-foreground">
           {label}
         </span>
         {icon}
       </div>
       <div className="mt-4">
-        <span className="font-hanken text-[48px] font-bold leading-none tracking-tight text-industrial-on-surface">
+        <span className="font-hanken text-[48px] font-bold leading-none tracking-tight text-foreground">
           {value}
         </span>
         {unit && (
-          <span className="ml-1 font-mono-jet text-sm font-semibold uppercase text-industrial-on-variant">{unit}</span>
+          <span className="ml-1 font-mono-jet text-sm font-semibold uppercase text-muted-foreground">{unit}</span>
         )}
-        <div className="mt-2 text-sm font-bold text-industrial-tertiary">{note}</div>
+        <div className="mt-2 text-sm font-bold text-primary">{note}</div>
         {typeof progress === "number" && (
-          <div className="mt-3 h-1.5 w-full overflow-hidden bg-industrial-surface-highest">
-            <div className="h-full bg-industrial-primary" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
+          <div className="mt-3 h-1.5 w-full overflow-hidden bg-secondary">
+            <div className="h-full bg-primary" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
           </div>
         )}
       </div>
@@ -358,31 +358,31 @@ function ProjectCard({ project, onClick }: { project: DashboardProject; onClick:
     <button
       type="button"
       onClick={onClick}
-      className="group flex flex-col overflow-hidden border border-industrial-outline-variant bg-industrial-surface text-left transition-colors hover:border-industrial-primary"
+      className="group flex flex-col overflow-hidden border border-border bg-card text-left transition-colors hover:border-primary"
     >
-      <div className="relative aspect-video overflow-hidden bg-industrial-surface-high">
+      <div className="relative aspect-video overflow-hidden bg-secondary">
         <div
           className="absolute inset-0 opacity-50"
           style={{
             backgroundImage:
-              "linear-gradient(to right, hsl(var(--industrial-outline-variant)) 1px, transparent 1px), linear-gradient(to bottom, hsl(var(--industrial-outline-variant)) 1px, transparent 1px)",
+              "linear-gradient(to right, hsl(var(--border)) 1px, transparent 1px), linear-gradient(to bottom, hsl(var(--border)) 1px, transparent 1px)",
             backgroundSize: "16px 16px",
           }}
         />
         <div className="absolute right-2 top-2">
-          <span className="bg-industrial-on-surface px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-industrial-surface">
+          <span className="bg-foreground px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-background">
             {status.label}
           </span>
         </div>
       </div>
       <div className="flex flex-col gap-2 p-4">
         <div className="flex items-start justify-between gap-3">
-          <h4 className="font-hanken text-[18px] font-semibold text-industrial-on-surface">{project.name}</h4>
-          <span className="font-mono-jet text-sm font-semibold text-industrial-primary">
+          <h4 className="font-hanken text-[18px] font-semibold text-foreground">{project.name}</h4>
+          <span className="font-mono-jet text-sm font-semibold text-primary">
             {project.linkage_score || "L0"}
           </span>
         </div>
-        <p className="flex items-center gap-1 text-sm text-industrial-on-variant">
+        <p className="flex items-center gap-1 text-sm text-muted-foreground">
           <MapPin className="h-4 w-4" />
           {project.address || project.client_name || "Location pending"}
         </p>
@@ -397,7 +397,7 @@ function ProjectCard({ project, onClick }: { project: DashboardProject; onClick:
 
 function Tag({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded border border-industrial-outline-variant bg-industrial-surface-high px-2 py-0.5 text-[11px] font-medium text-industrial-on-variant">
+    <span className="rounded border border-border bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
       {children}
     </span>
   );
@@ -417,28 +417,28 @@ function ShortcutButton({
   return (
     <button
       onClick={onClick}
-      className="flex w-full items-center justify-between border border-industrial-outline-variant bg-industrial-surface px-4 py-4 text-left transition hover:border-industrial-primary"
+      className="flex w-full items-center justify-between border border-border bg-card px-4 py-4 text-left transition hover:border-primary"
     >
       <div>
-        <div className="text-sm font-semibold text-industrial-on-surface">{title}</div>
-        <div className="mt-1 text-sm text-industrial-on-variant">{desc}</div>
+        <div className="text-sm font-semibold text-foreground">{title}</div>
+        <div className="mt-1 text-sm text-muted-foreground">{desc}</div>
       </div>
-      <span className="text-industrial-on-variant">{icon}</span>
+      <span className="text-muted-foreground">{icon}</span>
     </button>
   );
 }
 
 function EmptyState({ onNewEstimation }: { onNewEstimation: () => void }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 border border-dashed border-industrial-outline-variant bg-industrial-surface p-10 text-center">
-      <ClipboardCheck className="h-8 w-8 text-industrial-on-variant" />
-      <h4 className="font-hanken text-xl font-semibold text-industrial-on-surface">No projects yet</h4>
-      <p className="max-w-sm text-sm text-industrial-on-variant">
+    <div className="flex flex-col items-center justify-center gap-3 border border-dashed border-border bg-card p-10 text-center">
+      <ClipboardCheck className="h-8 w-8 text-muted-foreground" />
+      <h4 className="font-hanken text-xl font-semibold text-foreground">No projects yet</h4>
+      <p className="max-w-sm text-sm text-muted-foreground">
         Upload a drawing set to start. Calibration runs first so quantities are tied to real-world measurements.
       </p>
       <Button
         onClick={onNewEstimation}
-        className="mt-2 rounded bg-industrial-primary text-industrial-on-primary hover:bg-industrial-primary-container"
+        className="mt-2 rounded bg-primary text-primary-foreground hover:bg-primary/90"
       >
         <Plus className="mr-2 h-4 w-4" />
         New estimate
