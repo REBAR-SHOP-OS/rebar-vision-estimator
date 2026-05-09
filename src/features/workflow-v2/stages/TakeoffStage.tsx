@@ -53,6 +53,74 @@ interface EditPatch {
   size?: string;
 }
 
+// 6-Phase Rebar Takeoff status chips (mirrors Agent Brain rules R0-R8).
+// Derived from existing row fields — no schema change.
+type PhaseState = "done" | "partial" | "todo";
+function derivePhaseStates(items: WorkflowTakeoffRow[], segName: string): PhaseState[] {
+  const seg = (segName || "").toLowerCase();
+  const isFooting = /footing|ftg|wf-|pad|grade beam|pile/i.test(seg);
+  const isPier = /pier|column|p-\d/i.test(seg);
+  const isFlat = /slab|sog|flat|mesh|wwm|wwf/i.test(seg);
+  if (items.length === 0) return ["todo","todo","todo","todo","todo","todo"];
+  const ready = (r: WorkflowTakeoffRow) => r.status !== "blocked" && r.geometry_status !== "unresolved";
+  const anyReady = items.some(ready);
+  const allReady = items.every(ready);
+  // P1 Specs: any row with non-empty size + non-empty source (cited)
+  const p1: PhaseState = items.some((r) => r.size && r.size !== "-" && r.source) ? "done" : "todo";
+  // P2 Foundation: footings have length>0
+  const p2: PhaseState = isFooting
+    ? (items.some((r) => r.length > 0) ? (allReady ? "done" : "partial") : "todo")
+    : "todo";
+  // P3 Verticals: pier-like with both vertical-size and tie-size present
+  const p3: PhaseState = isPier
+    ? (items.length >= 2 && anyReady ? "done" : items.length > 0 ? "partial" : "todo")
+    : "todo";
+  // P4 Flatwork: mesh row present
+  const p4: PhaseState = isFlat
+    ? (items.some((r) => /wwm|mesh|wwf/i.test(`${r.size} ${r.shape} ${r.source}`)) ? "done" : "partial")
+    : "todo";
+  // P5 Hidden: any row references a typical-detail or S6.x sheet
+  const p5: PhaseState = items.some((r) => /T\.?D\.?\s*\d+|S-?6/i.test(`${r.shape} ${r.source} ${r.missing_refs?.join(" ") || ""}`))
+    ? "done"
+    : "todo";
+  // P6 Convert: every ready row has weight>0
+  const p6: PhaseState = allReady && items.every((r) => r.weight > 0)
+    ? "done"
+    : items.some((r) => r.weight > 0) ? "partial" : "todo";
+  return [p1, p2, p3, p4, p5, p6];
+}
+const PHASE_LABELS = ["1 Specs","2 Foundation","3 Verticals","4 Flatwork","5 Hidden","6 Convert"];
+const PHASE_TOOLTIPS = [
+  "R1: bar grade, lap, hook, coating cited from spec sheet",
+  "R3/R4: continuous wall + pad footing geometry resolved",
+  "R5: pier verticals + ties from schedule",
+  "R6: mesh weight = mass × area (no linear m)",
+  "R7: corner bars, opening trim, dowels, step bars from typical details",
+  "R8: weight = length × locked kg/m (RSIC 2018)",
+];
+function PhaseChips({ items, segName }: { items: WorkflowTakeoffRow[]; segName: string }) {
+  const states = derivePhaseStates(items, segName);
+  return (
+    <div className="flex flex-wrap gap-1 px-3 py-1.5 bg-muted/10 border-t border-border/40">
+      {PHASE_LABELS.map((lbl, i) => {
+        const s = states[i];
+        const cls = s === "done"
+          ? "border-emerald-500/50 text-emerald-500 bg-emerald-500/5"
+          : s === "partial"
+          ? "border-amber-500/50 text-amber-500 bg-amber-500/5"
+          : "border-muted-foreground/30 text-muted-foreground/70";
+        const glyph = s === "done" ? "✓" : s === "partial" ? "⏳" : "—";
+        return (
+          <span key={lbl} title={PHASE_TOOLTIPS[i]}
+            className={`inline-flex items-center gap-1 px-1.5 py-0.5 border text-[9px] font-mono uppercase tracking-wider ${cls}`}>
+            {glyph} {lbl}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 interface TakeoffFoundDisplay {
   qty: string;
   length: string;
