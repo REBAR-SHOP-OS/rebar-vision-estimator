@@ -1,7 +1,10 @@
 import OutputsTab from "@/components/workspace/OutputsTab";
-import { GateBanner, type StageProps } from "./_shared";
+import { GateBanner, CalibrationGate, type StageProps } from "./_shared";
 
-export default function OutputsStage({ projectId, state }: StageProps) {
+export default function OutputsStage({ projectId, state, goToStage }: StageProps) {
+  if (!state.local.calibrationConfirmed) {
+    return <CalibrationGate state={state} goToStage={goToStage} stageLabel="Outputs" />;
+  }
   if (!state.estimatorConfirmed) {
     return (
       <div className="p-4">
