@@ -11,6 +11,7 @@ interface LegacyRenderPayload {
   width: number;
   height: number;
   pageCount: number;
+  pageNumber: number;
   textItems: Array<{ str: string; x: number; y: number; w: number; h: number }>;
 }
 
@@ -115,7 +116,9 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({
 
     const renderPage = async () => {
       try {
-        const pageDoc = await pdfDocRef.current!.getPage(resolvedPage);
+        const pageCount = pdfDocRef.current?.numPages || 1;
+        const safePage = Math.min(Math.max(1, resolvedPage), pageCount);
+        const pageDoc = await pdfDocRef.current!.getPage(safePage);
         if (cancelled) return;
 
         const viewport = pageDoc.getViewport({ scale });
@@ -166,7 +169,8 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({
           imageUrl: dataUrl,
           width: viewport.width / scale,
           height: viewport.height / scale,
-          pageCount: pdfDocRef.current?.numPages || 1,
+          pageCount,
+          pageNumber: safePage,
           textItems,
         });
         onRenderStateChange?.({ status: "ready", error: null });
