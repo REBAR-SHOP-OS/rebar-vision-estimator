@@ -3,6 +3,7 @@ import { STAGES, type StageKey } from "./types";
 import { Lock, CheckCircle2, Circle, AlertTriangle, FolderOpen, Layers, Ruler, ShieldCheck, Stamp, FileSpreadsheet, Search, Bell, HelpCircle, MessageSquareText } from "lucide-react";
 import FilesStage from "./stages/FilesStage";
 import ScopeStage from "./stages/ScopeStage";
+import CalibrationStage from "./stages/CalibrationStage";
 import TakeoffStage from "./stages/TakeoffStage";
 import QAStage from "./stages/QAStage";
 import AssistantStage from "./stages/AssistantStage";
@@ -46,6 +47,7 @@ export default function WorkflowShell({ projectId, project }: Props) {
   const status = useMemo(() => ({
     files: state.fileCount > 0 ? "complete" : "pending",
     scope: state.scopeAccepted > 0 ? "complete" : state.fileCount > 0 ? "active" : "locked",
+    calibration: state.scopeAccepted > 0 ? "active" : "locked",
     takeoff: state.takeoffRows > 0 ? "complete" : state.scopeAccepted > 0 ? "active" : "locked",
     qa: state.takeoffRows > 0 ? (state.qaCriticalOpen > 0 ? "blocked" : "active") : "locked",
     assistant: state.takeoffRows > 0 || state.fileCount > 0 ? "active" : "locked",
@@ -58,6 +60,7 @@ export default function WorkflowShell({ projectId, project }: Props) {
     switch (active) {
       case "files": return <FilesStage {...props} />;
       case "scope": return <ScopeStage {...props} />;
+      case "calibration": return <CalibrationStage {...props} />;
       case "takeoff": return <TakeoffStage {...props} />;
       case "qa": return <QAStage {...props} />;
       case "assistant": return <AssistantStage {...props} />;
