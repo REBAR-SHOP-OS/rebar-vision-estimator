@@ -38,16 +38,29 @@ const PLAYBOOKS: Record<string, Playbook> = {
   commercial: {
     expected_buckets: ["Substructure", "Slab-on-Grade", "Superstructure"],
     must_have: [
-      { name: "Pile Caps / Pad Footings", segment_type: "footing", bucket: "Substructure", notes: "Commercial default" },
-      { name: "Piers / Pedestals", segment_type: "pier", bucket: "Substructure", notes: "Commercial default" },
-      { name: "Steps on Grade", segment_type: "slab", bucket: "Slab-on-Grade", notes: "Commercial default" },
-      { name: "Columns (per level)", segment_type: "column", bucket: "Superstructure", notes: "Commercial default" },
-      { name: "Elevated Slabs (per level)", segment_type: "slab", bucket: "Superstructure", notes: "Commercial default" },
-      { name: "Shear Walls", segment_type: "wall", bucket: "Superstructure", notes: "Commercial default" },
+      // Step 1 — Foundation Map (S-1.0)
+      { name: "Wall Footings (WF)", segment_type: "footing", bucket: "Substructure", notes: "Step 1 · Foundation Map · perimeter (S-1.0)" },
+      { name: "Pad Footings (F-pads)", segment_type: "footing", bucket: "Substructure", notes: "Step 1 · Foundation Map · grid intersections (S-1.0)" },
+      // Step 2 — Vertical Elements
+      { name: "Piers / Pedestals", segment_type: "pier", bucket: "Substructure", notes: "Step 2 · Vertical · cage on top of pad footing" },
+      { name: "Foundation Walls", segment_type: "wall", bucket: "Substructure", notes: "Step 2 · Vertical · perimeter wall" },
+      { name: "Columns (per level)", segment_type: "column", bucket: "Superstructure", notes: "Step 2 · Vertical · per level" },
+      { name: "Shear Walls", segment_type: "wall", bucket: "Superstructure", notes: "Step 2 · Vertical · lateral system" },
+      // Step 3 — Horizontal Flatwork
+      { name: "Slab on Grade (SOG)", segment_type: "slab", bucket: "Slab-on-Grade", notes: "Step 3 · Flatwork · General Notes (S-1.0 Note 6)" },
+      { name: "Slab Thickenings (under interior walls)", segment_type: "slab", bucket: "Slab-on-Grade", notes: "Step 3 · Flatwork · A-2.2 wall vs S-1.0 footing overlay (TD.37)" },
+      { name: "Steps on Grade", segment_type: "slab", bucket: "Slab-on-Grade", notes: "Step 3 · Flatwork · elevation changes (TD.3)" },
+      { name: "Elevated Slabs (per level)", segment_type: "slab", bucket: "Superstructure", notes: "Step 3 · Flatwork · suspended deck" },
+      // Step 4 — Transitions (S-6.0 series)
+      { name: "Corner & L-Bars", segment_type: "miscellaneous", bucket: "Substructure", notes: "Step 4 · Transitions · every wall corner (TD.13)" },
+      { name: "Door / Wall Openings", segment_type: "miscellaneous", bucket: "Substructure", notes: "Step 4 · Transitions · door schedule + Detail 5" },
+      // Step 5 — Site Misc (S-6.5)
+      { name: "Curbs & Bollards", segment_type: "curb", bucket: "Site", notes: "Step 5 · Site Misc · curbs, ramps, bollards" },
+      { name: "Sign Bases / Menu Boards", segment_type: "footing", bucket: "Site", notes: "Step 5 · Site Misc · TD.87 / TD.88" },
     ],
     forbidden_types: ["icf wall", "garage slab"],
     bar_mark_hints: "Common: COL/C# = columns, B# = beams, SW# = shear walls, FC# = footing caps, F# = footings, P# = piers/pedestals, FW = foundation wall. Group by level (L1, L2…).",
-    prompt_emphasis: "Emphasize footings (F#), piers/pedestals (P#) on top of footings, foundation walls, steps on grade, columns by level, elevated slabs, shear walls. Group footings by mark from a footing schedule. Always create a Piers segment when P1/P2/P# marks or a pier schedule appear, distinct from footings.",
+    prompt_emphasis: "Apply the Bottom-to-Top scan: (1) Foundation Map — WF perimeter + F-pad grid (S-1.0); (2) Vertical — Piers/Columns/Foundation Walls cross-referenced to schedules; (3) Flatwork — SOG + Slab Thickenings (compare A-2.2 walls vs S-1.0 footings, missing footing → thickening, TD.37); (4) Transitions — Steps (TD.3), Corner L-bars (TD.13), Door openings (Detail 5); (5) Site Misc — Curbs, Bollards, Sign Bases (TD.87/88). Always create a Piers segment when P1/P2/P# marks or a pier schedule appear, distinct from footings.",
   },
   industrial: {
     expected_buckets: ["Substructure", "Slab-on-Grade", "Superstructure"],
@@ -307,6 +320,13 @@ ${knowledgeContext}
 
 Rules:
 - **HIERARCHY**: (1) Drawing-confirmed evidence > (2) Playbook must-haves > (3) User templates > (4) Inferred.
+- **BOTTOM-TO-TOP scan order** (always emit segments in this order):
+  1. Foundation Map (S-1.0): Wall Footings (WF) along perimeter, Pad Footings (F#) at every grid intersection.
+  2. Vertical Elements: Piers/Pedestals (P#), Columns, Foundation Walls — cross-reference Foundation Schedule.
+  3. Horizontal Flatwork: SOG (General Notes), Slab Thickenings (where A-2.2 wall has no S-1.0 footing — TD.37).
+  4. Transitions (S-6.0 details): Steps (TD.3), Corners (TD.13), Door/Wall Openings (Detail 5).
+  5. Site Misc (S-6.5): Curbs, Bollards, Sign Bases / Menu Boards (TD.87/88).
+- **TAX SCAN (Commercial)**: ALWAYS attempt the Arch-vs-Struct overlay. Any interior wall on A-2.2 with no matching footing on S-1.0 → emit a "Slab Thickening" candidate (source=hidden_scope, note "TD.37"). Every exterior door in the door schedule → emit "Door Opening Trim" (Detail 5). Every site sign/bollard on S-6.5 → emit a Site Misc candidate.
 - **NEVER** suggest a segment whose type matches the playbook's forbidden_types list.
 - **HIDDEN SCOPE**: Items appearing ONLY in the "NON-STRUCTURAL SHEETS" block must be returned with source="hidden_scope" and a note pointing to the sheet_id.
 - **BAR LIST PARSING**: If a bar schedule is present, group bar marks by family (prefix) into segments matching the playbook's bar_mark_hints.

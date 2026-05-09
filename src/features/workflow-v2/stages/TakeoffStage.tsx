@@ -6,7 +6,7 @@ import { StageHeader, Pill, EmptyState, CalibrationGate, type StageProps } from 
 import { Sparkles, FileText, CheckCircle2, Loader2, Wand2, Pencil, Save, X, ChevronDown, ChevronRight, Layers, Table as TableIcon } from "lucide-react";
 import PdfRenderer from "@/components/chat/PdfRenderer";
 import TakeoffCanvas, { type TakeoffCanvasLayer } from "@/components/takeoff-canvas/TakeoffCanvas";
-import { inferSegmentType } from "@/lib/segment-type";
+import { inferSegmentType, methodologyStep } from "@/lib/segment-type";
 import { loadWorkflowTakeoffRows, type WorkflowTakeoffRow } from "../takeoff-data";
 import { parseAndIndexFile } from "@/lib/parse-file";
 function getFunctionErrorMessage(error: unknown, fallback: string) {
@@ -654,7 +654,15 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
         blocked: 0,
         empty: true,
       }));
-    return [...populated, ...empties];
+    const all = [...populated, ...empties];
+    // Bottom-to-Top order: WF → F-pads → Piers/Walls → SOG/Thickenings → Steps/Corners → Site misc.
+    all.sort((a, b) => {
+      const sa = methodologyStep(a.name);
+      const sb = methodologyStep(b.name);
+      if (sa !== sb) return sa - sb;
+      return a.name.localeCompare(b.name);
+    });
+    return all;
   }, [rows, allSegments]);
 
   const totals = useMemo(() => ({
