@@ -93,12 +93,13 @@ export function computeFocusTransformForImage({
   pageBox: Rect | null;
   canvas: { width: number; height: number };
   zoom: number;
-  pan: { dx: number; dy: number };
+  pan?: { dx: number; dy: number };
   toolbarSafeTop?: number;
 }): { x: number; y: number; scale: number } {
   const scale = Math.max(0.1, zoom || 1);
+  const safePan = pan ?? { dx: 0, dy: 0 };
   if (!bbox || !pageBox || !imgW || !imgH || !canvas.width || !canvas.height) {
-    return { x: pan.dx, y: pan.dy, scale };
+    return { x: safePan.dx, y: safePan.dy, scale };
   }
 
   const focusX = pageBox.left + (((bbox[0] + bbox[2]) / 2) / imgW) * pageBox.width;
@@ -106,8 +107,8 @@ export function computeFocusTransformForImage({
   const targetViewportX = canvas.width / 2;
   const targetViewportY = toolbarSafeTop + Math.max(0, canvas.height - toolbarSafeTop) * 0.52;
   return clampTransformToVisiblePage(
-    targetViewportX - focusX * scale + pan.dx,
-    targetViewportY - focusY * scale + pan.dy,
+    targetViewportX - focusX * scale + safePan.dx,
+    targetViewportY - focusY * scale + safePan.dy,
     pageBox,
     canvas,
     scale,
