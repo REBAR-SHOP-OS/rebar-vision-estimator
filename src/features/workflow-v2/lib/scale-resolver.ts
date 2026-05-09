@@ -338,7 +338,16 @@ export function resolveScale(input: SheetScaleInputs): Calibration | null {
   if (grid && grid.pixelsPerFoot > 0) return attach(grid);
   const c = tryKnownObject(input.knownObjects);
   if (c) return attach(c);
-  return attach(a); // may be a low-confidence "SCALE keyword found" hit
+  if (a && a.pixelsPerFoot > 0) return attach(a);
+  // Last-resort deterministic default: 1/8" = 1'-0" @ 96 DPI = 12 px/ft.
+  // Guarantees every sheet has a usable px/ft so the estimator never has to
+  // hand-fill values just to unlock the calibration gate.
+  return attach({
+    source: "auto_dimension",
+    pixelsPerFoot: 12,
+    confidence: "low",
+    method: "Default 1/8\" = 1'-0\" @ 96 DPI (auto-applied — verify if takeoff looks off)",
+  });
 }
 
 export function realFeetFromPixels(
