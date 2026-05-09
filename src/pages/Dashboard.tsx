@@ -1,14 +1,12 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { Button } from "@/components/ui/button";
-import { Plus, Loader2 } from "lucide-react";
-import ProjectDashboard from "@/components/workspace/ProjectDashboard";
 import OutcomeCapture from "@/components/audit/OutcomeCapture";
 import DrawingSearchPanel from "@/components/search/DrawingSearchPanel";
 import ProjectHealthDashboard from "@/components/dashboard/ProjectHealthDashboard";
 import AdminDiagnosticsPanel from "@/components/dashboard/AdminDiagnosticsPanel";
+import RebarForgeDashboard, { type DashboardProject } from "@/components/dashboard/RebarForgeDashboard";
 import { toast } from "sonner";
 import { computeSHA256 } from "@/lib/file-hash";
 import {
@@ -17,22 +15,11 @@ import {
   inferRebarFileKind,
 } from "@/lib/rebar-intake";
 
-interface Project {
-  id: string;
-  name: string;
-  status: string;
-  created_at: string;
-  workflow_status?: string;
-  linkage_score?: string;
-  intake_complete?: boolean;
-}
-
 const Dashboard: React.FC = () => {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [projects, setProjects] = useState<DashboardProject[]>([]);
   const [creatingProject, setCreatingProject] = useState(false);
-  const [showCrm, setShowCrm] = useState(false);
   const [showOutcomes, setShowOutcomes] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
@@ -48,6 +35,7 @@ const Dashboard: React.FC = () => {
       .from("projects")
       .select("*")
       .order("updated_at", { ascending: false });
+
     if (error) {
       if (error.message?.includes("JWT expired") || error.message?.includes("Invalid Refresh Token")) {
         toast.error("Session expired. Please sign in again.");
@@ -57,6 +45,7 @@ const Dashboard: React.FC = () => {
       toast.error("Failed to load projects");
       return;
     }
+
     setProjects(data || []);
   };
 
@@ -78,7 +67,7 @@ const Dashboard: React.FC = () => {
       if (dupCheck?.is_duplicate && dupCheck.matches?.length > 0) {
         const match = dupCheck.matches[0];
         const proceed = window.confirm(
-          `A similar project exists: "${match.name}" (${Math.round(match.similarity * 100)}% match). Create anyway?`
+          `A similar project exists: "${match.name}" (${Math.round(match.similarity * 100)}% match). Create anyway?`,
         );
         if (!proceed) {
           setCreatingProject(false);
@@ -92,7 +81,7 @@ const Dashboard: React.FC = () => {
 
     const normalizedName = projectName.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
 
-    let project: Project | null = null;
+    let project: DashboardProject | null = null;
 
     try {
       project = await createProjectWithCanonicalBridge(supabase, {
@@ -112,15 +101,13 @@ const Dashboard: React.FC = () => {
       return;
     }
 
-    const projectBridgeHealthy = (project as Project & {
+    const projectBridgeHealthy = (project as DashboardProject & {
       canonicalBridgeHealthy?: boolean;
       canonicalBridgeError?: string;
     }).canonicalBridgeHealthy !== false;
 
     if (!projectBridgeHealthy) {
-      const projectBridgeError = (project as Project & {
-        canonicalBridgeError?: string;
-      }).canonicalBridgeError;
+      const projectBridgeError = (project as DashboardProject & { canonicalBridgeError?: string }).canonicalBridgeError;
       toast.warning(
         projectBridgeError
           ? `Project created with legacy fallback. Canonical sync will retry later: ${projectBridgeError}`
@@ -187,19 +174,23 @@ const Dashboard: React.FC = () => {
 
   if (showHealth) return <ProjectHealthDashboard onClose={() => setShowHealth(false)} />;
   if (showDiagnostics) return <AdminDiagnosticsPanel onClose={() => setShowDiagnostics(false)} />;
-  if (showSearch) return (
-    <DrawingSearchPanel
-      onClose={() => setShowSearch(false)}
-      onSelectProject={(projectId) => {
-        setShowSearch(false);
-        navigate(`/app/project/${projectId}`);
-      }}
-    />
-  );
-  if (showOutcomes) return <OutcomeCapture projects={projects.map((p) => ({ id: p.id, name: p.name }))} />;
+  if (showSearch) {
+    return (
+      <DrawingSearchPanel
+        onClose={() => setShowSearch(false)}
+        onSelectProject={(projectId) => {
+          setShowSearch(false);
+          navigate(`/app/project/${projectId}`);
+        }}
+      />
+    );
+  }
+  if (showOutcomes) {
+    return <OutcomeCapture projects={projects.map((project) => ({ id: project.id, name: project.name }))} />;
+  }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div className="flex min-h-0 flex-1 flex-col">
       <input
         ref={newProjectFileInputRef}
         type="file"
@@ -208,14 +199,15 @@ const Dashboard: React.FC = () => {
         onChange={handleNewProjectFileSelect}
         className="hidden"
       />
-      <ProjectDashboard
+      <RebarForgeDashboard
+        projects={projects}
+        creatingProject={creatingProject}
         onSelectProject={(id) => navigate(`/app/project/${id}`)}
         onNewEstimation={handleNewEstimationClick}
-        onShowCrm={() => setShowCrm(true)}
-        onShowOutcomes={() => setShowOutcomes(true)}
+        onShowSearch={() => setShowSearch(true)}
         onShowHealth={() => setShowHealth(true)}
         onShowDiagnostics={() => setShowDiagnostics(true)}
-        onShowSearch={() => setShowSearch(true)}
+        onShowOutcomes={() => setShowOutcomes(true)}
       />
     </div>
   );
