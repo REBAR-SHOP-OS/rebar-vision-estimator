@@ -9,7 +9,6 @@ import { loadWorkflowQaIssues, type WorkflowQaIssue } from "../takeoff-data";
 import { supabase } from "@/integrations/supabase/client";
 import PdfRenderer from "@/components/chat/PdfRenderer";
 import {
-  computeFocusTransformForImage,
   normalizeBboxToImagePixels,
   type BBox,
 } from "./qa-overlay-geometry";
@@ -589,17 +588,6 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
   const anchorStatus = sel?.locator?.anchor_mode || (textSearch ? (textSearch.score >= MIN_ANCHOR_CONFIDENCE ? "exact" : "approximate") : "unavailable");
   const anchorReason = textSearch?.text ? `Matched ${textSearch.kind} anchor: ${textSearch.text}` : null;
-  const zoom = zoomMode === "tight" && bbox && imgSize
-    ? computeFocusTransformForImage({
-        bbox,
-        imgW: imgSize.w,
-        imgH: imgSize.h,
-        pageBox,
-        canvas: canvasSize,
-        zoom: zoomLevel,
-        pan,
-      }).scale
-    : zoomLevel;
   const canShowPointer = Boolean(renderStatus === "ready" && previewUrl && imgSize && pageBox && bbox);
 
   const TABS: Array<{ k: TabKey; label: string }> = [
@@ -780,26 +768,28 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                 />
               </div>
             )}
+            {/* Overlays sit INSIDE the transform wrapper so they pan/zoom with the drawing */}
+            {renderStatus === "ready" && previewUrl && imgSize && pageBox && canShowPointer && bbox && (
+              <BBoxPointer
+                bbox={bbox}
+                imgW={imgSize.w}
+                imgH={imgSize.h}
+                zoom={1}
+                viewZoom={zoomLevel}
+                pageBox={pageBox}
+                title={sel?.location_label || sel?.title || "Selected target"}
+                onFix={openAnswerTab}
+                approximate={anchorStatus === "approximate"}
+              />
+            )}
+            {renderStatus === "ready" && previewUrl && imgSize && pageBox && debug && textLines.map((line, idx) => {
+              const top = pageBox.top + (line.y / imgSize.h) * pageBox.height;
+              return <div key={idx} className="absolute left-0 right-0 border-t border-amber-500/20" style={{ top }} />;
+            })}
             </div>
 
             {renderStatus === "ready" && previewUrl && imgSize && pageBox && (
               <>
-                {canShowPointer && bbox && (
-                  <BBoxPointer
-                    bbox={bbox}
-                    imgW={imgSize.w}
-                    imgH={imgSize.h}
-                    zoom={zoom}
-                    pageBox={pageBox}
-                    title={sel?.location_label || sel?.title || "Selected target"}
-                    onFix={openAnswerTab}
-                    approximate={anchorStatus === "approximate"}
-                  />
-                )}
-                {debug && textLines.map((line, idx) => {
-                  const top = pageBox.top + (line.y / imgSize.h) * pageBox.height;
-                  return <div key={idx} className="absolute left-0 right-0 border-t border-amber-500/20" style={{ top }} />;
-                })}
                 {anchorStatus === "unavailable" && renderStatus === "ready" && previewUrl && (
                   <div className="absolute top-14 right-4 z-10 text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--status-blocked))] border border-[hsl(var(--status-blocked))]/40 bg-[hsl(var(--status-blocked))]/10 px-2 py-1">
                     Page linked · no trusted object box on this page
@@ -847,7 +837,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                   <button className="px-1 hover:text-foreground" disabled={pdfPage >= pdfPageCount} onClick={() => setPdfPage((p) => Math.min(pdfPageCount, p + 1))}>▶</button>
                 </span>
               )}
-              <span>Zoom: {Math.round(zoom * 100)}%</span>
+              <span>Zoom: {Math.round(zoomLevel * 100)}%</span>
               <span className="truncate max-w-[200px]">{previewName || "—"}</span>
               <span className="w-1.5 h-1.5 bg-[hsl(var(--status-supported))] rounded-full" />
             </div>
@@ -1089,12 +1079,13 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 }
 
 function BBoxPointer({
-  bbox, imgW, imgH, zoom, pageBox, title, onFix, approximate,
+  bbox, imgW, imgH, zoom, viewZoom, pageBox, title, onFix, approximate,
 }: {
   bbox: BBox;
   imgW: number;
   imgH: number;
   zoom: number;
+  viewZoom?: number;
   pageBox: { left: number; top: number; width: number; height: number };
   title: string;
   onFix: () => void;
@@ -1111,14 +1102,18 @@ function BBoxPointer({
   const topPx = pageBox.top + (top / 100) * pageBox.height;
   const widthPx = (width / 100) * pageBox.width;
   const heightPx = (height / 100) * pageBox.height;
+  // `zoom` is used for positioning math; `viewZoom` reflects the actual CSS
+  // scale applied to the parent wrapper, used only to keep border + badge
+  // visually stable as the user zooms in/out.
   const z = Math.max(1, zoom);
+  const vz = Math.max(1, viewZoom ?? zoom);
   const stroke = approximate ? "#f59e0b" : "#ff7a1a";
-  const borderPx = Math.max(1, 2 / z);
-  const haloPx = Math.max(0.5, 1.5 / z);
-  const isShortBox = heightPx * z < 26 || widthPx * z < 42;
+  const borderPx = Math.max(1, 2 / vz);
+  const haloPx = Math.max(0.5, 1.5 / vz);
+  const isShortBox = heightPx * vz < 26 || widthPx * vz < 42;
   // Counteract canvas zoom so the attention badge stays visually stable
   // instead of growing excessively at high zoom levels.
-  const labelScale = Math.min(1, Math.max(0.16, 1 / z));
+  const labelScale = Math.min(1, Math.max(0.16, 1 / vz));
   const fillBg = approximate ? "rgba(245,158,11,0.035)" : "rgba(255,122,26,0.025)";
   return (
     <div
