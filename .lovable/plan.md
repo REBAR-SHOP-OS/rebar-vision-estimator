@@ -1,67 +1,51 @@
-# Encode the "Big Three + Bottom-to-Top" Methodology
+# Takeoff Canvas — Fix overlay + reclaim viewport
 
-Make the methodology you described the **explicit playbook** the AI follows during project classification, scope/segment generation, and takeoff ordering — so every project is identified the same way and no rebar element gets missed.
+The Canvas view currently (a) draws polygons that don't appear because they aren't tied to the active sheet/page, (b) has a hard-to-see "active layer" state, and (c) wastes half the screen on chrome (260px Layers rail + 78vh image cap + workflow stage strip + app sidebar). All work stays in `src/components/takeoff-canvas/TakeoffCanvas.tsx` and the canvas branch of `TakeoffStage.tsx` / `ScopeStage.tsx`. No DB schema changes (the existing `takeoff_overlays` table already has `page_number`).
 
-## What changes
+## 1. Overlay bug — target the right page/sheet
 
-### 1. Project-type recognition — the "Big Three"
-File: `supabase/functions/detect-project-type/index.ts`
+**Symptom:** Layers show `0 drawn` even after drawing; polygon disappears as soon as PDF renders page 1.
 
-Extend the classification prompt with the three explicit identifiers, in priority order:
-- **Title Block** (A-0.0 / S-0.0): keywords → Commercial: "Retail / Unit Development / Westdell"; Industrial: "Warehouse / Factory / Distribution Center"; Residential: "Multi-family / Apartment / Condominium"
-- **Floor Plan** (A-2.2): storefront glass / loading docks / many small rooms
-- **Framing Material** (S-1.1): OWSJ + metal deck (Comm) / W-shapes + precast (Indus) / wood trusses (Resi)
+**Causes**
+- `useEffect` that loads polygons keys on `page` but `page` defaults to `1` and only updates after `PdfRenderer` reports `pageNumber`. The save uses the same stale `page`, so polygons are written for page 1 even when a multi-sheet PDF is showing a different sheet.
+- `takeoff_overlays` rows don't carry the file/sheet identifier, so loading the canvas with a different file shows old polygons.
 
-Output adds `classification_evidence: { title_block, floor_plan, framing }` so the user sees why it was classified.
+**Fix (minimal patch)**
+- Pass and store `file_path` (or `legacy_file_id` when available) on each overlay row by extending the `insert` payload with `source_file: filePath`. Add the same column to the `select` filter so polygons load only for the current sheet. (Column already exists in `takeoff_overlays` — if not, add it via a small additive migration with a nullable `source_file text` column. No data backfill needed.)
+- Synchronise the persisted `page` with what `PdfRenderer` actually rendered: derive saves from a single `currentPage` state set inside `onRender`, so the first save matches the visible sheet.
+- Re-fetch polygons whenever `signedUrl` or `currentPage` change (currently keyed only on `page`).
 
-### 2. Bottom-to-Top segment generation
-File: `supabase/functions/auto-segments/index.ts` — extend the `commercial` and `industrial` playbooks with an ordered **bottom-to-top scan**:
+## 2. Make selection + drawing obvious
 
-```text
-Step 1 — Foundation Map (S-1.0)        WF (perimeter), F-pads (grid intersections)
-Step 2 — Vertical Elements             Piers, Columns, Foundation Walls (cross-ref Foundation Schedule)
-Step 3 — Horizontal Flatwork           SOG + WWF (General Notes), Slab Thickenings under interior walls
-Step 4 — Transitions (S-6.0 details)   Steps (TD.3), Corners (TD.13), Openings (door schedule + Detail 5)
-Step 5 — Site Misc (S-6.5)             Curbs, Sign Bases (TD.87/88), Bollards
-```
+- Highlight the active layer with a solid swatch border + filled background (use `bg-primary/15` and a 2px ring) so it reads in dark mode.
+- Auto-switch the tool to `polygon` the moment a layer is clicked (and back to `pan` after the polygon is committed) so users don't need to discover the keyboard shortcut.
+- Show the active layer name + a "Click to add point · Double-click to close" hint inline at the top of the stage instead of only in the bottom status strip.
+- Keep saved polygons clickable in any tool, but make them brighter (raise `fillOpacity` from 0.28 → 0.45 and stroke width from 0.003 → 0.005) so existing overlays are visible on dense drawings.
 
-Each step becomes a tagged candidate group with `methodology_step: 1..5` and `bucket` mapped to the existing 5 Construction Buckets.
+## 3. Reclaim space for the blueprint
 
-### 3. Hidden-scope tax scan
-Add a dedicated pass that always runs on Commercial:
-- **Arch Overlay**: cross-reference A-2.2 walls vs S-1.0 footings → emit `Slab Thickening` candidates (TD.37) where a wall exists with no footing.
-- **Door Schedule**: every exterior door → extra top/bottom bars (Detail 5).
-- **Site Steel**: scan S-6.5 for menu board / directional sign / bollard details.
+In `TakeoffCanvas.tsx`:
+- Drop the right `Layers` aside from 260px → collapsible 56px rail (icon-only swatches with a tooltip) and add a chevron to expand to a 220px panel on demand. Default state = collapsed for first paint.
+- Remove the bottom status bar (move "tool / pts" into the floating tool palette tooltip and active-layer chip). Saves ~28px vertical.
+- Replace the `max-h-[78vh]` cap on the `<img>` with `h-full w-full` inside a flex container so the sheet fills all remaining vertical/horizontal space.
+- Remove the redundant top "Sheet … 1 / 18" bar and merge page nav into the tool palette as ◀ N/M ▶ buttons.
 
-These get `source: "hidden_scope"` and a note pointing to the trigger sheet/detail, so they show up in the existing Hidden Scope panel.
+In the canvas branch of `TakeoffStage.tsx` (lines 689-712):
+- Drop the `StageHeader` in canvas mode and render only a thin 32px top strip with the Table/Canvas toggle pinned right. The workflow stage strip on the left is already enough breadcrumb.
 
-### 4. Takeoff ordering in UI
-File: `src/features/workflow-v2/stages/TakeoffStage.tsx`
+In `ScopeStage.tsx` canvas usage (around line 304):
+- Same: collapse the methodology chips row into a single overflow chip (`Σ 5 steps`) when the viewport is narrower than 1100px so the canvas isn't shrunk.
 
-Sort segments by `methodology_step` (then bucket) so the takeoff list reads bottom-up:
-WF → F-pads → Piers/Columns/Walls → SOG/Thickenings → Steps/Corners/Openings → Site misc.
-
-### 5. Final Summary Checklist surface
-File: `src/features/workflow-v2/stages/ScopeStage.tsx`
-
-Add a small read-only checklist card on the right rail:
-1. Identity (Comm/Indus/Resi)
-2. Perimeter (WF LF)
-3. Grid points (F-pads + Piers count)
-4. Arch overlay (Slab Thickenings found)
-5. Tax scan (Laps / Hooks / Corners / Openings)
-
-Each row shows ✓ / ⚠ / — based on segment + candidate state. No new tables — purely derived from existing `segments`, `validation_issues`, and `audit_events`.
+The combined effect: the blueprint area gains roughly +260px horizontal and +60px vertical at default zoom, which is what the user is asking for.
 
 ## Files touched
-- `supabase/functions/detect-project-type/index.ts` (prompt + evidence payload)
-- `supabase/functions/auto-segments/index.ts` (playbook entries + bottom-to-top emission)
-- `src/features/workflow-v2/stages/ScopeStage.tsx` (checklist card)
-- `src/features/workflow-v2/stages/TakeoffStage.tsx` (sort by methodology_step)
+- `src/components/takeoff-canvas/TakeoffCanvas.tsx` — overlay fix, selection UX, collapsible Layers rail, removed status bar, fill-area image.
+- `src/features/workflow-v2/stages/TakeoffStage.tsx` — slimmer canvas-mode header (lines 689-712 only).
+- `src/features/workflow-v2/stages/ScopeStage.tsx` — responsive methodology chips (lines 270-302 only).
+- `supabase/migrations/<new>.sql` — only if `takeoff_overlays.source_file` doesn't exist; single `ALTER TABLE … ADD COLUMN source_file text;`.
 
-No DB schema changes required — `methodology_step` rides in `segments.notes` / candidate metadata, and the checklist is fully derived.
+No other files, no rewrites of working logic, no changes to estimation pipeline, segments table, or AppSidebar.
 
-## Your starting question
-You asked whether to start the takeoff with **Pad Footings** or **Slab Thickenings**.
-
-Per the methodology itself (Step 1 = Foundation Map before Step 3 = Flatwork), the correct order is **Pad Footings first**, then Slab Thickenings during the Arch Overlay pass. I'll wire the Takeoff list to default to that order so it matches the bottom-to-top logic.
+## Out of scope
+- Touching `AppSidebar`/workflow stage rail — those are shared chrome used by every other stage; collapsing them belongs to a separate request.
+- Pan/zoom gestures on the canvas (current Pan tool stays a no-op cursor change).

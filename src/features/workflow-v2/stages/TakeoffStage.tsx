@@ -694,16 +694,16 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
     const firstFile = state.files[0];
     return (
       <div className="flex h-full min-h-0 flex-col">
-        <StageHeader
-          kicker="Stage 03 — Canvas"
-          title="Takeoff Canvas"
-          right={
-            <div className="inline-flex items-center border border-border h-7">
-              <button onClick={() => setViewMode("table")} className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:bg-accent/40 inline-flex items-center gap-1"><TableIcon className="w-3 h-3" /> Table</button>
-              <button onClick={() => setViewMode("canvas")} className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider bg-primary text-primary-foreground inline-flex items-center gap-1 border-l border-border"><Layers className="w-3 h-3" /> Canvas</button>
-            </div>
-          }
-        />
+        <div className="flex h-9 flex-shrink-0 items-center justify-between border-b border-border bg-card px-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">Stage 03 · Canvas</span>
+            <span className="truncate text-xs text-foreground">{firstFile?.file_name || ""}</span>
+          </div>
+          <div className="inline-flex items-center border border-border h-7">
+            <button onClick={() => setViewMode("table")} className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:bg-accent/40 inline-flex items-center gap-1"><TableIcon className="w-3 h-3" /> Table</button>
+            <button onClick={() => setViewMode("canvas")} className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider bg-primary text-primary-foreground inline-flex items-center gap-1 border-l border-border"><Layers className="w-3 h-3" /> Canvas</button>
+          </div>
+        </div>
         <div className="flex-1 min-h-0">
           <TakeoffCanvas projectId={projectId} layers={canvasLayers} filePath={firstFile?.file_path} fileName={firstFile?.file_name} emptyHint="Approve scope first to populate layers." />
         </div>
