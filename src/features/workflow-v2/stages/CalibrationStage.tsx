@@ -285,6 +285,17 @@ function DisciplineSection({
                     placeholder="—"
                   />
                 </label>
+                {cal?.source === "auto_dimension" && cal.pixelsPerFoot > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[11px]"
+                    onClick={() => onUpdateOverride(r.id, cal.pixelsPerFoot.toFixed(2))}
+                    title="Accept auto-inferred px/ft and mark as confirmed"
+                  >
+                    Use auto value
+                  </Button>
+                )}
               </div>
             );
           })}
