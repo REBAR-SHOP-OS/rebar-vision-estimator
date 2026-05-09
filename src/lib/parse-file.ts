@@ -18,6 +18,7 @@ export interface ParseFileResult {
   document_version_id: string | null;
   error?: string;
   skipped?: boolean;
+  pages?: Array<{ page_number: number; raw_text?: string; title_block?: any; ocr_metadata?: any; is_ocr?: boolean }>;
 }
 
 /**
@@ -191,7 +192,18 @@ export async function parseAndIndexFile(
       } as any).eq("id", dvId);
     }
 
-    return { status: "indexed", pages_indexed: pagesIndexed, document_version_id: dvId };
+    return {
+      status: "indexed",
+      pages_indexed: pagesIndexed,
+      document_version_id: dvId,
+      pages: pages.map((p: any) => ({
+        page_number: p.page_number,
+        raw_text: p.raw_text,
+        title_block: p.title_block,
+        ocr_metadata: p.ocr_metadata,
+        is_ocr: p.is_ocr,
+      })),
+    };
   } catch (err: any) {
     const msg = String(err?.message || err);
     if (dvId) {

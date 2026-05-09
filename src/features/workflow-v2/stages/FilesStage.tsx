@@ -57,6 +57,7 @@ export default function FilesStage({ projectId, state }: StageProps) {
     const fl = e.target.files; if (!fl || !user) return;
     setUploading(true);
     let ok = 0;
+    const ocrCachePatch: Record<string, { pages: any[]; indexed_at: string; file_name: string }> = {};
 
     try {
       await ensureCurrentProjectRebarBridge(supabase, projectId);
@@ -115,6 +116,13 @@ export default function FilesStage({ projectId, state }: StageProps) {
             toast.error(`Indexing failed for ${file.name}: ${res.error || "unknown error"}`);
           } else if (res.status === "indexed") {
             toast.success(`${file.name} indexed (${res.pages_indexed} pages)`);
+            if (res.pages && res.pages.length) {
+              ocrCachePatch[fileRow.id] = {
+                pages: res.pages,
+                indexed_at: new Date().toISOString(),
+                file_name: file.name,
+              };
+            }
           }
         } catch (parseErr: any) {
           console.warn(`parseAndIndexFile failed for ${file.name}:`, parseErr);
@@ -130,6 +138,23 @@ export default function FilesStage({ projectId, state }: StageProps) {
 
     setUploading(false);
     if (ok) toast.success(`${ok} file${ok > 1 ? "s" : ""} uploaded`);
+    if (Object.keys(ocrCachePatch).length) {
+      const prev = (state.local.ocrCache as Record<string, any>) || {};
+      state.setLocal({ ocrCache: { ...prev, ...ocrCachePatch } });
+      // Pre-arm dimensions for takeoff/estimate (fire-and-forget).
+      toast.message("Pre-computing dimensions for takeoff…");
+      supabase.functions.invoke("extract-dimensions", { body: { project_id: projectId } })
+        .then(({ data, error }) => {
+          if (error) {
+            console.warn("extract-dimensions pre-warm failed:", error);
+            return;
+          }
+          const segments = (data as any)?.segments || [];
+          state.setLocal({ dimensionsCache: { resolved_at: new Date().toISOString(), segments } });
+          if (segments.length) toast.success(`Dimensions cached for ${segments.length} segment${segments.length > 1 ? "s" : ""}`);
+        })
+        .catch((err) => console.warn("extract-dimensions pre-warm error:", err));
+    }
     if (inputRef.current) inputRef.current.value = "";
     state.refresh();
   };
@@ -143,6 +168,7 @@ export default function FilesStage({ projectId, state }: StageProps) {
     if (!user || rows.length === 0) return;
     setReindexing(true);
     let ok = 0;
+    const ocrCachePatch: Record<string, { pages: any[]; indexed_at: string; file_name: string }> = {};
     for (const r of rows) {
       try {
         const res = await parseAndIndexFile(projectId, {
@@ -151,14 +177,31 @@ export default function FilesStage({ projectId, state }: StageProps) {
           file_name: r.file_name,
           file_path: r.file_path,
         }, (msg) => toast.message(`${r.file_name}: ${msg}`), { force: true });
-        if (res.status === "indexed") ok++;
-        else if (res.status === "failed") toast.error(`Re-index failed: ${r.file_name} — ${res.error || "unknown"}`);
+        if (res.status === "indexed") {
+          ok++;
+          if (res.pages && res.pages.length) {
+            ocrCachePatch[r.id] = { pages: res.pages, indexed_at: new Date().toISOString(), file_name: r.file_name };
+          }
+        } else if (res.status === "failed") {
+          toast.error(`Re-index failed: ${r.file_name} — ${res.error || "unknown"}`);
+        }
       } catch (e: any) {
         toast.error(`Re-index error: ${r.file_name} — ${e?.message || e}`);
       }
     }
     setReindexing(false);
     if (ok) toast.success(`Re-indexed ${ok} file${ok > 1 ? "s" : ""}`);
+    if (Object.keys(ocrCachePatch).length) {
+      state.setLocal({ ocrCache: ocrCachePatch });
+      toast.message("Re-computing dimensions for takeoff…");
+      supabase.functions.invoke("extract-dimensions", { body: { project_id: projectId } })
+        .then(({ data, error }) => {
+          if (error) { console.warn("extract-dimensions re-warm failed:", error); return; }
+          const segments = (data as any)?.segments || [];
+          state.setLocal({ dimensionsCache: { resolved_at: new Date().toISOString(), segments } });
+        })
+        .catch((err) => console.warn("extract-dimensions re-warm error:", err));
+    }
     state.refresh();
   };
 
