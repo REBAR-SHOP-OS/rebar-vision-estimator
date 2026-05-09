@@ -1080,12 +1080,13 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 }
 
 function BBoxPointer({
-  bbox, imgW, imgH, zoom, pageBox, title, onFix, approximate,
+  bbox, imgW, imgH, zoom, viewZoom, pageBox, title, onFix, approximate,
 }: {
   bbox: BBox;
   imgW: number;
   imgH: number;
   zoom: number;
+  viewZoom?: number;
   pageBox: { left: number; top: number; width: number; height: number };
   title: string;
   onFix: () => void;
@@ -1102,14 +1103,18 @@ function BBoxPointer({
   const topPx = pageBox.top + (top / 100) * pageBox.height;
   const widthPx = (width / 100) * pageBox.width;
   const heightPx = (height / 100) * pageBox.height;
+  // `zoom` is used for positioning math; `viewZoom` reflects the actual CSS
+  // scale applied to the parent wrapper, used only to keep border + badge
+  // visually stable as the user zooms in/out.
   const z = Math.max(1, zoom);
+  const vz = Math.max(1, viewZoom ?? zoom);
   const stroke = approximate ? "#f59e0b" : "#ff7a1a";
-  const borderPx = Math.max(1, 2 / z);
-  const haloPx = Math.max(0.5, 1.5 / z);
-  const isShortBox = heightPx * z < 26 || widthPx * z < 42;
+  const borderPx = Math.max(1, 2 / vz);
+  const haloPx = Math.max(0.5, 1.5 / vz);
+  const isShortBox = heightPx * vz < 26 || widthPx * vz < 42;
   // Counteract canvas zoom so the attention badge stays visually stable
   // instead of growing excessively at high zoom levels.
-  const labelScale = Math.min(1, Math.max(0.16, 1 / z));
+  const labelScale = Math.min(1, Math.max(0.16, 1 / vz));
   const fillBg = approximate ? "rgba(245,158,11,0.035)" : "rgba(255,122,26,0.025)";
   return (
     <div
