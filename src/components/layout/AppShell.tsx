@@ -82,7 +82,7 @@ export default function AppShell() {
   }, [activeProjectId]);
 
   return (
-    <SidebarProvider defaultOpen={true}>
+    <SidebarProvider defaultOpen={false}>
       <div className="min-h-screen flex w-full bg-background">
         <AppSidebar activeProjectId={activeProjectId} activeProjectName={projectName} />
         <div className="flex min-w-0 flex-1 flex-col">
