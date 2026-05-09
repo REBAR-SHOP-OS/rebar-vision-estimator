@@ -16,7 +16,6 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const ReviewPage = lazy(() => import("./pages/ReviewPage"));
 const BlueprintViewerPage = lazy(() => import("./pages/BlueprintViewerPage"));
 const ProjectWorkspace = lazy(() => import("./pages/ProjectWorkspace"));
-const LegacyProjectWorkspace = lazy(() => import("./pages/legacy/LegacyProjectWorkspace"));
 const SegmentDetail = lazy(() => import("./pages/SegmentDetail"));
 const StandardsPage = lazy(() => import("./pages/StandardsPage"));
 const OrdersPage = lazy(() => import("./pages/OrdersPage"));
@@ -73,15 +72,6 @@ const App = () => (
                   <Route index element={<Dashboard />} />
                   <Route path="project/:id" element={<ProjectWorkspace />} />
                   <Route path="project/:id/segments/:segId" element={<SegmentDetail />} />
-                  {/* Legacy archive — kept reachable but not the primary path */}
-                  <Route path="legacy/project/:id" element={<LegacyProjectWorkspace />} />
-                  <Route path="legacy/project/:id/files" element={<LegacyProjectWorkspace />} />
-                  <Route path="legacy/project/:id/segments" element={<LegacyProjectWorkspace />} />
-                  <Route path="legacy/project/:id/qa" element={<LegacyProjectWorkspace />} />
-                  <Route path="legacy/project/:id/estimate" element={<LegacyProjectWorkspace />} />
-                  <Route path="legacy/project/:id/shop-drawings" element={<LegacyProjectWorkspace />} />
-                  <Route path="legacy/project/:id/outputs" element={<LegacyProjectWorkspace />} />
-                  <Route path="legacy/project/:id/settings" element={<LegacyProjectWorkspace />} />
                   <Route path="standards" element={<StandardsPage />} />
                   <Route path="orders" element={<OrdersPage />} />
                   <Route path="orders/:orderId" element={<OrderDetail />} />
