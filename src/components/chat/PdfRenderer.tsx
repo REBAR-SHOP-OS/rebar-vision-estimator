@@ -106,7 +106,7 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({
 
     loadPdf();
     return () => { cancelled = true; };
-  }, [resolvedUrl, onError, onPageCount, onRenderStateChange]);
+  }, [resolvedUrl]);
 
   // Render current page
   useEffect(() => {
@@ -184,7 +184,7 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({
 
     renderPage();
     return () => { cancelled = true; };
-  }, [resolvedPage, loading, scale, resolvedUrl, onError, onPageRendered, onPageText, onRender, onRenderStateChange]);
+  }, [resolvedPage, loading, scale, resolvedUrl]);
 
   if (error) {
     return (
