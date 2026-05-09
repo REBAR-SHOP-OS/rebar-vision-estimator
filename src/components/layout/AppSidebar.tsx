@@ -217,6 +217,19 @@ export default function AppSidebar({ activeProjectId, activeProjectName }: AppSi
                     </SidebarMenuItem>
                   );
                 })}
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    onClick={() => { setActive("assistant"); navigate(projectBase); }}
+                    title="Assistant"
+                    className={[
+                      "rounded-xl text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                      active === "assistant" ? "bg-sidebar-accent text-sidebar-primary font-medium" : "",
+                    ].join(" ")}
+                  >
+                    <MessageSquareText className="mr-2 h-4 w-4" />
+                    {!collapsed && <span className="flex-1 truncate">Assistant</span>}
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
