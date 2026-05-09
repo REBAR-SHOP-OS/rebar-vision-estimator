@@ -110,16 +110,6 @@ export default function AppSidebar({ activeProjectId, activeProjectName }: AppSi
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
-                {activeProjectId && (
-                  <SidebarMenuItem>
-                    <SidebarMenuButton asChild className="rounded-xl text-slate-200 hover:bg-white/8 hover:text-white data-[active=true]:bg-teal-500/15 data-[active=true]:text-white">
-                      <NavLink to={`/app/legacy/project/${activeProjectId}`} className="hover:bg-transparent" activeClassName="bg-teal-500/15 text-white font-medium">
-                        <Settings className="mr-2 h-4 w-4" />
-                        {!collapsed && <span>Legacy View</span>}
-                      </NavLink>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
