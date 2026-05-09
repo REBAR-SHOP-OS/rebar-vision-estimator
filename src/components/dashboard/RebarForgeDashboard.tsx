@@ -3,7 +3,6 @@ import { formatDistanceToNow } from "date-fns";
 import {
   Activity,
   AlertTriangle,
-  ArrowRight,
   ChevronRight,
   ClipboardCheck,
   Download,
@@ -13,7 +12,6 @@ import {
   Radar,
   Search,
   ShieldCheck,
-  Sigma,
   Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -449,6 +447,3 @@ function EmptyState({ onNewEstimation }: { onNewEstimation: () => void }) {
   );
 }
 
-// keep export name unused vars import-stable
-void ArrowRight;
-void Sigma;
