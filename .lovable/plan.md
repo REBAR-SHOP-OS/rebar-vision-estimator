@@ -1,98 +1,78 @@
-# 6-Phase Rebar Takeoff — Full Integration
+# Rebar Takeoff — Golden Rules + Hidden Scope (Phase 2 Integration)
 
-Encode the human estimator's 6-phase methodology (Specs → Foundation → Verticals → Flatwork → Hidden Details → Convert) as a **global default** across three layers:
-
-1. **Agent Brain knowledge rules** — persistent, citable
-2. **TakeoffStage UI checklist** — visible per-segment progress
-3. **auto-estimate edge function** — programmatic phase walk + missing-data flags
-
-No DB schema changes. No new tables. Minimum-patch policy.
+Build on the already-shipped R0–R8 system rules. Add 6 new global rules, 3 deterministic math enforcement points in `auto-estimate`, and 3 small UI affordances in TakeoffStage. No DB schema changes.
 
 ---
 
-## 1. Agent Brain — global rules
+## 1. New global Brain rules (insert into `agent_knowledge`, `is_system=true`)
 
-Insert ~8 system rules into `public.agent_knowledge` with `user_id = NULL`-equivalent global flag (use existing service-role seed pattern; if no global flag exists, seed per-user on first load via a migration that loops through existing users, OR add `is_system boolean default false` mirroring `scope_templates`).
+| ID | Title | Body |
+|----|-------|------|
+| **G1** | Spacing + 1 starter | `qty = floor(L / spacing) + 1`. The +1 is the starter bar; never omit it. |
+| **G2** | Written > Scaled | If a dimension is written on the plan, use it verbatim. Only fall back to scale-derived measurement when no written value exists, and tag `dimension_source: "scaled"`. |
+| **G3** | Clear cover | Effective rebar dimension = nominal − 2·cover. Default cover = 75 mm (earth face) unless spec overrides. Apply to pad mats and all bars cast against soil. |
+| **G4** | Waste factor | Apply 7 % at the **segment total** (not per row). Configurable 5/7/10 in standards_profiles.waste_factors.global. Tag the additive line `WASTE_FACTOR_7%`. |
+| **R9** | Dowels | Footing-to-wall connections require dowels per the typical detail (e.g., 15M @ 400 mm O.C.). Compute over full perimeter when a dowel detail is referenced. |
+| **R10** | Slab thickenings cross-ref | Overlay architectural partition walls onto the slab plan. Each interior partition run that crosses the slab triggers the typical-thickening detail (default +3 × 15M continuous). |
+| **R11** | Top-tie rule | When piers/columns have a "top-tie" or "extra ties at top" note, add 2 extra ties in the top 100 mm. |
+| **R12** | Step bars | At every footing elevation change ("step"), add the L-bars and U-bars from the typical step detail. Count steps from the footing-step plan callouts. |
 
-**Preferred:** add `is_system boolean default false` to `agent_knowledge` and update RLS to `is_system OR auth.uid()=user_id` for SELECT. Then seed system rules.
-
-Rules to seed (each ~150–400 chars, type=`rule`):
-
-- **R1 Specs first** — Before any quantity, extract bar grade (default 400 MPa CSA), lap table, hook table, coating. Cite sheet (e.g., S-0.2, S-5.0, S-6.0). If missing → flag `UNVERIFIED_ASSUMPTION`.
-- **R2 Epoxy multiplier** — Coated bars: lap × 1.5. Apply only when "epoxy" is explicit in spec notes.
-- **R3 Continuous wall footings** — Total length = perimeter (from grids) + Σ laps. Multiply by bar count from schedule (e.g., WF-1 = 2 top + 2 bottom = 4 × 20M).
-- **R4 Pad footings** — Per mark: bars per side = floor((L − 2·cover) / spacing) + 1. Total per pad = bars E.W. × 2 directions. Multiply by count of that mark on plan.
-- **R5 Piers/columns** — Verticals: count from schedule × (height + lap + hook). Ties: floor(height / spacing) + 1, length = perimeter of tie − 2·cover + hook ext.
-- **R6 Mesh (WWF)** — Weight = mass(kg/m²) × area(m²). Add 10–15% lap waste. NEVER × linear m. Slab thickenings: +3 × 15M continuous per interior partition run (T.D.9-style detail).
-- **R7 Hidden rebar** — Always scan typical-detail sheet (Sxx.x series) for: corner bars (T.D.13), opening trim (2 × 20M T&B), dowels (S-1.0 Note 5-style), step bars (T.D.3).
-- **R8 Conversion table** — 10M=0.785, 15M=1.570, 20M=2.355, 25M=3.925, 30M=5.495, 35M=7.850 kg/m. Authority: RSIC 2018. LOCK these values; never AI-derive.
-
-Phase order rule (R0): Always execute Phase 1 → 6 in sequence; never skip Phase 1.
+Total system rules will be **R0–R12 + G1–G4 = 17 rules**.
 
 ---
 
-## 2. TakeoffStage UI — 6-phase checklist (per segment)
+## 2. `auto-estimate` math enforcement (small, additive)
 
-Edit only `src/features/workflow-v2/stages/TakeoffStage.tsx`.
+**Files:** `supabase/functions/auto-estimate/index.ts` only.
 
-Add a collapsed phase-strip below each segment header (above the existing element rows):
+- **Extend `PHASE_RULES` constant** with G1–G4, R9–R12 verbatim so the AI emits matching `rule_cited`.
+- **Cover-aware mat length helper** `effectiveMatLengthMm(L, coverMm = 75)` → returns `L − 2·cover`. Used by the pad-footing path.
+- **Spacing+1 guard**: in any place the resolver computes `floor(L/spacing)`, ensure `+1`. Add a unit-test-style sanity assert (logged, not thrown).
+- **Waste factor application**: after building the response array, append one synthetic line per segment:
+  ```
+  { description: "Waste factor 7%", item_type: "waste", phase: 6, rule_cited: "G4",
+    total_weight: round(0.07 * sum(real weights in segment), 1), confidence: 1.0,
+    assumptions_json: { waste_pct: 7, source: "G4", configurable: true } }
+  ```
+  Read `standards_profiles.waste_factors.global` (default 0.07) when computing the percentage.
+- **Dowel auto-row**: when STRUCTURAL OCR contains `DOWEL` + a spacing pattern within 80 chars of a footing schedule, emit a Phase-5 row with `rule_cited: "R9"`, length = perimeter, qty per spacing.
+- **Step-bar auto-row**: regex `\bSTEP\b.*\b(?:T\.?D\.?\s*\d+|TYP)\b` → emit Phase-5 row `rule_cited: "R12"` with `confidence: 0.4, status: "draft"` so user verifies count.
+- **Written>Scaled flag**: any value resolved from the new grid_dimension calibration source (G2) is tagged `dimension_source: "scaled"` in `assumptions_json`; AI-extracted values stay `dimension_source: "written"`.
 
-```text
-[1 Specs ✓] [2 Foundation ⏳] [3 Verticals —] [4 Flatwork —] [5 Hidden —] [6 Convert —]
-```
-
-State derived from existing data — no new tables:
-- **Phase 1** ✓ when `bar_items.grade_source` AND `lap_source` populated (or rule R1 cited in row's `assumptions_json`).
-- **Phase 2** ✓ when at least one `estimate_items.item_type='rebar'` row for footing-type segments has `total_length>0` AND assumption cites a lap value.
-- **Phase 3** ✓ when piers/columns segments produce verticals + ties rows.
-- **Phase 4** ✓ when mesh/WWF rows include `area` derivation (reuse the existing `wwm:` derivation marker).
-- **Phase 5** ✓ when ≥1 row references a typical-detail sheet (`source_refs` contains `T.D.` or `S-6`).
-- **Phase 6** ✓ when all rows have `total_weight>0` and pass the LOCKED kg/m table check.
-
-Each chip is clickable → scrolls to first row that satisfies/blocks that phase. Failing phase shows the missing rule in tooltip ("R5: pier ties spacing not found").
-
-No business-logic changes — UI reads existing fields.
+No changes to existing extraction prompt structure beyond the rule list.
 
 ---
 
-## 3. auto-estimate edge function — phase walk + math
+## 3. TakeoffStage UI additions
 
-Edit only `supabase/functions/auto-estimate/index.ts`. Existing structure already has lap/hook/WWM logic. Add:
+**File:** `src/features/workflow-v2/stages/TakeoffStage.tsx` only.
 
-**Prompt additions** (system prompt block ~line 1429):
-- Insert "PHASE WALK" section instructing the model to emit one row group per phase 1–6, with `phase: 1..6` field on each line item.
-- Reference rules R0–R8 verbatim (same strings as Brain seeds, kept in a `PHASE_RULES` const so Brain + edge stay in sync).
+- **Waste % selector** in the StageHeader right-side toolbar: `[5%] [7•] [10%]` segmented buttons; persists to `standards_profiles.waste_factors.global` via a tiny upsert. Default highlight = 7.
+- **Hidden-scope chip** appears next to a segment's PhaseChips strip when ≥1 row has `rule_cited` in `{R7, R9, R10, R11, R12}`: `🔍 HIDDEN SCOPE (n)` — clickable, scrolls to first matching row.
+- **Cover/waste display** in the existing rows: a tiny inline tag under the Length column showing `−2×75 cover` when `assumptions_json.cover_applied` is true, and a `+7% waste` tag on the synthetic waste row (rendered with muted styling so it visually subtotals).
 
-**Math layer additions:**
-- `computePerimeterFromGrids(graph)` — sum grid bay dimensions on outermost gridlines; output meters with provenance `{source: "grid_dimensions", samples: [...]}`. Used by Phase 2 wall-footing rows when no explicit perimeter is in OCR.
-- `padFootingExpander(footing, schedule)` — applies R4 formula per direction; emits `derivation: "qty=floor((L−2c)/s)+1=N E.W. ×2 dir × M pads"`.
-- `pierTiesExpander(pier, schedule)` — applies R5; emits ties qty + length.
-- `meshWasteFactor` — bump default from current value to 1.10 (low) / 1.15 (high) controlled by `standards_profiles.waste_factors.mesh` (read existing field; default 1.12).
-- `hiddenDetailsScan(graph)` — regex pass for `T\.D\.\d+`, `CORNER`, `OPENING`, `DOWEL`, `STEP` markers; each match emits a Phase-5 row with `confidence=0.5, status='draft', source_refs` populated.
-- LOCK the kg/m table (R8): replace any existing kg/m lookup with a frozen `Object.freeze({...})`; reject AI-supplied weight if it deviates >0.5 % from the table value (mark row `UNVERIFIED` and overwrite).
-- Each emitted row carries `phase: number` and `rule_cited: "R3"` etc. — the UI uses these for the checklist.
-
-**Output schema** — extend each line item with `phase` and `rule_cited`. Backward compatible (optional fields).
+UI reads the new fields defensively — old rows without them render unchanged.
 
 ---
 
-## Files touched
+## 4. Files touched
 
-- `supabase/migrations/<new>.sql` — `ALTER TABLE agent_knowledge ADD COLUMN is_system boolean DEFAULT false;` + update SELECT RLS + INSERT ~9 system rule rows.
-- `src/features/workflow-v2/stages/TakeoffStage.tsx` — add `<PhaseChips segment={g} />` component + helpers.
-- `supabase/functions/auto-estimate/index.ts` — add `PHASE_RULES`, perimeter/pad/pier/hidden helpers, phase tagging on output, LOCK kg/m table.
-- `src/components/chat/BrainKnowledgeDialog.tsx` — minor: show 🔒 badge on `is_system` rules (read-only).
+- `agent_knowledge` rows — INSERT 8 new system rules (no migration; data only).
+- `supabase/functions/auto-estimate/index.ts` — extend PHASE_RULES, add 3 helpers, append waste row, dowel/step regex pass.
+- `src/features/workflow-v2/stages/TakeoffStage.tsx` — waste selector, hidden-scope chip, cover/waste row tags.
 
 ## Out of scope
 
-- Shop-drawing generation changes
-- Quote/estimate version schema
-- Reconciliation thresholds
-- Any UI redesign outside the phase-chip strip
+- Lap length per-size table (already R1)
+- WWM mesh waste 10–15% (already R6)
+- Schema changes to `estimate_items` or `bar_items`
+- Shop-drawing generation
+- Quote/estimate version changes
 
 ## Verification
 
-- Open existing project 38c049c8… → TakeoffStage shows 6 chips per segment; chips reflect current data.
-- Re-run auto-estimate on a footing segment → output rows carry `phase` + `rule_cited`; perimeter derived from grids when OCR lacks it.
-- Brain dialog lists the 9 new system rules with 🔒 badge.
-- Weight rows for 15M → exactly 1.570 kg/m (LOCKED); any AI deviation logged.
+- Brain dialog now lists 17 system rules with 🔒 badge.
+- Re-run auto-estimate on a footing segment → output includes a `Waste factor 7%` line at segment end with `rule_cited: "G4"`.
+- Pad-footing rows show `−2×75 cover` tag when cover applied.
+- Project with corner/dowel/step OCR matches → segment shows `🔍 HIDDEN SCOPE` chip linking to those rows.
+- Waste % selector toggle re-saves and re-runs apply 5/10 accordingly.
