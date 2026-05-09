@@ -1,4 +1,3 @@
-import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useLanguage, LANGUAGES } from "@/contexts/LanguageContext";
@@ -23,16 +22,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  LayoutDashboard,
-  FolderOpen,
-  Settings,
-  Ruler,
-  LogOut,
-  Sun,
-  Moon,
-  Globe,
   Brain,
+  FolderOpen,
+  Globe,
+  LayoutDashboard,
+  LogOut,
+  Moon,
   Package,
+  Ruler,
+  Settings,
+  Sun,
 } from "lucide-react";
 import logoBg from "@/assets/logo.png";
 import BrainKnowledgeDialog from "@/components/chat/BrainKnowledgeDialog";
@@ -48,9 +47,7 @@ const mainNav = [
   { title: "Standards", url: "/app/standards", icon: Ruler },
 ];
 
-const projectNav = [
-  { title: "Workspace", suffix: "", icon: FolderOpen, end: true },
-];
+const projectNav = [{ title: "Workspace", suffix: "", icon: FolderOpen, end: true }];
 
 export default function AppSidebar({ activeProjectId, activeProjectName }: AppSidebarProps) {
   const { state } = useSidebar();
@@ -58,37 +55,34 @@ export default function AppSidebar({ activeProjectId, activeProjectName }: AppSi
   const { signOut } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { language, setLanguage, currentLanguageInfo } = useLanguage();
-  const location = useLocation();
 
   const projectBase = activeProjectId ? `/app/project/${activeProjectId}` : null;
 
   return (
-    <Sidebar collapsible="icon">
-      <SidebarContent>
-        {/* Logo */}
-        <div className="flex items-center gap-2 px-3 pt-3 pb-1">
-          <img src={logoBg} alt="Logo" className="h-7 w-7 rounded-lg flex-shrink-0" />
+    <Sidebar collapsible="icon" className="border-r border-white/10">
+      <SidebarContent className="bg-[#141c20] text-slate-100">
+        <div className="flex items-center gap-3 px-3 pb-3 pt-4">
+          <img src={logoBg} alt="Logo" className="h-9 w-9 rounded-xl border border-white/10 object-cover" />
           {!collapsed && (
-            <span className="text-sm font-bold text-sidebar-foreground truncate">
-              Rebar Vision
-            </span>
+            <div className="min-w-0">
+              <div className="truncate font-['Bahnschrift','Segoe_UI',sans-serif] text-base font-bold tracking-tight text-white">
+                RebarForge Pro
+              </div>
+              <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                Estimator OS
+              </div>
+            </div>
           )}
         </div>
 
-        {/* Main Navigation */}
-        <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+        <SidebarGroup className="px-2">
+          <SidebarGroupLabel className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Workspace</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {mainNav.map((item) => (
                 <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild>
-                    <NavLink
-                      to={item.url}
-                      end={item.end}
-                      className="hover:bg-muted/50"
-                      activeClassName="bg-sidebar-accent text-primary font-medium"
-                    >
+                  <SidebarMenuButton asChild className="rounded-xl text-slate-200 hover:bg-white/8 hover:text-white data-[active=true]:bg-teal-500/15 data-[active=true]:text-white">
+                    <NavLink to={item.url} end={item.end} className="hover:bg-transparent" activeClassName="bg-teal-500/15 text-white font-medium">
                       <item.icon className="mr-2 h-4 w-4" />
                       {!collapsed && <span>{item.title}</span>}
                     </NavLink>
@@ -99,23 +93,17 @@ export default function AppSidebar({ activeProjectId, activeProjectName }: AppSi
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Active Project Navigation */}
         {projectBase && (
-          <SidebarGroup>
-            <SidebarGroupLabel>
-              {collapsed ? "Proj" : (activeProjectName || "Project")}
+          <SidebarGroup className="px-2">
+            <SidebarGroupLabel className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+              {collapsed ? "Proj" : activeProjectName || "Project"}
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {projectNav.map((item) => (
                   <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild>
-                      <NavLink
-                        to={`${projectBase}${item.suffix}`}
-                        end={item.end}
-                        className="hover:bg-muted/50"
-                        activeClassName="bg-sidebar-accent text-primary font-medium"
-                      >
+                    <SidebarMenuButton asChild className="rounded-xl text-slate-200 hover:bg-white/8 hover:text-white data-[active=true]:bg-teal-500/15 data-[active=true]:text-white">
+                      <NavLink to={`${projectBase}${item.suffix}`} end={item.end} className="hover:bg-transparent" activeClassName="bg-teal-500/15 text-white font-medium">
                         <item.icon className="mr-2 h-4 w-4" />
                         {!collapsed && <span>{item.title}</span>}
                       </NavLink>
@@ -124,12 +112,8 @@ export default function AppSidebar({ activeProjectId, activeProjectName }: AppSi
                 ))}
                 {activeProjectId && (
                   <SidebarMenuItem>
-                    <SidebarMenuButton asChild>
-                      <NavLink
-                        to={`/app/legacy/project/${activeProjectId}`}
-                        className="hover:bg-muted/50"
-                        activeClassName="bg-sidebar-accent text-primary font-medium"
-                      >
+                    <SidebarMenuButton asChild className="rounded-xl text-slate-200 hover:bg-white/8 hover:text-white data-[active=true]:bg-teal-500/15 data-[active=true]:text-white">
+                      <NavLink to={`/app/legacy/project/${activeProjectId}`} className="hover:bg-transparent" activeClassName="bg-teal-500/15 text-white font-medium">
                         <Settings className="mr-2 h-4 w-4" />
                         {!collapsed && <span>Legacy View</span>}
                       </NavLink>
@@ -142,11 +126,11 @@ export default function AppSidebar({ activeProjectId, activeProjectName }: AppSi
         )}
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border p-2 space-y-1">
+      <SidebarFooter className="border-t border-white/10 bg-[#141c20] p-2 space-y-1">
         <BrainKnowledgeDialog />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="w-full justify-start gap-2 text-sidebar-foreground text-xs">
+            <Button variant="ghost" size="sm" className="w-full justify-start gap-2 rounded-xl text-xs text-slate-300 hover:bg-white/8 hover:text-white">
               <Globe className="h-4 w-4" />
               {!collapsed && currentLanguageInfo.nativeName}
             </Button>
@@ -160,11 +144,11 @@ export default function AppSidebar({ activeProjectId, activeProjectName }: AppSi
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="ghost" size="sm" onClick={toggleTheme} className="w-full justify-start gap-2 text-sidebar-foreground text-xs">
+        <Button variant="ghost" size="sm" onClick={toggleTheme} className="w-full justify-start gap-2 rounded-xl text-xs text-slate-300 hover:bg-white/8 hover:text-white">
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           {!collapsed && (theme === "dark" ? "Light Mode" : "Dark Mode")}
         </Button>
-        <Button variant="ghost" size="sm" onClick={signOut} className="w-full justify-start gap-2 text-sidebar-foreground hover:text-destructive text-xs">
+        <Button variant="ghost" size="sm" onClick={signOut} className="w-full justify-start gap-2 rounded-xl text-xs text-slate-300 hover:bg-white/8 hover:text-rose-300">
           <LogOut className="h-4 w-4" />
           {!collapsed && "Sign Out"}
         </Button>
