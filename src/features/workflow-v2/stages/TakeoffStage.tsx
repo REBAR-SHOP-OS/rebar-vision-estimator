@@ -709,6 +709,16 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
             <Pill tone="direct">{totals.rows} ROWS</Pill>
             <Pill tone="supported">{totals.weight.toFixed(0)} KG</Pill>
             {totals.blocked > 0 && <Pill tone="blocked" solid>{totals.blocked} BLOCKED</Pill>}
+            <div className="inline-flex items-center border border-border h-7" title="Waste factor (G4) — applied at segment total. Re-run takeoff to apply.">
+              <span className="px-2 text-[9px] font-mono uppercase tracking-wider text-muted-foreground">Waste</span>
+              {([5, 7, 10] as const).map((p) => (
+                <button key={p}
+                  onClick={() => updateWastePct(p)}
+                  className={`h-7 px-2 text-[10px] font-mono border-l border-border ${wastePct === p ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent/40"}`}>
+                  {p}%
+                </button>
+              ))}
+            </div>
             <button
               onClick={computeBestGuessAll}
               disabled={bestGuessRunning || generating}
