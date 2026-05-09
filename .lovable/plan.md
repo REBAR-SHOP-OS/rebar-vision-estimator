@@ -1,35 +1,37 @@
-## Goal
+# Stage 03 Scale Calibration — Loading & Stuck-State Fix
 
-After upload, the app already runs `parseAndIndexFile` (OCR → `drawing_search_index`). What's missing:
-1. The OCR text isn't held in the workflow's "project memory" (the per-project `local` state) — every downstream stage re-fetches it.
-2. Dimensions are only extracted when the user manually triggers it, so Stage 04 (Takeoff) and the estimate aren't pre-armed.
+## Problem
 
-This plan wires both into the existing post-upload pipeline so by the time the user reaches Calibration / Takeoff, OCR is cached and dimensions are already resolved per segment.
+Users report Stage 03 (Scale Calibration) feels "stuck". Audit of `src/features/workflow-v2/stages/CalibrationStage.tsx`:
 
-## Changes (minimum patch, no rewrites)
+- `confirmAll()` is fully synchronous (`setLocal` + `refresh` + `goToStage("takeoff")`) — navigation actually fires immediately, but there is **no visual feedback** between click and the next stage rendering, so the UI looks frozen for a beat.
+- `load()` runs four sequential Supabase queries (drawing_search_index, sheet_revisions, logical_drawings, document_versions). On large projects this can take several seconds. During that time the **only** indicator is a small "Loading sheets…" empty-state in the body — the **Re-detect** and **Confirm** buttons in the header give no spinner and stay clickable, so repeat clicks queue up duplicate loads.
+- If `load()` throws (network blip, RLS error, table miss), `setLoading(false)` is never reached → permanent "Loading sheets…" with no error → user perceives the stage as bricked. There is no try/catch and no toast.
+- `confirmAll()` does not check `allConfirmable` itself (it relies on `disabled`), and does not guard against double-click during the brief navigation window.
 
-### 1. `src/lib/parse-file.ts`
-- After successful indexing, return the `pages` array (page_number + raw_text + title_block + ocr_metadata) in `ParseFileResult` so the caller can cache it without a second DB hit.
+## Fix (minimum patch, single file)
 
-### 2. `src/features/workflow-v2/stages/FilesStage.tsx` (`handleUpload` + `handleReindexAll`)
-- After the per-file `parseAndIndexFile` loop finishes successfully:
-  - Build an in-memory map `{ [fileId]: { pages: [...], indexed_at } }` and persist via `state.setLocal({ ocrCache: { ...prev, ...new } })`. This is the "temporary project memory" — survives reloads (localStorage) and is read by Scope/Calibration/Takeoff/Assistant without re-querying.
-  - Fire `supabase.functions.invoke("extract-dimensions", { body: { project_id: projectId } })` once after the batch (not per file). Toast: "Pre-computing dimensions for takeoff…". On success, write `state.setLocal({ dimensionsCache: { resolved_at, segments: <summary> } })` with the returned segment summary (id, geometry, missing_fields, confidence). Failures are non-fatal — log + toast warning, takeoff still works on demand.
+Edit only `src/features/workflow-v2/stages/CalibrationStage.tsx`:
 
-### 3. `src/features/workflow-v2/useWorkflowState.ts`
-- Add typed accessors `local.ocrCache` and `local.dimensionsCache` (no schema changes — already free-form `local`). No state shape change required; this step is documentation-only inside the file (1–2 line JSDoc on `local`).
-
-### 4. `src/features/workflow-v2/stages/TakeoffStage.tsx` and `stages/assistant-logic.ts`
-- Where they currently fetch `drawing_search_index` rows or call `extract-dimensions` on demand, **first** check `state.local.ocrCache` / `state.local.dimensionsCache`. If present and non-empty, use cached values; otherwise fall back to the existing fetch. Pure additive guard, no removal of existing logic.
-
-### 5. Bust the cache on re-upload / re-index
-- In `handleUpload` and `handleReindexAll`, before the loop, clear stale cached entries for files being replaced (`ocrCache[fileId]` set to undefined). After completion, re-run dimension extraction so the cache reflects the latest sheets.
+1. **Wrap `load()` in try/catch/finally** — guarantees `setLoading(false)` runs even on error. Surface failure with `toast.error("Failed to load sheets — retry")` (already importing `sonner` patterns elsewhere).
+2. **Add a `confirming` boolean state**. `confirmAll()` becomes:
+   - set `confirming = true`
+   - run `setLocal` + `refresh`
+   - `requestAnimationFrame(() => goToStage?.("takeoff"))` so React paints the disabled/loading state before unmount
+   - reset `confirming` in a `finally`-style guard (mostly cosmetic since the component unmounts).
+3. **Header buttons reflect in-flight state**:
+   - Re-detect button: show `<Loader2 className="animate-spin" />` and `disabled` while `loading === true`.
+   - Confirm button: show spinner + "Confirming…" label while `confirming === true`, and `disabled` whenever `loading || confirming || !allConfirmable`.
+4. **Body loading state**: replace the bare `EmptyState title="Loading sheets…"` with the same EmptyState plus a centered `<Loader2 className="animate-spin" />` so the user sees motion (not just static text). No new component — reuse the spinner icon already imported elsewhere via `lucide-react`.
+5. **Prevent duplicate `load()` calls** by early-returning if `loading === true` at the top of the function.
 
 ## Out of scope
-- No DB migrations.
-- No edge-function changes (`extract-dimensions` already exists and writes `agent_knowledge` + `estimate_items.assumptions_json`).
-- No UI redesign — only background pre-warming + cache reads.
-- No changes to `WorkflowShell.tsx`, `ScopeStage`, `CalibrationStage`, or stage-gate logic.
+
+- No changes to `scale-resolver.ts`, `WorkflowShell.tsx`, `useWorkflowState.ts`, `TakeoffStage.tsx`, or any edge function.
+- No DB schema or RLS changes.
+- No redesign of the calibration flow — only loading-state hardening.
+- The existing gating logic (low-confidence auto values count as resolved, Confirm enabled when `allConfirmable`) is preserved exactly.
 
 ## Risk
-Low. Cache is additive: if it's missing or stale, existing fetch paths run unchanged. Dimension pre-extraction is fire-and-forget — failure does not block upload or navigation. localStorage size is bounded (text per page already <4KB after server cap; tens of pages at most).
+
+Very low. All changes are additive UI guards in one file. Worst case: a spinner shows for an extra frame. Existing tests (`stage-2-to-3-navigation.test.ts`) only assert gate logic, which is unchanged.
