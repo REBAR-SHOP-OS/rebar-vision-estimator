@@ -42,10 +42,24 @@ function detectSheetDiscipline(opts: { fileName?: string | null; sheetNumber?: s
   return "Other";
 }
 
+const REBAR_KEYWORDS = /(concrete|rebar|reinforc|bar mark|f['\u2019]c|\bpsi\b|\bmpa\b|slab|footing|pier|pile|pile cap|cap beam|\bbeam\b|\bcolumn\b|wall reinf|\blap\b|dowel|stirrup|\btie\b|\bhook\b|#\s?[3-9]|#\s?1[0-1])/i;
+const REBAR_SHEET_NUM = /^(s[a-z]?-?\d|sd-?\d|f[a-z]?-?\d|fd-?\d|c[a-z]?-?\d)/i;
+function isRelevantSheet(opts: { rawText: string; sheetNumber: string | null; tableDiscipline: string | null; barMarks: string[] | null; fileName?: string | null }): boolean {
+  const td = (opts.tableDiscipline || "").toLowerCase();
+  if (td.startsWith("struct") || td.startsWith("found") || td.startsWith("civil")) return true;
+  if (opts.barMarks && opts.barMarks.length > 0) return true;
+  if (opts.sheetNumber && REBAR_SHEET_NUM.test(opts.sheetNumber.trim())) return true;
+  if (opts.fileName && REBAR_SHEET_NUM.test(opts.fileName.trim())) return true;
+  if (opts.rawText && REBAR_KEYWORDS.test(opts.rawText)) return true;
+  return false;
+}
+
 export default function CalibrationStage({ projectId, state, goToStage }: StageProps) {
   const [sheets, setSheets] = useState<SheetRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState(false);
+  const [hiddenCount, setHiddenCount] = useState(0);
+  const [showAll, setShowAll] = useState<boolean>(!!state.local.calibrationShowAll);
 
   const load = async () => {
     if (loading && sheets.length > 0) return; // ignore overlapping clicks once primed
@@ -53,11 +67,13 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
     try {
     const { data, error } = await supabase
       .from("drawing_search_index")
-      .select("id, page_number, raw_text, sheet_revision_id, logical_drawing_id, document_version_id")
+      .select("id, page_number, raw_text, sheet_revision_id, logical_drawing_id, document_version_id, bar_marks")
       .eq("project_id", projectId)
       .order("page_number", { ascending: true });
     if (error) throw error;
-    const indexRows = (data || []) as Array<{ id: string; page_number: number | null; raw_text: string | null; sheet_revision_id: string | null; logical_drawing_id: string | null; document_version_id: string | null }>;
+    const indexRowsRaw = (data || []) as Array<{ id: string; page_number: number | null; raw_text: string | null; sheet_revision_id: string | null; logical_drawing_id: string | null; document_version_id: string | null; bar_marks: string[] | null }>;
+    // Truncate OCR to first 4 KB — scale text + relevance keywords always live near title block.
+    const indexRows = indexRowsRaw.map((r) => ({ ...r, raw_text: (r.raw_text || "").slice(0, 4096) }));
     const sheetRevIds = Array.from(new Set(indexRows.map((r) => r.sheet_revision_id).filter(Boolean) as string[]));
     const logicalIds = Array.from(new Set(indexRows.map((r) => r.logical_drawing_id).filter(Boolean) as string[]));
     const docVerIds = Array.from(new Set(indexRows.map((r) => r.document_version_id).filter(Boolean) as string[]));
@@ -70,7 +86,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
     const logicMap = new Map<string, { sheet_id: string | null; discipline: string | null }>((logicRes.data || []).map((r: any) => [r.id, { sheet_id: r.sheet_id, discipline: r.discipline }]));
     const docMap = new Map<string, string>((docRes.data || []).map((r: any) => [r.id, r.file_name]));
     const overrideMap = (state.local.disciplineOverride || {}) as Record<string, Discipline>;
-    const rows: SheetRow[] = indexRows.map((r) => {
+    const allRows: Array<SheetRow & { _relevant: boolean }> = indexRows.map((r) => {
       const rev = r.sheet_revision_id ? revMap.get(r.sheet_revision_id) : undefined;
       const logic = r.logical_drawing_id ? logicMap.get(r.logical_drawing_id) : undefined;
       const fileName = r.document_version_id ? docMap.get(r.document_version_id) : undefined;
@@ -79,6 +95,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
       const detected = detectSheetDiscipline({ fileName, sheetNumber, rawText: r.raw_text, tableDiscipline });
       const override = overrideMap[r.id];
       const cal = resolveScale({ rawText: r.raw_text || "" });
+      const relevant = isRelevantSheet({ rawText: r.raw_text || "", sheetNumber, tableDiscipline, barMarks: r.bar_marks, fileName });
       return {
         id: r.id,
         page_number: r.page_number,
@@ -88,8 +105,12 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
         ppfOverride: cal && cal.pixelsPerFoot > 0 ? cal.pixelsPerFoot.toFixed(2) : "",
         detectedDiscipline: detected,
         discipline: override || detected,
+        _relevant: relevant,
       };
     });
+    const filtered = showAll ? allRows : allRows.filter((r) => r._relevant);
+    setHiddenCount(allRows.length - filtered.length);
+    const rows: SheetRow[] = filtered.map(({ _relevant, ...r }) => r);
     // hydrate from local
     const stored = (state.local.calibration || {}) as Record<string, Calibration>;
     for (const r of rows) {
@@ -116,7 +137,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, showAll]);
 
   const persist = (next: SheetRow[]) => {
     const map: Record<string, Calibration> = {};
@@ -201,6 +222,20 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
         subtitle="Structural sheets drive takeoff. Architectural sheets are reference only — Structural always wins on conflicting dimensions."
         right={
           <div className="flex items-center gap-2">
+            {hiddenCount > 0 && !showAll && (
+              <span className="text-[11px] text-muted-foreground font-mono tabular-nums">
+                {sheets.length} relevant · {hiddenCount} hidden
+              </span>
+            )}
+            <label className="flex items-center gap-1 text-[11px] text-muted-foreground cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={showAll}
+                onChange={(e) => { setShowAll(e.target.checked); state.setLocal({ calibrationShowAll: e.target.checked }); }}
+                className="h-3 w-3"
+              />
+              Show all sheets
+            </label>
             <Button size="sm" variant="outline" onClick={load} disabled={loading}>
               {loading ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <RefreshCcw className="w-3.5 h-3.5 mr-1.5" />}
               {loading ? "Loading…" : "Re-detect"}
