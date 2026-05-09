@@ -177,12 +177,54 @@ export function tryKnownObject(
   };
 }
 
+/**
+ * Layer B2 (text-only fallback): no scale text, no measured pixel dimensions.
+ * Scrape any imperial / metric size annotation from the raw OCR text and infer
+ * px/ft by assuming the longest documented run roughly spans the drawable
+ * width of an ANSI D sheet rasterised at 96 DPI (~3264 px ≈ 34 in). This is a
+ * trust-first proposal — always returned as low confidence so the estimator
+ * must accept it before the calibration gate unlocks.
+ */
+export function tryAutoDimensionFromText(rawText?: string | null): Calibration | null {
+  if (!rawText) return null;
+  const text = rawText.replace(/\s+/g, " ");
+  const matches: { feet: number; text: string }[] = [];
+  const patterns: RegExp[] = [
+    /(\d+(?:\.\d+)?)\s*'\s*-?\s*(\d+(?:\.\d+)?)\s*"/g,   // 12'-6"
+    /(\d+(?:\.\d+)?)\s*'(?!\s*\d)/g,                       // 12'
+    /(\d+(?:\.\d+)?)\s*"/g,                                // 6"
+    /(\d+(?:\.\d+)?)\s*(mm|cm|m)\b/gi,                     // 150 mm / 3 m
+  ];
+  for (const re of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      const ft = parseImperialFeet(m[0]);
+      if (ft && ft >= 0.5 && ft <= 200) matches.push({ feet: ft, text: m[0].trim() });
+    }
+  }
+  if (matches.length === 0) return null;
+  matches.sort((a, b) => a.feet - b.feet);
+  const median = matches[Math.floor(matches.length / 2)];
+  const ANSI_D_WIDTH_PX = 3264; // 34 in @ 96 DPI
+  let pixelsPerFoot = ANSI_D_WIDTH_PX / Math.max(median.feet, 0.5);
+  pixelsPerFoot = Math.min(384, Math.max(16, pixelsPerFoot));
+  return {
+    source: "auto_dimension",
+    scaleText: median.text,
+    pixelsPerFoot,
+    confidence: "low",
+    method: `Auto-inferred from ${matches.length} dimension annotation(s) — verify before takeoff`,
+  };
+}
+
 /** Try every layer in priority order. */
 export function resolveScale(input: SheetScaleInputs): Calibration | null {
   const a = tryTitleBlockText(input.rawText);
   if (a && a.pixelsPerFoot > 0 && a.confidence === "high") return a;
   const b = tryDimensionAnnotation(input.dimensions);
   if (b && b.pixelsPerFoot > 0) return b;
+  const auto = tryAutoDimensionFromText(input.rawText);
+  if (auto && auto.pixelsPerFoot > 0) return auto;
   const c = tryKnownObject(input.knownObjects);
   if (c) return c;
   return a; // may be a low-confidence "SCALE keyword found" hit
