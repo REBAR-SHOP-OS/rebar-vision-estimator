@@ -3,26 +3,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { StageHeader, Pill, EmptyState, type StageProps } from "./_shared";
 import { ArrowRight, Check, X, GitMerge, Split, Layers, Loader2 } from "lucide-react";
+import TakeoffCanvas, { type TakeoffCanvasLayer } from "@/components/takeoff-canvas/TakeoffCanvas";
+import { inferSegmentType } from "@/lib/segment-type";
 
 type Decision = "accept" | "hold" | "reroute";
-
-// Map a free-form scope label to one of the allowed segment_type values
-// used by the takeoff engine. Defaults to "miscellaneous" only when no
-// pattern matches, instead of always "miscellaneous".
-function inferSegmentType(label: string): string {
-  const n = (label || "").toLowerCase();
-  if (/(retain|retaining)/.test(n)) return "retaining_wall";
-  if (/(wall|frost wall|foundation wall)/.test(n)) return "wall";
-  if (/(footing|ftg|pile cap|pile|caisson|grade beam|raft|mat)/.test(n)) return "footing";
-  if (/(slab|sog|slab[- ]on[- ]grade|topping|deck)/.test(n)) return "slab";
-  if (/(beam|girder|joist|lintel|bond beam)/.test(n)) return "beam";
-  if (/(column|col\b)/.test(n)) return "column";
-  if (/(pier)/.test(n)) return "pier";
-  if (/(stair)/.test(n)) return "stair";
-  if (/(pit|sump|elevator pit)/.test(n)) return "pit";
-  if (/(curb|stoop|ledge|housekeeping pad|equipment pad)/.test(n)) return "curb";
-  return "miscellaneous";
-}
 
 interface Candidate {
   id: string;
@@ -179,17 +163,27 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
     decisions[candidate.id] || (serverApprovedLabels.has(candidate.label) ? "accept" : undefined);
 
   const accepted = candidates.filter((c) => getDecision(c) === "accept");
-  // Group accepted by archetype label for "Approved Scope" buckets
-  const buckets = useMemo(() => {
-    const m = new Map<string, Candidate[]>();
+  const newCount = candidates.filter((c) => !getDecision(c)).length;
+
+  // Build canvas layers from approved buckets (one layer per archetype label).
+  const canvasLayers: TakeoffCanvasLayer[] = useMemo(() => {
+    const m = new Map<string, { name: string; type: string; count: number }>();
     accepted.forEach((c) => {
       const k = c.label.split("—")[0].split("/")[0].trim();
-      if (!m.has(k)) m.set(k, []);
-      m.get(k)!.push(c);
+      const existing = m.get(k);
+      if (existing) existing.count += 1;
+      else m.set(k, { name: k, type: inferSegmentType(k), count: 1 });
     });
-    return Array.from(m.entries());
+    return Array.from(m.entries()).map(([k, v]) => ({
+      id: `synthetic-${k}`,
+      name: v.name,
+      segment_type: v.type,
+      count: v.count,
+      unit: "items",
+    }));
   }, [accepted]);
-  const newCount = candidates.filter((c) => !getDecision(c)).length;
+
+  const firstFile = state.files[0];
 
   return (
     <div className="grid h-full" style={{ gridTemplateColumns: "360px 64px 1fr" }}>
@@ -259,7 +253,7 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
       <div className="flex flex-col min-h-0">
         <StageHeader
           kicker="Approved Scope"
-          title="Construction Buckets"
+          title="Takeoff Canvas"
           right={
             <div className="flex items-center gap-3">
               <div className="flex gap-4 text-[11px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
@@ -276,29 +270,14 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
             </div>
           }
         />
-        <div className="flex-1 overflow-auto p-4">
-          {accepted.length === 0 ? (
-            <EmptyState title="No approved scope yet" hint="Review candidates on the left and approve them to populate buckets." />
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {buckets.map(([name, items]) => (
-                <div key={name} className="ip-card p-3">
-                  <div className="flex items-baseline justify-between mb-2">
-                    <div className="text-[11px] uppercase tracking-[0.14em] font-semibold">{name}</div>
-                    <div className="text-[10px] text-muted-foreground tabular-nums">{items.length} Units</div>
-                  </div>
-                  <div className="space-y-1.5">
-                    {items.map((it, i) => (
-                      <div key={it.id} className="flex justify-between text-[12px] tabular-nums">
-                        <span className="text-foreground">{name.charAt(0)}{i + 1}</span>
-                        <span className="text-muted-foreground">— TN</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="flex-1 min-h-0">
+          <TakeoffCanvas
+            projectId={projectId}
+            layers={canvasLayers}
+            filePath={firstFile?.file_path}
+            fileName={firstFile?.file_name}
+            emptyHint={accepted.length === 0 ? "Approve candidates on the left to add layers." : "Upload a drawing to see the canvas."}
+          />
         </div>
       </div>
     </div>

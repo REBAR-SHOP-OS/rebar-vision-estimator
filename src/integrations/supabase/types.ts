@@ -1529,6 +1529,7 @@ export type Database = {
           level_label: string | null
           name: string
           notes: string | null
+          overlay_color: string | null
           project_id: string
           segment_type: string
           status: string | null
@@ -1547,6 +1548,7 @@ export type Database = {
           level_label?: string | null
           name: string
           notes?: string | null
+          overlay_color?: string | null
           project_id: string
           segment_type?: string
           status?: string | null
@@ -1565,6 +1567,7 @@ export type Database = {
           level_label?: string | null
           name?: string
           notes?: string | null
+          overlay_color?: string | null
           project_id?: string
           segment_type?: string
           status?: string | null
@@ -1780,6 +1783,45 @@ export type Database = {
           symbol_id?: string
           unit_default?: string | null
           user_id?: string | null
+        }
+        Relationships: []
+      }
+      takeoff_overlays: {
+        Row: {
+          area_sqft: number | null
+          color_hint: string | null
+          created_at: string
+          id: string
+          page_number: number
+          polygon: Json
+          project_id: string
+          segment_id: string | null
+          source_file_id: string | null
+          user_id: string
+        }
+        Insert: {
+          area_sqft?: number | null
+          color_hint?: string | null
+          created_at?: string
+          id?: string
+          page_number?: number
+          polygon: Json
+          project_id: string
+          segment_id?: string | null
+          source_file_id?: string | null
+          user_id: string
+        }
+        Update: {
+          area_sqft?: number | null
+          color_hint?: string | null
+          created_at?: string
+          id?: string
+          page_number?: number
+          polygon?: Json
+          project_id?: string
+          segment_id?: string | null
+          source_file_id?: string | null
+          user_id?: string
         }
         Relationships: []
       }

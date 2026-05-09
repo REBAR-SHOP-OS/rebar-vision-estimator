@@ -3,8 +3,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { StageHeader, Pill, EmptyState, CalibrationGate, type StageProps } from "./_shared";
-import { Sparkles, FileText, CheckCircle2, Loader2, Wand2, Pencil, Save, X, ChevronDown, ChevronRight } from "lucide-react";
+import { Sparkles, FileText, CheckCircle2, Loader2, Wand2, Pencil, Save, X, ChevronDown, ChevronRight, Layers, Table as TableIcon } from "lucide-react";
 import PdfRenderer from "@/components/chat/PdfRenderer";
+import TakeoffCanvas, { type TakeoffCanvasLayer } from "@/components/takeoff-canvas/TakeoffCanvas";
+import { inferSegmentType } from "@/lib/segment-type";
 import { loadWorkflowTakeoffRows, type WorkflowTakeoffRow } from "../takeoff-data";
 import { parseAndIndexFile } from "@/lib/parse-file";
 function getFunctionErrorMessage(error: unknown, fallback: string) {
@@ -235,6 +237,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
   const [reindexRunning, setReindexRunning] = useState(false);
   const [allSegments, setAllSegments] = useState<{ id: string; name: string }[]>([]);
   const [wastePct, setWastePct] = useState<5 | 7 | 10>(7);
+  const [viewMode, setViewMode] = useState<"table" | "canvas">("table");
 
   // Load + persist global waste factor from user's standards_profile.
   useEffect(() => {
@@ -675,6 +678,31 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
     return <CalibrationGate state={state} goToStage={goToStage} stageLabel="Takeoff" />;
   }
 
+  if (viewMode === "canvas") {
+    const canvasLayers: TakeoffCanvasLayer[] = (allSegments.length > 0
+      ? allSegments.map((s) => ({ id: s.id, name: s.name, segment_type: inferSegmentType(s.name) }))
+      : []
+    );
+    const firstFile = state.files[0];
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <StageHeader
+          kicker="Stage 03 — Canvas"
+          title="Takeoff Canvas"
+          right={
+            <div className="inline-flex items-center border border-border h-7">
+              <button onClick={() => setViewMode("table")} className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:bg-accent/40 inline-flex items-center gap-1"><TableIcon className="w-3 h-3" /> Table</button>
+              <button onClick={() => setViewMode("canvas")} className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider bg-primary text-primary-foreground inline-flex items-center gap-1 border-l border-border"><Layers className="w-3 h-3" /> Canvas</button>
+            </div>
+          }
+        />
+        <div className="flex-1 min-h-0">
+          <TakeoffCanvas projectId={projectId} layers={canvasLayers} filePath={firstFile?.file_path} fileName={firstFile?.file_name} emptyHint="Approve scope first to populate layers." />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="grid h-full" style={{ gridTemplateColumns: "240px 1fr 380px" }}>
       <aside className="border-r border-border flex flex-col min-h-0" style={{ background: "hsl(var(--card))" }}>
@@ -724,6 +752,10 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
             <Pill tone="direct">{totals.rows} ROWS</Pill>
             <Pill tone="supported">{totals.weight.toFixed(0)} KG</Pill>
             {totals.blocked > 0 && <Pill tone="blocked" solid>{totals.blocked} BLOCKED</Pill>}
+            <div className="inline-flex items-center border border-border h-7" title="Switch between table and canvas view">
+              <button onClick={() => setViewMode("table")} className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider inline-flex items-center gap-1 bg-primary text-primary-foreground"><TableIcon className="w-3 h-3" /> Table</button>
+              <button onClick={() => setViewMode("canvas")} className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider inline-flex items-center gap-1 border-l border-border text-muted-foreground hover:bg-accent/40"><Layers className="w-3 h-3" /> Canvas</button>
+            </div>
             <div className="inline-flex items-center border border-border h-7" title="Waste factor (G4) — applied at segment total. Re-run takeoff to apply.">
               <span className="px-2 text-[9px] font-mono uppercase tracking-wider text-muted-foreground">Waste</span>
               {([5, 7, 10] as const).map((p) => (
