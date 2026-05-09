@@ -1,51 +1,41 @@
-# Takeoff Canvas — Fix overlay + reclaim viewport
 
-The Canvas view currently (a) draws polygons that don't appear because they aren't tied to the active sheet/page, (b) has a hard-to-see "active layer" state, and (c) wastes half the screen on chrome (260px Layers rail + 78vh image cap + workflow stage strip + app sidebar). All work stays in `src/components/takeoff-canvas/TakeoffCanvas.tsx` and the canvas branch of `TakeoffStage.tsx` / `ScopeStage.tsx`. No DB schema changes (the existing `takeoff_overlays` table already has `page_number`).
+## Problem
 
-## 1. Overlay bug — target the right page/sheet
+In `src/components/takeoff-canvas/TakeoffCanvas.tsx`:
 
-**Symptom:** Layers show `0 drawn` even after drawing; polygon disappears as soon as PDF renders page 1.
+- The `<img>` uses `object-contain` and shrinks to fit, but the `<svg>` overlay is `absolute inset-0` over the **whole stage container**. So a polygon stored as `(0..1, 0..1)` of the image is painted as `(0..1, 0..1)` of the entire (much larger) stage — making it land far from the drawing, often off-screen.
+- During drawing, click coordinates are also normalised against the stage rect, not the image rect — so the points you click and the saved polygon do not correspond to the same place on the sheet.
+- The image visually pins to the bottom because the centering wrapper is fighting the headless `PdfRenderer` slot above it; the image is centered inside a too-tall flex column.
 
-**Causes**
-- `useEffect` that loads polygons keys on `page` but `page` defaults to `1` and only updates after `PdfRenderer` reports `pageNumber`. The save uses the same stale `page`, so polygons are written for page 1 even when a multi-sheet PDF is showing a different sheet.
-- `takeoff_overlays` rows don't carry the file/sheet identifier, so loading the canvas with a different file shows old polygons.
+Both symptoms ("no overlay visible" + "image stuck at the bottom") come from the same root cause: the stage doesn't track the actual image bounds.
 
-**Fix (minimal patch)**
-- Pass and store `file_path` (or `legacy_file_id` when available) on each overlay row by extending the `insert` payload with `source_file: filePath`. Add the same column to the `select` filter so polygons load only for the current sheet. (Column already exists in `takeoff_overlays` — if not, add it via a small additive migration with a nullable `source_file text` column. No data backfill needed.)
-- Synchronise the persisted `page` with what `PdfRenderer` actually rendered: derive saves from a single `currentPage` state set inside `onRender`, so the first save matches the visible sheet.
-- Re-fetch polygons whenever `signedUrl` or `currentPage` change (currently keyed only on `page`).
+## Fix (single file: `src/components/takeoff-canvas/TakeoffCanvas.tsx`)
 
-## 2. Make selection + drawing obvious
+1. Introduce an **image-bound wrapper** that the `<img>` and `<svg>` both live inside, sized to the image's natural aspect ratio:
+   - Compute aspect ratio from `imgSize` (`w/h`).
+   - Wrapper uses `max-h-full max-w-full` with `aspectRatio: w/h` so it matches the rendered image rect exactly.
+   - `<img>` becomes `h-full w-full object-contain` (or `object-fill` since the box already matches the aspect).
+   - `<svg>` is `absolute inset-0` of this wrapper — now `viewBox="0 0 1 1"` truly maps to the visible image.
 
-- Highlight the active layer with a solid swatch border + filled background (use `bg-primary/15` and a 2px ring) so it reads in dark mode.
-- Auto-switch the tool to `polygon` the moment a layer is clicked (and back to `pan` after the polygon is committed) so users don't need to discover the keyboard shortcut.
-- Show the active layer name + a "Click to add point · Double-click to close" hint inline at the top of the stage instead of only in the bottom status strip.
-- Keep saved polygons clickable in any tool, but make them brighter (raise `fillOpacity` from 0.28 → 0.45 and stroke width from 0.003 → 0.005) so existing overlays are visible on dense drawings.
+2. Update `onStageClick` to normalize against the **image wrapper**'s rect (new ref `imageBoxRef`), not the outer stage. Reject clicks that fall outside the image box.
 
-## 3. Reclaim space for the blueprint
+3. Centering: keep the outer flex `items-center justify-center`, but remove the extra nested `flex` wrapper that was making the image cling to the bottom. The aspect-ratio box will naturally center.
 
-In `TakeoffCanvas.tsx`:
-- Drop the right `Layers` aside from 260px → collapsible 56px rail (icon-only swatches with a tooltip) and add a chevron to expand to a 220px panel on demand. Default state = collapsed for first paint.
-- Remove the bottom status bar (move "tool / pts" into the floating tool palette tooltip and active-layer chip). Saves ~28px vertical.
-- Replace the `max-h-[78vh]` cap on the `<img>` with `h-full w-full` inside a flex container so the sheet fills all remaining vertical/horizontal space.
-- Remove the redundant top "Sheet … 1 / 18" bar and merge page nav into the tool palette as ◀ N/M ▶ buttons.
+4. Make sure the `PdfRenderer` stays headless (it already is — no visible output). No layout slot for it in the stage.
 
-In the canvas branch of `TakeoffStage.tsx` (lines 689-712):
-- Drop the `StageHeader` in canvas mode and render only a thin 32px top strip with the Table/Canvas toggle pinned right. The workflow stage strip on the left is already enough breadcrumb.
-
-In `ScopeStage.tsx` canvas usage (around line 304):
-- Same: collapse the methodology chips row into a single overflow chip (`Σ 5 steps`) when the viewport is narrower than 1100px so the canvas isn't shrunk.
-
-The combined effect: the blueprint area gains roughly +260px horizontal and +60px vertical at default zoom, which is what the user is asking for.
-
-## Files touched
-- `src/components/takeoff-canvas/TakeoffCanvas.tsx` — overlay fix, selection UX, collapsible Layers rail, removed status bar, fill-area image.
-- `src/features/workflow-v2/stages/TakeoffStage.tsx` — slimmer canvas-mode header (lines 689-712 only).
-- `src/features/workflow-v2/stages/ScopeStage.tsx` — responsive methodology chips (lines 270-302 only).
-- `supabase/migrations/<new>.sql` — only if `takeoff_overlays.source_file` doesn't exist; single `ALTER TABLE … ADD COLUMN source_file text;`.
-
-No other files, no rewrites of working logic, no changes to estimation pipeline, segments table, or AppSidebar.
+5. Small polish: when `imgSize` updates from either the PDF render callback or the `<img onLoad>`, prefer the rendered image's natural size (already handled), but reset `imgSize` on page change so the wrapper resizes correctly between sheets of different aspect ratios.
 
 ## Out of scope
-- Touching `AppSidebar`/workflow stage rail — those are shared chrome used by every other stage; collapsing them belongs to a separate request.
-- Pan/zoom gestures on the canvas (current Pan tool stays a no-op cursor change).
+
+- No DB, RLS, edge function, or schema changes.
+- No changes to layer panel, toolbar, sidebar, or stage picker.
+- No changes to polygon storage format (still `[[x,y], ...]` normalized 0..1 of the image).
+
+## Verification
+
+- Open `/app/project/.../` → Takeoff stage on a multi-page PDF.
+- Image should center in the available canvas area (no large empty band above it).
+- Pick a layer (e.g. Piers) → tool auto-switches to polygon → click 4 points around a feature → double-click to close.
+- Polygon should appear exactly where you clicked, in the layer's color, and persist after page navigation away and back.
+- Erase tool should hit-test the polygon correctly.
+

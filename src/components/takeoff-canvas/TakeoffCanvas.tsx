@@ -57,6 +57,38 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
   const [polygons, setPolygons] = useState<ManualPolygon[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
+  const imageBoxRef = useRef<HTMLDivElement>(null);
+  const [stageSize, setStageSize] = useState<{ w: number; h: number } | null>(null);
+
+  // Resolve project file id + signed URL.
+  // Track stage size for fitted image box.
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        const r = e.contentRect;
+        setStageSize({ w: r.width, h: r.height });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const fittedBox = useMemo(() => {
+    if (!imgSize || !stageSize) return null;
+    const padding = 16; // matches p-2 on stage (~8px each side)
+    const availW = Math.max(0, stageSize.w - padding);
+    const availH = Math.max(0, stageSize.h - padding);
+    const ar = imgSize.w / imgSize.h;
+    let w = availW;
+    let h = w / ar;
+    if (h > availH) {
+      h = availH;
+      w = h * ar;
+    }
+    return { w, h };
+  }, [imgSize, stageSize]);
 
   // Resolve project file id + signed URL.
   useEffect(() => {
@@ -93,6 +125,7 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
       setSourceFileId(id);
       setPage(1);
       setPdfImg(null);
+      setImgSize(null);
     })();
     return () => { cancelled = true; };
   }, [projectId, filePath, fileName]);
@@ -134,11 +167,12 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
   };
 
   const onStageClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (tool !== "polygon" || !stageRef.current || !activeLayer) return;
-    const rect = stageRef.current.getBoundingClientRect();
+    if (tool !== "polygon" || !imageBoxRef.current || !activeLayer) return;
+    const rect = imageBoxRef.current.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
-    setDraft((d) => [...d, [Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y))]]);
+    if (x < 0 || x > 1 || y < 0 || y > 1) return;
+    setDraft((d) => [...d, [x, y]]);
   };
 
   const finishDraft = useCallback(async () => {
@@ -266,15 +300,21 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
                 {signedUrl ? "Rendering sheet…" : (emptyHint || "Upload a drawing to enable the canvas.")}
               </div>
             ) : (
-              <div className="relative h-full w-full flex items-center justify-center">
+              <div
+                ref={imageBoxRef}
+                className="relative block"
+                style={fittedBox ? { width: `${fittedBox.w}px`, height: `${fittedBox.h}px` } : { width: "100%", height: "100%" }}
+              >
                 <img
                   src={(isPdf ? pdfImg : signedUrl) || undefined}
                   alt={resolvedName || "Sheet"}
                   draggable={false}
-                  className="block max-h-full max-w-full select-none object-contain"
+                  className="block h-full w-full select-none object-contain"
                   onLoad={(e) => {
                     const i = e.currentTarget;
-                    setImgSize({ w: i.naturalWidth, h: i.naturalHeight });
+                    if (i.naturalWidth && i.naturalHeight) {
+                      setImgSize({ w: i.naturalWidth, h: i.naturalHeight });
+                    }
                   }}
                 />
                 {imgSize && (
