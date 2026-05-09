@@ -15,10 +15,18 @@ export type CalibrationSource =
   | "title_block"
   | "dimension"
   | "auto_dimension"
+  | "grid_dimension"
   | "known_object"
   | "user";
 
 export type CalibrationConfidence = "high" | "medium" | "low" | "user";
+
+export interface DetailOverride {
+  tag: string;
+  scaleText: string;
+  pixelsPerFoot: number;
+  nts: boolean;
+}
 
 export interface Calibration {
   source: CalibrationSource;
@@ -26,6 +34,7 @@ export interface Calibration {
   pixelsPerFoot: number;
   confidence: CalibrationConfidence;
   method: string;
+  detailOverrides?: DetailOverride[];
 }
 
 export interface DimensionHint {
@@ -48,6 +57,7 @@ export interface SheetScaleInputs {
   rawText?: string | null;
   dimensions?: DimensionHint[];
   knownObjects?: KnownObjectHint[];
+  pageWidthPx?: number;
 }
 
 const FT_PER_IN = 1 / 12;
@@ -217,17 +227,118 @@ export function tryAutoDimensionFromText(rawText?: string | null): Calibration |
   };
 }
 
+/** Convert a "1:N" engineering ratio into pixels-per-foot at 96 DPI. */
+function pixelsPerFootFromRatio(denom: number): number {
+  if (!denom || denom <= 0) return 0;
+  const mmPerFootReal = 304.8;
+  const paperMmPerFoot = mmPerFootReal / denom;
+  return paperMmPerFoot * 3.7795275591;
+}
+
+/**
+ * Layer A2: grid-spacing inference. Looks for grid labels and adjacent
+ * 4–5 digit metric distance numbers (e.g. "Grid 1 ... 6133 ... Grid 2") and
+ * derives px/ft using the page's drawable width as the projection target.
+ */
+export function tryGridDimension(rawText?: string | null, pageWidthPx?: number): Calibration | null {
+  if (!rawText) return null;
+  const text = rawText.replace(/\s+/g, " ");
+  const gridRe = /\b(?:GRID|GRIDLINE|GL)\s*[:#]?\s*([0-9A-Z]{1,3})\b/gi;
+  const positions: { idx: number; label: string }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = gridRe.exec(text)) !== null) positions.push({ idx: m.index, label: m[1].toUpperCase() });
+  if (positions.length < 2) return null;
+  const samplesMm: number[] = [];
+  for (let i = 0; i < positions.length - 1; i++) {
+    const a = positions[i];
+    const b = positions[i + 1];
+    const window = text.slice(a.idx, Math.min(b.idx + 80, text.length));
+    const numRe = /(?<![\d.])(\d{4,5})(?![\d.])/g;
+    let nm: RegExpExecArray | null;
+    while ((nm = numRe.exec(window)) !== null) {
+      const n = Number(nm[1]);
+      if (n >= 1500 && n <= 60000) { samplesMm.push(n); break; }
+    }
+  }
+  if (samplesMm.length === 0) return null;
+  samplesMm.sort((a, b) => a - b);
+  const medianMm = samplesMm[Math.floor(samplesMm.length / 2)];
+  const medianFt = (medianMm / 1000) * 3.28084;
+  if (medianFt <= 0) return null;
+
+  // Estimate the projected pixel-span of the median grid bay.
+  // Default: assume the full set of grids spans ~85% of the drawable page width.
+  const drawableWidthPx = (pageWidthPx && pageWidthPx > 0 ? pageWidthPx : 3264) * 0.85;
+  const totalMm = samplesMm.reduce((s, v) => s + v, 0);
+  const totalFt = (totalMm / 1000) * 3.28084;
+  const pxPerFootFromTotal = totalFt > 0 ? drawableWidthPx / totalFt : 0;
+
+  // Confidence: high if ≥3 samples and they cluster within 5% of median.
+  const within5pct = samplesMm.filter((s) => Math.abs(s - medianMm) / medianMm <= 0.05).length;
+  let confidence: CalibrationConfidence = "low";
+  if (samplesMm.length >= 3 && within5pct >= 3) confidence = "high";
+  else if (samplesMm.length >= 2) confidence = "medium";
+
+  let pixelsPerFoot = pxPerFootFromTotal;
+  pixelsPerFoot = Math.min(384, Math.max(16, pixelsPerFoot));
+  return {
+    source: "grid_dimension",
+    scaleText: `${medianMm} mm grid bay`,
+    pixelsPerFoot,
+    confidence,
+    method: `Grid spacing: median ${medianMm} mm across ${samplesMm.length} bay(s)`,
+  };
+}
+
+/** Detect per-detail scale callouts (e.g. "1/S-6.0  SCALE: 1:25", "DETAIL B  N.T.S."). */
+export function tryDetailScales(rawText?: string | null): DetailOverride[] {
+  if (!rawText) return [];
+  const text = rawText.replace(/\s+/g, " ");
+  const out: DetailOverride[] = [];
+  const seen = new Set<string>();
+  const push = (tag: string, scaleText: string) => {
+    const key = `${tag}::${scaleText}`.toUpperCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    const nts = /N\.?T\.?S\.?/i.test(scaleText);
+    let ppf = 0;
+    if (!nts) {
+      const r = scaleText.match(/1\s*:\s*(\d+)/);
+      if (r) ppf = pixelsPerFootFromRatio(Number(r[1]));
+      else {
+        const arch = scaleText.match(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*"?\s*=\s*1\s*'/);
+        if (arch) ppf = (Number(arch[1]) / Number(arch[2])) * 96;
+      }
+    }
+    out.push({ tag, scaleText, pixelsPerFoot: ppf, nts });
+  };
+  const reA = /(\b\d+\s*\/\s*[A-Z]-?\d+(?:\.\d+)?)\b[^\n]{0,40}?(?:SCALE\s*[:=]?\s*)?(1\s*:\s*\d+|N\.?T\.?S\.?|\d+\/\d+\s*"?\s*=\s*1\s*')/gi;
+  let m: RegExpExecArray | null;
+  while ((m = reA.exec(text)) !== null) push(m[1].replace(/\s+/g, ""), m[2].trim());
+  const reB = /\bDETAIL\s+([A-Z0-9]{1,4})\b[^\n]{0,40}?(1\s*:\s*\d+|N\.?T\.?S\.?|\d+\/\d+\s*"?\s*=\s*1\s*')/gi;
+  while ((m = reB.exec(text)) !== null) push(`DETAIL ${m[1].toUpperCase()}`, m[2].trim());
+  return out;
+}
+
 /** Try every layer in priority order. */
 export function resolveScale(input: SheetScaleInputs): Calibration | null {
   const a = tryTitleBlockText(input.rawText);
-  if (a && a.pixelsPerFoot > 0 && a.confidence === "high") return a;
+  const detailOverrides = tryDetailScales(input.rawText);
+  const attach = (cal: Calibration | null): Calibration | null => {
+    if (!cal) return null;
+    return detailOverrides.length ? { ...cal, detailOverrides } : cal;
+  };
+  if (a && a.pixelsPerFoot > 0 && a.confidence === "high") return attach(a);
+  const grid = tryGridDimension(input.rawText, input.pageWidthPx);
+  if (grid && grid.pixelsPerFoot > 0 && (grid.confidence === "high" || grid.confidence === "medium")) return attach(grid);
   const b = tryDimensionAnnotation(input.dimensions);
-  if (b && b.pixelsPerFoot > 0) return b;
+  if (b && b.pixelsPerFoot > 0) return attach(b);
   const auto = tryAutoDimensionFromText(input.rawText);
-  if (auto && auto.pixelsPerFoot > 0) return auto;
+  if (auto && auto.pixelsPerFoot > 0) return attach(auto);
+  if (grid && grid.pixelsPerFoot > 0) return attach(grid);
   const c = tryKnownObject(input.knownObjects);
-  if (c) return c;
-  return a; // may be a low-confidence "SCALE keyword found" hit
+  if (c) return attach(c);
+  return attach(a); // may be a low-confidence "SCALE keyword found" hit
 }
 
 export function realFeetFromPixels(

@@ -261,10 +261,29 @@ function DisciplineSection({
                   <div className="text-[12px] font-semibold flex items-center gap-2 flex-wrap">
                     <span>Page {r.page_number ?? "—"}{r.sheet_number ? ` · ${r.sheet_number}` : ""}</span>
                     <Pill tone={toneCal}>{cal ? cal.confidence : "none"}</Pill>
+                    {cal?.source === "grid_dimension" && <Pill tone="info">grid</Pill>}
+                    {cal?.source === "auto_dimension" && <Pill tone="info">auto</Pill>}
                     {reclassified && <Pill tone="info">reclassified</Pill>}
                     {cal?.scaleText && <span className="text-[11px] text-muted-foreground font-mono truncate">{cal.scaleText}</span>}
                   </div>
                   <div className="text-[11px] text-muted-foreground mt-0.5">{cal?.method || "No scale text detected — enter px/ft manually."}</div>
+                  {cal?.detailOverrides && cal.detailOverrides.length > 0 && (
+                    <details className="mt-1">
+                      <summary className="text-[11px] text-muted-foreground cursor-pointer hover:text-foreground">
+                        {cal.detailOverrides.length} detail scale{cal.detailOverrides.length === 1 ? "" : "s"} detected
+                      </summary>
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {cal.detailOverrides.map((d, i) => (
+                          <span key={`${d.tag}-${i}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 border border-border bg-background text-[11px] font-mono">
+                            <span>{d.tag}</span>
+                            <span className="text-muted-foreground">·</span>
+                            <span>{d.scaleText}</span>
+                            {d.nts && <Pill tone="warn">N.T.S.</Pill>}
+                          </span>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                 </div>
                 <select
                   value={r.discipline}
