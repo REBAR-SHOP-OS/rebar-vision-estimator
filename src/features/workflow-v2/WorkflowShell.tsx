@@ -28,6 +28,7 @@ interface Props {
 const STAGE_ICONS: Record<StageKey, React.ComponentType<{ className?: string }>> = {
   files: FolderOpen,
   scope: Layers,
+  calibration: Ruler,
   takeoff: Ruler,
   qa: ShieldCheck,
   assistant: MessageSquareText,
