@@ -1984,6 +1984,43 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
     }
     const dedupedRows = Array.from(dedupMap.values());
 
+    // G4 Waste Factor — append one synthetic waste row per segment.
+    // Configurable via standards_profiles.waste_factors.global (default 0.07).
+    const wasteGlobal = (() => {
+      const v = Number((standard?.waste_factors as any)?.global);
+      return Number.isFinite(v) && v >= 0.03 && v <= 0.20 ? v : 0.07;
+    })();
+    const segWeightSum = dedupedRows.reduce(
+      (s: number, r: any) => s + (Number(r.total_weight) || 0),
+      0,
+    );
+    if (segWeightSum > 0) {
+      const wastePct = Math.round(wasteGlobal * 100);
+      dedupedRows.push({
+        segment_id,
+        project_id,
+        user_id: user.id,
+        description: `Waste factor ${wastePct}% (G4)`,
+        bar_size: "",
+        quantity_count: 0,
+        total_length: 0,
+        total_weight: +(segWeightSum * wasteGlobal).toFixed(1),
+        confidence: 1,
+        item_type: "waste",
+        waste_factor: 1,
+        status: "draft",
+        source_file_id: null,
+        assumptions_json: {
+          geometry_status: "resolved",
+          rule_cited: "G4",
+          waste_pct: wastePct,
+          source: "G4",
+          configurable: true,
+          base_segment_weight_kg: +segWeightSum.toFixed(1),
+        },
+      } as any);
+    }
+
     // ───────────────────────────────────────────────────────────────
     // OUTLIER GUARD (MAD check on length-per-piece, grouped by bar_size)
     // Catches OCR errors like "10'-0"" parsed as "100'-0"" inflating a
