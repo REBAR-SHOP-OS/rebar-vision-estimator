@@ -708,6 +708,7 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
                           {g.items.length} · {g.weight.toFixed(0)} kg
                         </span>
                       </button>
+                      {!isCollapsed && <PhaseChips items={g.items} segName={g.name} />}
                       {!isCollapsed && (
                         <table className="w-full text-[12px] tabular-nums">
                           <thead className="bg-muted/20 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
