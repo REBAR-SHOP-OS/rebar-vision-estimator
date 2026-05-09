@@ -769,26 +769,28 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                 />
               </div>
             )}
+            {/* Overlays sit INSIDE the transform wrapper so they pan/zoom with the drawing */}
+            {renderStatus === "ready" && previewUrl && imgSize && pageBox && canShowPointer && bbox && (
+              <BBoxPointer
+                bbox={bbox}
+                imgW={imgSize.w}
+                imgH={imgSize.h}
+                zoom={1}
+                viewZoom={zoomLevel}
+                pageBox={pageBox}
+                title={sel?.location_label || sel?.title || "Selected target"}
+                onFix={openAnswerTab}
+                approximate={anchorStatus === "approximate"}
+              />
+            )}
+            {renderStatus === "ready" && previewUrl && imgSize && pageBox && debug && textLines.map((line, idx) => {
+              const top = pageBox.top + (line.y / imgSize.h) * pageBox.height;
+              return <div key={idx} className="absolute left-0 right-0 border-t border-amber-500/20" style={{ top }} />;
+            })}
             </div>
 
             {renderStatus === "ready" && previewUrl && imgSize && pageBox && (
               <>
-                {canShowPointer && bbox && (
-                  <BBoxPointer
-                    bbox={bbox}
-                    imgW={imgSize.w}
-                    imgH={imgSize.h}
-                    zoom={zoom}
-                    pageBox={pageBox}
-                    title={sel?.location_label || sel?.title || "Selected target"}
-                    onFix={openAnswerTab}
-                    approximate={anchorStatus === "approximate"}
-                  />
-                )}
-                {debug && textLines.map((line, idx) => {
-                  const top = pageBox.top + (line.y / imgSize.h) * pageBox.height;
-                  return <div key={idx} className="absolute left-0 right-0 border-t border-amber-500/20" style={{ top }} />;
-                })}
                 {anchorStatus === "unavailable" && renderStatus === "ready" && previewUrl && (
                   <div className="absolute top-14 right-4 z-10 text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--status-blocked))] border border-[hsl(var(--status-blocked))]/40 bg-[hsl(var(--status-blocked))]/10 px-2 py-1">
                     Page linked · no trusted object box on this page
@@ -836,7 +838,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                   <button className="px-1 hover:text-foreground" disabled={pdfPage >= pdfPageCount} onClick={() => setPdfPage((p) => Math.min(pdfPageCount, p + 1))}>▶</button>
                 </span>
               )}
-              <span>Zoom: {Math.round(zoom * 100)}%</span>
+              <span>Zoom: {Math.round(zoomLevel * 100)}%</span>
               <span className="truncate max-w-[200px]">{previewName || "—"}</span>
               <span className="w-1.5 h-1.5 bg-[hsl(var(--status-supported))] rounded-full" />
             </div>
