@@ -302,8 +302,8 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
             ) : (
               <div
                 ref={imageBoxRef}
-                className="relative block max-h-full max-w-full"
-                style={imgSize ? { aspectRatio: `${imgSize.w} / ${imgSize.h}`, width: "min(100%, calc((100% * 1) * 1))", height: "auto", maxHeight: "100%" } : { width: "100%", height: "100%" }}
+                className="relative block"
+                style={fittedBox ? { width: `${fittedBox.w}px`, height: `${fittedBox.h}px` } : { width: "100%", height: "100%" }}
               >
                 <img
                   src={(isPdf ? pdfImg : signedUrl) || undefined}
