@@ -138,7 +138,10 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
   const gateRows = (structural.length + architectural.length > 0)
     ? [...structural, ...architectural]
     : sheets;
-  const isResolved = (r: SheetRow) => !!r.calibration && r.calibration.pixelsPerFoot > 0 && r.calibration.confidence !== "low";
+  // Auto-scaled values (low confidence) count as resolved so the estimator
+  // is never forced to hand-fill px/ft just to unlock the gate. They can
+  // still override via the input below.
+  const isResolved = (r: SheetRow) => !!r.calibration && r.calibration.pixelsPerFoot > 0;
   const structuralResolved = structural.filter(isResolved).length;
   const gateResolved = gateRows.filter(isResolved).length;
   const allConfirmable = gateRows.length > 0 && gateRows.every(isResolved);
@@ -154,6 +157,8 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
   const confirmAll = () => {
     state.setLocal({ calibrationConfirmed: true, calibrationPrimary: "structural" });
     state.refresh();
+    // Auto-advance to Stage 04 (Takeoff) on confirmation.
+    goToStage?.("takeoff");
   };
   const reset = () => {
     state.setLocal({ calibrationConfirmed: false });
@@ -235,10 +240,10 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
                 ? "No discipline-tagged sheets"
                 : "Calibration required"}
             message={allConfirmable
-              ? "Ready to confirm — every Structural and Architectural sheet has a usable scale."
+              ? "Auto-scaled — review and confirm to continue."
               : gateRows.length === 0
                 ? "No discipline-tagged sheets. Reclassify at least one sheet, or confirm to proceed with the available pages."
-                : `Resolve every Structural and Architectural sheet (${gateResolved}/${gateRows.length} done).`}
+                : `Auto-scaled (${gateResolved}/${gateRows.length}). Override any sheet below if needed, then confirm.`}
           />
         </div>
       )}
