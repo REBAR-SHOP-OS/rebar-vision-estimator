@@ -100,8 +100,12 @@ const PHASE_TOOLTIPS = [
 ];
 function PhaseChips({ items, segName }: { items: WorkflowTakeoffRow[]; segName: string }) {
   const states = derivePhaseStates(items, segName);
+  const hiddenCount = items.filter((r) =>
+    /\b(dowel|corner|opening|step\s*bar|top\s*tie|thicken|T\.?D\.?\s*\d+)\b/i.test(`${r.mark} ${r.shape} ${r.source}`)
+  ).length;
+  const wasteRow = items.find((r) => /waste\s*factor/i.test(`${r.shape} ${r.mark}`));
   return (
-    <div className="flex flex-wrap gap-1 px-3 py-1.5 bg-muted/10 border-t border-border/40">
+    <div className="flex flex-wrap items-center gap-1 px-3 py-1.5 bg-muted/10 border-t border-border/40">
       {PHASE_LABELS.map((lbl, i) => {
         const s = states[i];
         const cls = s === "done"
@@ -117,6 +121,17 @@ function PhaseChips({ items, segName }: { items: WorkflowTakeoffRow[]; segName: 
           </span>
         );
       })}
+      {hiddenCount > 0 && (
+        <span title="Hidden scope detected: dowels, corners, openings, step bars, top ties, or thickenings (R7/R9-R12)"
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 border border-fuchsia-500/50 text-fuchsia-500 bg-fuchsia-500/5 text-[9px] font-mono uppercase tracking-wider">
+          🔍 Hidden Scope ({hiddenCount})
+        </span>
+      )}
+      {wasteRow && wasteRow.weight > 0 && (
+        <span className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 border border-muted-foreground/30 text-muted-foreground text-[9px] font-mono uppercase tracking-wider">
+          +{wasteRow.weight.toFixed(1)} kg waste (G4)
+        </span>
+      )}
     </div>
   );
 }
