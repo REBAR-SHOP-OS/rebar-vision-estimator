@@ -320,6 +320,13 @@ ${knowledgeContext}
 
 Rules:
 - **HIERARCHY**: (1) Drawing-confirmed evidence > (2) Playbook must-haves > (3) User templates > (4) Inferred.
+- **BOTTOM-TO-TOP scan order** (always emit segments in this order):
+  1. Foundation Map (S-1.0): Wall Footings (WF) along perimeter, Pad Footings (F#) at every grid intersection.
+  2. Vertical Elements: Piers/Pedestals (P#), Columns, Foundation Walls — cross-reference Foundation Schedule.
+  3. Horizontal Flatwork: SOG (General Notes), Slab Thickenings (where A-2.2 wall has no S-1.0 footing — TD.37).
+  4. Transitions (S-6.0 details): Steps (TD.3), Corners (TD.13), Door/Wall Openings (Detail 5).
+  5. Site Misc (S-6.5): Curbs, Bollards, Sign Bases / Menu Boards (TD.87/88).
+- **TAX SCAN (Commercial)**: ALWAYS attempt the Arch-vs-Struct overlay. Any interior wall on A-2.2 with no matching footing on S-1.0 → emit a "Slab Thickening" candidate (source=hidden_scope, note "TD.37"). Every exterior door in the door schedule → emit "Door Opening Trim" (Detail 5). Every site sign/bollard on S-6.5 → emit a Site Misc candidate.
 - **NEVER** suggest a segment whose type matches the playbook's forbidden_types list.
 - **HIDDEN SCOPE**: Items appearing ONLY in the "NON-STRUCTURAL SHEETS" block must be returned with source="hidden_scope" and a note pointing to the sheet_id.
 - **BAR LIST PARSING**: If a bar schedule is present, group bar marks by family (prefix) into segments matching the playbook's bar_mark_hints.
