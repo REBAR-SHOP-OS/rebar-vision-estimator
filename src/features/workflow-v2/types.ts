@@ -21,9 +21,8 @@ export const STAGES: StageDef[] = [
   { key: "calibration", label: "Scale Calibration", short: "Calibrate", index: 3 },
   { key: "takeoff", label: "Takeoff Workspace", short: "Takeoff", index: 4 },
   { key: "qa", label: "QA Gate", short: "QA", index: 5 },
-  { key: "assistant", label: "Assistant Chat", short: "Assistant", index: 6 },
-  { key: "confirm", label: "Estimator Confirmation", short: "Confirm", index: 7 },
-  { key: "outputs", label: "Outputs", short: "Outputs", index: 8 },
+  { key: "confirm", label: "Estimator Confirmation", short: "Confirm", index: 6 },
+  { key: "outputs", label: "Outputs", short: "Outputs", index: 7 },
 ];
 
 export type RowStatus = "ready" | "review" | "blocked";
