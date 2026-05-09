@@ -49,7 +49,7 @@ export default function WorkflowShell({ projectId, project }: Props) {
   const status = useMemo(() => ({
     files: state.fileCount > 0 ? "complete" : "pending",
     scope: state.scopeAccepted > 0 ? "complete" : state.fileCount > 0 ? "active" : "locked",
-    calibration: calibrationConfirmed ? "complete" : state.scopeAccepted > 0 ? "active" : "locked",
+    calibration: calibrationConfirmed ? "complete" : (state.scopeAccepted > 0 || state.fileCount > 0) ? "active" : "locked",
     takeoff: !calibrationConfirmed ? "locked" : state.takeoffRows > 0 ? "complete" : "active",
     qa: !calibrationConfirmed ? "locked" : state.takeoffRows > 0 ? (state.qaCriticalOpen > 0 ? "blocked" : "active") : "locked",
     assistant: state.takeoffRows > 0 || state.fileCount > 0 ? "active" : "locked",
