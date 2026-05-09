@@ -588,7 +588,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
   const anchorStatus = sel?.locator?.anchor_mode || (textSearch ? (textSearch.score >= MIN_ANCHOR_CONFIDENCE ? "exact" : "approximate") : "unavailable");
   const anchorReason = textSearch?.text ? `Matched ${textSearch.kind} anchor: ${textSearch.text}` : null;
-  const canShowPointer = Boolean(renderStatus === "ready" && previewUrl && imgSize && pageBox && bbox);
+  const canShowPointer = Boolean(renderStatus === "ready" && previewUrl && imgSize && bbox);
 
   const TABS: Array<{ k: TabKey; label: string }> = [
     { k: "change", label: "Change" },
@@ -727,65 +727,87 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
                 />
                 {pdfImg && (
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <img
-                      data-qa-preview="true"
-                      src={pdfImg}
-                      alt={previewName || `PDF page ${pdfPage}`}
-                      className="max-w-full max-h-full object-contain"
-                      onLoad={(event) => {
-                        const img = event.currentTarget;
-                        setImgSize({ w: img.naturalWidth, h: img.naturalHeight });
-                        setRenderStatus("ready");
-                        setRenderError(null);
-                        updatePageBox();
-                      }}
-                      onError={() => {
-                        setRenderStatus("error");
-                        setRenderError(`Could not render ${previewName || "the source file"}.`);
-                      }}
-                    />
+                    <div className="relative" style={{ display: "inline-block", maxWidth: "100%", maxHeight: "100%" }}>
+                      <img
+                        data-qa-preview="true"
+                        src={pdfImg}
+                        alt={previewName || `PDF page ${pdfPage}`}
+                        className="block max-w-full max-h-full object-contain"
+                        onLoad={(event) => {
+                          const img = event.currentTarget;
+                          setImgSize({ w: img.naturalWidth, h: img.naturalHeight });
+                          setRenderStatus("ready");
+                          setRenderError(null);
+                          updatePageBox();
+                        }}
+                        onError={() => {
+                          setRenderStatus("error");
+                          setRenderError(`Could not render ${previewName || "the source file"}.`);
+                        }}
+                      />
+                      {canShowPointer && bbox && imgSize && (
+                        <BBoxPointer
+                          bbox={bbox}
+                          imgW={imgSize.w}
+                          imgH={imgSize.h}
+                          viewZoom={zoomLevel}
+                          title={sel?.location_label || sel?.title || "Selected target"}
+                          onFix={openAnswerTab}
+                          approximate={anchorStatus === "approximate"}
+                        />
+                      )}
+                      {debug && imgSize && textLines.map((line, idx) => (
+                        <div
+                          key={idx}
+                          className="absolute left-0 right-0 border-t border-amber-500/20 pointer-events-none"
+                          style={{ top: `${(line.y / imgSize.h) * 100}%` }}
+                        />
+                      ))}
+                    </div>
                   </div>
                 )}
               </>
             ) : (
               <div className="absolute inset-0 flex items-center justify-center">
-                <img
-                  data-qa-preview="true"
-                  src={previewUrl}
-                  alt={previewName || "Drawing preview"}
-                  className="max-w-full max-h-full object-contain"
-                  onLoad={(event) => {
-                    const img = event.currentTarget;
-                    setImgSize({ w: img.naturalWidth, h: img.naturalHeight });
-                    setRenderStatus("ready");
-                    setRenderError(null);
-                    updatePageBox();
-                  }}
-                  onError={() => {
-                    setRenderStatus("error");
-                    setRenderError(`Could not render ${previewName || "the source file"}.`);
-                  }}
-                />
+                <div className="relative" style={{ display: "inline-block", maxWidth: "100%", maxHeight: "100%" }}>
+                  <img
+                    data-qa-preview="true"
+                    src={previewUrl}
+                    alt={previewName || "Drawing preview"}
+                    className="block max-w-full max-h-full object-contain"
+                    onLoad={(event) => {
+                      const img = event.currentTarget;
+                      setImgSize({ w: img.naturalWidth, h: img.naturalHeight });
+                      setRenderStatus("ready");
+                      setRenderError(null);
+                      updatePageBox();
+                    }}
+                    onError={() => {
+                      setRenderStatus("error");
+                      setRenderError(`Could not render ${previewName || "the source file"}.`);
+                    }}
+                  />
+                  {canShowPointer && bbox && imgSize && (
+                    <BBoxPointer
+                      bbox={bbox}
+                      imgW={imgSize.w}
+                      imgH={imgSize.h}
+                      viewZoom={zoomLevel}
+                      title={sel?.location_label || sel?.title || "Selected target"}
+                      onFix={openAnswerTab}
+                      approximate={anchorStatus === "approximate"}
+                    />
+                  )}
+                  {debug && imgSize && textLines.map((line, idx) => (
+                    <div
+                      key={idx}
+                      className="absolute left-0 right-0 border-t border-amber-500/20 pointer-events-none"
+                      style={{ top: `${(line.y / imgSize.h) * 100}%` }}
+                    />
+                  ))}
+                </div>
               </div>
             )}
-            {/* Overlays sit INSIDE the transform wrapper so they pan/zoom with the drawing */}
-            {renderStatus === "ready" && previewUrl && imgSize && pageBox && canShowPointer && bbox && (
-              <BBoxPointer
-                bbox={bbox}
-                imgW={imgSize.w}
-                imgH={imgSize.h}
-                zoom={1}
-                viewZoom={zoomLevel}
-                pageBox={pageBox}
-                title={sel?.location_label || sel?.title || "Selected target"}
-                onFix={openAnswerTab}
-                approximate={anchorStatus === "approximate"}
-              />
-            )}
-            {renderStatus === "ready" && previewUrl && imgSize && pageBox && debug && textLines.map((line, idx) => {
-              const top = pageBox.top + (line.y / imgSize.h) * pageBox.height;
-              return <div key={idx} className="absolute left-0 right-0 border-t border-amber-500/20" style={{ top }} />;
-            })}
             </div>
 
             {renderStatus === "ready" && previewUrl && imgSize && pageBox && (
