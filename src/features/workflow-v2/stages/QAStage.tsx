@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { StageHeader, Pill, EmptyState, GateBanner, type StageProps } from "./_shared";
 import {
   ArrowLeft, ArrowRight, Wand2, Filter, Layers, Columns2, GitCompare,
-  ZoomIn, ZoomOut, Maximize2, Eye, Edit3, AlertTriangle, RefreshCw,
+  ZoomIn, ZoomOut, Maximize2, Eye, Edit3, AlertTriangle, RefreshCw, Hand,
   Fingerprint, History, GitBranch, Scale, Edit2, RefreshCw as Sync, Bug,
 } from "lucide-react";
 import { loadWorkflowQaIssues, type WorkflowQaIssue } from "../takeoff-data";
