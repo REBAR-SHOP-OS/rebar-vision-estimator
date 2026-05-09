@@ -140,7 +140,7 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
         page_number: page,
         polygon: draft,
         color_hint: color,
-      })
+      } as never)
       .select("id,segment_id,page_number,polygon,color_hint")
       .single();
     if (error) {
