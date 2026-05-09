@@ -565,17 +565,37 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
   const bbox = useMemo(() => {
     if (sel?.locator?.bbox && imgSize) {
-      const normalized = normalizeBboxToImagePixels(sel.locator.bbox, sel.locator.image_size || imgSize, imgSize);
-      const clamped = clampBbox(normalized, imgSize.w, imgSize.h);
-      if (clamped) return clamped;
+      const sourceW = sel.locator.image_size?.w || imgSize.w;
+      const sourceH = sel.locator.image_size?.h || imgSize.h;
+      const normalized = normalizeBboxToImagePixels(sel.locator.bbox, sourceW, sourceH);
+      if (normalized.bbox) {
+        const scaled: BBox = sourceW !== imgSize.w || sourceH !== imgSize.h
+          ? [
+              normalized.bbox[0] * (imgSize.w / sourceW),
+              normalized.bbox[1] * (imgSize.h / sourceH),
+              normalized.bbox[2] * (imgSize.w / sourceW),
+              normalized.bbox[3] * (imgSize.h / sourceH),
+            ]
+          : normalized.bbox;
+        const clamped = clampBbox(scaled, imgSize.w, imgSize.h);
+        if (clamped) return clamped;
+      }
     }
     return textSearch?.bbox || null;
   }, [sel?.locator?.bbox, sel?.locator?.image_size, textSearch, imgSize]);
 
   const anchorStatus = sel?.locator?.anchor_mode || (textSearch ? (textSearch.score >= MIN_ANCHOR_CONFIDENCE ? "exact" : "approximate") : "unavailable");
   const anchorReason = textSearch?.text ? `Matched ${textSearch.kind} anchor: ${textSearch.text}` : null;
-  const zoom = zoomMode === "tight" && bbox && imgSize && canvasSize.width > 0 && canvasSize.height > 0
-    ? computeFocusTransformForImage(bbox, imgSize.w, imgSize.h, canvasSize.width, canvasSize.height, zoomLevel).zoom
+  const zoom = zoomMode === "tight" && bbox && imgSize
+    ? computeFocusTransformForImage({
+        bbox,
+        imgW: imgSize.w,
+        imgH: imgSize.h,
+        pageBox,
+        canvas: canvasSize,
+        zoom: zoomLevel,
+        pan,
+      }).scale
     : zoomLevel;
   const canShowPointer = Boolean(renderStatus === "ready" && previewUrl && imgSize && pageBox && bbox);
 
@@ -588,15 +608,17 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
   return (
     <div className="h-full bg-background text-foreground">
-      <StageHeader title="QA Gate" subtitle="Compare revisions, validate anchors, and clear estimator questions" />
-      <GateBanner tone={critCount > 0 ? "blocked" : warnCount > 0 ? "warning" : "ok"}>
-        <div className="grid grid-cols-4 gap-4 text-[11px] uppercase tracking-[0.14em]">
-          <div>Rows Require Action <span className="block text-[18px] font-black tracking-normal text-foreground">{totalImpact}</span></div>
-          <div>Warnings <span className="block text-[18px] font-black tracking-normal text-[hsl(var(--status-inferred))]">{warnCount}</span></div>
-          <div>Critical <span className="block text-[18px] font-black tracking-normal text-[hsl(var(--status-blocked))]">{critCount}</span></div>
-          <div>Outputs Stale <span className="block text-[18px] font-black tracking-normal text-foreground">{staleOutputs}</span></div>
-        </div>
-      </GateBanner>
+      <StageHeader kicker="Stage 04" title="QA Gate" subtitle="Compare revisions, validate anchors, and clear estimator questions" />
+      <GateBanner
+        tone={critCount > 0 ? "blocked" : "warn"}
+        title={critCount > 0 ? "Critical QA issues require action" : warnCount > 0 ? "QA warnings remain open" : "No open QA blockers"}
+      />
+      <div className="grid grid-cols-4 gap-4 border-b border-border bg-card px-4 py-3 text-[11px] uppercase tracking-[0.14em]">
+        <div>Rows Require Action <span className="block text-[18px] font-black tracking-normal text-foreground">{totalImpact}</span></div>
+        <div>Warnings <span className="block text-[18px] font-black tracking-normal text-[hsl(var(--status-inferred))]">{warnCount}</span></div>
+        <div>Critical <span className="block text-[18px] font-black tracking-normal text-[hsl(var(--status-blocked))]">{critCount}</span></div>
+        <div>Outputs Stale <span className="block text-[18px] font-black tracking-normal text-foreground">{staleOutputs}</span></div>
+      </div>
 
       <div className="grid grid-cols-12 h-[calc(100%-112px)] min-h-0">
         <aside className="col-span-2 border-r border-border bg-card/70 min-h-0 flex flex-col">
@@ -660,28 +682,48 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
             {!previewUrl ? (
               <div className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">{previewLoading ? "Loading drawing…" : renderError || "Select an issue to load the source drawing."}</div>
             ) : previewKind === "pdf" ? (
-              <PdfRenderer
-                key={`${previewUrl}:${pdfPage}`}
-                file={previewUrl}
-                page={pdfPage}
-                zoom={zoom}
-                pan={pan}
-                debug={debug}
-                viewMode={viewMode}
-                onRender={({ imageUrl, width, height, pageCount, textItems }) => {
-                  setPdfImg(imageUrl);
-                  setImgSize({ w: width, h: height });
-                  setPdfPageCount(pageCount || 1);
-                  setRenderedPage(pdfPage);
-                  setPageText(textItems || []);
-                  setRenderStatus("ready");
-                  setRenderError(null);
-                }}
-                onError={(message) => {
-                  setRenderStatus("error");
-                  setRenderError(message);
-                }}
-              />
+              <>
+                <PdfRenderer
+                  key={`${previewUrl}:${pdfPage}`}
+                  file={previewUrl}
+                  page={pdfPage}
+                  onRender={({ imageUrl, width, height, pageCount, pageNumber, textItems }) => {
+                    setPdfImg(imageUrl);
+                    setImgSize({ w: width, h: height });
+                    setPdfPageCount(pageCount || 1);
+                    if (pageNumber && pageNumber !== pdfPage) setPdfPage(pageNumber);
+                    setRenderedPage(pageNumber || pdfPage);
+                    setPageText(textItems || []);
+                    setRenderStatus("ready");
+                    setRenderError(null);
+                  }}
+                  onError={(message) => {
+                    setRenderStatus("error");
+                    setRenderError(message);
+                  }}
+                />
+                {pdfImg && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <img
+                      data-qa-preview="true"
+                      src={pdfImg}
+                      alt={previewName || `PDF page ${pdfPage}`}
+                      className="max-w-full max-h-full object-contain"
+                      onLoad={(event) => {
+                        const img = event.currentTarget;
+                        setImgSize({ w: img.naturalWidth, h: img.naturalHeight });
+                        setRenderStatus("ready");
+                        setRenderError(null);
+                        updatePageBox();
+                      }}
+                      onError={() => {
+                        setRenderStatus("error");
+                        setRenderError(`Could not render ${previewName || "the source file"}.`);
+                      }}
+                    />
+                  </div>
+                )}
+              </>
             ) : (
               <div className="absolute inset-0 flex items-center justify-center">
                 <img
