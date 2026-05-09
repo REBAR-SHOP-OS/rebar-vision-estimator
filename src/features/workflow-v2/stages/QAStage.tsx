@@ -182,6 +182,9 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
   const [zoomMode, setZoomMode] = useState<"tight" | "full">("tight");
   const [zoomLevel, setZoomLevel] = useState(1);
   const [pan, setPan] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
+  const [tool, setTool] = useState<"select" | "pan">("select");
+  const panStateRef = useRef<{ startX: number; startY: number; startDx: number; startDy: number } | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
   const [viewMode, setViewMode] = useState<"overlay" | "side" | "diff">("overlay");
   const [changedOnly, setChangedOnly] = useState(true);
   const [debug, setDebug] = useState(false);
