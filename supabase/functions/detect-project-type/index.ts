@@ -337,6 +337,15 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
               items: { type: "string" },
               description: "Scope elements found ONLY on non-structural drawings (A/C/L/M/E) — easily missed in estimation"
             },
+            classificationEvidence: {
+              type: "object",
+              description: "Big Three identifier findings (Title Block, Floor Plan, Framing Material). Used to explain to the user why the project was classified as it was.",
+              properties: {
+                titleBlock: { type: "string", description: "What you saw on A-0.0 / S-0.0 (keywords, project name)." },
+                floorPlan: { type: "string", description: "What you saw on A-2.2 (storefront glass / loading docks / many small rooms / etc)." },
+                framing: { type: "string", description: "What you saw on S-1.1 (OWSJ + metal deck / W-shapes / wood trusses / etc)." },
+              },
+            },
             confidencePrimary: {
               type: "number",
               description: "Confidence in primaryCategory classification from 0 to 1"
