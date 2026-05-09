@@ -292,7 +292,7 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
               </div>
               <button
                 disabled={accepted.length === 0}
-                onClick={() => goToStage?.("takeoff")}
+                onClick={() => goToStage?.("calibration")}
                 className="inline-flex h-8 items-center justify-center gap-1.5 border border-primary/60 bg-primary/15 px-3 text-[10px] font-mono uppercase tracking-wider text-primary transition-colors hover:bg-primary/25 disabled:cursor-not-allowed disabled:border-border disabled:bg-transparent disabled:text-muted-foreground"
               >
                 Continue <ArrowRight className="w-3.5 h-3.5" />
