@@ -1,85 +1,32 @@
-## Goal
+## Why the selected F footings aren't recognized
 
-When the user (a) switches the selected scope candidate or (b) navigates to a new page, the canvas should automatically run OCR and automatically light up the layer(s) that match the selection — so picking "Elevated Slabs (per level)" instantly highlights the actual slab marks (S-1, S1, etc.) on the current sheet.
+Looking at your screenshot, the orange-boxed marks on the foundation plan look like `F2.0`, `F-2.0`, `F1.5`, etc. — footing tags that include a **decimal size suffix**. The current detection misses them for three concrete reasons:
 
-## Current behavior (what's wrong)
+1. **Regex is too strict.** `src/lib/ocr-page-labels.ts` accepts only `^F[-.\s]?\d+[A-Z]?$` and `markBucket` uses `^F[-.]?\d`. Tokens like `F2.0`, `F-2.0`, `FTG-1`, `PAD-2` are rejected, so even when Vision reads them correctly they never become hits.
+2. **Whole‑block matching loses tokens.** Vision often returns a block as `"F2.0\n2'-0\""`. We split on whitespace/punctuation, but `F2.0` then fails the strict regex above, so the whole block is dropped.
+3. **No visibility when zero hits.** When `hitsByLayer` is empty for "Footings" the UI just says "No structural marks detected." You can't see what OCR actually read, so you can't tell whether it's a regex problem or an OCR miss.
 
-In `src/components/takeoff-canvas/TakeoffCanvas.tsx`:
+Separately, "Footings" → `inferSegmentType` → `"footing"` → `markBucket("F-1") === "footing"` already lines up correctly, so the layer wiring is fine. The failure is purely at the token-recognition step.
 
-1. OCR auto-runs **only** when `highlight.label` is set AND the page has no cache. It does **not** re-run on plain page changes (next/prev sheet) even if a scope is still selected.
-2. When OCR returns hits, every matching layer is drawn — there is no visual emphasis on the *selected* candidate. The user picked "Elevated Slabs", but footings, walls, columns, etc. are all painted at equal weight, so the slab match is lost in the noise.
-3. `hitsByLayer` maps an OCR token to a layer by exact `segment_type` bucket. "Elevated Slabs (per level)" infers to `slab`, and `S-1` also maps to `slab`, so the match exists — but only as one of many overlays, with no zoom/jump to the matched rect.
+## Plan — 1 file, low risk
 
-## Plan (single file: `src/components/takeoff-canvas/TakeoffCanvas.tsx`)
+**Single file:** `src/lib/ocr-page-labels.ts` (no UI, no DB, no edge function changes).
 
-### 1. Auto-OCR on page change too
+1. **Broaden `DEFAULT_MARK_PATTERNS`** to include the real-world variants:
+   - `F`, `WF`, `P`, `C`, `B`, `S`, `GB`, `PC` followed by optional `-`/`.`/space, digits, optional `.digits` (decimal size), optional letter suffix. Example: `^F[-.\s]?\d+(\.\d+)?[A-Z]?$`.
+   - Add `FTG[-.\s]?\d+` and `PAD[-.\s]?\d+` as additional footing aliases.
 
-Extend the existing auto-OCR effect (around line 417) so it fires when **either** the highlight or the page changes, as long as a candidate is currently selected:
+2. **Mirror the same loosening in `markBucket`** so `F2.0`, `FTG-1`, `PAD-2` all bucket to `"footing"`, and `WF1.5` to `"wall"`.
 
-```text
-useEffect(() => {
-  if (!ocrCacheKey) return;
-  if (ocrCacheRef.current.has(ocrCacheKey)) return;
-  if (ocrLoading) return;
-  // Run when a scope is selected (highlight) OR the page just changed
-  // and we have a usable source URL.
-  if (!highlight?.label && !pdfImg && !signedUrl) return;
-  runOcr();
-}, [highlight?.label, page, ocrCacheKey, runOcr, ocrLoading, pdfImg, signedUrl]);
-```
+3. **Token normalization tweak:** keep the decimal point during normalization (don't strip `.`), and bump the length window from `2..8` to `2..10` so `F-2.0A` survives.
 
-This means: pick a candidate → OCR runs; flip to next page → OCR runs again automatically (cached after first time).
+4. **Diagnostic fallback (still same file):** when zero hits matched but blocks were returned, attach the raw token list to the result as `unmatchedTokens` (already returned via `OcrPageResult` extension — purely additive field). The canvas can log it in dev to see why.
 
-### 2. Compute the "selected layer" from `highlight.label`
+### Out of scope
+- `TakeoffCanvas.tsx`, `region-segmentation.ts`, `ocr-image` edge function, `ScopeStage`, DB tables, RLS — all untouched.
+- No new dependencies. `bunx tsc --noEmit` must remain clean.
 
-Add a memo that resolves the candidate name → matching layer in the panel:
-
-```text
-const selectedLayer = useMemo(() => {
-  if (!highlight?.label) return null;
-  const want = highlight.label.trim().toLowerCase();
-  return (
-    layers.find((l) => l.name.trim().toLowerCase() === want) ||
-    layers.find((l) => (l.segment_type || inferSegmentType(l.name)) ===
-                       inferSegmentType(highlight.label!)) ||
-    null
-  );
-}, [layers, highlight?.label]);
-```
-
-### 3. Emphasize the selected layer visually
-
-Where OCR hit rectangles are rendered (the block that consumes `hitsByLayer`), branch on `selectedLayer`:
-
-- Hits belonging to `selectedLayer.id` → draw at full opacity, thicker stroke, with a soft pulse class (reuse `.overlay-pulse` already used in `DrawingOverlay`), and use the layer color.
-- Hits for other layers → draw at low opacity (≈ 0.25) with a thin stroke, no pulse.
-
-If `selectedLayer` is null (no candidate chosen) keep current rendering for all hits.
-
-### 4. Auto-fit zoom/pan to the matched hits (best-effort)
-
-After OCR finishes and `selectedLayer` is set, if there are hits for that layer, compute their union bbox in normalised coords and:
-
-- If `fittedBox` and `stageSize` exist, set `zoom` to a value that frames the union bbox with ~20% padding (cap at `clampZoom` bounds), and set `pan` so the bbox center lands in the stage center.
-- Skip if the user has manually zoomed (track a `userZoomedRef` flag set in `onWheel` / `zoomIn` / `zoomOut`; cleared on page or highlight change).
-
-This is what makes "I chose Elevated Slab → I see the exact slab segments framed on the sheet" work.
-
-### 5. No changes outside this file
-
-- `ocr-page-labels.ts`, `region-segmentation.ts`, the `ocr-image` edge function, `ScopeStage`, DB tables, RLS — all untouched.
-- No new dependencies.
-- `bunx tsc --noEmit` must remain clean.
-
-## Out of scope
-
-- Adding new OCR mark patterns (the dot/hyphen variants are already in place from the previous patch).
-- Persisting any selection — purely cosmetic / UX.
-- Region-based fallback when OCR returns zero hits (separate change, will revisit only if user asks).
-
-## Acceptance
-
-- Pick "Elevated Slabs (per level)" → OCR runs → slab marks (S-1 / S1 / S.1) on the current sheet are highlighted in the slab color and pulsing; other layers fade.
-- Click ▶ to next page → OCR runs automatically; same emphasis applied.
-- Pick a different candidate (e.g. "Wall Footings (WF)") → emphasis instantly shifts to WF marks; no manual ✨ click required.
-- No OCR re-run when revisiting a page already cached.
+### Acceptance
+- Pick "Footings" candidate on the foundation plan in your screenshot → OCR runs → every `F-#`, `F#.#`, `FTG-#`, `PAD-#` mark is highlighted in footing color and pulses; auto-frame zooms to their union bbox.
+- Existing `WF-1`/`F-1`/`S-1` behavior unchanged.
+- If OCR genuinely can't read a tag (too small / rotated), the toast still says "No structural marks detected" but `unmatchedTokens` is available for follow-up debugging.
