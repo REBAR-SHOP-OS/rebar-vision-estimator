@@ -134,16 +134,18 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
   // Timing helper: logs a console warning if a step takes longer than 3 s.
   const timedFetch = async <T,>(
     label: keyof Omit<LoadSteps, "errors">,
-    fn: () => Promise<T>,
+    fn: (signal: AbortSignal) => Promise<T>,
   ): Promise<T> => {
     const start = performance.now();
     setStep(label, "loading");
     let timeoutId: ReturnType<typeof window.setTimeout> | null = null;
+    const controller = new AbortController();
     try {
       const result = await Promise.race([
-        fn(),
+        fn(controller.signal),
         new Promise<T>((_, reject) => {
           timeoutId = window.setTimeout(() => {
+            controller.abort();
             reject(new Error(`${label} timed out after ${Math.round(STEP_TIMEOUT_MS / 1000)}s`));
           }, STEP_TIMEOUT_MS);
         }),
@@ -178,12 +180,13 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
       bar_marks: string[] | null;
     }> = [];
     try {
-      indexRowsRaw = await timedFetch("index", async () => {
+      indexRowsRaw = await timedFetch("index", async (signal) => {
         const { data, error } = await supabase
           .from("drawing_search_index")
           .select("id, page_number, raw_text, sheet_revision_id, logical_drawing_id, document_version_id, bar_marks")
           .eq("project_id", projectId)
-          .order("page_number", { ascending: true });
+          .order("page_number", { ascending: true })
+          .abortSignal(signal);
         if (error) throw error;
         return (data || []) as typeof indexRowsRaw;
       });
@@ -206,21 +209,21 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
     let docData: DocRow[] = [];
 
     const [revResult, logicResult, docResult] = await Promise.allSettled([
-      timedFetch("revisions", async () => {
+      timedFetch("revisions", async (signal) => {
         if (!sheetRevIds.length) return [] as RevRow[];
-        const { data, error } = await supabase.from("sheet_revisions").select("id, sheet_number, discipline").in("id", sheetRevIds);
+        const { data, error } = await supabase.from("sheet_revisions").select("id, sheet_number, discipline").in("id", sheetRevIds).abortSignal(signal);
         if (error) throw error;
         return (data || []) as RevRow[];
       }),
-      timedFetch("drawings", async () => {
+      timedFetch("drawings", async (signal) => {
         if (!logicalIds.length) return [] as LogicRow[];
-        const { data, error } = await supabase.from("logical_drawings").select("id, sheet_id, discipline").in("id", logicalIds);
+        const { data, error } = await supabase.from("logical_drawings").select("id, sheet_id, discipline").in("id", logicalIds).abortSignal(signal);
         if (error) throw error;
         return (data || []) as LogicRow[];
       }),
-      timedFetch("files", async () => {
+      timedFetch("files", async (signal) => {
         if (!docVerIds.length) return [] as DocRow[];
-        const { data, error } = await supabase.from("document_versions").select("id, file_name, file_path").in("id", docVerIds);
+        const { data, error } = await supabase.from("document_versions").select("id, file_name, file_path").in("id", docVerIds).abortSignal(signal);
         if (error) throw error;
         return (data || []) as DocRow[];
       }),
@@ -253,8 +256,9 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
       const storedCal = storedCals[r.id];
       const autoCal = resolveScale({ rawText: r.raw_text || "", discipline: override || detected });
       const cal = storedCal || autoCal;
-      const scaleStatus = deriveScaleStatus(cal, storedStatuses[r.id]);
-      const resolvedReason = storedReasons[r.id] || cal?.reason || (metadataFailed ? "metadata load failed" : undefined);
+      const derivedStatus = deriveScaleStatus(cal, storedStatuses[r.id]);
+      const unresolvedFromMetadata = metadataFailed && (derivedStatus === "ambiguous" || derivedStatus === "failed");
+      const resolvedReason = storedReasons[r.id] || cal?.reason || (unresolvedFromMetadata ? "metadata load failed" : undefined);
       const relevant = isRelevantSheet({ rawText: r.raw_text || "", sheetNumber, tableDiscipline, barMarks: r.bar_marks, fileName });
       return {
         id: r.id,
@@ -265,7 +269,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
         ppfOverride: cal && cal.pixelsPerFoot > 0 ? cal.pixelsPerFoot.toFixed(2) : "",
         detectedDiscipline: detected,
         discipline: override || detected,
-        scale_status: scaleStatus,
+        scale_status: derivedStatus,
         scale_reason: resolvedReason,
         diagnostics: cal?.diagnostics,
         file_path: filePath,
