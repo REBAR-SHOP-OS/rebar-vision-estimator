@@ -12,14 +12,15 @@ export interface LabelHit {
 
 /** Default mark patterns used on structural foundation sheets. */
 export const DEFAULT_MARK_PATTERNS: RegExp[] = [
-  /^WF[-\s]?\d+[A-Z]?$/i, // wall footings
-  /^F[-\s]?\d+[A-Z]?$/i,  // pad footings
-  /^P[-\s]?\d+[A-Z]?$/i,  // piers
-  /^C[-\s]?\d+[A-Z]?$/i,  // columns
-  /^B[-\s]?\d+[A-Z]?$/i,  // beams
-  /^S[-\s]?\d+[A-Z]?$/i,  // slabs / stairs
-  /^GB[-\s]?\d+[A-Z]?$/i, // grade beams
-  /^PC[-\s]?\d+[A-Z]?$/i, // pile caps
+  // Accept hyphen, dot, or no separator (e.g. F2, F-2, F.2, WF-1, WF.1)
+  /^WF[-.\s]?\d+[A-Z]?$/i, // wall footings
+  /^F[-.\s]?\d+[A-Z]?$/i,  // pad footings
+  /^P[-.\s]?\d+[A-Z]?$/i,  // piers
+  /^C[-.\s]?\d+[A-Z]?$/i,  // columns
+  /^B[-.\s]?\d+[A-Z]?$/i,  // beams
+  /^S[-.\s]?\d+[A-Z]?$/i,  // slabs / stairs
+  /^GB[-.\s]?\d+[A-Z]?$/i, // grade beams
+  /^PC[-.\s]?\d+[A-Z]?$/i, // pile caps
 ];
 
 function normalizeToken(t: string): string {
@@ -29,14 +30,14 @@ function normalizeToken(t: string): string {
 /** Classify a mark token to a segment_type bucket. */
 export function markBucket(token: string): string | null {
   const t = normalizeToken(token);
-  if (/^WF-?\d/i.test(t)) return "footing";
-  if (/^F-?\d/i.test(t)) return "footing";
-  if (/^PC-?\d/i.test(t)) return "footing";
-  if (/^P-?\d/i.test(t)) return "pier";
-  if (/^C-?\d/i.test(t)) return "column";
-  if (/^B-?\d/i.test(t)) return "beam";
-  if (/^GB-?\d/i.test(t)) return "beam";
-  if (/^S-?\d/i.test(t)) return "slab";
+  if (/^WF[-.]?\d/i.test(t)) return "footing";
+  if (/^F[-.]?\d/i.test(t)) return "footing";
+  if (/^PC[-.]?\d/i.test(t)) return "footing";
+  if (/^P[-.]?\d/i.test(t)) return "pier";
+  if (/^C[-.]?\d/i.test(t)) return "column";
+  if (/^B[-.]?\d/i.test(t)) return "beam";
+  if (/^GB[-.]?\d/i.test(t)) return "beam";
+  if (/^S[-.]?\d/i.test(t)) return "slab";
   return null;
 }
 
