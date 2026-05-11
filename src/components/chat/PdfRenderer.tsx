@@ -4,7 +4,20 @@ import * as pdfjsLib from "pdfjs-dist";
 // (no external CDN fetch, works offline, no version drift).
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    pdfWorkerUrl ||
+    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+}
+
+const PDF_LOAD_TIMEOUT_MS = 20_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+  });
+}
 
 interface LegacyRenderPayload {
   imageUrl: string;
@@ -49,6 +62,7 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({
   const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
 
   const resolvedUrl = url || file || "";
   const resolvedPage = currentPage ?? page ?? 1;
@@ -74,39 +88,53 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({
         return;
       }
 
+      // Try direct URL load first (fast path for signed-URL PDFs); fall back to
+      // fetch+ArrayBuffer if the worker can't open the URL directly. Both
+      // attempts are wrapped in a timeout so the UI never hangs forever.
       try {
-        const response = await fetch(resolvedUrl, { method: "GET" });
-        if (cancelled) return;
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        const buffer = await response.arrayBuffer();
-        if (cancelled) return;
-        const doc = await pdfjsLib.getDocument({ data: buffer }).promise;
+        const doc = await withTimeout(
+          pdfjsLib.getDocument({ url: resolvedUrl }).promise,
+          PDF_LOAD_TIMEOUT_MS,
+          "PDF worker load",
+        );
         if (cancelled) return;
         pdfDocRef.current = doc;
         onPageCount?.(doc.numPages);
         setLoading(false);
-      } catch (fetchErr) {
+        return;
+      } catch (urlErr) {
         if (cancelled) return;
-        console.warn("PDF binary fetch failed, falling back to direct pdfjs URL load:", fetchErr);
-        try {
-          const doc = await pdfjsLib.getDocument(resolvedUrl).promise;
-          if (cancelled) return;
-          pdfDocRef.current = doc;
-          onPageCount?.(doc.numPages);
-          setLoading(false);
-        } catch (err) {
-          if (cancelled) return;
-          console.error("PDF load error:", err);
-          emitLoadError("Failed to load PDF");
-        }
+        console.warn("PDF URL load failed, falling back to ArrayBuffer:", urlErr);
+      }
+
+      try {
+        const response = await fetch(resolvedUrl, { method: "GET" });
+        if (cancelled) return;
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const buffer = await response.arrayBuffer();
+        if (cancelled) return;
+        const doc = await withTimeout(
+          pdfjsLib.getDocument({ data: buffer }).promise,
+          PDF_LOAD_TIMEOUT_MS,
+          "PDF worker load",
+        );
+        if (cancelled) return;
+        pdfDocRef.current = doc;
+        onPageCount?.(doc.numPages);
+        setLoading(false);
+      } catch (err) {
+        if (cancelled) return;
+        console.error("PDF load error:", err);
+        const msg = err instanceof Error && /timed out/i.test(err.message)
+          ? "PDF worker did not respond. Check your connection and retry."
+          : "Failed to load PDF";
+        emitLoadError(msg);
       }
     };
 
     loadPdf();
     return () => { cancelled = true; };
-  }, [resolvedUrl]);
+  }, [resolvedUrl, retryTick]);
 
   // Render current page
   useEffect(() => {
@@ -188,8 +216,15 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-full text-destructive text-sm">
-        {error}
+      <div className="flex flex-col items-center justify-center h-full gap-2 text-destructive text-sm">
+        <span>{error}</span>
+        <button
+          type="button"
+          onClick={() => { setError(null); setLoading(true); setRetryTick((n) => n + 1); }}
+          className="px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider border border-destructive/50 hover:bg-destructive/10"
+        >
+          Retry
+        </button>
       </div>
     );
   }
