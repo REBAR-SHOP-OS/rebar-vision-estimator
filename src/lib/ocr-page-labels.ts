@@ -26,13 +26,34 @@ export const DEFAULT_MARK_PATTERNS: RegExp[] = [
   /^PC[-.\s]?\d+(\.\d+)?[A-Z]?$/i, // pile caps
 ];
 
-function normalizeToken(t: string): string {
-  return (t || "").trim().replace(/\s+/g, "").toUpperCase();
+export function normalizeMarkToken(t: string): string {
+  return (t || "")
+    .trim()
+    .replace(/[‐‑‒–—﹘﹣－]/g, "-")
+    .replace(/\s+/g, "")
+    .toUpperCase()
+    .replace(/^[^A-Z0-9]+/, "")
+    .replace(/[^A-Z0-9]+$/, "");
+}
+
+export function extractMarkCandidates(text: string): string[] {
+  const raw = (text || "").trim();
+  if (!raw) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const parts = [raw, ...raw.split(/[\s,;:()\[\]{}\\/|]+/)];
+  for (const part of parts) {
+    const norm = normalizeMarkToken(part);
+    if (!norm || seen.has(norm)) continue;
+    seen.add(norm);
+    out.push(norm);
+  }
+  return out;
 }
 
 /** Classify a mark token to a segment_type bucket. */
 export function markBucket(token: string): string | null {
-  const t = normalizeToken(token);
+  const t = normalizeMarkToken(token);
   if (/^WF[-.]?\d/i.test(t)) return "wall"; // WF = Foundation Wall
   if (/^FTG[-.]?\d/i.test(t)) return "footing";
   if (/^PAD[-.]?\d/i.test(t)) return "footing";
@@ -84,27 +105,25 @@ export async function detectPageLabels(
       const txt = (b.text || "").trim();
       if (!txt) continue;
       // Test the whole block AND each whitespace-separated token.
-      const tokens = [txt, ...txt.split(/[\s,;()\[\]]+/)].map((t) => t.trim()).filter(Boolean);
+      const tokens = extractMarkCandidates(txt);
       let matched = false;
       for (const tok of tokens) {
-        const norm = normalizeToken(tok);
-        if (norm.length < 2 || norm.length > 10) continue;
-        if (patterns.some((p) => p.test(norm))) { matched = true; break; }
+        if (tok.length < 2 || tok.length > 10) continue;
+        if (patterns.some((p) => p.test(tok))) { matched = true; break; }
       }
       if (!matched) {
         // Capture short alpha+digit tokens for diagnostics
         for (const tok of tokens) {
-          const norm = normalizeToken(tok);
-          if (norm.length >= 2 && norm.length <= 10 && /[A-Z]/.test(norm) && /\d/.test(norm)) {
-            unmatched.add(norm);
+          if (tok.length >= 2 && tok.length <= 10 && /[A-Z]/.test(tok) && /\d/.test(tok)) {
+            unmatched.add(tok);
           }
         }
         continue;
       }
-      const key = `${normalizeToken(txt)}::${Math.round(x1 / 4)}:${Math.round(y1 / 4)}`;
+      const key = `${normalizeMarkToken(txt)}::${Math.round(x1 / 4)}:${Math.round(y1 / 4)}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      hits.push({ text: normalizeToken(txt), rect: [x1, y1, x2, y2] });
+      hits.push({ text: normalizeMarkToken(txt), rect: [x1, y1, x2, y2] });
     }
   }
   return {

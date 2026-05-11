@@ -5,7 +5,8 @@ import PdfRenderer from "@/components/chat/PdfRenderer";
 import { colorForSegmentType, inferSegmentType } from "@/lib/segment-type";
 import { detectRegions, hueDistance, parseHslHue, type Region } from "@/lib/region-segmentation";
 import { detectPageLabels, markBucket, type LabelHit } from "@/lib/ocr-page-labels";
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Eye, EyeOff, Hand, Layers, Maximize2, Minus, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
+import { createManualShapePolygon, type ManualShape } from "@/lib/takeoff-manual-shapes";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Circle, Eye, EyeOff, Hand, Layers, Maximize2, Minus, Pencil, Plus, Sparkles, Square, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 /** A bucket / segment the canvas can paint a layer for. */
@@ -42,7 +43,7 @@ type ManualPolygon = {
   source_file_id?: string | null;
 };
 
-type Tool = "pan" | "polygon" | "erase";
+type Tool = "pan" | "polygon" | "square" | "circle" | "erase";
 
 function isPdfPath(path: string | null | undefined): boolean {
   return !!path && path.toLowerCase().split("?")[0].endsWith(".pdf");
@@ -191,7 +192,14 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
     if (cached) { setRegions(cached); return; }
     let alive = true;
     const run = () => {
-      detectRegions(src, { maxDim: 1024 })
+      detectRegions(src, {
+        maxDim: 1536,
+        minAreaPct: 0.0008,
+        minSat: 0.1,
+        minVal: 0.2,
+        maxVal: 0.99,
+        hueBuckets: 16,
+      })
         .then((r) => {
           if (!alive) return;
           regionCacheRef.current.set(cacheKey, r);
@@ -252,20 +260,8 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
     });
   };
 
-  const onStageClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (tool !== "polygon" || !imageBoxRef.current || !activeLayer) return;
-    const rect = imageBoxRef.current.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
-    if (x < 0 || x > 1 || y < 0 || y > 1) return;
-    setDraft((d) => [...d, [x, y]]);
-  };
-
-  const finishDraft = useCallback(async () => {
-    if (!user || !activeLayer || draft.length < 3) {
-      setDraft([]);
-      return;
-    }
+  const saveOverlayPolygon = useCallback(async (points: Array<[number, number]>, switchToPan = false) => {
+    if (!user || !activeLayer || points.length < 3) return false;
     const layer = layers.find((l) => l.id === activeLayer);
     const color = layer ? layerColor(layer) : null;
     const segId = activeLayer.startsWith("synthetic-") ? null : activeLayer;
@@ -276,7 +272,7 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
         project_id: projectId,
         segment_id: segId,
         page_number: page,
-        polygon: draft,
+        polygon: points,
         color_hint: color,
         source_file_id: sourceFileId,
       } as never)
@@ -284,12 +280,37 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
       .single();
     if (error) {
       toast.error(`Could not save polygon: ${error.message}`);
-      return;
+      return false;
     }
     setPolygons((prev) => [...prev, data as unknown as ManualPolygon]);
-    setDraft([]);
-    setTool("pan");
-  }, [user, activeLayer, draft, layers, layerColor, projectId, page, sourceFileId]);
+    if (switchToPan) setTool("pan");
+    return true;
+  }, [user, activeLayer, layers, layerColor, projectId, page, sourceFileId]);
+
+  const onStageClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!imageBoxRef.current || !activeLayer) return;
+    const rect = imageBoxRef.current.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    if (x < 0 || x > 1 || y < 0 || y > 1) return;
+    if (tool === "polygon") {
+      setDraft((d) => [...d, [x, y]]);
+      return;
+    }
+    if (tool === "square" || tool === "circle") {
+      const shape = tool as ManualShape;
+      void saveOverlayPolygon(createManualShapePolygon(shape, x, y));
+    }
+  };
+
+  const finishDraft = useCallback(async () => {
+    if (!user || !activeLayer || draft.length < 3) {
+      setDraft([]);
+      return;
+    }
+    const ok = await saveOverlayPolygon(draft, true);
+    if (ok) setDraft([]);
+  }, [user, activeLayer, draft, saveOverlayPolygon]);
 
   const erasePolygon = async (id: string) => {
     const { error } = await supabase.from("takeoff_overlays" as never).delete().eq("id", id);
@@ -307,6 +328,8 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
       if (e.key === "Enter" && draft.length >= 3) finishDraft();
       if (e.key === "v" || e.key === "V") setTool("pan");
       if (e.key === "p" || e.key === "P") setTool("polygon");
+      if (e.key === "r" || e.key === "R") setTool("square");
+      if (e.key === "c" || e.key === "C") setTool("circle");
       if (e.key === "e" || e.key === "E") setTool("erase");
     };
     window.addEventListener("keydown", onKey);
@@ -521,6 +544,8 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
           <div className="absolute left-3 top-3 z-10 flex flex-col gap-1 rounded border border-border bg-card/95 p-1 shadow backdrop-blur-sm">
             <ToolBtn title="Pan / Select (V)" active={tool === "pan"} onClick={() => setTool("pan")}><Hand className="h-4 w-4" /></ToolBtn>
             <ToolBtn title="Polygon (P)" active={tool === "polygon"} onClick={() => setTool("polygon")}><Pencil className="h-4 w-4" /></ToolBtn>
+            <ToolBtn title="Square stamp (R)" active={tool === "square"} onClick={() => setTool("square")}><Square className="h-4 w-4" /></ToolBtn>
+            <ToolBtn title="Circle stamp (C)" active={tool === "circle"} onClick={() => setTool("circle")}><Circle className="h-4 w-4" /></ToolBtn>
             <ToolBtn title="Erase (E)" active={tool === "erase"} onClick={() => setTool("erase")}><Trash2 className="h-4 w-4" /></ToolBtn>
             <div className="mt-1 flex flex-col items-center gap-0.5 border-t border-border pt-1">
               <ToolBtn title="Zoom in (Ctrl + wheel)" active={false} onClick={zoomIn}><Plus className="h-4 w-4" /></ToolBtn>
@@ -546,12 +571,14 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
           </div>
 
           {/* Active layer chip */}
-          {tool === "polygon" && activeLayer && (
+          {(tool === "polygon" || tool === "square" || tool === "circle") && activeLayer && (
             <div className="absolute left-1/2 top-3 z-10 -translate-x-1/2 inline-flex items-center gap-2 rounded border border-primary bg-card/95 px-2.5 py-1 text-[11px] shadow backdrop-blur-sm">
               <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: layerColor(layers.find((l) => l.id === activeLayer)!) }} />
               <span className="font-medium text-foreground">{layers.find((l) => l.id === activeLayer)?.name}</span>
               <span className="font-mono text-[10px] text-muted-foreground">
-                {draft.length === 0 ? "click to add points · double-click to close" : `${draft.length} pts · ⏎ close · esc cancel`}
+                {tool === "polygon"
+                  ? (draft.length === 0 ? "click to add points · double-click to close" : `${draft.length} pts · ⏎ close · esc cancel`)
+                  : `click to stamp ${tool} · esc cancel`}
               </span>
             </div>
           )}
@@ -559,7 +586,7 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
           {/* Stage */}
           <div
             ref={stageRef}
-            className={`absolute inset-0 flex items-center justify-center p-2 overflow-hidden ${tool === "polygon" ? "cursor-crosshair" : tool === "erase" ? "cursor-not-allowed" : isPanning ? "cursor-grabbing" : "cursor-grab"}`}
+            className={`absolute inset-0 flex items-center justify-center p-2 overflow-hidden ${tool === "polygon" || tool === "square" || tool === "circle" ? "cursor-crosshair" : tool === "erase" ? "cursor-not-allowed" : isPanning ? "cursor-grabbing" : "cursor-grab"}`}
             onClick={onStageClick}
             onDoubleClick={() => { if (tool === "polygon") finishDraft(); }}
             onWheel={onWheel}
