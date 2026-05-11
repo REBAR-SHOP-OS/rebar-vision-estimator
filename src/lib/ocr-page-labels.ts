@@ -30,7 +30,7 @@ function normalizeToken(t: string): string {
 /** Classify a mark token to a segment_type bucket. */
 export function markBucket(token: string): string | null {
   const t = normalizeToken(token);
-  if (/^WF[-.]?\d/i.test(t)) return "footing";
+  if (/^WF[-.]?\d/i.test(t)) return "wall"; // WF = Foundation Wall
   if (/^F[-.]?\d/i.test(t)) return "footing";
   if (/^PC[-.]?\d/i.test(t)) return "footing";
   if (/^P[-.]?\d/i.test(t)) return "pier";
