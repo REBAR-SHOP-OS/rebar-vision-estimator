@@ -1,38 +1,35 @@
-## Problem
+## Goal
 
-On project `51e9c8bc…` the left pane shows **"No candidates detected — OCR did not surface a usable scope"**, but the top bar shows **SCOPE APPROVED 16/16** and **TAKEOFF ROWS 7**. The scope is already approved on the server; the empty state is misleading and blocks the user from selecting a candidate to drive the right-pane SELECTION overlay we just added.
+Add a delete action to each project card in the Dashboard's **Recent Projects** grid (highlighted area in the screenshot), so the user can remove a project directly without opening it.
 
-## Root cause
+## Changes (minimal patch)
 
-1. `auto-segments` filters out any suggestion whose name matches `existingSegNames` (segments already saved on the project). With 16 approved items already materialised as segments, every must-have and AI suggestion gets stripped → response is `{ suggestions: [] }`.
-2. `ScopeStage.runDetection` treats `suggestions.length === 0` as a **detection failure** and flips `detectFailed = true`, even though the server-side `projects.scope_items` array contains 16 valid approved labels (exposed as `state.approvedScopeItems`).
-3. The left list (`candidates`) is built only from `state.local.scopeCandidates`, never from `state.approvedScopeItems`, so already-approved scope is invisible until OCR re-detects it.
+### 1. `src/pages/Dashboard.tsx`
+- Add `handleDeleteProject(id)`:
+  - `window.confirm("Delete this project? This cannot be undone.")`
+  - `await supabase.from("projects").delete().eq("id", id)`
+  - On success: toast + remove from `projects` state (optimistic, no refetch needed).
+  - On JWT-expired: same signOut path as `loadProjects`.
+- Pass `onDeleteProject={handleDeleteProject}` to `<RebarForgeDashboard>`.
 
-## Fix (frontend only, minimum patch)
-
-Edit only `src/features/workflow-v2/stages/ScopeStage.tsx`. No edge-function or DB changes.
-
-1. **Seed candidates from `state.approvedScopeItems`** when the local cache is empty:
-   - In the `candidates` `useMemo`, if `cached.length === 0` and `state.approvedScopeItems.length > 0`, synthesize `Candidate[]` from the approved labels with `source = "approved scope"`, `confidence = 1`, `id = "approved-<label>"`. This is purely cosmetic — they already carry `getDecision === "accept"` via `serverApprovedLabels`.
-
-2. **Don't flag detection as failed when scope already exists**:
-   - In `runDetection`, when `suggestions.length === 0`, only set `detectFailed = true` if `state.approvedScopeItems.length === 0`. Otherwise leave it false (the list will render the approved items from step 1).
-
-3. **Refine the empty-state copy**:
-   - When `candidates.length === 0` and `state.approvedScopeItems.length > 0` (shouldn't happen after step 1, defensive only), show "Scope already approved" instead of the OCR failure message.
-   - Keep the existing "No candidates detected" + Retry button only for the true OCR-empty case.
-
-4. **Keep the SELECTION overlay working**: with approved items now in `candidates`, `selectedId` will resolve to the first approved label, `selectedPage` lookup against `searchPages` keeps working unchanged, and the right-pane orange highlight will appear without further wiring.
+### 2. `src/components/dashboard/RebarForgeDashboard.tsx`
+- Extend props: `onDeleteProject: (id: string) => void`.
+- Forward to `<ProjectCard ... onDelete={() => onDeleteProject(p.id)} />`.
+- In `ProjectCard`:
+  - Add an absolutely-positioned **Trash2** icon button in the top-left of the preview area (mirrors the existing `IN PROGRESS` chip on the right).
+  - Styling: small square button, `bg-background/80 hover:bg-destructive hover:text-destructive-foreground`, `opacity-0 group-hover:opacity-100 focus:opacity-100`.
+  - `onClick`: `e.stopPropagation(); e.preventDefault(); onDelete();` so it doesn't trigger the card's navigation.
+  - Add `aria-label="Delete project"` and `title="Delete project"`.
+  - Import `Trash2` from `lucide-react`.
 
 ## Out of scope
-
-- `supabase/functions/auto-segments/index.ts` — no change. (Echoing already-approved items back from the server would be a larger refactor and risks duplicating approved segments.)
-- `TakeoffCanvas`, `CalibrationStage`, `TakeoffStage`, `PdfRenderer` — untouched.
-- No DB migration, no RLS change, no new state in `useWorkflowState`.
+- Server-side cascade: cascading deletes (segments, files, estimate_items, storage objects) are already covered by existing DB FKs / project-deletion flows in `AppSidebar.tsx` and `ProjectSettingsTab.tsx`. We reuse the same `from("projects").delete()` call, no new edge function.
+- No new confirmation modal component — `window.confirm` matches existing patterns in this file (duplicate-project prompt).
+- No bulk-delete, no soft-delete, no undo.
+- No design-token changes; uses existing `destructive` semantic colors.
 
 ## Verification
-
-- Reload the affected project → left pane shows 16 approved candidates with the "Approved" pill, top bar still reads **0 NEW**.
-- Click any candidate → right pane jumps to the matching page and renders the pulsing orange `SELECTION: <label>` overlay.
-- For a fresh project with no approved scope and OCR that returns nothing, the existing "No candidates detected" + Retry block still appears.
+- Hover a project card → trash icon fades in.
+- Click trash → native confirm → card disappears from list, toast "Project deleted".
+- Clicking elsewhere on the card still navigates to the project.
 - `bunx tsc --noEmit` passes.
