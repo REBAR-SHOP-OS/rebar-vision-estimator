@@ -1,28 +1,65 @@
-## Problem
+# Stage 02 — Auto-Detected Segments + Selected Segment Highlight on Blueprint
 
-Stage 02 (Scope Review) shows "Loading PDF…" indefinitely in the Takeoff Canvas. Network confirms the signed-URL fetch returns the PDF bytes successfully (HTTP 200, valid `%PDF-1.7` body), but `PdfRenderer` never transitions out of its loading state — meaning `pdfjsLib.getDocument({ data: buffer }).promise` is not resolving and no error is being thrown to the UI.
+**Goal:** Match the attached design. The left sidebar of Stage 02 (Scope Review) shows the auto-detected segments as soon as the project opens. Clicking a segment in the list highlights that exact area on the blueprint on the right with an orange `SELECTION: <label>` overlay (like the reference screens).
 
-Most likely cause: the pdf.js worker (`pdfjs-dist/build/pdf.worker.min.mjs?url`) is not initialising in this context. There is no fetch for the worker in network logs, and pdfjs v4 silently hangs `getDocument` if the worker module fails to bootstrap. There is also no visible error toast or destructive state because the component swallows non-throwing hangs.
+Today the left column already lists candidates (after `auto-segments` finishes), but the right canvas only paints layers from *approved* items and never visually highlights the *selected* candidate, so estimators can't see what they're looking at on the drawing. The user's screenshot also shows the list stuck on "DETECTING SCOPE…" with no recovery path.
 
-## Fix (minimal patch)
+## What changes (minimal patch, UI-only on the client)
 
-Edit only `src/components/chat/PdfRenderer.tsx`:
+```text
+┌──────────────────┬──┬───────────────────────────────────────┐
+│ Candidate Scope  │▮ │  Takeoff Canvas (right pane)          │
+│ ───────────────  │▮ │  ┌─────────────────────────────────┐  │
+│ ▣ FTG-1  92%     │▮ │  │ blueprint page (from PDF)       │  │
+│ ▣ COL-A  88%     │▮ │  │     ┌──── SELECTION: FTG-1 ───┐ │  │
+│ ▢ SLAB-2 81% ←sel│▮ │  │     │ orange dashed bbox      │ │  │
+│ ▢ WALL-3 76%     │▮ │  │     └─────────────────────────┘ │  │
+└──────────────────┴──┴───────────────────────────────────────┘
+```
 
-1. **Add a load timeout + visible error.** Wrap `getDocument(...).promise` in `Promise.race` with a ~20 s timeout. On timeout, set `error` ("PDF worker did not respond") and call `onError`, so the user no longer sees a frozen "Loading PDF…".
-2. **Harden worker init.** Guard the `GlobalWorkerOptions.workerSrc` assignment so it only runs once, and add a fallback to the matching `cdnjs` URL (`pdfjs-dist@${pdfjsLib.version}/pdf.worker.min.mjs`, same pattern already used in `BrainKnowledgeDialog.tsx`) if the bundled `?url` import returns an empty string. This protects against the rare Vite case where the `?url` import resolves to "" before the worker chunk is emitted.
-3. **Try `getDocument({ url })` first when we have an https URL,** and only fall back to `{ data: buffer }` on failure. The current code does the opposite — a hung `data:` path leaves the second branch unreached. Switching the order makes the fast path more reliable for signed-URL PDFs and keeps the byte fallback for blobs.
-4. **Surface a Retry button** in the error state so the user can recover without reloading the page.
+### 1. `supabase/functions/auto-segments/index.ts`
+Return, for each suggestion, the best supporting evidence from `drawing_search_index`:
+- `page_number` (int)
+- `bbox`: `[x, y, w, h]` normalised to `0..1` on that page (use the matching word/phrase bbox already produced by Vision OCR; if multiple matches, use the largest)
+- `source_file_id` (project_files id) so the canvas can swap to the right PDF
 
-No changes to `TakeoffCanvas.tsx`, `ScopeStage.tsx`, the storage signing flow, or any backend code.
+Backwards-compatible: existing `{ name, segment_type, notes }` keys are preserved.
+
+### 2. `src/features/workflow-v2/stages/ScopeStage.tsx`
+- Map the new fields into `Candidate` (add `pageNumber?`, `bbox?`, `sourceFileId?`).
+- Pass a new `highlight` prop to `<TakeoffCanvas/>` built from the **selected** candidate (not the approved set):
+  ```ts
+  highlight={sel ? { label: sel.label, pageNumber: sel.pageNumber ?? 1,
+                     bbox: sel.bbox, color: "hsl(24 95% 55%)" } : undefined}
+  ```
+- Replace the indefinite "Detecting scope…" empty-state with a 30 s watchdog: if `auto-segments` returns no rows or times out, surface a "No candidates detected" message with a **Retry** button that re-invokes the edge function.
+
+### 3. `src/components/takeoff-canvas/TakeoffCanvas.tsx`
+Add optional prop:
+```ts
+highlight?: { label: string; pageNumber: number; bbox?: [number,number,number,number]; color?: string };
+```
+Behaviour:
+- When `highlight.pageNumber` differs from current page, auto-jump to that page (`setPage`).
+- Render a non-interactive SVG overlay above the existing layers SVG:
+  - If `bbox` present → orange dashed rectangle at the normalised coords, with a small filled tag `SELECTION: <label>` anchored top-left of the rect (matches the design).
+  - If `bbox` missing → render the tag at the top-center of the page so the user still sees which candidate is active.
+- The selection overlay is purely cosmetic — it does not write `manual_polygons` or affect approval state.
+
+### 4. No DB schema changes
+We read existing `drawing_search_index` bbox data that OCR already stores. No new tables, no new RLS.
 
 ## Out of scope
 
-- Re-architecting PdfRenderer or moving to a different PDF library.
-- Changes to `pdf-to-images.ts` (server/worker pipeline) — that path is unrelated.
-- The Stage 02 layout/UX (kept exactly as-is).
+- Editing/dragging the selection rect (read-only highlight only).
+- Calibration of px/ft (Stage 03 already handles that).
+- Backend rewrites of `auto-segments` beyond returning the existing bbox/page evidence.
+- `TakeoffStage`, `CalibrationStage`, `PdfRenderer` — untouched.
 
 ## Verification
 
-- Reload Stage 02 with the same `CRU-1 Structral (4).pdf`. Expect the page raster to appear within a few seconds and "Loading PDF…" to disappear.
-- Force-fail the worker (block the worker URL in devtools) and confirm the new error state + Retry button replaces the indefinite spinner.
-- Re-check Stage 04 / QA Stage which also use PdfRenderer to ensure the legacy `file`/`page`/`onRender` props still work.
+1. Open a project with parsed drawings → Stage 02 left list populates within a few seconds.
+2. Click each candidate → right pane jumps to the right PDF page and draws an orange `SELECTION: <label>` box.
+3. If a candidate has no bbox (older projects), the page still switches and a tag still shows.
+4. Force `auto-segments` to fail → left column shows "No candidates detected" + Retry button instead of hanging.
+5. Re-run `npm run test` to ensure existing scope/stage tests still pass.
