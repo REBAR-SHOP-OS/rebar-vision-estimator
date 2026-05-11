@@ -4,48 +4,48 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 220 15% 12%;
+    --background: 36 38% 95%;
+    --foreground: 215 24% 12%;
 
-    --card: 0 0% 99%;
-    --card-foreground: 220 15% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 24% 12%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 220 15% 12%;
+    --popover-foreground: 215 24% 12%;
 
-    --primary: 142 60% 40%;
+    --primary: 177 74% 36%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 10% 95%;
-    --secondary-foreground: 220 15% 15%;
+    --secondary: 34 24% 92%;
+    --secondary-foreground: 215 24% 15%;
 
-    --muted: 220 10% 95%;
-    --muted-foreground: 220 10% 45%;
+    --muted: 36 20% 92%;
+    --muted-foreground: 210 10% 42%;
 
-    --accent: 220 10% 93%;
-    --accent-foreground: 220 15% 12%;
+    --accent: 177 20% 92%;
+    --accent-foreground: 215 24% 12%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 10% 91%;
-    --input: 220 10% 91%;
-    --ring: 142 60% 40%;
+    --border: 35 20% 84%;
+    --input: 35 20% 84%;
+    --ring: 177 74% 36%;
 
-    --radius: 0.75rem;
+    --radius: 1rem;
 
-    --status-approved: 142 60% 40%;
+    --status-approved: 177 74% 36%;
     --status-review: 38 92% 50%;
     --status-blocked: 0 72% 51%;
 
-    --sidebar-background: 220 12% 97%;
-    --sidebar-foreground: 220 10% 25%;
-    --sidebar-primary: 142 60% 40%;
+    --sidebar-background: 210 19% 12%;
+    --sidebar-foreground: 210 24% 88%;
+    --sidebar-primary: 177 74% 36%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 10% 93%;
-    --sidebar-accent-foreground: 220 10% 15%;
-    --sidebar-border: 220 10% 91%;
-    --sidebar-ring: 142 60% 40%;
+    --sidebar-accent: 210 18% 17%;
+    --sidebar-accent-foreground: 210 24% 95%;
+    --sidebar-border: 210 18% 20%;
+    --sidebar-ring: 177 74% 36%;
 
     --chat-user: 220 10% 97%;
     --chat-assistant: 0 0% 100%;
@@ -53,50 +53,50 @@
   }
 
   .dark {
-    --background: 220 14% 7%;
-    --foreground: 220 10% 93%;
+    --background: 215 25% 8%;
+    --foreground: 210 18% 92%;
 
-    --card: 220 14% 10%;
-    --card-foreground: 220 10% 93%;
+    --card: 215 21% 11%;
+    --card-foreground: 210 18% 92%;
 
-    --popover: 220 14% 10%;
-    --popover-foreground: 220 10% 93%;
+    --popover: 215 21% 11%;
+    --popover-foreground: 210 18% 92%;
 
-    --primary: 142 60% 45%;
-    --primary-foreground: 0 0% 5%;
+    --primary: 177 66% 43%;
+    --primary-foreground: 0 0% 6%;
 
-    --secondary: 220 14% 14%;
-    --secondary-foreground: 220 10% 90%;
+    --secondary: 215 16% 15%;
+    --secondary-foreground: 210 18% 90%;
 
-    --muted: 220 14% 14%;
-    --muted-foreground: 220 10% 55%;
+    --muted: 215 16% 15%;
+    --muted-foreground: 210 10% 58%;
 
-    --accent: 220 14% 14%;
-    --accent-foreground: 220 10% 93%;
+    --accent: 215 16% 15%;
+    --accent-foreground: 210 18% 92%;
 
     --destructive: 0 62% 45%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 14% 16%;
-    --input: 220 14% 16%;
-    --ring: 142 60% 45%;
+    --border: 215 16% 18%;
+    --input: 215 16% 18%;
+    --ring: 177 66% 43%;
 
-    --status-approved: 142 60% 45%;
+    --status-approved: 177 66% 43%;
     --status-review: 38 92% 50%;
     --status-blocked: 0 62% 45%;
 
-    --sidebar-background: 220 14% 5%;
-    --sidebar-foreground: 220 10% 75%;
-    --sidebar-primary: 142 60% 45%;
-    --sidebar-primary-foreground: 0 0% 5%;
-    --sidebar-accent: 220 14% 11%;
-    --sidebar-accent-foreground: 220 10% 90%;
-    --sidebar-border: 220 14% 13%;
-    --sidebar-ring: 142 60% 45%;
+    --sidebar-background: 215 21% 8%;
+    --sidebar-foreground: 210 18% 82%;
+    --sidebar-primary: 177 66% 43%;
+    --sidebar-primary-foreground: 0 0% 6%;
+    --sidebar-accent: 215 18% 13%;
+    --sidebar-accent-foreground: 210 18% 92%;
+    --sidebar-border: 215 17% 16%;
+    --sidebar-ring: 177 66% 43%;
 
-    --chat-user: 220 14% 7%;
-    --chat-assistant: 220 14% 10%;
-    --chat-input: 220 14% 11%;
+    --chat-user: 215 20% 9%;
+    --chat-assistant: 215 20% 11%;
+    --chat-input: 215 20% 12%;
   }
 }
 
@@ -147,7 +147,6 @@
     linear-gradient(to bottom, hsla(210, 80%, 55%, 0.12) 1px, transparent 1px);
 }
 
-/* Glass card effect */
 .glass-card {
   background: hsla(0, 0%, 100%, 0.75);
   backdrop-filter: blur(16px);
@@ -165,16 +164,14 @@
     0 1px 3px hsla(220, 30%, 5%, 0.2);
 }
 
-/* Timeline pulse animation */
 @keyframes timeline-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 hsla(142, 60%, 40%, 0.4); }
-  50% { box-shadow: 0 0 0 6px hsla(142, 60%, 40%, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 hsla(177, 74%, 36%, 0.35); }
+  50% { box-shadow: 0 0 0 6px hsla(177, 74%, 36%, 0); }
 }
 .timeline-pulse {
   animation: timeline-pulse 2s ease-in-out infinite;
 }
 
-/* Typing dots */
 @keyframes typing-dot {
   0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
   30% { opacity: 1; transform: translateY(-4px); }
@@ -183,24 +180,20 @@
 .typing-dot:nth-child(2) { animation: typing-dot 1.4s ease-in-out infinite 0.2s; }
 .typing-dot:nth-child(3) { animation: typing-dot 1.4s ease-in-out infinite 0.4s; }
 
-/* Smooth scrollbar */
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
 .custom-scrollbar::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 999px; }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
 
-/* Drop zone animation */
 @keyframes drop-zone-dash {
   0% { background-position: 0 0; }
   100% { background-position: 40px 40px; }
 }
 
-/* Stat card gradient */
 .stat-card-gradient {
   background: linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--accent)) 100%);
 }
 
-/* Blueprint overlay pulse animation */
 @keyframes blueprint-pulse {
   0%, 100% { filter: drop-shadow(0 0 4px currentColor); }
   50% { filter: drop-shadow(0 0 12px currentColor); }
@@ -209,7 +202,6 @@
   animation: blueprint-pulse 1.5s ease-in-out infinite;
 }
 
-/* Review active element pulse */
 @keyframes review-pulse {
   0%, 100% { stroke-opacity: 1; stroke-width: 4; }
   50% { stroke-opacity: 0.5; stroke-width: 6; }
@@ -218,7 +210,6 @@
   animation: review-pulse 1.2s ease-in-out infinite;
 }
 
-/* Overlay pulsing center dot */
 @keyframes overlay-dot-pulse {
   0%, 100% { r: 6; opacity: 0.4; }
   50% { r: 14; opacity: 0; }
@@ -226,3 +217,64 @@
 .overlay-pulse {
   animation: overlay-dot-pulse 1.5s ease-in-out infinite;
 }
+
+.workflow-v2 {
+  --background: 222 22% 8%;
+  --foreground: 222 16% 90%;
+  --card: 222 17% 11%;
+  --card-foreground: 222 16% 90%;
+  --popover: 222 17% 11%;
+  --popover-foreground: 222 16% 90%;
+  --muted: 222 14% 14%;
+  --muted-foreground: 222 10% 62%;
+  --accent: 222 14% 16%;
+  --accent-foreground: 222 16% 90%;
+  --secondary: 222 14% 14%;
+  --secondary-foreground: 222 16% 90%;
+  --border: 222 13% 22%;
+  --input: 222 13% 22%;
+  --primary: 220 100% 84%;
+  --primary-foreground: 220 100% 14%;
+  --ring: 220 100% 84%;
+  --status-direct: 217 91% 60%;
+  --status-inferred: 32 94% 56%;
+  --status-supported: 142 65% 48%;
+  --status-blocked: 0 75% 60%;
+  --destructive: 0 75% 60%;
+  --destructive-foreground: 0 0% 100%;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "cv02","cv03","cv04","cv11";
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.workflow-v2 .num,
+.workflow-v2 table {
+  font-variant-numeric: tabular-nums;
+}
+
+.workflow-v2 .ip-card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 0;
+}
+
+.workflow-v2 .ip-kicker {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: hsl(var(--muted-foreground));
+  font-family: 'Inter', sans-serif;
+}
+
+.workflow-v2 .ip-banner-blocked {
+  background: linear-gradient(180deg, hsl(0 60% 18% / 0.6), hsl(0 60% 12% / 0.6));
+  border: 1px solid hsl(var(--status-blocked) / 0.5);
+  color: hsl(0 90% 88%);
+}
+
+.workflow-v2 ::-webkit-scrollbar { width: 6px; height: 6px; }
+.workflow-v2 ::-webkit-scrollbar-track { background: transparent; }
+.workflow-v2 ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 0; }
+.workflow-v2 ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }

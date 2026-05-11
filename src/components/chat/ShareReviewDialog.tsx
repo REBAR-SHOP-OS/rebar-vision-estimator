@@ -66,8 +66,8 @@ const ShareReviewDialog: React.FC<ShareReviewDialogProps> = ({
       if (!resp.ok) throw new Error(result.error || "Failed to create share");
       setShareUrl(result.shareUrl);
       toast.success("Review link created!");
-    } catch (err: any) {
-      toast.error(err.message || "Failed to share");
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to share");
     } finally {
       setLoading(false);
     }

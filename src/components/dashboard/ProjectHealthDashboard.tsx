@@ -42,7 +42,7 @@ const ProjectHealthDashboard: React.FC<{ onClose: () => void }> = ({ onClose }) 
       if (!projectsData) { setLoading(false); return; }
 
       const enriched: ProjectHealth[] = await Promise.all(
-        projectsData.map(async (p: any) => {
+        projectsData.map(async (p) => {
           const [{ count: fileCount }, { count: drawingCount }, { count: estimateCount }] = await Promise.all([
             supabase.from("project_files").select("id", { count: "exact", head: true }).eq("project_id", p.id),
             supabase.from("drawing_search_index").select("id", { count: "exact", head: true }).eq("project_id", p.id),

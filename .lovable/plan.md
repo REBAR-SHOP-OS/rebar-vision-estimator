@@ -1,44 +1,28 @@
+## Problem
 
+Stage 02 (Scope Review) shows "Loading PDF…" indefinitely in the Takeoff Canvas. Network confirms the signed-URL fetch returns the PDF bytes successfully (HTTP 200, valid `%PDF-1.7` body), but `PdfRenderer` never transitions out of its loading state — meaning `pdfjsLib.getDocument({ data: buffer }).promise` is not resolving and no error is being thrown to the UI.
 
-# Enhance Provenance with Full Address + Clickable Drawing Navigation
+Most likely cause: the pdf.js worker (`pdfjs-dist/build/pdf.worker.min.mjs?url`) is not initialising in this context. There is no fetch for the worker in network logs, and pdfjs v4 silently hangs `getDocument` if the worker module fails to bootstrap. There is also no visible error toast or destructive state because the component swallows non-throwing hangs.
 
-## What Changes
+## Fix (minimal patch)
 
-### 1. `src/pages/SegmentDetail.tsx` — Fetch additional context for provenance
+Edit only `src/components/chat/PdfRenderer.tsx`:
 
-In `loadData()`, add a query to fetch `drawing_search_index` entries for this project to get page numbers per source file. Also fetch `document_versions` for page metadata.
+1. **Add a load timeout + visible error.** Wrap `getDocument(...).promise` in `Promise.race` with a ~20 s timeout. On timeout, set `error` ("PDF worker did not respond") and call `onError`, so the user no longer sees a frozen "Loading PDF…".
+2. **Harden worker init.** Guard the `GlobalWorkerOptions.workerSrc` assignment so it only runs once, and add a fallback to the matching `cdnjs` URL (`pdfjs-dist@${pdfjsLib.version}/pdf.worker.min.mjs`, same pattern already used in `BrainKnowledgeDialog.tsx`) if the bundled `?url` import returns an empty string. This protects against the rare Vite case where the `?url` import resolves to "" before the worker chunk is emitted.
+3. **Try `getDocument({ url })` first when we have an https URL,** and only fall back to `{ data: buffer }` on failure. The current code does the opposite — a hung `data:` path leaves the second branch unreached. Switching the order makes the fast path more reliable for signed-URL PDFs and keeps the byte fallback for blobs.
+4. **Surface a Retry button** in the error state so the user can recover without reloading the page.
 
-Use this data to enrich the provenance line:
-- **Page number**: from `drawing_search_index.page_number` matched via `source_file_id` → `document_version_id`
-- **Segment address**: show `segment.level_label`, `zone_label`, `segment_type`
-- **Full file name**: already available from `projectFiles`
+No changes to `TakeoffCanvas.tsx`, `ScopeStage.tsx`, the storage signing flow, or any backend code.
 
-Display format per bar line:
-```
-A1  [15M]  72 × (6,000 mm ÷ 1000) × 1.570 kg/m = 678.2 kg
-📍 Source: Continuous Wall Footing - Longitudinal Reinforcement
-   Drawing: CRU-1 Structral (4).pdf · Page 3 · Segment: L1 / Zone A / Foundation
-   Confidence: 90% · AI-generated
-```
+## Out of scope
 
-### 2. `src/pages/SegmentDetail.tsx` — Make drawing reference clickable
+- Re-architecting PdfRenderer or moving to a different PDF library.
+- Changes to `pdf-to-images.ts` (server/worker pipeline) — that path is unrelated.
+- The Stage 02 layout/UX (kept exactly as-is).
 
-Add a click handler on the drawing/page reference that:
-1. Fetches a signed URL for the source file from storage
-2. Sets `sessionStorage` with `blueprint-viewer-data` including the page number and any overlay elements for this segment
-3. Opens `/blueprint-viewer` in a new tab via `window.open`
+## Verification
 
-The blueprint viewer already supports PDF page navigation (`currentPage`) and element highlighting via `selectedElementId`, so passing the correct page number and element data will auto-navigate and highlight.
-
-### 3. Data joining approach
-
-- Match `estimate_item.source_file_id` → `project_files.id` for file name
-- Match `estimate_item.source_file_id` → `document_versions.file_id` → get `page_count` and `pdf_metadata`
-- Match `source_file_id` → `drawing_search_index` entries (via `document_version_id`) to find relevant page numbers
-- Use segment's `level_label`, `zone_label`, `segment_type` for the address
-
-## Files Modified
-- `src/pages/SegmentDetail.tsx` — add drawing_search_index + document_versions queries, enrich provenance display, add click-to-open handler
-
-## No new files, no migrations, no edge function changes
-
+- Reload Stage 02 with the same `CRU-1 Structral (4).pdf`. Expect the page raster to appear within a few seconds and "Loading PDF…" to disappear.
+- Force-fail the worker (block the worker URL in devtools) and confirm the new error state + Retry button replaces the indefinite spinner.
+- Re-check Stage 04 / QA Stage which also use PdfRenderer to ensure the legacy `file`/`page`/`onRender` props still work.

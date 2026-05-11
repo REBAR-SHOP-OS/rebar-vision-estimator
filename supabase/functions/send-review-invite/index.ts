@@ -21,18 +21,47 @@ Deno.serve(async (req) => {
     }
 
     const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader || "" } },
+      global: { headers: { Authorization: authHeader } },
     });
     const { data: { user }, error: userError } = await userClient.auth.getUser();
     if (userError || !user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { data: ownedProject, error: projectError } = await supabase
+      .from("projects")
+      .select("id")
+      .eq("id", project_id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (projectError) {
+      console.error("Project lookup error:", projectError);
+      return new Response(JSON.stringify({ error: "Failed to verify project access" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!ownedProject) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -64,7 +93,6 @@ Deno.serve(async (req) => {
 
     const shareUrl = `https://rebar-vision-estimator.lovable.app/review/${share_token}`;
 
-    // Trigger notification (fire-and-forget)
     try {
       const totalWeight = review_data?.total_weight_lbs
         ? `${Number(review_data.total_weight_lbs).toLocaleString()} lbs`
@@ -76,10 +104,10 @@ Deno.serve(async (req) => {
         ? "Customer Quotation"
         : "Estimation Review";
 
-      const notifyBody = `A new ${reviewTypeLabel} is ready for your review.\n\n` +
-        `• Total weight: ${totalWeight}\n` +
-        `• Elements: ${elemCount}\n\n` +
-        `Click the link below to review and leave feedback.`;
+      const notifyBody = `A new ${reviewTypeLabel} is ready for your review.\n\n`
+        + `• Total weight: ${totalWeight}\n`
+        + `• Elements: ${elemCount}\n\n`
+        + `Click the link below to review and leave feedback.`;
 
       await fetch(`${supabaseUrl}/functions/v1/notify-reviewer`, {
         method: "POST",

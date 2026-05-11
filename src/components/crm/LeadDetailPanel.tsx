@@ -33,10 +33,29 @@ interface LeadDetailPanelProps {
   onStartEstimationWithFiles?: (projectId: string, files: LeadAttachment[]) => void;
 }
 
+interface CrmLeadRecord {
+  id?: string | number;
+  title?: string;
+  customers?: { company_name?: string; name?: string } | null;
+  expected_value?: number;
+  created_at?: string;
+  stage?: string;
+  priority?: string;
+}
+
+interface CrmMessage {
+  author?: string;
+  user_name?: string;
+  created_at?: string;
+  body?: string;
+  content?: string;
+  message?: string;
+}
+
 interface LeadDetail {
-  lead: any;
-  attachments: any[];
-  messages: any[];
+  lead: CrmLeadRecord;
+  attachments: LeadAttachment[];
+  messages: CrmMessage[];
   messages_table: string;
 }
 
@@ -117,7 +136,7 @@ const LeadDetailPanel: React.FC<LeadDetailPanelProps> = ({
       crm_deal_id: String(lead.id),
     });
 
-    const files: LeadAttachment[] = detail.attachments.map((a: any) => ({
+    const files: LeadAttachment[] = detail.attachments.map((a) => ({
       name: a.name,
       size: a.size,
       mimeType: a.mimeType,
@@ -216,7 +235,7 @@ const LeadDetailPanel: React.FC<LeadDetailPanelProps> = ({
                 <p className="text-xs text-muted-foreground">No chatter messages found.</p>
               ) : (
                 <div className="space-y-2">
-                  {detail.messages.map((msg: any, i: number) => (
+                  {detail.messages.map((msg, i: number) => (
                     <div key={i} className="rounded-md border border-border p-2 text-xs">
                       <div className="flex justify-between text-muted-foreground mb-1">
                         <span>{msg.author || msg.user_name || "System"}</span>
@@ -242,7 +261,7 @@ const LeadDetailPanel: React.FC<LeadDetailPanelProps> = ({
                 <p className="text-xs text-muted-foreground">No attachments found.</p>
               ) : (
                 <div className="space-y-1.5">
-                  {detail.attachments.map((att: any, i: number) => (
+                  {detail.attachments.map((att, i: number) => (
                     <div key={i} className="flex items-center justify-between rounded border border-border p-2 text-xs">
                       <div className="flex items-center gap-2 min-w-0">
                         <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />

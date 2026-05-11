@@ -11,7 +11,7 @@ interface ReviewElement {
   status: string;
   extraction?: {
     confidence?: number;
-    truth?: Record<string, any>;
+    truth?: Record<string, unknown>;
   };
   regions?: {
     tag_region?: {
@@ -216,7 +216,7 @@ const PageReviewPanel: React.FC<PageReviewPanelProps> = ({
             const needsConfirmation = confidence < 1.0;
             const answer = answers.get(el.element_id);
             const isEditing = editingElement === el.element_id;
-            const truth = el.extraction?.truth;
+            const truth = el.extraction?.truth as any;
 
             return (
               <div

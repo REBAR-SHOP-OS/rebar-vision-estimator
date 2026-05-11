@@ -36,10 +36,11 @@ interface HistoryEntry {
 interface ShopDrawingModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  quoteResult: any;
-  elements: any[];
-  scopeData?: any;
+  quoteResult: Record<string, unknown>;
+  elements: unknown[];
+  scopeData?: Record<string, unknown>;
   projectId?: string;
+  exportBlocked?: boolean;
 }
 
 type ModalPhase = "options" | "generating" | "preview";
@@ -59,7 +60,7 @@ const PROGRESS_STEPS = [
   { pct: 90, label: "Adding dimensions and annotations..." },
 ];
 
-export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elements, scopeData, projectId }: ShopDrawingModalProps) {
+export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elements, scopeData, projectId, exportBlocked }: ShopDrawingModalProps) {
   const [phase, setPhase] = useState<ModalPhase>("options");
   const [options, setOptions] = useState<ShopDrawingOptions>(DEFAULT_OPTIONS);
   const [progress, setProgress] = useState(0);
@@ -71,8 +72,8 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const abortRef = useRef(false);
 
-  const barList: any[] = quoteResult?.quote?.bar_list || [];
-  const sizeBreakdown: Record<string, number> = quoteResult?.quote?.size_breakdown || {};
+  const barList: unknown[] = (quoteResult?.quote as Record<string, unknown>)?.bar_list as unknown[] || [];
+  const sizeBreakdown: Record<string, number> = (quoteResult?.quote as any)?.size_breakdown || {};
 
   const loadHistory = useCallback(async () => {
     if (!projectId) return;
@@ -84,7 +85,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
         .eq("project_id", projectId)
         .order("version", { ascending: false });
       if (error) throw error;
-      setHistory((data as any[]) || []);
+      setHistory((data as unknown as HistoryEntry[]) || []);
     } catch {
       // silent
     }
@@ -105,6 +106,10 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
   }, [open]);
 
   const handleGenerate = async () => {
+    if (exportBlocked) {
+      toast.error("Shop drawing export is blocked until verification passes.");
+      return;
+    }
     setPhase("generating");
     setProgress(0);
     setProgressLabel(PROGRESS_STEPS[0].label);
@@ -159,18 +164,18 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
           await supabase.from("shop_drawings").insert({
             project_id: projectId,
             user_id: user.id,
-            options: options as any,
+            options: options as unknown,
             html_content: data.html,
             version: nextVersion,
-          });
+          } as any);
         }
       }
 
       setTimeout(() => setPhase("preview"), 400);
-    } catch (err: any) {
+    } catch (err) {
       timers.forEach(clearTimeout);
       abortRef.current = true;
-      toast.error(err.message || "Generation failed");
+      toast.error((err as Error).message || "Generation failed");
       setPhase("options");
     }
   };
@@ -253,7 +258,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
                   <Textarea value={options.notes} onChange={e => setOptions(o => ({ ...o, notes: e.target.value }))} placeholder="Any notes to include on the drawing..." rows={3} />
                 </div>
 
-                <Button onClick={handleGenerate} className="w-full">Generate Shop Drawing</Button>
+                <Button onClick={handleGenerate} disabled={exportBlocked} className="w-full">Generate Shop Drawing</Button>
               </div>
             )}
 
@@ -306,7 +311,7 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
                         {new Date(entry.created_at).toLocaleDateString()}
                       </div>
                       <span className="text-xs text-muted-foreground">
-                        Scale: {(entry.options as any)?.scale || "—"}
+                        Scale: {(entry.options as { scale?: string })?.scale || "—"}
                       </span>
                     </div>
                     <div className="flex gap-1">

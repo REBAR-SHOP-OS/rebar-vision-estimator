@@ -35,7 +35,8 @@ export default function ProjectSettingsTab({ project, onUpdate }: Props) {
   const handleSave = async () => {
     if (!user || !name.trim()) return;
     setSaving(true);
-    const { data, error } = await supabase.from("projects").update({
+
+    const legacyPayload = {
       name: name.trim(),
       client_name: clientName.trim() || null,
       address: address.trim() || null,
@@ -43,13 +44,78 @@ export default function ProjectSettingsTab({ project, onUpdate }: Props) {
       description: description.trim() || null,
       status,
       workflow_status: workflowStatus,
-    }).eq("id", project.id).select("*").single();
-    if (error) toast.error("Failed to save");
-    else {
-      await logAuditEvent(user.id, "updated", "project", project.id, project.id);
-      toast.success("Project saved");
-      onUpdate(data);
+    };
+
+    const { data, error } = await supabase.from("projects").update(legacyPayload).eq("id", project.id).select("*").single();
+
+    if (error) {
+      toast.error("Failed to save");
+      setSaving(false);
+      return;
     }
+
+    let updatedCanonicalProject = project.canonicalProject || null;
+    let canonicalSyncSucceeded = false;
+
+    if (project.rebar_project_id) {
+      const { data: canonicalData, error: canonicalError } = await (supabase as any)
+        .schema("rebar")
+        .from("projects")
+        .update({
+          project_name: legacyPayload.name,
+          customer_name: legacyPayload.client_name,
+          location: legacyPayload.address,
+          status: legacyPayload.status,
+        })
+        .eq("id", project.rebar_project_id)
+        .select("id, project_name, customer_name, status, created_at, updated_at, project_number, location, tender_due_at, concrete_grade, rebar_grade, bid_notes")
+        .single();
+
+      if (canonicalError) {
+        console.warn("Failed to sync canonical project fields:", canonicalError);
+        toast.warning("Saved project details, but the canonical project record did not sync.");
+        updatedCanonicalProject = null;
+      } else if (canonicalData) {
+        canonicalSyncSucceeded = true;
+        updatedCanonicalProject = {
+          legacyProjectId: project.id,
+          rebarProjectId: canonicalData.id,
+          projectName: canonicalData.project_name,
+          customerName: canonicalData.customer_name || null,
+          status: canonicalData.status,
+          createdAt: canonicalData.created_at,
+          updatedAt: canonicalData.updated_at,
+          projectNumber: canonicalData.project_number || null,
+          location: canonicalData.location || null,
+          tenderDueAt: canonicalData.tender_due_at || null,
+          concreteGrade: canonicalData.concrete_grade || null,
+          rebarGrade: canonicalData.rebar_grade || null,
+          bidNotes: canonicalData.bid_notes || null,
+        };
+      }
+    }
+
+    await logAuditEvent(user.id, "updated", "project", project.id, project.id);
+    toast.success("Project saved");
+
+    const nextProject = {
+      ...data,
+      canonicalProject: updatedCanonicalProject,
+      rebar_project_id: project.rebar_project_id || updatedCanonicalProject?.rebarProjectId || null,
+      project_name: canonicalSyncSucceeded ? updatedCanonicalProject?.projectName || data.name : data.name,
+      customer_name: canonicalSyncSucceeded ? updatedCanonicalProject?.customerName ?? data.client_name : data.client_name,
+      location: canonicalSyncSucceeded ? updatedCanonicalProject?.location ?? data.address ?? null : data.address ?? null,
+      status: canonicalSyncSucceeded ? updatedCanonicalProject?.status || data.status : data.status,
+    };
+
+    onUpdate(nextProject);
+    window.dispatchEvent(new CustomEvent("project-updated", {
+      detail: {
+        projectId: project.id,
+        projectName: nextProject.project_name || nextProject.name,
+      },
+    }));
+
     setSaving(false);
   };
 
@@ -114,7 +180,7 @@ export default function ProjectSettingsTab({ project, onUpdate }: Props) {
             </div>
           </div>
           <Button onClick={handleSave} disabled={saving || !name.trim()} size="sm" className="w-full">
-            {saving ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Saving…</> : "Save Changes"}
+            {saving ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Saving...</> : "Save Changes"}
           </Button>
         </CardContent>
       </Card>
@@ -133,7 +199,7 @@ export default function ProjectSettingsTab({ project, onUpdate }: Props) {
               <div className="flex gap-2 justify-end mt-2">
                 <Button variant="outline" size="sm" onClick={() => setDeleteOpen(false)}>Cancel</Button>
                 <Button variant="destructive" size="sm" onClick={handleDelete} disabled={deleting}>
-                  {deleting ? "Deleting…" : "Delete"}
+                  {deleting ? "Deleting..." : "Delete"}
                 </Button>
               </div>
             </DialogContent>

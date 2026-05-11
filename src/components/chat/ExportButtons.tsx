@@ -8,21 +8,23 @@ import { getMassKgPerM, kgToLbs } from "@/lib/rebar-weights";
 import { exportExcelFile } from "@/lib/excel-export";
 import { exportPdfFile } from "@/lib/pdf-export";
 import { toast } from "sonner";
+import type { ExportGateResult } from "@/lib/verified-estimate/export-gate";
 
 interface ExportButtonsProps {
-  quoteResult: any;
-  elements: any[];
-  scopeData?: any;
+  quoteResult: Record<string, unknown>;
+  elements: unknown[];
+  scopeData?: Record<string, unknown>;
   projectId?: string;
+  exportGate?: ExportGateResult | null;
 }
 
-const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteResult, elements, scopeData, projectId }, ref) => {
+const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteResult, elements, scopeData, projectId, exportGate }, ref) => {
   const [shopDrawingOpen, setShopDrawingOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [jsonOpen, setJsonOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const quote = quoteResult?.quote || {};
-  const barList: any[] = quote.bar_list || [];
+  const quote: any = quoteResult?.quote || {};
+  const barList: unknown[] = (quote as Record<string, unknown>).bar_list as unknown[] || [];
   const sizeBreakdown: Record<string, number> = quote.size_breakdown || {};
   const sizeBreakdownKg: Record<string, number> = quote.size_breakdown_kg || {};
   const totalLbs = quote.total_weight_lbs;
@@ -31,6 +33,7 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
 
   const isBlocked = quote.job_status === "VALIDATION_FAILED" || quote.job_status === "BLOCKED";
   const isFlagged = quote.reconciliation?.risk_level === "FLAG" || quote.job_status === "FLAGGED";
+  const gatedBlocked = Boolean(exportGate && !exportGate.canExport);
 
   const handleCopyJson = () => {
     navigator.clipboard.writeText(JSON.stringify(quoteResult, null, 2));
@@ -40,15 +43,23 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
   };
 
   const handleExcelExport = async () => {
+    if (gatedBlocked) {
+      toast.error(exportGate?.blocked_reasons[0] || "Export blocked until the estimate passes verification.");
+      return;
+    }
     if (isBlocked) {
-      toast.warning("Estimate is BLOCKED — exporting with warning banner");
+      toast.warning("Quote status is flagged — review before relying on this export.");
     }
     await exportExcelFile({ quoteResult, elements, scopeData });
   };
 
   const handlePdfExport = async () => {
+    if (gatedBlocked) {
+      toast.error(exportGate?.blocked_reasons[0] || "Export blocked until the estimate passes verification.");
+      return;
+    }
     if (isBlocked) {
-      toast.warning("Estimate is BLOCKED — PDF includes warning banner");
+      toast.warning("Quote status is flagged — review before relying on this export.");
     }
     await exportPdfFile({ quoteResult, elements, scopeData, projectId });
   };
@@ -90,8 +101,21 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
         </CollapsibleContent>
       </Collapsible>
 
-      {/* Warning for blocked/flagged estimates */}
-      {isBlocked && (
+      {gatedBlocked && exportGate && (
+        <div className="flex flex-col gap-1 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs font-medium">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            Export blocked — resolve the issues below
+          </div>
+          <ul className="list-disc pl-5 text-[11px] font-normal text-destructive/90">
+            {exportGate.blocked_reasons.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {/* Warning for blocked/flagged estimates (LLM quote status) */}
+      {!gatedBlocked && isBlocked && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs font-medium">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           Estimate is BLOCKED — exports will include warning banner
@@ -106,11 +130,11 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
 
       {/* Export buttons: PDF then Excel */}
       <div className="flex gap-2">
-        <Button variant="outline" onClick={handlePdfExport} className="flex-1 gap-2 h-10 rounded-xl font-semibold">
+        <Button variant="outline" onClick={handlePdfExport} disabled={gatedBlocked} className="flex-1 gap-2 h-10 rounded-xl font-semibold">
           <FileText className="h-4 w-4" />
           Export PDF
         </Button>
-        <Button onClick={handleExcelExport} className="flex-1 gap-2 h-10 rounded-xl font-semibold bg-primary hover:bg-primary/90">
+        <Button onClick={handleExcelExport} disabled={gatedBlocked} className="flex-1 gap-2 h-10 rounded-xl font-semibold bg-primary hover:bg-primary/90">
           <FileSpreadsheet className="h-4 w-4" />
           Export Excel
         </Button>
@@ -118,6 +142,7 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
       <Button
         variant="outline"
         onClick={() => setShopDrawingOpen(true)}
+        disabled={gatedBlocked}
         className="w-full gap-2 h-10 rounded-xl font-semibold border-primary/30 text-primary hover:bg-primary/10"
       >
         <Ruler className="h-4 w-4" />
@@ -131,7 +156,7 @@ const ExportButtons = forwardRef<HTMLDivElement, ExportButtonsProps>(({ quoteRes
         <Share2 className="h-4 w-4" />
         Share for Review
       </Button>
-      <ShopDrawingModal open={shopDrawingOpen} onOpenChange={setShopDrawingOpen} quoteResult={quoteResult} elements={elements} scopeData={scopeData} projectId={projectId} />
+      <ShopDrawingModal open={shopDrawingOpen} onOpenChange={setShopDrawingOpen} quoteResult={quoteResult} elements={elements} scopeData={scopeData} projectId={projectId} exportBlocked={gatedBlocked} />
       <ShareReviewDialog open={shareOpen} onOpenChange={setShareOpen} projectId={projectId} />
     </div>
   );

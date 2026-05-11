@@ -1,0 +1,40 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+      - codex/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --no-fund --no-audit
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Build app
+        run: npm run build

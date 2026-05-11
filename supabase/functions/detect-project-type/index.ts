@@ -7,6 +7,23 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// ── Shared types ──
+
+type ServiceAccountKey = { client_email: string; private_key: string };
+type ImageUrlPart = { type: "image_url"; image_url: { url: string } };
+type TextPart = { type: "text"; text: string };
+type UserContentPart = TextPart | ImageUrlPart;
+
+function tryParseJson<T>(value: string): T | null {
+  try {
+    return JSON.parse(value) as T;
+  } catch (err) {
+    // Intentionally ignore parse errors; we try multiple encodings.
+    console.debug("JSON parse attempt failed:", err);
+    return null;
+  }
+}
+
 // ── Google Vision helpers ──
 
 function base64url(data: Uint8Array): string {
@@ -23,12 +40,12 @@ async function getGoogleAccessToken(): Promise<string> {
   const saKeyRaw = Deno.env.get("GOOGLE_VISION_SA_KEY_V2") || Deno.env.get("GOOGLE_VISION_SA_KEY");
   if (!saKeyRaw) throw new Error("GOOGLE_VISION_SA_KEY not configured");
   
-  let sa: any;
+  let sa: ServiceAccountKey | null = null;
   const cleanJson = saKeyRaw.replace(/^\uFEFF/, '').trim();
-  try { sa = JSON.parse(cleanJson); } catch {}
-  if (!sa) { try { sa = JSON.parse(decodeURIComponent(cleanJson)); } catch {} }
-  if (!sa) { try { sa = JSON.parse(new TextDecoder().decode(decodeBase64(cleanJson))); } catch {} }
-  if (!sa) { try { sa = JSON.parse(cleanJson.replace(/\\n/g, '\n').replace(/\\"/g, '"')); } catch {} }
+  sa = tryParseJson<ServiceAccountKey>(cleanJson);
+  if (!sa) sa = tryParseJson<ServiceAccountKey>(decodeURIComponent(cleanJson));
+  if (!sa) sa = tryParseJson<ServiceAccountKey>(new TextDecoder().decode(decodeBase64(cleanJson)));
+  if (!sa) sa = tryParseJson<ServiceAccountKey>(cleanJson.replace(/\\n/g, '\n').replace(/\\"/g, '"'));
   if (!sa || !sa.client_email || !sa.private_key) throw new Error("GOOGLE_VISION_SA_KEY parse failed");
 
   const now = Math.floor(Date.now() / 1000);
@@ -101,7 +118,7 @@ serve(async (req) => {
     });
 
     // Limit: 3 images for AI vision, 2 for OCR to stay within CPU budget
-    const contentParts: any[] = imageUrls.slice(0, 3).map((url: string) => ({
+    const contentParts: ImageUrlPart[] = imageUrls.slice(0, 3).map((url: string) => ({
       type: "image_url", image_url: { url },
     }));
 
@@ -116,11 +133,11 @@ serve(async (req) => {
           if (imgBuf.byteLength > 2 * 1024 * 1024) continue; // skip large images
           const text = await quickOCR(accessToken, encodeBase64(imgBuf));
           if (text) ocrText += `\n--- OCR from ${url.split('/').pop()?.split('?')[0]} ---\n${text}\n`;
-        } catch {}
+        } catch (err) {
+          console.warn("OCR failed for image:", url, err);
+        }
       }
     }
-
-    // Keyword-based analysis for veto logic
     const ocrLower = ocrText.toLowerCase();
     const cageKeywords = ["cage", "spiral", "tied assembly", "cage mark", "prefab", "column cage", "cage schedule", "cage height", "cage dia", "caisson", "drilled pier", "drilled shaft", "belled"];
     const barListKeywords = ["bar list", "bar schedule", "bar mark", "cut length", "bending schedule"];
@@ -166,6 +183,26 @@ ${ocrText ? `## OCR Text Extracted:\n${ocrText}` : "No OCR text available - anal
 
 ${keywordHints.length > 0 ? `## Keyword Analysis Hints:\n${keywordHints.map(h => `- ${h}`).join("\n")}\n` : ""}
 
+## STEP 0: THE "BIG THREE" PROJECT-TYPE IDENTIFIERS (do this FIRST)
+Before any scope work, classify the project using these three signals — in priority order — and report what you saw for each in classificationEvidence:
+
+1. **Title Block** (cover sheet A-0.0 / S-0.0):
+   - Commercial: "Retail", "Unit X Development", "Plaza", developer names (e.g. "Westdell").
+   - Industrial: "Warehouse", "Factory", "Distribution Center", "Plant".
+   - Residential: "Multi-family", "Apartment", "Condominium", "Townhouse".
+
+2. **Floor Plan Layout** (A-2.2 or first architectural plan):
+   - Commercial: large open spaces, "Storefront" glass, multiple washrooms in a row, "Signage" labels.
+   - Industrial: very few interior walls, "Loading Docks", "Drive-in Doors", clear-span bays.
+   - Residential: many small rooms, kitchens, bedrooms, bathtubs.
+
+3. **Framing Material** (S-1.1 or first structural framing plan):
+   - Commercial: O.W.S.J. (Open Web Steel Joists) + metal deck.
+   - Industrial: heavy structural steel (W-shapes) or pre-cast concrete.
+   - Residential: wood trusses or thin-slab concrete on metal studs.
+
+If two of three signals agree, use that classification with high confidence. If signals conflict, prefer the structural framing material and lower confidence.
+
 ## STEP 1: DISCIPLINE IDENTIFICATION (Critical First Step)
 Before analyzing scope, identify the DISCIPLINE of each page/image from the title block or sheet number:
 - **S** = Structural (S1.1, S2.1, etc.)
@@ -190,10 +227,10 @@ Rebar only exists inside concrete or masonry. Find EVERY piece of concrete acros
 
 ## 5 Construction Buckets (classify every concrete element into one):
 
-**Bucket 1 — Substructure & Deep Foundations**: Piles, Caissons, Grade Beams, Strip Footings, Pad Footings, Raft Slabs, Elevator Pits, Sump Pits.
+**Bucket 1 — Substructure & Deep Foundations**: Piles, Caissons, Piers/Pedestals (P# marks on top of footings), Grade Beams, Strip Footings, Pad Footings (F# marks), Raft Slabs, Elevator Pits, Sump Pits, Foundation Walls (FW).
   Found on: Structural (S), Elevator specs, Plumbing (P) drawings.
 
-**Bucket 2 — Slab-on-Grade & Flatwork**: Main interior slabs, thickened edges, trench drains, vapor barrier protection slabs, heavy equipment pads, wire mesh.
+**Bucket 2 — Slab-on-Grade & Flatwork**: Main interior slabs, thickened edges, trench drains, vapor barrier protection slabs, heavy equipment pads, wire mesh, Steps on Grade (exterior step assemblies on SOG).
   Found on: Structural (S), Architectural (A) for depressed slabs, Mechanical/Electrical (M/E) for housekeeping pads.
 
 **Bucket 3 — Superstructure**: Columns, Beams, Elevated/Suspended Slabs, Concrete Roofs, Stairs, Shear Walls, Post-Tensioned decks, Cage Assemblies.
@@ -300,6 +337,15 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
               items: { type: "string" },
               description: "Scope elements found ONLY on non-structural drawings (A/C/L/M/E) — easily missed in estimation"
             },
+            classificationEvidence: {
+              type: "object",
+              description: "Big Three identifier findings (Title Block, Floor Plan, Framing Material). Used to explain to the user why the project was classified as it was.",
+              properties: {
+                titleBlock: { type: "string", description: "What you saw on A-0.0 / S-0.0 (keywords, project name)." },
+                floorPlan: { type: "string", description: "What you saw on A-2.2 (storefront glass / loading docks / many small rooms / etc)." },
+                framing: { type: "string", description: "What you saw on S-1.1 (OWSJ + metal deck / W-shapes / wood trusses / etc)." },
+              },
+            },
             confidencePrimary: {
               type: "number",
               description: "Confidence in primaryCategory classification from 0 to 1"
@@ -315,7 +361,7 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
       }
     }];
 
-    const userContent: any[] = [{ type: "text", text: detectionPrompt }, ...contentParts];
+    const userContent: UserContentPart[] = [{ type: "text", text: detectionPrompt }, ...contentParts];
 
     const aiStart = performance.now();
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -350,7 +396,7 @@ FOUNDATION PLAN, FOOTING, STRIP FOOTING, BASEMENT WALL, ICF WALL, WALL SCHEDULE,
     const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
     
     if (toolCall?.function?.arguments) {
-      let result = JSON.parse(toolCall.function.arguments);
+      const result = JSON.parse(toolCall.function.arguments);
       
       // ── Server-side Veto Logic ──
       // If AI returned cage_only but our keyword analysis found building signals, override

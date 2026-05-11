@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { createClient } from "@supabase/supabase-js";
 import { Input } from "@/components/ui/input";
@@ -11,10 +11,15 @@ import ReviewReport from "@/components/review/ReviewReport";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-const anonClient = createClient(supabaseUrl, supabaseAnonKey);
 
 const ReviewPage: React.FC = () => {
   const { token } = useParams<{ token: string }>();
+  const reviewClient = useMemo(() => createClient(supabaseUrl, supabaseAnonKey, {
+    global: {
+      headers: token ? { "x-share-token": token } : {},
+    },
+  }), [token]);
+
   const [share, setShare] = useState<any>(null);
   const [comments, setComments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,12 +33,12 @@ const ReviewPage: React.FC = () => {
 
   useEffect(() => {
     if (token) loadShareData();
-  }, [token]);
+  }, [token, reviewClient]);
 
   const loadShareData = async () => {
     setLoading(true);
     try {
-      const { data: shareData, error: shareErr } = await anonClient
+      const { data: shareData, error: shareErr } = await reviewClient
         .from("review_shares")
         .select("*")
         .eq("share_token", token)
@@ -48,20 +53,20 @@ const ReviewPage: React.FC = () => {
       setShare(shareData);
 
       if (shareData.status === "pending") {
-        await anonClient
+        await reviewClient
           .from("review_shares")
           .update({ status: "viewed" })
           .eq("id", shareData.id);
       }
 
-      const { data: commentsData } = await anonClient
+      const { data: commentsData } = await reviewClient
         .from("review_comments")
         .select("*")
         .eq("share_id", shareData.id)
         .order("created_at", { ascending: true });
 
       setComments(commentsData || []);
-    } catch (err: any) {
+    } catch {
       setError("Failed to load review data.");
     } finally {
       setLoading(false);
@@ -72,7 +77,7 @@ const ReviewPage: React.FC = () => {
     if (!commentText.trim() || !authorName.trim() || !authorEmail.trim() || !share) return;
     setSubmitting(true);
     try {
-      const { error: insertErr } = await anonClient
+      const { error: insertErr } = await reviewClient
         .from("review_comments")
         .insert({
           share_id: share.id,
@@ -83,40 +88,15 @@ const ReviewPage: React.FC = () => {
 
       if (insertErr) throw insertErr;
 
-      await anonClient
+      await reviewClient
         .from("review_shares")
         .update({ status: "commented" })
         .eq("id", share.id);
 
-      // Notify project owner about new comment
-      try {
-        await fetch(
-          `${supabaseUrl}/functions/v1/notify-reviewer`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${supabaseAnonKey}`,
-            },
-            body: JSON.stringify({
-              project_id: share.project_id,
-              recipient_email: "neel@rebar.shop",
-              recipient_name: "Neel",
-              notification_type: "comment_received",
-              subject: `💬 ${authorName.trim()} commented on your review — Rebar Shop`,
-              body: `${authorName.trim()} left a comment on the ${share.review_type === "quote_approval" ? "quote approval" : "estimation review"}:\n\n"${commentText.trim().slice(0, 200)}"`,
-              share_url: window.location.href,
-            }),
-          }
-        );
-      } catch (notifyErr) {
-        console.error("Owner notification failed (non-blocking):", notifyErr);
-      }
-
       setSubmitted(true);
       setCommentText("");
 
-      const { data: commentsData } = await anonClient
+      const { data: commentsData } = await reviewClient
         .from("review_comments")
         .select("*")
         .eq("share_id", share.id)
@@ -173,7 +153,6 @@ const ReviewPage: React.FC = () => {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-6 space-y-6">
-        {/* Share info */}
         <div className="rounded-xl border border-border bg-card p-4 space-y-2">
           <h2 className="font-semibold text-foreground">Review Details</h2>
           <div className="grid grid-cols-2 gap-2 text-sm">
@@ -198,12 +177,10 @@ const ReviewPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Full estimation report */}
         {reviewData && Object.keys(reviewData).length > 0 && (
           <ReviewReport reviewData={reviewData} />
         )}
 
-        {/* Existing comments */}
         {comments.length > 0 && (
           <div className="space-y-3">
             <h2 className="font-semibold text-foreground flex items-center gap-2">
@@ -224,7 +201,6 @@ const ReviewPage: React.FC = () => {
           </div>
         )}
 
-        {/* Comment form */}
         <div className="rounded-xl border border-border bg-card p-4 space-y-4">
           <h2 className="font-semibold text-foreground">Leave a Comment</h2>
 

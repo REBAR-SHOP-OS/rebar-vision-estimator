@@ -15,7 +15,7 @@ interface EstimateVersion {
   confidence_score: number | null;
   status: string | null;
   created_at: string;
-  line_items: any[];
+  line_items: Record<string, unknown>[];
 }
 
 const EstimateComparison: React.FC<{ projectId: string; onClose: () => void }> = ({ projectId, onClose }) => {
@@ -42,9 +42,9 @@ const EstimateComparison: React.FC<{ projectId: string; onClose: () => void }> =
   const vA = versions.find((v) => v.id === selected[0]);
   const vB = versions.find((v) => v.id === selected[1]);
 
-  const computeWeight = (items: any[]): number => {
+  const computeWeight = (items: Record<string, unknown>[]): number => {
     if (!items || !Array.isArray(items)) return 0;
-    return items.reduce((sum: number, el: any) => sum + (el.total_weight_kg || el.weight_kg || 0), 0);
+    return items.reduce((sum: number, el) => sum + (Number(el.total_weight_kg) || Number(el.weight_kg) || 0), 0);
   };
 
   const weightA = vA ? computeWeight(vA.line_items) : 0;

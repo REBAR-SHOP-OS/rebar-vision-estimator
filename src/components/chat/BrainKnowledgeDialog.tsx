@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Brain, Upload, Trash2, FileText, Plus, Loader2, GraduationCap, Lightbulb, Pencil, Check, X } from "lucide-react";
+import { Brain, Upload, Trash2, FileText, Plus, Loader2, GraduationCap, Lightbulb, Pencil, Check, X, ShieldCheck, ShieldAlert, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,98 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { readSpreadsheetFile, rowsToCsvText } from "@/lib/spreadsheet-import";
+import * as pdfjsLib from "pdfjs-dist";
+import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
+
+// Worker is already configured in src/lib/pdf-to-images.ts; re-asserting here
+// is safe (idempotent) and avoids load-order issues if this dialog opens first.
+if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+}
+
+// Extract text from a PDF in-browser. Caps at ~500KB so the runtime prompt
+// path stays small. Returns "" if extraction fails (caller shows a warning).
+async function extractPdfText(file: File): Promise<string> {
+  try {
+    const buf = await file.arrayBuffer();
+    const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+    const pageCount = Math.min(doc.numPages, 200);
+    const out: string[] = [];
+    for (let i = 1; i <= pageCount; i++) {
+      const p = await doc.getPage(i);
+      const tc = await p.getTextContent();
+      const text = tc.items.map((it: any) => ("str" in it ? it.str : "")).join(" ");
+      out.push(`[Page ${i}]\n${text}`);
+      if (out.join("\n").length > 500_000) break;
+    }
+    return out.join("\n\n").slice(0, 500_000);
+  } catch (err) {
+    console.warn("[BrainKnowledge] PDF text extraction failed:", err);
+    return "";
+  }
+}
+
+// OCR a single image file via the ocr-image edge function. Uploads to a temp
+// path under the user's blueprints space, signs a URL, and returns extracted
+// text. Returns "" if anything fails.
+async function ocrImageFile(file: File, userId: string): Promise<string> {
+  try {
+    const tmpPath = `${userId}/knowledge-tmp/${Date.now()}_${file.name}`;
+    const up = await supabase.storage.from("blueprints").upload(tmpPath, file, { upsert: true });
+    if (up.error) throw up.error;
+    const { data: signed } = await supabase.storage.from("blueprints").createSignedUrl(tmpPath, 600);
+    if (!signed?.signedUrl) throw new Error("No signed URL");
+    const { data: ocrData } = await supabase.functions.invoke("ocr-image", {
+      body: { image_url: signed.signedUrl },
+    });
+    const txt = (ocrData?.ocr_results || [])
+      .map((r: any) => r.fullText || "")
+      .filter((t: string) => t.length > 0)
+      .sort((a: string, b: string) => b.length - a.length)[0] || "";
+    // Best-effort cleanup; ignore errors
+    supabase.storage.from("blueprints").remove([tmpPath]).catch(() => {});
+    return txt.slice(0, 500_000);
+  } catch (err) {
+    console.warn("[BrainKnowledge] image OCR failed:", err);
+    return "";
+  }
+}
+
+// PDF fallback: render pages to images in the browser and OCR each via the
+// ocr-image edge function. Used when pdfjs text extraction yields nothing
+// (i.e. scanned PDFs).
+async function ocrPdfFile(file: File, projectIdLike: string): Promise<string> {
+  try {
+    const tmpPath = `${projectIdLike}/knowledge-tmp/${Date.now()}_${file.name}`;
+    const up = await supabase.storage.from("blueprints").upload(tmpPath, file, { upsert: true });
+    if (up.error) throw up.error;
+    const { data: signed } = await supabase.storage.from("blueprints").createSignedUrl(tmpPath, 1800);
+    if (!signed?.signedUrl) throw new Error("No signed URL");
+    const pages = await renderPdfPagesToImages(signed.signedUrl, projectIdLike, { maxPages: 30, scale: 1.5 });
+    const out: string[] = [];
+    for (let bi = 0; bi < pages.length; bi += 4) {
+      const batch = pages.slice(bi, bi + 4);
+      const results = await Promise.allSettled(batch.map(async (img) => {
+        const { data: ocrData } = await supabase.functions.invoke("ocr-image", {
+          body: { image_url: img.signedUrl },
+        });
+        const txt = (ocrData?.ocr_results || [])
+          .map((r: any) => r.fullText || "")
+          .filter((t: string) => t.length > 0)
+          .sort((a: string, b: string) => b.length - a.length)[0] || "";
+        return `[Page ${img.pageNumber}]\n${txt}`;
+      }));
+      for (const r of results) if (r.status === "fulfilled") out.push(r.value);
+      if (out.join("\n").length > 500_000) break;
+    }
+    supabase.storage.from("blueprints").remove([tmpPath]).catch(() => {});
+    return out.join("\n\n").slice(0, 500_000);
+  } catch (err) {
+    console.warn("[BrainKnowledge] PDF OCR fallback failed:", err);
+    return "";
+  }
+}
 
 interface KnowledgeItem {
   id: string;
@@ -78,21 +170,21 @@ const BrainKnowledgeDialog: React.FC = () => {
   const loadItems = async () => {
     setLoading(true);
     const { data, error } = await supabase
-      .from("agent_knowledge" as any)
+      .from("agent_knowledge")
       .select("*")
       .order("created_at", { ascending: false });
 
-    if (!error && data) setItems(data as any);
+    if (!error && data) setItems(data as KnowledgeItem[]);
     setLoading(false);
   };
 
   const loadTrainingExamples = async () => {
     const { data, error } = await supabase
-      .from("agent_training_examples" as any)
+      .from("agent_training_examples")
       .select("*")
       .order("created_at", { ascending: false });
 
-    if (!error && data) setTrainingExamples(data as any);
+    if (!error && data) setTrainingExamples(data as TrainingExample[]);
   };
 
   const addRule = async () => {
@@ -103,12 +195,12 @@ const BrainKnowledgeDialog: React.FC = () => {
       return;
     }
     setSaving(true);
-    const { error } = await supabase.from("agent_knowledge" as any).insert({
+    const { error } = await supabase.from("agent_knowledge").insert({
       user_id: user.id,
       title: ruleTitle.trim() || null,
       content: ruleContent.trim(),
       type: "rule",
-    } as any);
+    });
 
     if (error) {
       toast.error("Failed to save rule");
@@ -144,13 +236,30 @@ const BrainKnowledgeDialog: React.FC = () => {
         continue;
       }
 
-      const { error } = await supabase.from("agent_knowledge" as any).insert({
+      // Extract text so the runtime (auto-estimate) can use this file as an
+      // assumption authority. Without extracted content, the file is invisible
+      // to the takeoff engine.
+      let extracted = "";
+      if (/\.pdf$/i.test(file.name)) {
+        extracted = await extractPdfText(file);
+        if (!extracted) extracted = await ocrPdfFile(file, user.id);
+      } else if (/\.(txt|md|csv)$/i.test(file.name)) {
+        try { extracted = (await file.text()).slice(0, 500_000); } catch { /* ignore */ }
+      } else if (/\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(file.name)) {
+        extracted = await ocrImageFile(file, user.id);
+      }
+      if (!extracted) {
+        toast.warning(`${file.name}: text could not be extracted — file is stored but won't be used as a runtime authority.`);
+      }
+
+      const { error } = await supabase.from("agent_knowledge").insert({
         user_id: user.id,
         title: file.name,
         file_path: filePath,
         file_name: file.name,
+        content: extracted || null,
         type: "file",
-      } as any);
+      });
 
       if (error) toast.error(`Failed to save ${file.name}`);
     }
@@ -161,12 +270,45 @@ const BrainKnowledgeDialog: React.FC = () => {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  // Re-parse a previously uploaded file to populate `content` on legacy rows.
+  const reparseFile = async (item: KnowledgeItem) => {
+    if (!item.file_path || !user) return;
+    try {
+      const { data: signed, error: sErr } = await supabase.storage
+        .from("blueprints")
+        .createSignedUrl(item.file_path, 60);
+      if (sErr || !signed?.signedUrl) throw sErr || new Error("No signed URL");
+      const resp = await fetch(signed.signedUrl);
+      const blob = await resp.blob();
+      const fakeFile = new File([blob], item.file_name || "file.pdf", { type: blob.type });
+      let extracted = "";
+      if (/\.pdf$/i.test(fakeFile.name)) {
+        extracted = await extractPdfText(fakeFile);
+        if (!extracted) extracted = await ocrPdfFile(fakeFile, user.id);
+      } else if (/\.(txt|md|csv)$/i.test(fakeFile.name)) {
+        extracted = (await fakeFile.text()).slice(0, 500_000);
+      } else if (/\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(fakeFile.name)) {
+        extracted = await ocrImageFile(fakeFile, user.id);
+      }
+      if (!extracted) { toast.error("Could not extract text"); return; }
+      const { error } = await supabase.from("agent_knowledge")
+        .update({ content: extracted })
+        .eq("id", item.id);
+      if (error) throw error;
+      toast.success(`Parsed ${fakeFile.name} (${(extracted.length / 1000).toFixed(0)}k chars)`);
+      loadItems();
+    } catch (err) {
+      console.warn("Re-parse failed:", err);
+      toast.error("Re-parse failed");
+    }
+  };
+
   const deleteItem = async (item: KnowledgeItem) => {
     if (item.file_path) {
       await supabase.storage.from("blueprints").remove([item.file_path]);
     }
     const { error } = await supabase
-      .from("agent_knowledge" as any)
+      .from("agent_knowledge")
       .delete()
       .eq("id", item.id);
 
@@ -179,8 +321,8 @@ const BrainKnowledgeDialog: React.FC = () => {
 
   const updateRule = async (id: string, title: string, content: string) => {
     const { error } = await supabase
-      .from("agent_knowledge" as any)
-      .update({ title: title.trim() || null, content: content.trim() } as any)
+      .from("agent_knowledge")
+      .update({ title: title.trim() || null, content: content.trim() })
       .eq("id", id);
 
     if (error) {
@@ -261,7 +403,7 @@ const BrainKnowledgeDialog: React.FC = () => {
         }
       }
 
-      const { error } = await supabase.from("agent_training_examples" as any).insert({
+      const { error } = await supabase.from("agent_training_examples").insert({
         user_id: user.id,
         title: trainingTitle.trim(),
         description: trainingDescription.trim() || null,
@@ -270,7 +412,7 @@ const BrainKnowledgeDialog: React.FC = () => {
         answer_file_path: answerFilePath,
         answer_file_name: answerFileName,
         answer_text: trainingAnswerText.trim() || null,
-      } as any);
+      });
 
       if (error) {
         toast.error("Failed to save training example");
@@ -299,7 +441,7 @@ const BrainKnowledgeDialog: React.FC = () => {
     }
 
     const { error } = await supabase
-      .from("agent_training_examples" as any)
+      .from("agent_training_examples")
       .delete()
       .eq("id", example.id);
 
@@ -314,6 +456,52 @@ const BrainKnowledgeDialog: React.FC = () => {
   const fileCount = items.filter((i) => i.type === "file").length;
   const learnedItems = items.filter((i) => i.type === "learned");
   const totalCount = items.length + trainingExamples.length;
+
+  // RSIC Manual health: aggregate any uploaded chunks whose title/file_name
+  // matches the canonical manual name. Mirrors the gate in
+  // supabase/functions/auto-estimate/index.ts (MANUAL_NOT_LOADED).
+  const manualChunks = items.filter((i) => {
+    const hay = `${i.title || ""} ${i.file_name || ""}`.toLowerCase();
+    return /manual.*standard.*practice.*2018|standard.?practice.?2018|rsic.*manual/.test(hay);
+  });
+  const manualParsedChars = manualChunks.reduce((sum, c) => sum + (c.content?.length || 0), 0);
+  const manualReady = manualChunks.length > 0 && manualParsedChars >= 1000;
+  const manualUploadedNotParsed = manualChunks.length > 0 && manualParsedChars < 1000;
+  const [installingManual, setInstallingManual] = useState(false);
+
+  const installBundledRsicManual = async () => {
+    if (!user) return;
+    setInstallingManual(true);
+    try {
+      const url = "/manuals/Manual-Standard-Practice-2018.pdf";
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      const file = new File([blob], "Manual-Standard-Practice-2018.pdf", { type: "application/pdf" });
+      const filePath = `${user.id}/knowledge/${Date.now()}_${file.name}`;
+      const { error: upErr } = await supabase.storage.from("blueprints").upload(filePath, file, { upsert: true });
+      if (upErr) throw upErr;
+      let extracted = await extractPdfText(file);
+      if (!extracted) extracted = await ocrPdfFile(file, user.id);
+      const { error } = await supabase.from("agent_knowledge").insert({
+        user_id: user.id,
+        title: file.name,
+        file_path: filePath,
+        file_name: file.name,
+        content: extracted || null,
+        type: "file",
+      });
+      if (error) throw error;
+      if (!extracted) toast.warning("Manual stored but text could not be extracted. Try Re-parse.");
+      else toast.success(`RSIC Manual installed (${(extracted.length / 1000).toFixed(0)}k chars)`);
+      await loadItems();
+    } catch (err) {
+      console.warn("[BrainKnowledge] install bundled manual failed:", err);
+      toast.error("Could not install bundled RSIC Manual.");
+    } finally {
+      setInstallingManual(false);
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -411,6 +599,40 @@ const BrainKnowledgeDialog: React.FC = () => {
 
           {/* Files Tab */}
           <TabsContent value="files" className="space-y-3">
+            {/* RSIC Manual authority health */}
+            <div
+              className={`rounded-md border p-3 text-xs space-y-2 ${manualReady ? "border-emerald-500/40 bg-emerald-500/5" : "border-amber-500/50 bg-amber-500/5"}`}
+            >
+              <div className="flex items-center gap-2 font-semibold uppercase tracking-wider">
+                {manualReady ? (
+                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                ) : (
+                  <ShieldAlert className="h-4 w-4 text-amber-600" />
+                )}
+                <span>RSIC Manual of Standard Practice 2018</span>
+              </div>
+              {manualReady ? (
+                <p className="text-muted-foreground">
+                  Authority loaded — {manualChunks.length} chunk(s), {(manualParsedChars / 1000).toFixed(0)}k chars parsed.
+                  Auto-estimate may cite lap/splice/hook/bend rules from this document.
+                </p>
+              ) : manualUploadedNotParsed ? (
+                <p className="text-muted-foreground">
+                  Manual is uploaded but text was not extracted ({manualParsedChars} chars). Use the Re-parse action on the file row, or re-install below. Takeoff will be <b>blocked</b> until parsing succeeds.
+                </p>
+              ) : (
+                <p className="text-muted-foreground">
+                  Not installed. Auto-estimate will <b>block</b> with <code>MANUAL_NOT_LOADED</code> and refuse to fabricate assumption values.
+                </p>
+              )}
+              {!manualReady && (
+                <Button size="sm" variant="outline" className="gap-1" disabled={installingManual} onClick={installBundledRsicManual}>
+                  {installingManual ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                  {installingManual ? "Installing…" : "Install bundled RSIC Manual"}
+                </Button>
+              )}
+            </div>
+
             <div className="space-y-2 border rounded-lg p-3">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Upload Files ({fileCount}/10)
@@ -443,7 +665,21 @@ const BrainKnowledgeDialog: React.FC = () => {
                   <Upload className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-xs truncate">{item.file_name || item.title}</p>
+                    {!item.content ? (
+                      <p className="text-[10px] text-amber-600">Not parsed — runtime can't read this file</p>
+                    ) : (
+                      <p className="text-[10px] text-muted-foreground">{(item.content.length / 1000).toFixed(0)}k chars indexed</p>
+                    )}
                   </div>
+                  {!item.content && (
+                    <button
+                      onClick={() => reparseFile(item)}
+                      className="opacity-0 group-hover:opacity-100 text-[10px] uppercase tracking-wider text-primary hover:underline transition-opacity"
+                      title="Extract text so the takeoff engine can use this file"
+                    >
+                      Parse
+                    </button>
+                  )}
                   <button onClick={() => deleteItem(item)} className="opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive/80 transition-opacity">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>

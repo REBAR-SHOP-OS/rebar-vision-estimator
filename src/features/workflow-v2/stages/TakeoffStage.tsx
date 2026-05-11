@@ -1,0 +1,1050 @@
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
+import { StageHeader, Pill, EmptyState, CalibrationGate, type StageProps } from "./_shared";
+import { Sparkles, FileText, CheckCircle2, Loader2, Wand2, Pencil, Save, X, ChevronDown, ChevronRight, Layers, Table as TableIcon } from "lucide-react";
+import PdfRenderer from "@/components/chat/PdfRenderer";
+import TakeoffCanvas, { type TakeoffCanvasLayer } from "@/components/takeoff-canvas/TakeoffCanvas";
+import { inferSegmentType, methodologyStep } from "@/lib/segment-type";
+import { loadWorkflowTakeoffRows, type WorkflowTakeoffRow } from "../takeoff-data";
+import { parseAndIndexFile } from "@/lib/parse-file";
+function getFunctionErrorMessage(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  const jsonStart = message.indexOf("{");
+  if (jsonStart >= 0) {
+    try {
+      const payload = JSON.parse(message.slice(jsonStart));
+      if (payload?.error === "DRAWING_DATA_MISSING") {
+        const blockers = Array.isArray(payload.blockers)
+          ? payload.blockers.map((b: { name?: string }) => b?.name).filter(Boolean).join(", ")
+          : "";
+        return blockers
+          ? `No indexed drawing text is available yet. Re-index the drawings, then review dimensions for: ${blockers}.`
+          : "No indexed drawing text is available yet. Re-index the drawings before takeoff.";
+      }
+      if (payload?.error === "DIMENSIONS_INCOMPLETE") {
+        const blockers = Array.isArray(payload.blockers)
+          ? payload.blockers.map((b: { name?: string }) => b?.name).filter(Boolean).join(", ")
+          : "";
+        return blockers
+          ? `Dimensions still need review for: ${blockers}.`
+          : "Dimensions still need review before takeoff.";
+      }
+      if (typeof payload?.message === "string" && payload.message.trim()) return payload.message;
+    } catch {
+      // keep fallback
+    }
+  }
+  return message || fallback;
+}
+
+import { buildEngineerAnswerDraft } from "./qa-answer-fields";
+import { computeSyntheticEstimate } from "../lib/synthetic-estimate";
+import {
+  CANADIAN_BAR_MASS_KG_PER_M,
+  estimateCanadianLine,
+  parsePieceLengthMm,
+  parseSpacingMm,
+} from "@/lib/canadian-rebar-estimating";
+
+interface EditPatch {
+  count?: number;
+  length?: number;
+  weight?: number;
+  size?: string;
+}
+
+// 6-Phase Rebar Takeoff status chips (mirrors Agent Brain rules R0-R8).
+// Derived from existing row fields — no schema change.
+type PhaseState = "done" | "partial" | "todo";
+function derivePhaseStates(items: WorkflowTakeoffRow[], segName: string): PhaseState[] {
+  const seg = (segName || "").toLowerCase();
+  const isFooting = /footing|ftg|wf-|pad|grade beam|pile/i.test(seg);
+  const isPier = /pier|column|p-\d/i.test(seg);
+  const isFlat = /slab|sog|flat|mesh|wwm|wwf/i.test(seg);
+  if (items.length === 0) return ["todo","todo","todo","todo","todo","todo"];
+  const ready = (r: WorkflowTakeoffRow) => r.status !== "blocked" && r.geometry_status !== "unresolved";
+  const anyReady = items.some(ready);
+  const allReady = items.every(ready);
+  // P1 Specs: any row with non-empty size + non-empty source (cited)
+  const p1: PhaseState = items.some((r) => r.size && r.size !== "-" && r.source) ? "done" : "todo";
+  // P2 Foundation: footings have length>0
+  const p2: PhaseState = isFooting
+    ? (items.some((r) => r.length > 0) ? (allReady ? "done" : "partial") : "todo")
+    : "todo";
+  // P3 Verticals: pier-like with both vertical-size and tie-size present
+  const p3: PhaseState = isPier
+    ? (items.length >= 2 && anyReady ? "done" : items.length > 0 ? "partial" : "todo")
+    : "todo";
+  // P4 Flatwork: mesh row present
+  const p4: PhaseState = isFlat
+    ? (items.some((r) => /wwm|mesh|wwf/i.test(`${r.size} ${r.shape} ${r.source}`)) ? "done" : "partial")
+    : "todo";
+  // P5 Hidden: any row references a typical-detail or S6.x sheet
+  const p5: PhaseState = items.some((r) => /T\.?D\.?\s*\d+|S-?6/i.test(`${r.shape} ${r.source} ${r.missing_refs?.join(" ") || ""}`))
+    ? "done"
+    : "todo";
+  // P6 Convert: every ready row has weight>0
+  const p6: PhaseState = allReady && items.every((r) => r.weight > 0)
+    ? "done"
+    : items.some((r) => r.weight > 0) ? "partial" : "todo";
+  return [p1, p2, p3, p4, p5, p6];
+}
+const PHASE_LABELS = ["1 Specs","2 Foundation","3 Verticals","4 Flatwork","5 Hidden","6 Convert"];
+const PHASE_TOOLTIPS = [
+  "R1: bar grade, lap, hook, coating cited from spec sheet",
+  "R3/R4: continuous wall + pad footing geometry resolved",
+  "R5: pier verticals + ties from schedule",
+  "R6: mesh weight = mass × area (no linear m)",
+  "R7: corner bars, opening trim, dowels, step bars from typical details",
+  "R8: weight = length × locked kg/m (RSIC 2018)",
+];
+function PhaseChips({ items, segName }: { items: WorkflowTakeoffRow[]; segName: string }) {
+  const states = derivePhaseStates(items, segName);
+  const hiddenCount = items.filter((r) =>
+    /\b(dowel|corner|opening|step\s*bar|top\s*tie|thicken|T\.?D\.?\s*\d+)\b/i.test(`${r.mark} ${r.shape} ${r.source}`)
+  ).length;
+  const wasteRow = items.find((r) => /waste\s*factor/i.test(`${r.shape} ${r.mark}`));
+  return (
+    <div className="flex flex-wrap items-center gap-1 px-3 py-1.5 bg-muted/10 border-t border-border/40">
+      {PHASE_LABELS.map((lbl, i) => {
+        const s = states[i];
+        const cls = s === "done"
+          ? "border-emerald-500/50 text-emerald-500 bg-emerald-500/5"
+          : s === "partial"
+          ? "border-amber-500/50 text-amber-500 bg-amber-500/5"
+          : "border-muted-foreground/30 text-muted-foreground/70";
+        const glyph = s === "done" ? "✓" : s === "partial" ? "⏳" : "—";
+        return (
+          <span key={lbl} title={PHASE_TOOLTIPS[i]}
+            className={`inline-flex items-center gap-1 px-1.5 py-0.5 border text-[9px] font-mono uppercase tracking-wider ${cls}`}>
+            {glyph} {lbl}
+          </span>
+        );
+      })}
+      {hiddenCount > 0 && (
+        <span title="Hidden scope detected: dowels, corners, openings, step bars, top ties, or thickenings (R7/R9-R12)"
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 border border-fuchsia-500/50 text-fuchsia-500 bg-fuchsia-500/5 text-[9px] font-mono uppercase tracking-wider">
+          🔍 Hidden Scope ({hiddenCount})
+        </span>
+      )}
+      {wasteRow && wasteRow.weight > 0 && (
+        <span className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 border border-muted-foreground/30 text-muted-foreground text-[9px] font-mono uppercase tracking-wider">
+          +{wasteRow.weight.toFixed(1)} kg waste (G4)
+        </span>
+      )}
+    </div>
+  );
+}
+
+interface TakeoffFoundDisplay {
+  qty: string;
+  length: string;
+  weight: string;
+  found: string;
+  question: string;
+  confidence: "high" | "medium" | "low";
+}
+
+function compactMm(value: string) {
+  return value.replace(/\s+/g, "");
+}
+
+function formatM(value: number) {
+  return Number.isFinite(value) ? `${value.toFixed(value < 1 ? 3 : 2)}m` : "--";
+}
+
+function extractFoundDisplay(row: WorkflowTakeoffRow): TakeoffFoundDisplay {
+  const text = `${row.size} ${row.shape} ${row.missing_refs.join(" ")}`.replace(/\s+/g, " ").trim();
+  const bar = text.match(/\b(10M|15M|20M|25M|30M|35M)\b/i)?.[1]?.toUpperCase() || (row.size !== "-" ? row.size : "");
+  const pieceMatch = text.match(/\b(?:10M|15M|20M|25M|30M|35M)?\s*(?:x|\u00d7)?\s*(\d+(?:\.\d+)?)\s*(mm|m)\s*(?:\([^)]*\)\s*)?(?:long|dowels?|bars?)\b/i);
+  const spacingMatch = text.match(/(?:@|at)\s*(\d+(?:\.\d+)?)\s*(mm|m)\s*(?:\([^)]*\)\s*)?O\.?\s*C\.?/i);
+  const thicknessMatch = text.match(/\b(\d+(?:\.\d+)?)\s*mm\s+(?:frost\s+slab|foundation\s+wall|slab|wall|pad|footing)\b/i);
+  const eachWay = /\beach\s+way\b|\be\.?\s*w\.?\b/i.test(text);
+  const staggered = /\bstaggered\b/i.test(text);
+  const pieceMm = parsePieceLengthMm(text) || (pieceMatch ? (pieceMatch[2].toLowerCase() === "m" ? Number(pieceMatch[1]) * 1000 : Number(pieceMatch[1])) : null);
+  const pieceM = pieceMm ? pieceMm / 1000 : null;
+  const spacingMm = parseSpacingMm(text);
+  const canadianEstimate = estimateCanadianLine({
+    barSize: bar,
+    runLengthMm: row.length > 0 ? row.length * 1000 : null,
+    spacingMm,
+    pieceLengthMm: pieceMm,
+    quantity: row.count > 0 ? row.count : null,
+  });
+  const spacing = spacingMatch ? `${compactMm(spacingMatch[1] + spacingMatch[2])} O.C.` : "";
+  const thickness = thicknessMatch ? `${compactMm(thicknessMatch[1] + "mm")}` : "";
+  const foundParts = [
+    bar ? `bar ${bar}` : null,
+    pieceM ? `piece length ${formatM(pieceM)}` : null,
+    thickness ? `thickness ${thickness}` : null,
+    spacing ? `spacing ${spacing}` : null,
+    eachWay ? "each way" : null,
+    staggered ? "staggered" : null,
+  ].filter(Boolean) as string[];
+
+  const draft = buildEngineerAnswerDraft({
+    locationLabel: row.page_number ? `P${row.page_number}` : null,
+    objectIdentity: row.shape,
+    title: row.shape,
+    sourceExcerpt: row.shape,
+    missingRefs: row.missing_refs,
+  });
+
+  const needsRun = /run|length|dimension|element_dimensions|perimeter|edge/i.test(row.missing_refs.join(" "));
+  const needsQty = /qty|quantity|count/i.test(row.missing_refs.join(" "));
+  const found = foundParts.length
+    ? `Found: ${foundParts.join("; ")}.`
+    : draft.draftAnswer || `Found source text: "${row.shape}".`;
+  const needsRunText = spacingMm ? "Need run" : "Ask";
+  const inferredWeight = row.weight > 0
+    ? row.weight.toFixed(1)
+    : canadianEstimate.weightKg
+      ? canadianEstimate.weightKg.toFixed(1)
+      : bar && CANADIAN_BAR_MASS_KG_PER_M[bar]
+        ? needsRunText
+        : "Ask";
+
+  return {
+    qty: row.count > 0 ? String(row.count) : needsQty || needsRun ? "Need run" : "Ask",
+    length: row.length > 0 ? row.length.toFixed(2) : pieceM ? `${formatM(pieceM)} ea` : thickness ? thickness : "Ask",
+    weight: inferredWeight,
+    found,
+    question: `${draft.question} Canadian rule: count bars across the opposite direction; quantity = floor(run / spacing) + 1, then weight = total length x kg/m.`,
+    confidence: foundParts.length ? "medium" : draft.confidence,
+  };
+}
+
+export default function TakeoffStage({ projectId, state, goToStage }: StageProps) {
+  const { user } = useAuth();
+  const [rows, setRows] = useState<WorkflowTakeoffRow[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hoverId, setHoverId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [genStatus, setGenStatus] = useState<string>("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editPatch, setEditPatch] = useState<EditPatch>({});
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [pdfPage, setPdfPage] = useState(1);
+  const [pdfPageCount, setPdfPageCount] = useState(0);
+  const [pdfImg, setPdfImg] = useState<string | null>(null);
+  const [segRunning, setSegRunning] = useState<string | null>(null);
+  const [segPhase, setSegPhase] = useState<string>("");
+  const [bestGuessRunning, setBestGuessRunning] = useState(false);
+  const [reindexRunning, setReindexRunning] = useState(false);
+  const [allSegments, setAllSegments] = useState<{ id: string; name: string }[]>([]);
+  const [wastePct, setWastePct] = useState<5 | 7 | 10>(7);
+  const [viewMode, setViewMode] = useState<"table" | "canvas">("table");
+
+  // Load + persist global waste factor from user's standards_profile.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("standards_profiles")
+        .select("id, waste_factors, is_default")
+        .eq("user_id", user.id)
+        .order("is_default", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled) return;
+      const wf = (data?.waste_factors as any) || {};
+      const g = Number(wf.global);
+      if (g === 0.05) setWastePct(5);
+      else if (g === 0.10) setWastePct(10);
+      else setWastePct(7);
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+  const updateWastePct = async (pct: 5 | 7 | 10) => {
+    setWastePct(pct);
+    if (!user) return;
+    const value = pct / 100;
+    const { data: existing } = await supabase
+      .from("standards_profiles")
+      .select("id, waste_factors")
+      .eq("user_id", user.id)
+      .order("is_default", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const nextWf = { ...(existing?.waste_factors as any || {}), global: value };
+    if (existing?.id) {
+      await supabase.from("standards_profiles").update({ waste_factors: nextWf }).eq("id", existing.id);
+    } else {
+      await supabase.from("standards_profiles").insert({
+        user_id: user.id,
+        name: "Default",
+        is_default: true,
+        waste_factors: { small: 1.03, large: 1.05, stirrup: 1.08, global: value },
+      } as any);
+    }
+    toast.success(`Waste factor set to ${pct}% (re-run takeoff to apply)`);
+  };
+
+  const handleReindex = async () => {
+    setReindexRunning(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("reindex-extractors", {
+        body: { project_id: projectId },
+      });
+      if (error) throw error;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const d = data as any;
+      toast.success(`Re-indexed ${d?.pages_updated ?? 0} page(s) · ${d?.bar_callouts ?? 0} callouts · ${d?.dimensions ?? 0} dims · ${d?.schedule_rows ?? 0} schedule rows · ${d?.spec_keywords ?? 0} spec hits`);
+    } catch (err) {
+      console.warn("reindex-extractors failed:", err);
+      toast.error("Re-index OCR entities failed");
+    } finally {
+      setReindexRunning(false);
+    }
+  };
+
+  const reload = async () => {
+    const mapped = await loadWorkflowTakeoffRows(projectId, state.files);
+    setRows(mapped);
+    setSelectedId((current) => mapped.find((row) => row.id === current)?.id || mapped[0]?.id || null);
+  };
+
+  const runSingleSegment = async (segName: string) => {
+    // find segment_id from any row in the group, falling back to allSegments for empty segments
+    const seg =
+      rows.find((r) => r.segment_name === segName && r.segment_id)?.segment_id ||
+      allSegments.find((s) => s.name === segName)?.id;
+    if (!seg) { toast.error("No segment id for this group."); return; }
+    setSegRunning(segName);
+    setSegPhase("Starting…");
+    try {
+      // Step 1: ensure project drawings are indexed
+      const { count: dvCount } = await supabase
+        .from("document_versions")
+        .select("id", { count: "exact", head: true })
+        .eq("project_id", projectId);
+      if (!dvCount || dvCount === 0) {
+        const files = state.files || [];
+        if (files.length === 0) {
+          toast.error("No files uploaded. Add drawings in Stage 01 first.");
+          setSegRunning(null); setSegPhase(""); return;
+        }
+        for (let i = 0; i < files.length; i++) {
+          const f = files[i];
+          setSegPhase(`Indexing ${i + 1}/${files.length}…`);
+          try {
+            await parseAndIndexFile(projectId, {
+              id: f.id,
+              legacy_file_id: (f as any).legacy_file_id || f.id,
+              file_name: f.file_name,
+              file_path: f.file_path,
+            });
+          } catch (e) {
+            console.warn("parseAndIndexFile failed:", f.file_name, e);
+          }
+        }
+      }
+
+      // Step 2: refresh OCR entities (best-effort)
+      setSegPhase("Reading drawings…");
+      try {
+        await supabase.functions.invoke("reindex-extractors", { body: { project_id: projectId } });
+      } catch (e) {
+        console.warn("reindex-extractors (per-segment) failed:", e);
+      }
+
+      // Step 3: scoped takeoff
+      setSegPhase("Running segment…");
+      const { data, error } = await supabase.functions.invoke("auto-estimate", {
+        body: { segment_id: seg, project_id: projectId },
+      });
+      if (error) throw error;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const created = (data as any)?.metadata?.items_created ?? (data as any)?.items_created ?? 0;
+      toast.success(`Segment "${segName}" re-run: ${created} item(s)`);
+      await reload();
+      state.refresh();
+    } catch (err) {
+      console.warn("Per-segment re-run failed:", err);
+      toast.error(getFunctionErrorMessage(err, `Re-run failed for "${segName}"`));
+    } finally {
+      setSegRunning(null);
+      setSegPhase("");
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const mapped = await loadWorkflowTakeoffRows(projectId, state.files);
+      if (cancelled) return;
+      setRows(mapped);
+      setSelectedId((current) => mapped.find((row) => row.id === current)?.id || mapped[0]?.id || null);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [projectId, state.files]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("segments")
+        .select("id,name")
+        .eq("project_id", projectId);
+      if (!cancelled) setAllSegments((data || []) as { id: string; name: string }[]);
+    })();
+    return () => { cancelled = true; };
+  }, [projectId, segRunning, generating]);
+
+  useEffect(() => {
+    const focus = state.local.takeoffFocus as {
+      raw_id?: string;
+      raw_kind?: "legacy" | "canonical";
+      source_file_id?: string | null;
+      page_number?: number | null;
+    } | undefined;
+    if (!focus) return;
+
+    const target = rows.find((row) => {
+      if (focus.raw_id && focus.raw_kind) return row.raw_id === focus.raw_id && row.raw_kind === focus.raw_kind;
+      return !!focus.source_file_id && row.source_file_id === focus.source_file_id;
+    });
+
+    if (target && target.id !== selectedId) setSelectedId(target.id);
+    if (focus.page_number && focus.page_number > 0) setPdfPage(focus.page_number);
+  }, [rows, selectedId, state.local.takeoffFocus]);
+
+  // Resolve signed URL of the source file for the highlighted/selected row
+  const focusRow = useMemo(
+    () => rows.find((r) => r.id === (hoverId || selectedId)),
+    [rows, hoverId, selectedId]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const fileId = focusRow?.source_file_id || state.files[0]?.id;
+      const f = state.files.find((x) => x.id === fileId);
+      if (!f) { setSignedUrl(null); return; }
+      const { data } = await supabase.storage.from("blueprints").createSignedUrl(f.file_path, 3600);
+      if (!cancelled) setSignedUrl(data?.signedUrl || null);
+    })();
+    return () => { cancelled = true; };
+  }, [focusRow?.source_file_id, state.files]);
+
+  useEffect(() => {
+    const focus = state.local.takeoffFocus as { page_number?: number | null } | undefined;
+    setPdfPage(focus?.page_number && focus.page_number > 0 ? focus.page_number : 1);
+    setPdfPageCount(0);
+    setPdfImg(null);
+  }, [signedUrl, state.local.takeoffFocus]);
+
+  const computeBestGuessAll = async () => {
+    setBestGuessRunning(true);
+    try {
+      const targets = rows.filter((r) => r.raw_kind === "legacy" && r.geometry_status !== "resolved");
+      if (targets.length === 0) { toast.info("Nothing to estimate."); return; }
+      let updated = 0, skipped = 0;
+      for (const r of targets) {
+        const synth = computeSyntheticEstimate({
+          description: r.shape,
+          bar_size: r.size === "-" ? null : r.size,
+          source_text: r.missing_refs.join(" "),
+        });
+        if (!synth) { skipped++; continue; }
+        const { data: item } = await supabase
+          .from("estimate_items").select("assumptions_json").eq("id", r.raw_id).maybeSingle();
+        const assumptions = (item?.assumptions_json && typeof item.assumptions_json === "object" && !Array.isArray(item.assumptions_json))
+          ? item.assumptions_json as Record<string, unknown> : {};
+        const { error } = await supabase.from("estimate_items").update({
+          quantity_count: synth.quantity_count,
+          total_length: synth.total_length,
+          total_weight: synth.total_weight,
+          assumptions_json: {
+            ...assumptions,
+            synthetic_estimate: true,
+            assumed_dimensions: synth.assumed_dimensions,
+            synthetic_basis: synth.basis,
+            synthetic_computed_at: new Date().toISOString(),
+          },
+        }).eq("id", r.raw_id);
+        if (!error) updated++;
+        if (user) {
+          await supabase.from("audit_events").insert({
+            user_id: user.id, project_id: projectId, segment_id: r.segment_id,
+            entity_type: "estimate_item", entity_id: r.raw_id,
+            action: "synthetic_best_guess",
+            metadata: { basis: synth.basis, assumed: synth.assumed_dimensions, qty: synth.quantity_count, length: synth.total_length, weight: synth.total_weight },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } as any);
+        }
+      }
+      toast.success(`Best-guess applied to ${updated} row(s)${skipped ? ` (${skipped} skipped — unknown bar size)` : ""}. Values are ASSUMED.`);
+      await reload();
+      state.refresh();
+    } catch (err) {
+      console.warn("Best-guess failed:", err);
+      toast.error("Best-guess estimate failed");
+    } finally {
+      setBestGuessRunning(false);
+    }
+  };
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const files = state.files || [];
+      let parsedNow = 0, alreadyIndexed = 0, parseFails = 0;
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        setGenStatus(`File ${i + 1}/${files.length}: ${f.file_name}`);
+        const res = await parseAndIndexFile(projectId, {
+          id: f.id,
+          legacy_file_id: f.legacy_file_id,
+          file_name: f.file_name,
+          file_path: f.file_path,
+        }, (msg) => setGenStatus(msg));
+        if (res.skipped) alreadyIndexed++;
+        else if (res.status === "indexed") parsedNow++;
+        else parseFails++;
+      }
+      if (parseFails > 0) toast.warning(`${parseFails} file(s) failed to parse.`);
+
+      setGenStatus("Generating takeoff...");
+      const { data: segs, error } = await supabase
+        .from("segments").select("id,name").eq("project_id", projectId);
+      if (error) throw error;
+      const segments = segs || [];
+      if (segments.length === 0) {
+        toast.error("No approved scope segments found. Approve scope items in Stage 02 first.");
+        return;
+      }
+      let ok = 0, failed = 0, totalItems = 0, manualBlocked = 0;
+      for (const seg of segments) {
+        try {
+          const { data: estData, error: invokeErr } = await supabase.functions.invoke("auto-estimate", {
+            body: { segment_id: seg.id, project_id: projectId },
+          });
+          if (invokeErr) throw invokeErr;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if ((estData as any)?.blocked && (estData as any)?.reason === "MANUAL_NOT_LOADED") {
+            manualBlocked++;
+            continue;
+          }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const created = (estData as any)?.metadata?.items_created
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ?? (estData as any)?.items_created
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ?? (Array.isArray((estData as any)?.items) ? (estData as any).items.length : 0);
+          totalItems += created || 0;
+          ok++;
+        } catch (err) {
+          console.warn(`auto-estimate failed for segment ${seg.name}:`, err);
+          toast.error(getFunctionErrorMessage(err, `Takeoff failed for ${seg.name}`));
+          failed++;
+        }
+      }
+      if (manualBlocked > 0 && ok === 0) {
+        toast.error("Manual-Standard-Practice-2018 not loaded in Brain. Upload it (with extracted text) before running takeoff.");
+      } else if (ok > 0 && totalItems > 0) {
+        toast.success(`Generated ${totalItems} item(s) across ${ok} segment(s)${failed ? ` (${failed} failed)` : ""}`);
+      } else if (ok > 0) {
+        toast.warning("0 items generated — drawings may lack rebar data.");
+      } else {
+        toast.error("Takeoff generation failed for all segments.");
+      }
+      await reload();
+      state.refresh();
+    } finally {
+      setGenerating(false);
+      setGenStatus("");
+    }
+  };
+
+  const beginEdit = (r: WorkflowTakeoffRow) => {
+    setEditingId(r.id);
+    setEditPatch({ count: r.count, length: r.length, weight: r.weight, size: r.size });
+  };
+  const cancelEdit = () => { setEditingId(null); setEditPatch({}); };
+
+  const saveEdit = async (r: WorkflowTakeoffRow) => {
+    if (r.raw_kind !== "legacy") {
+      toast.error("Editing canonical takeoff items not supported here yet.");
+      return;
+    }
+    const patch: Record<string, unknown> = {};
+    const original: Record<string, unknown> = { count: r.count, length: r.length, weight: r.weight, size: r.size };
+    const next: Record<string, unknown> = {};
+    let nextGeometryStatus: WorkflowTakeoffRow["geometry_status"] | null = null;
+    if (editPatch.count !== undefined && editPatch.count !== r.count) { patch.quantity_count = editPatch.count; next.count = editPatch.count; }
+    if (editPatch.length !== undefined && editPatch.length !== r.length) { patch.total_length = editPatch.length; next.length = editPatch.length; }
+    if (editPatch.weight !== undefined && editPatch.weight !== r.weight) { patch.total_weight = editPatch.weight; next.weight = editPatch.weight; }
+    if (editPatch.size !== undefined && editPatch.size !== r.size) { patch.bar_size = editPatch.size; next.size = editPatch.size; }
+    if (Object.keys(patch).length === 0) { cancelEdit(); return; }
+
+    if (patch.quantity_count !== undefined || patch.total_length !== undefined || patch.total_weight !== undefined) {
+      const { data: item } = await supabase.from("estimate_items").select("assumptions_json").eq("id", r.raw_id).maybeSingle();
+      const assumptions = item?.assumptions_json && typeof item.assumptions_json === "object" && !Array.isArray(item.assumptions_json)
+        ? item.assumptions_json as Record<string, unknown>
+        : {};
+      const nextCount = Number(patch.quantity_count ?? r.count);
+      const nextLength = Number(patch.total_length ?? r.length);
+      const nextWeight = Number(patch.total_weight ?? r.weight);
+      nextGeometryStatus = nextCount > 0 && (nextLength > 0 || nextWeight > 0) ? "resolved" : "partial";
+      patch.assumptions_json = {
+        ...assumptions,
+        geometry_status: nextGeometryStatus,
+        missing_refs: nextGeometryStatus === "resolved" ? [] : assumptions.missing_refs,
+        manual_takeoff_answered_at: new Date().toISOString(),
+      };
+    }
+
+    const { error } = await supabase.from("estimate_items").update(patch).eq("id", r.raw_id);
+    if (error) { toast.error("Save failed: " + error.message); return; }
+
+    if (user) {
+      await supabase.from("audit_events").insert({
+        user_id: user.id,
+        project_id: projectId,
+        segment_id: r.segment_id,
+        entity_type: "estimate_item",
+        entity_id: r.raw_id,
+        action: "ocr_correction",
+        metadata: { original, corrected: next, source: "takeoff_stage", file_id: r.source_file_id },
+      } as any);
+    }
+
+    setRows((prev) => prev.map((row) => row.id === r.id ? {
+      ...row,
+      ...(next as Partial<WorkflowTakeoffRow>),
+      geometry_status: nextGeometryStatus || row.geometry_status,
+      missing_refs: nextGeometryStatus === "resolved" ? [] : row.missing_refs,
+      status: patch.assumptions_json ? "review" : row.status,
+    } as WorkflowTakeoffRow : row));
+    cancelEdit();
+    toast.success("OCR correction saved & logged");
+  };
+
+  // Group rows by segment_name
+  const groups = useMemo(() => {
+    const map = new Map<string, WorkflowTakeoffRow[]>();
+    for (const r of rows) {
+      const key = r.segment_name || "Unassigned";
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(r);
+    }
+    const populated = Array.from(map.entries()).map(([name, items]) => ({
+      name,
+      items,
+      weight: items.reduce((s, r) => s + r.weight, 0),
+      blocked: items.filter((r) => r.status === "blocked").length,
+      empty: false,
+    }));
+    // Add empty segments (defined in DB but no rows yet)
+    const populatedNames = new Set(populated.map((g) => g.name));
+    const empties = allSegments
+      .filter((s) => !populatedNames.has(s.name))
+      .map((s) => ({
+        name: s.name,
+        items: [] as WorkflowTakeoffRow[],
+        weight: 0,
+        blocked: 0,
+        empty: true,
+      }));
+    const all = [...populated, ...empties];
+    // Bottom-to-Top order: WF → F-pads → Piers/Walls → SOG/Thickenings → Steps/Corners → Site misc.
+    all.sort((a, b) => {
+      const sa = methodologyStep(a.name);
+      const sb = methodologyStep(b.name);
+      if (sa !== sb) return sa - sb;
+      return a.name.localeCompare(b.name);
+    });
+    return all;
+  }, [rows, allSegments]);
+
+  const totals = useMemo(() => ({
+    rows: rows.length,
+    weight: rows
+      .filter((r) => r.geometry_status !== "unresolved")
+      .reduce((s, r) => s + r.weight, 0),
+    blocked: rows.filter(
+      (r) => r.status === "blocked" || r.geometry_status === "unresolved"
+    ).length,
+  }), [rows]);
+
+  const sel = focusRow;
+  const previewFileId = sel?.source_file_id || state.files[0]?.id;
+  const previewFile = state.files.find((f) => f.id === previewFileId);
+  const previewName = previewFile?.file_name || "";
+  const isImg = /\.(png|jpe?g|webp|gif|svg)$/i.test(previewName);
+  const isPdf = /\.pdf$/i.test(previewName);
+
+  if (!state.local.calibrationConfirmed) {
+    return <CalibrationGate state={state} goToStage={goToStage} stageLabel="Takeoff" />;
+  }
+
+  if (viewMode === "canvas") {
+    const canvasLayers: TakeoffCanvasLayer[] = (allSegments.length > 0
+      ? allSegments.map((s) => ({ id: s.id, name: s.name, segment_type: inferSegmentType(s.name) }))
+      : []
+    );
+    const firstFile = state.files[0];
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex h-9 flex-shrink-0 items-center justify-between border-b border-border bg-card px-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">Stage 03 · Canvas</span>
+            <span className="truncate text-xs text-foreground">{firstFile?.file_name || ""}</span>
+          </div>
+          <div className="inline-flex items-center border border-border h-7">
+            <button onClick={() => setViewMode("table")} className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:bg-accent/40 inline-flex items-center gap-1"><TableIcon className="w-3 h-3" /> Table</button>
+            <button onClick={() => setViewMode("canvas")} className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider bg-primary text-primary-foreground inline-flex items-center gap-1 border-l border-border"><Layers className="w-3 h-3" /> Canvas</button>
+          </div>
+        </div>
+        <div className="flex-1 min-h-0">
+          <TakeoffCanvas projectId={projectId} layers={canvasLayers} filePath={firstFile?.file_path} fileName={firstFile?.file_name} emptyHint="Approve scope first to populate layers." />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid h-full" style={{ gridTemplateColumns: "240px 1fr 380px" }}>
+      <aside className="border-r border-border flex flex-col min-h-0" style={{ background: "hsl(var(--card))" }}>
+        <div className="px-3 h-10 flex items-center border-b border-border">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em]">
+            <Sparkles className="w-3.5 h-3.5 text-primary" /> Segments
+          </div>
+        </div>
+        <div className="flex-1 overflow-auto p-2 space-y-1 text-[12px]">
+          {groups.length === 0 ? (
+            <div className="text-[11px] text-muted-foreground p-2">No segments yet.</div>
+          ) : groups.map((g) => (
+            <button key={g.name}
+              onClick={() => {
+                const first = g.items[0];
+                if (first) setSelectedId(first.id);
+                setCollapsed((c) => ({ ...c, [g.name]: false }));
+              }}
+              className="w-full ip-card p-2 text-left hover:bg-accent/40">
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] font-semibold truncate">{g.name}</div>
+                {g.blocked > 0 && <Pill tone="blocked" solid>{g.blocked}</Pill>}
+              </div>
+              <div className="text-[10px] text-muted-foreground font-mono mt-0.5">
+                {g.empty ? "0 rows · not run" : `${g.items.length} rows · ${g.weight.toFixed(0)} kg`}
+              </div>
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); runSingleSegment(g.name); }}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); runSingleSegment(g.name); } }}
+                className={`mt-1.5 inline-flex items-center gap-1 text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 border ${segRunning === g.name ? "border-muted-foreground/30 text-muted-foreground" : "border-primary/40 text-primary hover:bg-primary/10"}`}
+              >
+                {segRunning === g.name ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Wand2 className="w-2.5 h-2.5" />}
+                {segRunning === g.name ? (segPhase || "Running…") : g.empty ? "Run segment" : "Re-run segment"}
+              </div>
+            </button>
+          ))}
+        </div>
+      </aside>
+
+      <div className="border-r border-border flex flex-col min-h-0">
+        <StageHeader
+          kicker="Stage 03 - Production Takeoff Data"
+          title="Takeoff Workspace · By Segment"
+          right={<div className="flex gap-2">
+            <Pill tone="direct">{totals.rows} ROWS</Pill>
+            <Pill tone="supported">{totals.weight.toFixed(0)} KG</Pill>
+            {totals.blocked > 0 && <Pill tone="blocked" solid>{totals.blocked} BLOCKED</Pill>}
+            <div className="inline-flex items-center border border-border h-7" title="Switch between table and canvas view">
+              <button onClick={() => setViewMode("table")} className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider inline-flex items-center gap-1 bg-primary text-primary-foreground"><TableIcon className="w-3 h-3" /> Table</button>
+              <button onClick={() => setViewMode("canvas")} className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider inline-flex items-center gap-1 border-l border-border text-muted-foreground hover:bg-accent/40"><Layers className="w-3 h-3" /> Canvas</button>
+            </div>
+            <div className="inline-flex items-center border border-border h-7" title="Waste factor (G4) — applied at segment total. Re-run takeoff to apply.">
+              <span className="px-2 text-[9px] font-mono uppercase tracking-wider text-muted-foreground">Waste</span>
+              {([5, 7, 10] as const).map((p) => (
+                <button key={p}
+                  onClick={() => updateWastePct(p)}
+                  className={`h-7 px-2 text-[10px] font-mono border-l border-border ${wastePct === p ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent/40"}`}>
+                  {p}%
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={computeBestGuessAll}
+              disabled={bestGuessRunning || generating}
+              title="Apply industry-standard assumed dimensions to all Partial/Unresolved rows. Values tagged ASSUMED."
+              className="inline-flex items-center gap-1.5 h-7 px-2.5 border border-amber-500 text-amber-500 text-[10px] font-mono uppercase tracking-wider hover:bg-amber-500/10 disabled:opacity-50"
+            >
+              {bestGuessRunning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+              {bestGuessRunning ? "Estimating…" : "Best-Guess Estimate"}
+            </button>
+            <button
+              onClick={handleReindex}
+              disabled={reindexRunning || generating}
+              title="Re-run regex extractors over already-OCR'd raw text to backfill bar callouts, dimensions, and bar schedules. No re-OCR."
+              className="inline-flex items-center gap-1.5 h-7 px-2.5 border border-cyan-500 text-cyan-500 text-[10px] font-mono uppercase tracking-wider hover:bg-cyan-500/10 disabled:opacity-50"
+            >
+              {reindexRunning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+              {reindexRunning ? "Re-indexing…" : "Re-index OCR Entities"}
+            </button>
+            <button
+              onClick={handleGenerate}
+              disabled={generating}
+              className="inline-flex items-center gap-1.5 h-7 px-2.5 border border-primary text-primary text-[10px] font-mono uppercase tracking-wider hover:bg-primary/10 disabled:opacity-50"
+            >
+              {generating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+              {generating ? (genStatus || "Generating…") : rows.length === 0 ? "Generate Takeoff" : "Re-run"}
+            </button>
+          </div>}
+        />
+        <div className="flex-1 overflow-auto">
+          {loading ? <EmptyState title="Loading takeoff..." /> :
+            rows.length === 0 ? <EmptyState title="No takeoff rows" hint='Approve scope items in Stage 02, then click "Generate Takeoff" above.' /> : (
+              <div>
+                {groups.map((g) => {
+                  const isCollapsed = collapsed[g.name];
+                  return (
+                    <div key={g.name} className="border-b border-border">
+                      <button
+                        onClick={() => setCollapsed((c) => ({ ...c, [g.name]: !c[g.name] }))}
+                        className="w-full flex items-center gap-2 px-3 h-8 bg-muted/40 text-left hover:bg-muted/60"
+                      >
+                        {isCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.12em]">{g.name}</span>
+                        <span className="text-[10px] font-mono text-muted-foreground ml-auto">
+                          {g.items.length} · {g.weight.toFixed(0)} kg
+                        </span>
+                      </button>
+                      {!isCollapsed && <PhaseChips items={g.items} segName={g.name} />}
+                      {!isCollapsed && (
+                        <table className="w-full text-[12px] tabular-nums">
+                          <thead className="bg-muted/20 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                            <tr>
+                              <th className="text-left px-3 h-7 w-20">Mark</th>
+                              <th className="text-left px-3 h-7 w-16">Size</th>
+                              <th className="text-left px-3 h-7">Shape</th>
+                              <th className="text-right px-3 h-7 w-16">Qty</th>
+                              <th className="text-right px-3 h-7 w-20">Length</th>
+                              <th className="text-right px-3 h-7 w-20">Weight</th>
+                              <th className="text-left px-3 h-7 w-24">Status</th>
+                              <th className="text-right px-3 h-7 w-16"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {g.items.map((r, i) => {
+                              const editing = editingId === r.id;
+                              const foundDisplay = extractFoundDisplay(r);
+                              return (
+                                <tr key={r.id}
+                                  onMouseEnter={() => setHoverId(r.id)}
+                                  onMouseLeave={() => setHoverId(null)}
+                                  onClick={() => setSelectedId(r.id)}
+                                  className={`border-t border-border cursor-pointer ${selectedId === r.id ? "bg-primary/10" : i % 2 ? "bg-card/30 hover:bg-accent/40" : "hover:bg-accent/40"}`}>
+                                  <td className="px-3 font-mono text-[hsl(var(--status-direct))]">{r.mark}</td>
+                                  <td className="px-3">
+                                    {editing ? (
+                                      <input className="w-14 bg-background border border-border px-1 text-[11px]"
+                                        value={editPatch.size ?? ""} onChange={(e) => setEditPatch((p) => ({ ...p, size: e.target.value }))} />
+                                    ) : r.size}
+                                  </td>
+                                  <td className="px-3 truncate max-w-0">{r.shape}</td>
+                                  <td className="px-3 text-right">
+                                    {editing ? (
+                                      <input type="number" className="w-16 bg-background border border-border px-1 text-[11px] text-right"
+                                        value={editPatch.count ?? 0} onChange={(e) => setEditPatch((p) => ({ ...p, count: Number(e.target.value) }))} />
+                                     ) : r.geometry_status !== "resolved" ? <UnresolvedValue value={foundDisplay.qty} /> : r.count}
+                                  </td>
+                                  <td className="px-3 text-right">
+                                    {editing ? (
+                                      <input type="number" step="0.01" className="w-20 bg-background border border-border px-1 text-[11px] text-right"
+                                        value={editPatch.length ?? 0} onChange={(e) => setEditPatch((p) => ({ ...p, length: Number(e.target.value) }))} />
+                                     ) : r.geometry_status !== "resolved" ? <UnresolvedValue value={foundDisplay.length} /> : r.length.toFixed(2)}
+                                  </td>
+                                  <td className="px-3 text-right font-semibold">
+                                    {editing ? (
+                                      <input type="number" step="0.1" className="w-20 bg-background border border-border px-1 text-[11px] text-right"
+                                        value={editPatch.weight ?? 0} onChange={(e) => setEditPatch((p) => ({ ...p, weight: Number(e.target.value) }))} />
+                                     ) : r.geometry_status !== "resolved" ? <UnresolvedValue value={foundDisplay.weight} /> : r.weight.toFixed(1)}
+                                  </td>
+                                  <td className="px-3">
+                                    {r.synthetic ? (
+                                      <Pill tone="inferred" solid>
+                                        <span title={r.synthetic_basis ? `ASSUMED: ${r.synthetic_basis}` : "Best-guess values from industry defaults"}>ASSUMED</span>
+                                      </Pill>
+                                    ) : r.geometry_status === "unresolved" ? (
+                                      <Pill tone="blocked" solid>
+                                        <span title={r.missing_refs.length ? `Missing: ${r.missing_refs.join("; ")}` : "Geometry unresolved"}>Unresolved</span>
+                                      </Pill>
+                                    ) : r.geometry_status === "partial" ? (
+                                      <Pill tone="inferred" solid>
+                                        <span title={r.missing_refs.length ? `Missing: ${r.missing_refs.join("; ")}` : "Partial geometry"}>Partial</span>
+                                      </Pill>
+                                    ) : r.status === "ready" ? <Pill tone="direct" solid>Resolved</Pill>
+                                      : r.status === "blocked" ? <Pill tone="blocked" solid>Blocked</Pill>
+                                      : <Pill tone="direct" solid>Resolved</Pill>}
+                                  </td>
+                                  <td className="px-3 text-right" onClick={(e) => e.stopPropagation()}>
+                                    {editing ? (
+                                      <div className="inline-flex gap-1">
+                                        <button onClick={() => saveEdit(r)} title="Save" className="p-1 text-primary hover:bg-primary/10"><Save className="w-3.5 h-3.5" /></button>
+                                        <button onClick={cancelEdit} title="Cancel" className="p-1 text-muted-foreground hover:bg-muted"><X className="w-3.5 h-3.5" /></button>
+                                      </div>
+                                    ) : (
+                                      r.raw_kind === "legacy" && (
+                                        <button onClick={() => beginEdit(r)} title="Fix OCR" className="p-1 text-muted-foreground hover:text-primary hover:bg-primary/10">
+                                          <Pencil className="w-3.5 h-3.5" />
+                                        </button>
+                                      )
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+        </div>
+      </div>
+
+      <aside className="flex flex-col min-h-0" style={{ background: "hsl(var(--card))" }}>
+        <div className="border-b border-border">
+          <StageHeader kicker="Drawing Evidence" title={sel ? `${sel.segment_name} · ${sel.mark}` : "Hover a row"} />
+        </div>
+        <div className="flex-1 overflow-auto bg-white text-neutral-900">
+          {!previewFile ? <EmptyState title="No drawings uploaded" /> : !signedUrl ? (
+            <div className="h-full flex items-center justify-center text-[10px] text-neutral-400 font-mono uppercase tracking-widest p-4 text-center">
+              Loading drawing…
+            </div>
+          ) : isImg ? (
+            <img src={signedUrl} alt="" className="w-full h-auto" />
+          ) : isPdf ? (
+            <div className="flex flex-col h-full p-2">
+              <PdfRenderer
+                url={signedUrl}
+                currentPage={pdfPage}
+                scale={1.5}
+                onPageCount={setPdfPageCount}
+                onPageRendered={(img) => setPdfImg(img)}
+              />
+              {pdfImg ? (
+                <img src={pdfImg} alt="drawing" className="w-full h-auto border border-neutral-200" />
+              ) : (
+                <div className="text-[10px] text-neutral-400 font-mono p-3">Rendering page {pdfPage}…</div>
+              )}
+              {pdfPageCount > 1 && (
+                <div className="flex items-center justify-between mt-2 text-[10px] font-mono">
+                  <button onClick={() => setPdfPage((p) => Math.max(1, p - 1))} disabled={pdfPage <= 1}
+                    className="px-2 py-1 border border-neutral-300 disabled:opacity-30">‹ Prev</button>
+                  <span className="text-neutral-500">Page {pdfPage} / {pdfPageCount}</span>
+                  <button onClick={() => setPdfPage((p) => Math.min(pdfPageCount, p + 1))} disabled={pdfPage >= pdfPageCount}
+                    className="px-2 py-1 border border-neutral-300 disabled:opacity-30">Next ›</button>
+                </div>
+              )}
+              <a href={signedUrl} target="_blank" rel="noreferrer"
+                className="mt-2 text-[10px] font-mono uppercase tracking-wider text-blue-600 hover:underline text-center">
+                Open in new tab ↗
+              </a>
+            </div>
+          ) : (
+            <a href={signedUrl} target="_blank" rel="noreferrer"
+              className="block p-3 text-[10px] font-mono uppercase tracking-wider text-blue-600 hover:underline">
+              Open file in new tab ↗
+            </a>
+          )}
+        </div>
+        {sel && (
+          <div className="border-t border-border p-3 bg-card text-foreground">
+            {sel.geometry_status !== "resolved" && (
+              <UnresolvedFoundPanel row={sel} />
+            )}
+            <div className="grid grid-cols-3 gap-2 text-[11px] font-mono mb-3">
+              {sel.synthetic ? (
+                <>
+                  <Field label="Qty (assumed)" value={String(sel.count)} />
+                  <Field label="Len m (assumed)" value={sel.length.toFixed(2)} />
+                  <Field label="Wt kg (assumed)" value={sel.weight.toFixed(1)} />
+                </>
+              ) : sel.geometry_status !== "resolved" ? (
+                <>
+                  <Field label="Qty" value={extractFoundDisplay(sel).qty} />
+                  <Field label="Len" value={extractFoundDisplay(sel).length} />
+                  <Field label="Wt" value={extractFoundDisplay(sel).weight} />
+                </>
+              ) : (
+                <>
+                  <Field label="Qty" value={String(sel.count)} />
+                  <Field label="Len (m)" value={sel.length.toFixed(2)} />
+                  <Field label="Wt (kg)" value={sel.weight.toFixed(1)} />
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <FileText className="w-3.5 h-3.5" />
+              <span className="truncate">{sel.source}</span>
+            </div>
+          </div>
+        )}
+        <div className="border-t border-border p-3">
+          <button
+            disabled={rows.length === 0 || totals.blocked > 0}
+            onClick={() => { state.refresh(); goToStage?.("qa"); }}
+            className="w-full h-10 inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground text-[12px] font-semibold uppercase tracking-[0.14em] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            {totals.blocked > 0 ? `${totals.blocked} Blocked — Resolve First` : "Confirm Takeoff Data"}
+          </button>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function Field({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border border-border bg-background px-2 py-1.5">
+      <div className="ip-kicker">{label}</div>
+      <div className="truncate text-[12px] tabular-nums mt-0.5">{value}</div>
+    </div>
+  );
+}
+
+function UnresolvedValue({ value }: { value: string }) {
+  return (
+    <span className="inline-flex items-center justify-end text-[11px] font-semibold text-[hsl(var(--status-inferred))]" title={value}>
+      {value}
+    </span>
+  );
+}
+
+function UnresolvedFoundPanel({ row }: { row: WorkflowTakeoffRow }) {
+  const display = extractFoundDisplay(row);
+  return (
+    <div className="mb-3 border border-[hsl(var(--status-inferred))]/50 bg-[hsl(var(--status-inferred))]/10 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="ip-kicker">Found / Confirmation Needed</div>
+        <Pill tone={display.confidence === "high" ? "ok" : display.confidence === "medium" ? "warn" : "bad"}>
+          Evidence {display.confidence}
+        </Pill>
+      </div>
+      <p className="mt-2 text-[12px] leading-relaxed text-foreground">{display.found}</p>
+      <p className="mt-2 border-l border-primary/50 pl-2 text-[12px] leading-relaxed text-muted-foreground">
+        {display.question}
+      </p>
+      {row.missing_refs.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {row.missing_refs.map((ref) => <Pill key={ref} tone="blocked">{ref.replace(/_/g, " ")}</Pill>)}
+        </div>
+      )}
+    </div>
+  );
+}

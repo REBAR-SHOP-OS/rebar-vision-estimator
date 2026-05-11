@@ -1,3 +1,4 @@
+import React, { Suspense, lazy } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -8,16 +9,23 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
-import Dashboard from "./pages/Dashboard";
-import ReviewPage from "./pages/ReviewPage";
-import BlueprintViewerPage from "./pages/BlueprintViewerPage";
 import NotFound from "./pages/NotFound";
 import AppShell from "./components/layout/AppShell";
-import ProjectWorkspace from "./pages/ProjectWorkspace";
-import SegmentDetail from "./pages/SegmentDetail";
-import StandardsPage from "./pages/StandardsPage";
-import OrdersPage from "./pages/OrdersPage";
-import OrderDetail from "./pages/OrderDetail";
+
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const ReviewPage = lazy(() => import("./pages/ReviewPage"));
+const BlueprintViewerPage = lazy(() => import("./pages/BlueprintViewerPage"));
+const ProjectWorkspace = lazy(() => import("./pages/ProjectWorkspace"));
+const SegmentDetail = lazy(() => import("./pages/SegmentDetail"));
+const StandardsPage = lazy(() => import("./pages/StandardsPage"));
+const OrdersPage = lazy(() => import("./pages/OrdersPage"));
+const OrderDetail = lazy(() => import("./pages/OrderDetail"));
+
+const RouteFallback = () => (
+  <div className="flex h-screen items-center justify-center bg-background">
+    <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+  </div>
+);
 
 const queryClient = new QueryClient();
 
@@ -54,6 +62,7 @@ const App = () => (
             <Toaster />
             <Sonner />
             <BrowserRouter>
+              <Suspense fallback={<RouteFallback />}>
               <Routes>
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/auth" element={<AuthRoute><AuthPage /></AuthRoute>} />
@@ -62,12 +71,7 @@ const App = () => (
                 <Route path="/app" element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
                   <Route index element={<Dashboard />} />
                   <Route path="project/:id" element={<ProjectWorkspace />} />
-                  <Route path="project/:id/files" element={<ProjectWorkspace />} />
-                  <Route path="project/:id/segments" element={<ProjectWorkspace />} />
                   <Route path="project/:id/segments/:segId" element={<SegmentDetail />} />
-                  <Route path="project/:id/qa" element={<ProjectWorkspace />} />
-                  <Route path="project/:id/outputs" element={<ProjectWorkspace />} />
-                  <Route path="project/:id/settings" element={<ProjectWorkspace />} />
                   <Route path="standards" element={<StandardsPage />} />
                   <Route path="orders" element={<OrdersPage />} />
                   <Route path="orders/:orderId" element={<OrderDetail />} />
@@ -77,6 +81,7 @@ const App = () => (
                 <Route path="/review/:token" element={<ReviewPage />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
+              </Suspense>
             </BrowserRouter>
           </TooltipProvider>
         </AuthProvider>

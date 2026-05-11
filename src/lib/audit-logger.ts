@@ -7,7 +7,7 @@ export async function logAuditEvent(
   entityId?: string,
   projectId?: string,
   segmentId?: string,
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
 ) {
   const { error } = await supabase.from("audit_events").insert({
     user_id: userId,
@@ -17,6 +17,6 @@ export async function logAuditEvent(
     project_id: projectId || undefined,
     segment_id: segmentId || undefined,
     metadata: metadata || {},
-  });
+  } as any);
   if (error) console.error("Audit log failed:", error.message);
 }

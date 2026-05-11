@@ -8,9 +8,30 @@ import ShareReviewDialog from "./ShareReviewDialog";
 interface ApprovalWorkflowProps {
   projectId: string;
   quoteResult: any;
-  elements: any[];
+  elements: { status?: string }[];
   scopeData?: any;
   confidenceScore?: number;
+}
+
+interface ReviewComment {
+  id: string;
+  share_id: string;
+  created_at: string;
+  content?: string | null;
+  author_name?: string | null;
+}
+
+interface WorkflowNotification {
+  id: string;
+  project_id?: string | null;
+  created_at: string;
+  message?: string | null;
+  type?: string | null;
+  read?: boolean | null;
+  status?: string | null;
+  channel?: string | null;
+  recipient_name?: string | null;
+  recipient_email?: string | null;
 }
 
 type WorkflowStage = "estimation_ready" | "sent_to_ben" | "ben_approved" | "sent_to_neel" | "neel_approved" | "sent_to_customer";
@@ -24,10 +45,10 @@ const ApprovalWorkflow: React.FC<ApprovalWorkflowProps> = ({ projectId, quoteRes
   const [currentReviewType, setCurrentReviewType] = useState<"estimation_review" | "quote_approval" | "customer_quote">("estimation_review");
   const [defaultEmail, setDefaultEmail] = useState("");
   const [defaultName, setDefaultName] = useState("");
-  const [comments, setComments] = useState<any[]>([]);
+  const [comments, setComments] = useState<ReviewComment[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
   const [activeShareId, setActiveShareId] = useState<string | null>(null);
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<WorkflowNotification[]>([]);
 
   // Build review data snapshot
   const buildReviewData = () => {
@@ -39,8 +60,8 @@ const ApprovalWorkflow: React.FC<ApprovalWorkflowProps> = ({ projectId, quoteRes
       total_weight_lbs: quoteResult?.quote?.total_weight_lbs,
       total_weight_tons: quoteResult?.quote?.total_weight_tons,
       elements_count: elements?.length || 0,
-      ready_count: elements?.filter((e: any) => e.status === "READY").length || 0,
-      flagged_count: elements?.filter((e: any) => e.status === "FLAGGED").length || 0,
+      ready_count: elements?.filter((e) => e.status === "READY").length || 0,
+      flagged_count: elements?.filter((e) => e.status === "FLAGGED").length || 0,
       scope: scopeData ? {
         projectName: scopeData.projectName,
         clientName: scopeData.clientName,
@@ -109,7 +130,7 @@ const ApprovalWorkflow: React.FC<ApprovalWorkflowProps> = ({ projectId, quoteRes
         const latestShare = data[0];
         setActiveShareId(latestShare.id);
 
-        const reviewType = (latestShare as any).review_type || "estimation_review";
+        const reviewType = latestShare.review_type || "estimation_review";
         if (reviewType === "estimation_review" && latestShare.status === "commented") {
           setStage("ben_approved");
         } else if (reviewType === "estimation_review") {
@@ -320,7 +341,7 @@ const ApprovalWorkflow: React.FC<ApprovalWorkflowProps> = ({ projectId, quoteRes
                 .limit(1);
               if (data && data.length > 0) {
                 setActiveShareId(data[0].id);
-                const rt = (data[0] as any).review_type || "estimation_review";
+                const rt = data[0].review_type || "estimation_review";
                 if (rt === "estimation_review") setStage("sent_to_ben");
                 else if (rt === "quote_approval") setStage("sent_to_neel");
                 else if (rt === "customer_quote") setStage("sent_to_customer");

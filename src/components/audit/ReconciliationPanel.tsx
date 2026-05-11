@@ -29,11 +29,15 @@ const ISSUE_LABELS: Record<string, { label: string; color: string }> = {
   DRAWING_SET_TO_ESTIMATE_LINK: { label: "Drawing↔Estimate", color: "text-primary" },
 };
 
+interface DrawingSetRow { id: string; set_name?: string | null; issue_purpose?: string | null; issue_date?: string | null; }
+interface EstimateVersionRow { id: string; version_number?: number | null; status?: string | null; currency?: string | null; total_quoted_price?: number | null; }
+interface ReconciliationRecordRow { id: string; created_at: string; issue_type: string; resolved?: boolean | null; notes?: string | null; human_resolution?: { action?: string } | null; }
+
 const ReconciliationPanel: React.FC<ReconciliationPanelProps> = ({ projectId }) => {
   const { user } = useAuth();
-  const [records, setRecords] = useState<any[]>([]);
-  const [drawingSets, setDrawingSets] = useState<any[]>([]);
-  const [estimateVersions, setEstimateVersions] = useState<any[]>([]);
+  const [records, setRecords] = useState<ReconciliationRecordRow[]>([]);
+  const [drawingSets, setDrawingSets] = useState<DrawingSetRow[]>([]);
+  const [estimateVersions, setEstimateVersions] = useState<EstimateVersionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDrawingSet, setSelectedDrawingSet] = useState("");
   const [selectedEstimateVersion, setSelectedEstimateVersion] = useState("");
@@ -53,7 +57,7 @@ const ReconciliationPanel: React.FC<ReconciliationPanelProps> = ({ projectId }) 
       supabase.from("drawing_sets").select("*").eq("project_id", projectId),
       supabase.from("estimate_versions").select("*").eq("project_id", projectId),
     ]);
-    if (recRes.data) setRecords(recRes.data);
+    if (recRes.data) setRecords(recRes.data as unknown as ReconciliationRecordRow[]);
     if (dsRes.data) setDrawingSets(dsRes.data);
     if (evRes.data) setEstimateVersions(evRes.data);
     setLoading(false);
@@ -246,7 +250,7 @@ const ReconciliationPanel: React.FC<ReconciliationPanelProps> = ({ projectId }) 
 
 /** Individual reconciliation record card with resolve/waive actions */
 const ReconciliationCard: React.FC<{
-  record: any;
+  record: ReconciliationRecordRow;
   onResolve: (notes: string) => void;
   onWaive: (notes: string) => void;
 }> = ({ record, onResolve, onWaive }) => {
@@ -268,7 +272,7 @@ const ReconciliationCard: React.FC<{
         </span>
         {record.resolved && (
           <Badge variant="outline" className="text-[8px] text-primary">
-            {(record.human_resolution as any)?.action === "waive" ? "Waived" : "Resolved"}
+            {(record.human_resolution)?.action === "waive" ? "Waived" : "Resolved"}
           </Badge>
         )}
       </div>

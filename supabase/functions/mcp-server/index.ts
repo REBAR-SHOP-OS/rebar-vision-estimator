@@ -6,19 +6,16 @@ const app = new Hono();
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const MCP_SERVER_TOKEN = Deno.env.get("MCP_SERVER_TOKEN");
 
 function adminClient() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 }
 
-// ── MCP Server ──────────────────────────────────────────────
-
 const mcpServer = new McpServer({
   name: "rebar-vision-mcp",
   version: "1.0.0",
 });
-
-// ── Read Tools ──────────────────────────────────────────────
 
 mcpServer.tool("list_projects", {
   description: "List all estimation projects. Returns id, name, status, client_name, project_type, created_at.",
@@ -158,8 +155,6 @@ mcpServer.tool("get_project_details", {
   },
 });
 
-// ── Write Tools ─────────────────────────────────────────────
-
 mcpServer.tool("create_project", {
   description: "Create a new estimation project.",
   inputSchema: {
@@ -240,8 +235,6 @@ mcpServer.tool("update_project", {
   },
 });
 
-// ── Transport ───────────────────────────────────────────────
-
 const transport = new StreamableHttpTransport();
 const httpHandler = transport.bind(mcpServer);
 
@@ -250,10 +243,19 @@ app.all("/*", async (c) => {
     return new Response(null, {
       headers: {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "authorization, x-api-key, content-type, accept, x-client-info, apikey",
+        "Access-Control-Allow-Headers": "authorization, x-api-key, x-mcp-server-token, content-type, accept, x-client-info, apikey",
         "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
       },
     });
+  }
+
+  if (!MCP_SERVER_TOKEN) {
+    return new Response("MCP server token is not configured", { status: 503 });
+  }
+
+  const requestToken = c.req.header("x-mcp-server-token");
+  if (requestToken !== MCP_SERVER_TOKEN) {
+    return new Response("Unauthorized", { status: 401 });
   }
 
   return await httpHandler(c.req.raw);

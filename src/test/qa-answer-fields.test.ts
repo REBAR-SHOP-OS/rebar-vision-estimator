@@ -1,0 +1,253 @@
+import { describe, expect, it } from "vitest";
+import { buildEngineerAnswerDraft, buildEngineerQuestion, inferEngineerAnswerFields, summarizeEngineerAnswer } from "@/features/workflow-v2/stages/qa-answer-fields";
+
+describe("qa answer fields", () => {
+  it("asks for length and bar callout from unresolved geometry text", () => {
+    const fields = inferEngineerAnswerFields(
+      ["rebar_callout", "element_dimensions"],
+      "Enter the dimensions and bar callout from the drawing.",
+    ).map((field) => field.key);
+
+    expect(fields).toContain("length");
+    expect(fields).toContain("bar_callout");
+    expect(fields).toContain("notes");
+  });
+
+  it("falls back to a generic answer when no specific field is implied", () => {
+    expect(inferEngineerAnswerFields([], "Check the source.").map((field) => field.key)).toEqual(["answer", "notes"]);
+  });
+
+  it("summarizes non-empty values for storage", () => {
+    expect(summarizeEngineerAnswer({ length: "3000mm", notes: "", bar_callout: "15M @ 406mm O.C." }))
+      .toBe("Length: 3000mm; Bar callout: 15M @ 406mm O.C.");
+  });
+
+  it("builds an on-point free response question", () => {
+    expect(buildEngineerQuestion({
+      locationLabel: "P15-T.D.69",
+      objectIdentity: "leveling pad",
+      missingRefs: ["element_dimensions"],
+      sourceExcerpt: "LEVELING PAD INTO FOUNDATION WALL",
+    })).toBe('On P15-T.D.69, find the leveling pad. What length should be used for this item? Use the callout/excerpt "LEVELING PAD INTO FOUNDATION WALL".');
+  });
+
+  it("asks for run length and dowel count from leveling pad dowel callouts", () => {
+    const excerpt = 'PROVIDE 400mm (16") LONG 10M DOWELS AT 300mm (12") O.C. FROM C.I.P. CONC. LEVELING PAD INTO FOUNDATION WALL';
+    const fields = inferEngineerAnswerFields(["rebar_callout", "element_dimensions"], excerpt).map((field) => field.key);
+
+    expect(fields).toEqual(["length", "quantity", "bar_callout", "notes"]);
+    expect(buildEngineerQuestion({
+      locationLabel: "P15",
+      objectIdentity: "leveling pad",
+      missingRefs: ["rebar_callout", "element_dimensions"],
+      sourceExcerpt: excerpt,
+    })).toBe('On P15, find the C.I.P. concrete leveling pad into foundation wall. The callout requires 400mm (16") long 10M dowels @ 300mm (12") O.C. What is the full leveling pad run length, and how many dowels are required?');
+  });
+
+  it("drafts a confirmation answer when dowel callout is found without run length", () => {
+    const excerpt = 'PROVIDE 400mm (16") LONG 10M DOWELS AT 300mm (12") O.C. FROM C.I.P. CONC. LEVELING PAD INTO FOUNDATION WALL';
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P15",
+      missingRefs: ["rebar_callout", "element_dimensions"],
+      sourceExcerpt: excerpt,
+    });
+
+    expect(draft.confidence).toBe("medium");
+    expect(draft.needsConfirmation).toBe(true);
+    expect(draft.structuredValues).toEqual({ bar_callout: '400mm (16") long 10M dowels @ 300mm (12") O.C.' });
+    expect(draft.draftAnswer).toBe('Found: 400mm (16") long 10M dowels @ 300mm (12") O.C. from C.I.P. concrete leveling pad into foundation wall. Please confirm the full leveling pad run length so dowel quantity can be calculated.');
+  });
+
+  it("calculates dowel quantity when reliable run length is present", () => {
+    const excerpt = 'PROVIDE 400mm (16") LONG 10M DOWELS AT 300mm (12") O.C. FROM C.I.P. CONC. LEVELING PAD INTO FOUNDATION WALL';
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P15",
+      description: "Leveling pad run length 10000mm.",
+      missingRefs: ["rebar_callout", "element_dimensions"],
+      sourceExcerpt: excerpt,
+    });
+
+    expect(draft.confidence).toBe("high");
+    expect(draft.structuredValues).toEqual({
+      bar_callout: '400mm (16") long 10M dowels @ 300mm (12") O.C.',
+      length: "10000mm",
+      quantity: "34",
+    });
+    expect(draft.draftAnswer).toBe('Found: run length 10000mm; use 400mm (16") long 10M dowels @ 300mm (12") O.C.; quantity = 34 dowels. Please confirm.');
+  });
+
+  it("drafts an intelligent answer from frost slab rebar callouts", () => {
+    const excerpt = "152mm FROST SLAB W/ 15M @ 305mm O.C. EACH WAY IN THE CENTRE OF SLAB.";
+    const fields = inferEngineerAnswerFields(["rebar_callout", "element_dimensions"], excerpt).map((field) => field.key);
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P12",
+      missingRefs: ["rebar_callout", "element_dimensions"],
+      sourceExcerpt: excerpt,
+    });
+
+    expect(fields).toContain("thickness");
+    expect(fields).toContain("bar_callout");
+    expect(draft.question).toBe("On P12, find the frost slab. The drawing shows 152mm frost slab with 15M @ 305mm O.C. each way in the centre of slab. What slab length and width should be used?");
+    expect(draft.draftAnswer).toBe("Found: 152mm frost slab; rebar 15M @ 305mm O.C. each way in the centre of slab. Please confirm the slab length and width.");
+    expect(draft.structuredValues).toEqual({
+      thickness: "152mm",
+      bar_callout: "15M @ 305mm O.C. each way",
+      notes: "in the centre of slab",
+    });
+  });
+
+  it("drafts visible wall callouts but still asks for missing dimensions", () => {
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P6",
+      missingRefs: ["element_dimensions"],
+      sourceExcerpt: "203mm FOUNDATION WALL W/ 15M @ 406mm O.C. MIDDLE EACH WAY.",
+    });
+
+    expect(draft.question).toContain("find the foundation wall");
+    expect(draft.question).toContain("wall length and height");
+    expect(draft.draftAnswer).toContain("Found: 203mm foundation wall; rebar 15M @ 406mm O.C.");
+    expect(draft.structuredValues.thickness).toBe("203mm");
+  });
+
+  it("drafts suggestions from descriptive foundation wall hook callouts", () => {
+    const excerpt = 'Continuous horizontal bars @top of foundation wall w/ 800mm (32") hook';
+    const fields = inferEngineerAnswerFields(["rebar_callout", "element_dimensions"], excerpt).map((field) => field.key);
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P12",
+      objectIdentity: "foundation wall",
+      missingRefs: ["rebar_callout", "element_dimensions"],
+      sourceExcerpt: excerpt,
+    });
+
+    expect(fields).toContain("bar_callout");
+    expect(draft.question).toBe('On P12, find the foundation wall. The drawing shows foundation wall with continuous horizontal bars at top of foundation wall with 800mm (32") hook. What wall length and height should be used?');
+    expect(draft.draftAnswer).toBe('Found: foundation wall; rebar continuous horizontal bars at top of foundation wall with 800mm (32") hook. Please confirm the wall length and height.');
+    expect(draft.structuredValues).toEqual({
+      bar_callout: 'continuous horizontal bars at top of foundation wall with 800mm (32") hook',
+    });
+  });
+
+  it("drafts suggestions from brick ledge vertical bar callouts", () => {
+    const excerpt = '10M VERTICAL BARS @ 300mm (12") O.C. TYPICAL.';
+    const fields = inferEngineerAnswerFields(["rebar_callout", "element_dimensions"], `brick ledge ${excerpt}`).map((field) => field.key);
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P17",
+      objectIdentity: "brick ledge",
+      missingRefs: ["rebar_callout", "element_dimensions"],
+      sourceExcerpt: excerpt,
+      title: "P17: brick ledge",
+    });
+
+    expect(fields).toContain("width");
+    expect(fields).toContain("height");
+    expect(fields).toContain("bar_callout");
+    expect(draft.question).toBe("On P17, find the brick ledge. The drawing note already defines the brick ledge dimensions and reinforcement. Confirm or correct these values.");
+    expect(draft.draftAnswer).toContain("115mm (4-1/2\") brick ledge typical");
+    expect(draft.structuredValues.bar_callout).toBe("10M vertical bars @ 300mm (12\") O.C. typical");
+  });
+
+  it("prefills brick ledge detail-note answers instead of asking from scratch", () => {
+    const excerpt = "15M CONT. REINFORCEMENT @ TOP OF BRICK LEDGE";
+    const fields = inferEngineerAnswerFields(["rebar_callout", "element_dimensions"], `P17 brick ledge ${excerpt}`).map((field) => field.key);
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P17",
+      objectIdentity: "brick ledge",
+      missingRefs: ["rebar_callout", "element_dimensions"],
+      sourceExcerpt: excerpt,
+      title: "P17: brick ledge",
+    });
+
+    expect(fields).toEqual(["width", "height", "bar_callout", "notes"]);
+    expect(draft.confidence).toBe("high");
+    expect(draft.question).toBe("On P17, find the brick ledge. The drawing note already defines the brick ledge dimensions and reinforcement. Confirm or correct these values.");
+    expect(draft.draftAnswer).toBe([
+      "Brick ledge dimensions per detail:",
+      "- 115mm (4-1/2\") brick ledge typical",
+      "- Use 152mm (6\") brick ledge where wall height exceeds 300mm and is less than 900mm",
+      "- Max ledge height = 300mm (12\")",
+      "- 10M vertical bars @ 300mm (12\") O.C. typical",
+    ].join("\n"));
+    expect(draft.structuredValues).toMatchObject({
+      width: "115mm (4-1/2\") typical; 152mm (6\") where wall height exceeds 300mm and is less than 900mm",
+      height: "Max ledge height = 300mm (12\")",
+      bar_callout: "10M vertical bars @ 300mm (12\") O.C. typical",
+    });
+  });
+
+  it("drafts scale-backed linear geometry when available", () => {
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P17",
+      objectIdentity: "brick ledge",
+      missingRefs: ["element_dimensions"],
+      sourceExcerpt: '10M VERTICAL BARS @ 300mm (12") O.C. TYPICAL.',
+      linearGeometry: {
+        objectLabel: "brick ledge",
+        lengthMm: 10000,
+        heightMm: 1200,
+        barCallout: "10M vertical bars @ 300mm O.C. typical",
+        confidence: "high",
+        reason: "Measured from element bbox using sheet scale 1:50.",
+      },
+    });
+
+    expect(draft.question).toContain("scale-measured run length 10000mm");
+    expect(draft.draftAnswer).toContain("bar height 1200mm");
+    expect(draft.structuredValues).toMatchObject({
+      length: "10000mm",
+      height: "1200mm",
+      bar_callout: "10M vertical bars @ 300mm O.C. typical",
+    });
+  });
+
+  it("still drafts a low-confidence suggestion from unrelated descriptive text", () => {
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P2",
+      sourceExcerpt: "Refer to architectural drawings for information.",
+    });
+
+    expect(draft.confidence).toBe("low");
+    expect(draft.draftAnswer).toBe('Found source excerpt: "Refer to architectural drawings for information.". Please confirm the exact drawing value for this item.');
+    expect(draft.structuredValues).toEqual({});
+  });
+
+  it("asks only for missing wall height when wall length was auto-resolved", () => {
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P10",
+      objectIdentity: "foundation wall",
+      missingRefs: ["wall_height"],
+      sourceExcerpt: "15M @ 406mm O.C.",
+      wallGeometry: {
+        lengthMm: 12400,
+        heightMm: null,
+        confidence: "medium",
+        reason: "Found partial wall dimensions in OCR text.",
+        sheetTag: "S-1.0",
+      },
+    });
+
+    expect(draft.question).toContain("wall length 12400mm");
+    expect(draft.question).toContain("What wall height should be used");
+    expect(draft.draftAnswer).toContain("Please confirm the wall height");
+    expect(draft.structuredValues.length).toBe("12400mm");
+  });
+
+  it("prefills wall length and height when both are auto-resolved", () => {
+    const draft = buildEngineerAnswerDraft({
+      locationLabel: "P10",
+      objectIdentity: "foundation wall",
+      missingRefs: ["element_dimensions"],
+      sourceExcerpt: "15M @ 406mm O.C.",
+      wallGeometry: {
+        lengthMm: 12400,
+        heightMm: 3000,
+        confidence: "high",
+        reason: "Found explicit wall dimensions in OCR text.",
+        sheetTag: "S-1.0",
+      },
+    });
+
+    expect(draft.question).toContain("Should this wall geometry be used");
+    expect(draft.draftAnswer).toContain("wall height 3000mm");
+    expect(draft.structuredValues).toMatchObject({ length: "12400mm", height: "3000mm" });
+  });
+});

@@ -1,4 +1,6 @@
 import type { Config } from "tailwindcss";
+import tailwindcssAnimate from "tailwindcss-animate";
+import typography from "@tailwindcss/typography";
 
 export default {
   darkMode: ["class"],
@@ -63,6 +65,10 @@ export default {
           input: "hsl(var(--chat-input))",
         },
       },
+      fontFamily: {
+        hanken: ['"Hanken Grotesk"', "system-ui", "sans-serif"],
+        "mono-jet": ['"JetBrains Mono"', "ui-monospace", "monospace"],
+      },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
@@ -92,5 +98,5 @@ export default {
       },
     },
   },
-  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
+  plugins: [tailwindcssAnimate, typography],
 } satisfies Config;

@@ -6,10 +6,6 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const REBAR_URL = "https://rzqonxnowjrtbueauziu.supabase.co";
-const REBAR_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6cW9ueG5vd2pydGJ1ZWF1eml1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1ODE2NTMsImV4cCI6MjA4NzE1NzY1M30.3-ryGO4oXzW_4NET5cKYrw0hAI8oY4vvYnuYp5Q6NkY";
-
 const TARGET_STAGES = [
   "estimation_ben",
   "estimation_karthick",
@@ -23,9 +19,38 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const rebarClient = createClient(REBAR_URL, REBAR_ANON_KEY);
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-    // Fetch leads from target stages
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user }, error: userError } = await userClient.auth.getUser();
+    if (userError || !user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const rebarUrl = Deno.env.get("PIPELINE_SUPABASE_URL");
+    const rebarAnonKey = Deno.env.get("PIPELINE_SUPABASE_ANON_KEY");
+    if (!rebarUrl || !rebarAnonKey) {
+      return new Response(JSON.stringify({ error: "Pipeline connector is not configured" }), {
+        status: 503,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const rebarClient = createClient(rebarUrl, rebarAnonKey);
+
     const { data: leads, error } = await rebarClient
       .from("leads")
       .select("id, title, stage, expected_value, expected_close_date, priority, probability, source, created_at, customer_id, customers(name, company_name)")
@@ -43,7 +68,6 @@ Deno.serve(async (req) => {
     const filesByLead: Record<string, any[]> = {};
     let totalFilesFound = 0;
 
-    // Batch lead_files queries in chunks of 30 to stay within URL limits
     for (let i = 0; i < leadIds.length; i += 30) {
       const batch = leadIds.slice(i, i + 30);
       const { data: files, error: filesError } = await rebarClient
@@ -53,7 +77,7 @@ Deno.serve(async (req) => {
         .limit(500);
 
       if (filesError) {
-        console.error(`Files batch error:`, filesError.message);
+        console.error("Files batch error:", filesError.message);
         continue;
       }
 
@@ -64,7 +88,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    console.log(`Total files found: ${totalFilesFound} across ${Object.keys(filesByLead).length} leads`);
+    console.log(`Total files found: ${totalFilesFound} across ${Object.keys(filesByLead).length} leads for ${user.id}`);
 
     const leadsWithFiles = (leads || []).map((lead: any) => {
       const files = filesByLead[lead.id] || [];
@@ -72,21 +96,14 @@ Deno.serve(async (req) => {
         let url: string | null = null;
         let odooId: string | null = null;
 
-        // Prefer storage path (direct public download)
         if (f.storage_path) {
-          url = `${REBAR_URL}/storage/v1/object/public/lead-files/${f.storage_path}`;
-        }
-        // Use odoo_id for Odoo-hosted files
-        else if (f.odoo_id) {
+          url = `${rebarUrl}/storage/v1/object/public/lead-files/${f.storage_path}`;
+        } else if (f.odoo_id) {
           odooId = String(f.odoo_id);
-        }
-        // Extract content ID from Odoo URLs
-        else if (f.file_url && f.file_url.includes("odoo.com/web/content/")) {
+        } else if (f.file_url && f.file_url.includes("odoo.com/web/content/")) {
           const match = f.file_url.match(/\/web\/content\/(\d+)/);
           if (match) odooId = match[1];
-        }
-        // Non-Odoo URL fallback
-        else if (f.file_url) {
+        } else if (f.file_url) {
           url = f.file_url;
         }
 
