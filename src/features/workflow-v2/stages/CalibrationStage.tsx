@@ -818,6 +818,10 @@ function DisciplineSection({
 }
 
 // ── Two-point calibration modal ──────────────────────────────────────────────
+/** Module-level cache for signed URLs (1h TTL — matches createSignedUrl). */
+const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
+const SIGNED_URL_TTL_MS = 55 * 60 * 1000; // refresh slightly before the 1h server expiry
+
 function TwoPointCalModal({
   sheet,
   onClose,
@@ -841,6 +845,11 @@ function TwoPointCalModal({
       setUrlError("No file linked to this sheet. Use the px/ft input instead.");
       return;
     }
+    const cached = signedUrlCache.get(sheet.file_path);
+    if (cached && cached.expiresAt > Date.now()) {
+      setSignedUrl(cached.url);
+      return;
+    }
     supabase.storage
       .from("blueprints")
       .createSignedUrl(sheet.file_path, 3600)
@@ -849,6 +858,7 @@ function TwoPointCalModal({
           const detail = error?.message ? ` (${error.message})` : "";
           setUrlError(`Could not load drawing preview${detail}. Use the px/ft input instead.`);
         } else {
+          signedUrlCache.set(sheet.file_path!, { url: data.signedUrl, expiresAt: Date.now() + SIGNED_URL_TTL_MS });
           setSignedUrl(data.signedUrl);
         }
       });
