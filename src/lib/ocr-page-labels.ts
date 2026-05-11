@@ -12,15 +12,18 @@ export interface LabelHit {
 
 /** Default mark patterns used on structural foundation sheets. */
 export const DEFAULT_MARK_PATTERNS: RegExp[] = [
-  // Accept hyphen, dot, or no separator (e.g. F2, F-2, F.2, WF-1, WF.1)
-  /^WF[-.\s]?\d+[A-Z]?$/i, // wall footings
-  /^F[-.\s]?\d+[A-Z]?$/i,  // pad footings
-  /^P[-.\s]?\d+[A-Z]?$/i,  // piers
-  /^C[-.\s]?\d+[A-Z]?$/i,  // columns
-  /^B[-.\s]?\d+[A-Z]?$/i,  // beams
-  /^S[-.\s]?\d+[A-Z]?$/i,  // slabs / stairs
-  /^GB[-.\s]?\d+[A-Z]?$/i, // grade beams
-  /^PC[-.\s]?\d+[A-Z]?$/i, // pile caps
+  // Accept hyphen, dot, or no separator, plus optional decimal size suffix
+  // (e.g. F2, F-2, F.2, F2.0, F-2.0A, WF-1, WF1.5).
+  /^WF[-.\s]?\d+(\.\d+)?[A-Z]?$/i, // wall footings
+  /^F[-.\s]?\d+(\.\d+)?[A-Z]?$/i,  // pad footings
+  /^FTG[-.\s]?\d+(\.\d+)?[A-Z]?$/i, // footing alias
+  /^PAD[-.\s]?\d+(\.\d+)?[A-Z]?$/i, // pad footing alias
+  /^P[-.\s]?\d+(\.\d+)?[A-Z]?$/i,  // piers
+  /^C[-.\s]?\d+(\.\d+)?[A-Z]?$/i,  // columns
+  /^B[-.\s]?\d+(\.\d+)?[A-Z]?$/i,  // beams
+  /^S[-.\s]?\d+(\.\d+)?[A-Z]?$/i,  // slabs / stairs
+  /^GB[-.\s]?\d+(\.\d+)?[A-Z]?$/i, // grade beams
+  /^PC[-.\s]?\d+(\.\d+)?[A-Z]?$/i, // pile caps
 ];
 
 function normalizeToken(t: string): string {
@@ -31,6 +34,8 @@ function normalizeToken(t: string): string {
 export function markBucket(token: string): string | null {
   const t = normalizeToken(token);
   if (/^WF[-.]?\d/i.test(t)) return "wall"; // WF = Foundation Wall
+  if (/^FTG[-.]?\d/i.test(t)) return "footing";
+  if (/^PAD[-.]?\d/i.test(t)) return "footing";
   if (/^F[-.]?\d/i.test(t)) return "footing";
   if (/^PC[-.]?\d/i.test(t)) return "footing";
   if (/^P[-.]?\d/i.test(t)) return "pier";
@@ -45,6 +50,8 @@ export interface OcrPageResult {
   imageWidth: number;
   imageHeight: number;
   hits: LabelHit[];
+  /** Diagnostic: tokens read by OCR that did not match any pattern. */
+  unmatchedTokens?: string[];
 }
 
 /**
@@ -67,6 +74,7 @@ export async function detectPageLabels(
   // Pull all blocks from any pass, dedupe by text+approximate position.
   const seen = new Set<string>();
   const hits: LabelHit[] = [];
+  const unmatched = new Set<string>();
   let maxX = 0, maxY = 0;
   for (const r of results) {
     for (const b of r.blocks || []) {
@@ -80,15 +88,29 @@ export async function detectPageLabels(
       let matched = false;
       for (const tok of tokens) {
         const norm = normalizeToken(tok);
-        if (norm.length < 2 || norm.length > 8) continue;
+        if (norm.length < 2 || norm.length > 10) continue;
         if (patterns.some((p) => p.test(norm))) { matched = true; break; }
       }
-      if (!matched) continue;
+      if (!matched) {
+        // Capture short alpha+digit tokens for diagnostics
+        for (const tok of tokens) {
+          const norm = normalizeToken(tok);
+          if (norm.length >= 2 && norm.length <= 10 && /[A-Z]/.test(norm) && /\d/.test(norm)) {
+            unmatched.add(norm);
+          }
+        }
+        continue;
+      }
       const key = `${normalizeToken(txt)}::${Math.round(x1 / 4)}:${Math.round(y1 / 4)}`;
       if (seen.has(key)) continue;
       seen.add(key);
       hits.push({ text: normalizeToken(txt), rect: [x1, y1, x2, y2] });
     }
   }
-  return { imageWidth: maxX || 1000, imageHeight: maxY || 1000, hits };
+  return {
+    imageWidth: maxX || 1000,
+    imageHeight: maxY || 1000,
+    hits,
+    unmatchedTokens: unmatched.size ? Array.from(unmatched).slice(0, 50) : undefined,
+  };
 }
