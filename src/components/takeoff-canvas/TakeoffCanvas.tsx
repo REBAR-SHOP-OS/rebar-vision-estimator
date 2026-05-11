@@ -674,7 +674,8 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
                       return next;
                     });
                     setActiveLayer(l.id);
-                    setTool("polygon");
+                    // Keep current tool — Pan lets the user just highlight a
+                    // segment, Polygon stays on if they were drawing.
                   }}
                   title={`${l.name} — ${drawnHere} drawn`}
                   className={`flex h-9 w-full items-center justify-center rounded border ${isActive ? "border-primary ring-1 ring-primary" : "border-transparent hover:bg-muted/50"}`}
@@ -694,7 +695,8 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
                     return next;
                   });
                   setActiveLayer(l.id);
-                  setTool("polygon");
+                  // Keep current tool — Pan keeps the highlight without
+                  // forcing the user into draw mode.
                 }}
                 className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-xs transition-colors ${isActive ? "border-primary bg-primary/15 ring-1 ring-primary" : "border-transparent hover:bg-muted/50"}`}
               >
