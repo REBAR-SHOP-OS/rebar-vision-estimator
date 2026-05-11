@@ -404,6 +404,26 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
                     viewBox={`0 0 1 1`}
                     preserveAspectRatio="none"
                   >
+                    {/* Auto-detected colored regions (Togal-style overlay) */}
+                    {regionAssignments.map(({ region, layer }, i) => {
+                      const fill = layer ? layerColor(layer) : region.color;
+                      const layerLc = layer?.name.trim().toLowerCase();
+                      const isSel = !!highlightLabelLc && layerLc === highlightLabelLc;
+                      const isAssigned = !!layer;
+                      const fillOpacity = isSel ? 0.55 : (isAssigned ? 0.22 : 0.10);
+                      const strokeWidth = isSel ? 0.008 : 0.003;
+                      return (
+                        <polygon
+                          key={`reg-${i}`}
+                          points={region.polygon.map((p) => p.join(",")).join(" ")}
+                          fill={fill}
+                          fillOpacity={fillOpacity}
+                          stroke={fill}
+                          strokeWidth={strokeWidth}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      );
+                    })}
                     {/* Saved polygons grouped by layer */}
                     {visibleLayers.map((layer) => {
                       const polys = polysByLayer.get(layer.id) || [];
@@ -457,7 +477,7 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
                   </svg>
                 )}
                 {/* Selection callout — drives Stage 02 "selected segment" visual */}
-                {highlight?.label && (
+                {highlight?.label && !hasMatchedSelection && (
                   <div
                     className="pointer-events-none absolute inset-0"
                     style={{
