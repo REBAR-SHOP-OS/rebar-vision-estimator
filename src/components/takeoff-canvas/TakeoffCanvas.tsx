@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import PdfRenderer from "@/components/chat/PdfRenderer";
 import { colorForSegmentType, inferSegmentType } from "@/lib/segment-type";
+import { detectRegions, hueDistance, parseHslHue, type Region } from "@/lib/region-segmentation";
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Eye, EyeOff, Hand, Layers, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -62,6 +63,8 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
   const [draft, setDraft] = useState<Array<[number, number]>>([]);
   const [polygons, setPolygons] = useState<ManualPolygon[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [regions, setRegions] = useState<Region[]>([]);
+  const regionCacheRef = useRef<Map<string, Region[]>>(new Map());
   const stageRef = useRef<HTMLDivElement>(null);
   const imageBoxRef = useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = useState<{ w: number; h: number } | null>(null);
