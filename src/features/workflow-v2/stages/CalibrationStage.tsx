@@ -497,11 +497,12 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
                   {s === "done" && <CheckCircle2 className="w-3 h-3 text-[hsl(var(--status-supported))]" />}
                   {s === "error" && (
                     <button
-                      className="flex items-center gap-1 text-[hsl(var(--status-blocked))]"
+                      className="flex items-center gap-1 text-[hsl(var(--status-blocked))] hover:underline"
                       onClick={load}
-                      title={errMsg || "Retry all"}
+                      title={errMsg ? `${errMsg} — click to retry this step` : "Retry this step"}
                     >
                       <AlertTriangle className="w-3 h-3" />
+                      <span className="text-[10px] font-mono">retry</span>
                     </button>
                   )}
                   {s === "idle" && <span className="w-3 h-3 rounded-full border border-border inline-block" />}
