@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { StageHeader, Pill, EmptyState, type StageProps } from "./_shared";
-import { ArrowRight, Check, X, GitMerge, Split, Layers, Loader2 } from "lucide-react";
+import { ArrowRight, Check, X, GitMerge, Split, Layers, Loader2, RefreshCcw } from "lucide-react";
 import TakeoffCanvas, { type TakeoffCanvasLayer } from "@/components/takeoff-canvas/TakeoffCanvas";
 import { inferSegmentType, methodologyStep, METHODOLOGY_STEP_LABELS } from "@/lib/segment-type";
 
@@ -20,6 +20,8 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
   const { user } = useAuth();
   const [savingId, setSavingId] = useState<string | null>(null);
   const [detecting, setDetecting] = useState(false);
+  const [detectFailed, setDetectFailed] = useState(false);
+  const [searchPages, setSearchPages] = useState<Array<{ page_number: number | null; raw_text: string }>>([]);
   const detectedRef = useRef<string | null>(null);
   const cached = (state.local.scopeCandidates as Candidate[] | undefined) || [];
   // De-dup by label so we never show the same archetype twice (e.g. once per uploaded PDF).
@@ -40,6 +42,40 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
   }, [cached]);
 
   // Run real OCR-driven scope detection once per project (and re-run on file count change).
+  const runDetection = async () => {
+    setDetecting(true);
+    setDetectFailed(false);
+    const timeout = new Promise<{ timedOut: true }>((res) => setTimeout(() => res({ timedOut: true }), 30_000));
+    try {
+      const work = supabase.functions.invoke("auto-segments", { body: { projectId } });
+      const result = await Promise.race([work, timeout]);
+      if ((result as { timedOut?: boolean }).timedOut) {
+        setDetectFailed(true);
+        return;
+      }
+      const { data, error } = result as Awaited<typeof work>;
+      if (error || !data?.suggestions || data.suggestions.length === 0) {
+        setDetectFailed(true);
+        return;
+      }
+      const next: Candidate[] = (data.suggestions as Array<{
+        name: string; segment_type?: string; notes?: string | null;
+      }>).map((s, i) => ({
+        id: `${s.name}-${i}`,
+        label: s.name,
+        source: s.notes || s.segment_type || "OCR",
+        confidence: 0.75,
+        evidence: s.notes || `Detected ${s.segment_type || "element"} from drawings`,
+      }));
+      state.setLocal({ scopeCandidates: next });
+    } catch (e) {
+      console.warn("auto-segments invoke failed:", e);
+      setDetectFailed(true);
+    } finally {
+      setDetecting(false);
+    }
+  };
+
   useEffect(() => {
     if (state.files.length === 0) return;
     const sig = `${projectId}:${state.files.length}`;
@@ -49,33 +85,29 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
       return;
     }
     detectedRef.current = sig;
+    runDetection();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, state.files.length]);
+
+  // Pull OCR pages once so we can locate which page each candidate appears on
+  // (used by the right-pane SELECTION overlay).
+  useEffect(() => {
     let cancelled = false;
     (async () => {
-      setDetecting(true);
-      try {
-        const { data, error } = await supabase.functions.invoke("auto-segments", {
-          body: { projectId },
-        });
-        if (cancelled || error || !data?.suggestions) return;
-        const next: Candidate[] = (data.suggestions as Array<{
-          name: string; segment_type?: string; notes?: string | null;
-        }>).map((s, i) => ({
-          id: `${s.name}-${i}`,
-          label: s.name,
-          source: s.notes || s.segment_type || "OCR",
-          confidence: 0.75,
-          evidence: s.notes || `Detected ${s.segment_type || "element"} from drawings`,
-        }));
-        state.setLocal({ scopeCandidates: next });
-      } catch (e) {
-        console.warn("auto-segments invoke failed:", e);
-      } finally {
-        if (!cancelled) setDetecting(false);
-      }
+      const { data } = await supabase
+        .from("drawing_search_index")
+        .select("page_number, raw_text")
+        .eq("project_id", projectId)
+        .order("page_number", { ascending: true })
+        .limit(200);
+      if (cancelled) return;
+      setSearchPages((data || []).map((r: any) => ({
+        page_number: r.page_number,
+        raw_text: String(r.raw_text || "").slice(0, 8192),
+      })));
     })();
     return () => { cancelled = true; };
-     
-  }, [projectId, state.files.length]);
+  }, [projectId]);
 
   const decisions = (state.local.scope || {}) as Record<string, Decision>;
   const [selectedId, setSelectedId] = useState<string | null>(candidates[0]?.id || null);
@@ -198,6 +230,26 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
 
   const firstFile = state.files[0];
 
+  // Best-effort page lookup for the selected candidate.
+  const selectedPage = useMemo(() => {
+    if (!sel || searchPages.length === 0) return undefined;
+    const tokens = sel.label
+      .toLowerCase()
+      .split(/[^a-z0-9#]+/i)
+      .filter((t) => t.length >= 3);
+    if (tokens.length === 0) return undefined;
+    let best: { page: number; score: number } | null = null;
+    for (const row of searchPages) {
+      const text = row.raw_text.toLowerCase();
+      let score = 0;
+      for (const t of tokens) if (text.includes(t)) score += 1;
+      if (score > 0 && (!best || score > best.score)) {
+        best = { page: row.page_number || 1, score };
+      }
+    }
+    return best?.page;
+  }, [sel, searchPages]);
+
   return (
     <div className="grid h-full" style={{ gridTemplateColumns: "360px 64px 1fr" }}>
       {/* Candidate column */}
@@ -208,10 +260,34 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
           right={<Pill tone="info">{newCount} New</Pill>}
         />
         {candidates.length === 0 ? (
-          <EmptyState
-            title={detecting ? "Detecting scope…" : "No scope candidates"}
-            hint={detecting ? "Reading OCR from structural & architectural sheets." : "Upload drawings, then run scope detection."}
-          />
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center">
+            {detecting ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                <div className="text-[12px] font-mono uppercase tracking-widest text-muted-foreground">Detecting scope…</div>
+                <div className="text-[11px] text-muted-foreground">Reading OCR from structural &amp; architectural sheets.</div>
+              </>
+            ) : (
+              <>
+                <div className="text-[12px] font-mono uppercase tracking-widest text-muted-foreground">
+                  {detectFailed ? "No candidates detected" : "No scope candidates"}
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  {detectFailed
+                    ? "OCR did not surface a usable scope. Retry or upload more sheets."
+                    : "Upload drawings, then run scope detection."}
+                </div>
+                {state.files.length > 0 && (
+                  <button
+                    onClick={runDetection}
+                    className="inline-flex h-7 items-center gap-1.5 border border-primary/60 bg-primary/15 px-3 text-[10px] font-mono uppercase tracking-wider text-primary hover:bg-primary/25"
+                  >
+                    <RefreshCcw className="w-3 h-3" /> Retry detection
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         ) : (
           <div className="flex-1 overflow-auto p-3 space-y-2">
             {candidates.map((c) => {
@@ -307,6 +383,7 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
             filePath={firstFile?.file_path}
             fileName={firstFile?.file_name}
             emptyHint={accepted.length === 0 ? "Approve candidates on the left to add layers." : "Upload a drawing to see the canvas."}
+            highlight={sel ? { label: sel.label, pageNumber: selectedPage, color: "hsl(24 95% 55%)" } : null}
           />
         </div>
       </div>

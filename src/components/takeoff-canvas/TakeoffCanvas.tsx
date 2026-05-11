@@ -23,6 +23,12 @@ interface TakeoffCanvasProps {
   fileName?: string | null;
   emptyHint?: string;
   className?: string;
+  /**
+   * Optional read-only selection callout. When set, the canvas jumps to
+   * `pageNumber` and overlays a `SELECTION: <label>` tag (matches the
+   * Stage 02 design reference). No DB writes; cosmetic only.
+   */
+  highlight?: { label: string; pageNumber?: number; color?: string } | null;
 }
 
 type ManualPolygon = {
@@ -40,7 +46,7 @@ function isPdfPath(path: string | null | undefined): boolean {
   return !!path && path.toLowerCase().split("?")[0].endsWith(".pdf");
 }
 
-export default function TakeoffCanvas({ projectId, layers, filePath, fileName, emptyHint, className }: TakeoffCanvasProps) {
+export default function TakeoffCanvas({ projectId, layers, filePath, fileName, emptyHint, className, highlight }: TakeoffCanvasProps) {
   const { user } = useAuth();
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [resolvedName, setResolvedName] = useState<string | null>(fileName || null);
@@ -251,6 +257,15 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
 
   const totalPolyCount = polygons.length;
 
+  // Auto-jump to the page that contains the currently-selected candidate.
+  useEffect(() => {
+    const target = highlight?.pageNumber;
+    if (!target || target < 1) return;
+    if (target === page) return;
+    if (pageCount > 1 && target > pageCount) return;
+    setPage(target);
+  }, [highlight?.pageNumber, pageCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className={`flex h-full min-h-0 ${className || ""}`}>
       {/* Stage */}
@@ -386,6 +401,23 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
                       </>
                     )}
                   </svg>
+                )}
+                {/* Selection callout — drives Stage 02 "selected segment" visual */}
+                {highlight?.label && (
+                  <div
+                    className="pointer-events-none absolute inset-0"
+                    style={{
+                      boxShadow: `inset 0 0 0 2px ${highlight.color || "hsl(24 95% 55%)"}`,
+                      animation: "pulse 1.6s ease-in-out infinite",
+                    }}
+                  >
+                    <div
+                      className="absolute left-1/2 top-2 -translate-x-1/2 px-2 py-0.5 text-[10px] font-mono uppercase tracking-widest text-background"
+                      style={{ background: highlight.color || "hsl(24 95% 55%)" }}
+                    >
+                      Selection: {highlight.label}
+                    </div>
+                  </div>
                 )}
               </div>
             )}
