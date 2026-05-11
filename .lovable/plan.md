@@ -1,65 +1,38 @@
-# Stage 02 — Auto-Detected Segments + Selected Segment Highlight on Blueprint
+## Problem
 
-**Goal:** Match the attached design. The left sidebar of Stage 02 (Scope Review) shows the auto-detected segments as soon as the project opens. Clicking a segment in the list highlights that exact area on the blueprint on the right with an orange `SELECTION: <label>` overlay (like the reference screens).
+On project `51e9c8bc…` the left pane shows **"No candidates detected — OCR did not surface a usable scope"**, but the top bar shows **SCOPE APPROVED 16/16** and **TAKEOFF ROWS 7**. The scope is already approved on the server; the empty state is misleading and blocks the user from selecting a candidate to drive the right-pane SELECTION overlay we just added.
 
-Today the left column already lists candidates (after `auto-segments` finishes), but the right canvas only paints layers from *approved* items and never visually highlights the *selected* candidate, so estimators can't see what they're looking at on the drawing. The user's screenshot also shows the list stuck on "DETECTING SCOPE…" with no recovery path.
+## Root cause
 
-## What changes (minimal patch, UI-only on the client)
+1. `auto-segments` filters out any suggestion whose name matches `existingSegNames` (segments already saved on the project). With 16 approved items already materialised as segments, every must-have and AI suggestion gets stripped → response is `{ suggestions: [] }`.
+2. `ScopeStage.runDetection` treats `suggestions.length === 0` as a **detection failure** and flips `detectFailed = true`, even though the server-side `projects.scope_items` array contains 16 valid approved labels (exposed as `state.approvedScopeItems`).
+3. The left list (`candidates`) is built only from `state.local.scopeCandidates`, never from `state.approvedScopeItems`, so already-approved scope is invisible until OCR re-detects it.
 
-```text
-┌──────────────────┬──┬───────────────────────────────────────┐
-│ Candidate Scope  │▮ │  Takeoff Canvas (right pane)          │
-│ ───────────────  │▮ │  ┌─────────────────────────────────┐  │
-│ ▣ FTG-1  92%     │▮ │  │ blueprint page (from PDF)       │  │
-│ ▣ COL-A  88%     │▮ │  │     ┌──── SELECTION: FTG-1 ───┐ │  │
-│ ▢ SLAB-2 81% ←sel│▮ │  │     │ orange dashed bbox      │ │  │
-│ ▢ WALL-3 76%     │▮ │  │     └─────────────────────────┘ │  │
-└──────────────────┴──┴───────────────────────────────────────┘
-```
+## Fix (frontend only, minimum patch)
 
-### 1. `supabase/functions/auto-segments/index.ts`
-Return, for each suggestion, the best supporting evidence from `drawing_search_index`:
-- `page_number` (int)
-- `bbox`: `[x, y, w, h]` normalised to `0..1` on that page (use the matching word/phrase bbox already produced by Vision OCR; if multiple matches, use the largest)
-- `source_file_id` (project_files id) so the canvas can swap to the right PDF
+Edit only `src/features/workflow-v2/stages/ScopeStage.tsx`. No edge-function or DB changes.
 
-Backwards-compatible: existing `{ name, segment_type, notes }` keys are preserved.
+1. **Seed candidates from `state.approvedScopeItems`** when the local cache is empty:
+   - In the `candidates` `useMemo`, if `cached.length === 0` and `state.approvedScopeItems.length > 0`, synthesize `Candidate[]` from the approved labels with `source = "approved scope"`, `confidence = 1`, `id = "approved-<label>"`. This is purely cosmetic — they already carry `getDecision === "accept"` via `serverApprovedLabels`.
 
-### 2. `src/features/workflow-v2/stages/ScopeStage.tsx`
-- Map the new fields into `Candidate` (add `pageNumber?`, `bbox?`, `sourceFileId?`).
-- Pass a new `highlight` prop to `<TakeoffCanvas/>` built from the **selected** candidate (not the approved set):
-  ```ts
-  highlight={sel ? { label: sel.label, pageNumber: sel.pageNumber ?? 1,
-                     bbox: sel.bbox, color: "hsl(24 95% 55%)" } : undefined}
-  ```
-- Replace the indefinite "Detecting scope…" empty-state with a 30 s watchdog: if `auto-segments` returns no rows or times out, surface a "No candidates detected" message with a **Retry** button that re-invokes the edge function.
+2. **Don't flag detection as failed when scope already exists**:
+   - In `runDetection`, when `suggestions.length === 0`, only set `detectFailed = true` if `state.approvedScopeItems.length === 0`. Otherwise leave it false (the list will render the approved items from step 1).
 
-### 3. `src/components/takeoff-canvas/TakeoffCanvas.tsx`
-Add optional prop:
-```ts
-highlight?: { label: string; pageNumber: number; bbox?: [number,number,number,number]; color?: string };
-```
-Behaviour:
-- When `highlight.pageNumber` differs from current page, auto-jump to that page (`setPage`).
-- Render a non-interactive SVG overlay above the existing layers SVG:
-  - If `bbox` present → orange dashed rectangle at the normalised coords, with a small filled tag `SELECTION: <label>` anchored top-left of the rect (matches the design).
-  - If `bbox` missing → render the tag at the top-center of the page so the user still sees which candidate is active.
-- The selection overlay is purely cosmetic — it does not write `manual_polygons` or affect approval state.
+3. **Refine the empty-state copy**:
+   - When `candidates.length === 0` and `state.approvedScopeItems.length > 0` (shouldn't happen after step 1, defensive only), show "Scope already approved" instead of the OCR failure message.
+   - Keep the existing "No candidates detected" + Retry button only for the true OCR-empty case.
 
-### 4. No DB schema changes
-We read existing `drawing_search_index` bbox data that OCR already stores. No new tables, no new RLS.
+4. **Keep the SELECTION overlay working**: with approved items now in `candidates`, `selectedId` will resolve to the first approved label, `selectedPage` lookup against `searchPages` keeps working unchanged, and the right-pane orange highlight will appear without further wiring.
 
 ## Out of scope
 
-- Editing/dragging the selection rect (read-only highlight only).
-- Calibration of px/ft (Stage 03 already handles that).
-- Backend rewrites of `auto-segments` beyond returning the existing bbox/page evidence.
-- `TakeoffStage`, `CalibrationStage`, `PdfRenderer` — untouched.
+- `supabase/functions/auto-segments/index.ts` — no change. (Echoing already-approved items back from the server would be a larger refactor and risks duplicating approved segments.)
+- `TakeoffCanvas`, `CalibrationStage`, `TakeoffStage`, `PdfRenderer` — untouched.
+- No DB migration, no RLS change, no new state in `useWorkflowState`.
 
 ## Verification
 
-1. Open a project with parsed drawings → Stage 02 left list populates within a few seconds.
-2. Click each candidate → right pane jumps to the right PDF page and draws an orange `SELECTION: <label>` box.
-3. If a candidate has no bbox (older projects), the page still switches and a tag still shows.
-4. Force `auto-segments` to fail → left column shows "No candidates detected" + Retry button instead of hanging.
-5. Re-run `npm run test` to ensure existing scope/stage tests still pass.
+- Reload the affected project → left pane shows 16 approved candidates with the "Approved" pill, top bar still reads **0 NEW**.
+- Click any candidate → right pane jumps to the matching page and renders the pulsing orange `SELECTION: <label>` overlay.
+- For a fresh project with no approved scope and OCR that returns nothing, the existing "No candidates detected" + Retry block still appears.
+- `bunx tsc --noEmit` passes.

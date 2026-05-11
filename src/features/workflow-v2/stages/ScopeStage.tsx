@@ -24,10 +24,20 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
   const [searchPages, setSearchPages] = useState<Array<{ page_number: number | null; raw_text: string }>>([]);
   const detectedRef = useRef<string | null>(null);
   const cached = (state.local.scopeCandidates as Candidate[] | undefined) || [];
+  const approvedLabels = state.approvedScopeItems;
   // De-dup by label so we never show the same archetype twice (e.g. once per uploaded PDF).
   const candidates: Candidate[] = useMemo(() => {
     const seen = new Map<string, Candidate>();
-    for (const c of cached) {
+    const sourceList: Candidate[] = cached.length > 0
+      ? cached
+      : approvedLabels.map((label, i) => ({
+          id: `approved-${i}-${label}`,
+          label,
+          source: "approved scope",
+          confidence: 1,
+          evidence: "Previously approved scope item",
+        }));
+    for (const c of sourceList) {
       const key = c.label.trim().toLowerCase();
       const prev = seen.get(key);
       if (!prev || (c.confidence || 0) > (prev.confidence || 0)) seen.set(key, c);
@@ -39,7 +49,7 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
       if (sa !== sb) return sa - sb;
       return a.label.localeCompare(b.label);
     });
-  }, [cached]);
+  }, [cached, approvedLabels]);
 
   // Run real OCR-driven scope detection once per project (and re-run on file count change).
   const runDetection = async () => {
@@ -55,7 +65,8 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
       }
       const { data, error } = result as Awaited<typeof work>;
       if (error || !data?.suggestions || data.suggestions.length === 0) {
-        setDetectFailed(true);
+        // Only treat as a true failure when there's nothing approved yet either.
+        if (approvedLabels.length === 0) setDetectFailed(true);
         return;
       }
       const next: Candidate[] = (data.suggestions as Array<{
@@ -270,12 +281,16 @@ export default function ScopeStage({ projectId, state, goToStage }: StageProps) 
             ) : (
               <>
                 <div className="text-[12px] font-mono uppercase tracking-widest text-muted-foreground">
-                  {detectFailed ? "No candidates detected" : "No scope candidates"}
+                  {approvedLabels.length > 0
+                    ? "Scope already approved"
+                    : detectFailed ? "No candidates detected" : "No scope candidates"}
                 </div>
                 <div className="text-[11px] text-muted-foreground">
-                  {detectFailed
-                    ? "OCR did not surface a usable scope. Retry or upload more sheets."
-                    : "Upload drawings, then run scope detection."}
+                  {approvedLabels.length > 0
+                    ? "All scope items are approved. Continue to calibration or retry detection for more."
+                    : detectFailed
+                      ? "OCR did not surface a usable scope. Retry or upload more sheets."
+                      : "Upload drawings, then run scope detection."}
                 </div>
                 {state.files.length > 0 && (
                   <button
