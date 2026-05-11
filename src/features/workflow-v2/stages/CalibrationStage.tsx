@@ -647,7 +647,7 @@ const STATUS_PILL: Record<ScaleStatus, { tone: Parameters<typeof Pill>[0]["tone"
 // ── DisciplineSection ────────────────────────────────────────────────────────
 function DisciplineSection({
   title, subtitle, tone, rows, resolvedCount, verifiedCount, empty,
-  onUpdateOverride, onChangeDiscipline, onAcceptScale, onMeasure,
+  onUpdateOverride, onChangeDiscipline, onAcceptScale, onMeasure, onRetryMetadata,
 }: {
   title: string;
   subtitle: string;
