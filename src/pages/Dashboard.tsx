@@ -109,8 +109,8 @@ const Dashboard: React.FC = () => {
         projectName,
         normalizedName,
       });
-    } catch (error: any) {
-      if (error?.message?.includes("JWT expired") || error?.message?.includes("Invalid Refresh Token")) {
+    } catch (error: unknown) {
+      if (error instanceof Error && (error.message?.includes("JWT expired") || error.message?.includes("Invalid Refresh Token"))) {
         toast.error("Session expired. Please sign in again.");
         signOut();
         return;
