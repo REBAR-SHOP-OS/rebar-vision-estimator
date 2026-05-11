@@ -108,8 +108,10 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
         _relevant: relevant,
       };
     });
-    const filtered = showAll ? allRows : allRows.filter((r) => r._relevant);
-    setHiddenCount(allRows.length - filtered.length);
+    const relevantRows = allRows.filter((r) => r._relevant);
+    const fallbackToAll = !showAll && relevantRows.length === 0 && allRows.length > 0;
+    const filtered = showAll ? allRows : fallbackToAll ? allRows : relevantRows;
+    setHiddenCount(showAll || fallbackToAll ? 0 : allRows.length - filtered.length);
     const rows: SheetRow[] = filtered.map(({ _relevant, ...r }) => r);
     // hydrate from local
     const stored = (state.local.calibration || {}) as Record<string, Calibration>;

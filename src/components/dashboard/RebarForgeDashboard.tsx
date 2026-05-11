@@ -13,6 +13,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -39,6 +40,7 @@ interface RebarForgeDashboardProps {
   onShowHealth: () => void;
   onShowDiagnostics: () => void;
   onShowOutcomes: () => void;
+  onDeleteProject: (id: string) => void;
 }
 
 function formatTimestamp(value?: string) {
@@ -77,6 +79,7 @@ export default function RebarForgeDashboard({
   onShowHealth,
   onShowDiagnostics,
   onShowOutcomes,
+  onDeleteProject,
 }: RebarForgeDashboardProps) {
   const activeProjects = projects.length;
   const intakeReady = projects.filter((p) => p.intake_complete).length;
@@ -166,7 +169,12 @@ export default function RebarForgeDashboard({
             ) : (
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {recent.map((p) => (
-                  <ProjectCard key={p.id} project={p} onClick={() => onSelectProject(p.id)} />
+                  <ProjectCard
+                    key={p.id}
+                    project={p}
+                    onClick={() => onSelectProject(p.id)}
+                    onDelete={() => onDeleteProject(p.id)}
+                  />
                 ))}
               </div>
             )}
@@ -352,7 +360,7 @@ function MetricCard({
   );
 }
 
-function ProjectCard({ project, onClick }: { project: DashboardProject; onClick: () => void }) {
+function ProjectCard({ project, onClick, onDelete }: { project: DashboardProject; onClick: () => void; onDelete: () => void }) {
   const status = getProjectStatus(project);
   return (
     <button
@@ -369,6 +377,27 @@ function ProjectCard({ project, onClick }: { project: DashboardProject; onClick:
             backgroundSize: "16px 16px",
           }}
         />
+        <span
+          role="button"
+          tabIndex={0}
+          aria-label="Delete project"
+          title="Delete project"
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            onDelete();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.stopPropagation();
+              e.preventDefault();
+              onDelete();
+            }
+          }}
+          className="absolute left-2 top-2 inline-flex h-7 w-7 cursor-pointer items-center justify-center border border-border bg-background/80 text-muted-foreground opacity-0 transition hover:border-destructive hover:bg-destructive hover:text-destructive-foreground focus:opacity-100 group-hover:opacity-100"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </span>
         <div className="absolute right-2 top-2">
           <span className="bg-foreground px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-background">
             {status.label}

@@ -49,6 +49,26 @@ const Dashboard: React.FC = () => {
     setProjects(data || []);
   };
 
+  const handleDeleteProject = async (id: string) => {
+    const target = projects.find((p) => p.id === id);
+    const confirmed = window.confirm(
+      `Delete project "${target?.name ?? "this project"}"? This cannot be undone.`,
+    );
+    if (!confirmed) return;
+    const { error } = await supabase.from("projects").delete().eq("id", id);
+    if (error) {
+      if (error.message?.includes("JWT expired") || error.message?.includes("Invalid Refresh Token")) {
+        toast.error("Session expired. Please sign in again.");
+        signOut();
+        return;
+      }
+      toast.error("Failed to delete project");
+      return;
+    }
+    setProjects((prev) => prev.filter((p) => p.id !== id));
+    toast.success("Project deleted");
+  };
+
   const handleNewEstimationClick = () => {
     newProjectFileInputRef.current?.click();
   };
@@ -89,8 +109,8 @@ const Dashboard: React.FC = () => {
         projectName,
         normalizedName,
       });
-    } catch (error: any) {
-      if (error?.message?.includes("JWT expired") || error?.message?.includes("Invalid Refresh Token")) {
+    } catch (error: unknown) {
+      if (error instanceof Error && (error.message?.includes("JWT expired") || error.message?.includes("Invalid Refresh Token"))) {
         toast.error("Session expired. Please sign in again.");
         signOut();
         return;
@@ -208,6 +228,7 @@ const Dashboard: React.FC = () => {
         onShowHealth={() => setShowHealth(true)}
         onShowDiagnostics={() => setShowDiagnostics(true)}
         onShowOutcomes={() => setShowOutcomes(true)}
+        onDeleteProject={handleDeleteProject}
       />
     </div>
   );

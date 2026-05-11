@@ -20,7 +20,7 @@ const baseState = {
   estimatorConfirmed: true,
   refresh: vi.fn(),
   setLocal: vi.fn(),
-  local: {},
+  local: { calibrationConfirmed: true },
 };
 
 describe("OutputsStage", () => {
