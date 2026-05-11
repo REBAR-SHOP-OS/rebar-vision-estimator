@@ -79,6 +79,9 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
   const [stageSize, setStageSize] = useState<{ w: number; h: number } | null>(null);
   const panDragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
   const [isPanning, setIsPanning] = useState(false);
+  // Tracks whether the user has manually zoomed/panned — when true we won't
+  // auto-frame matched hits. Cleared on sheet/page/highlight change.
+  const userZoomedRef = useRef(false);
 
   // Resolve project file id + signed URL.
   // Track stage size for fitted image box.
@@ -344,6 +347,7 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
     setZoom((z) => clampZoom(z * factor));
+    userZoomedRef.current = true;
   };
 
   // Pan drag — active whenever the Hand tool is selected.
@@ -351,6 +355,7 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
     if (tool !== "pan" || e.button !== 0) return;
     panDragRef.current = { startX: e.clientX, startY: e.clientY, baseX: pan.x, baseY: pan.y };
     setIsPanning(true);
+    userZoomedRef.current = true;
   };
   const onStageMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const d = panDragRef.current;
@@ -412,14 +417,15 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
     else { setLabelHits([]); setLabelImg(null); }
   }, [ocrCacheKey]);
 
-  // Auto-run OCR when the user selects a candidate (highlight) and we
-  // don't have hits cached for this page yet.
+  // Auto-run OCR when the user selects a candidate OR navigates to a new
+  // page. Cached after first run per (sheet, page).
   useEffect(() => {
-    if (!highlight?.label || !ocrCacheKey) return;
+    if (!ocrCacheKey) return;
     if (ocrCacheRef.current.has(ocrCacheKey)) return;
     if (ocrLoading) return;
+    if (!highlight?.label && !pdfImg && !signedUrl) return;
     runOcr();
-  }, [highlight?.label, ocrCacheKey, runOcr, ocrLoading]);
+  }, [highlight?.label, page, ocrCacheKey, runOcr, ocrLoading, pdfImg, signedUrl]);
 
   // Group label hits by the layer they belong to (via segment_type bucket).
   const hitsByLayer = useMemo(() => {
@@ -444,6 +450,52 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
     }
     return false;
   }, [hitsByLayer, highlightLabelLc, visibleLayers]);
+
+  // Resolve which layer the current highlight points at — by exact name or
+  // by inferred segment_type bucket.
+  const selectedLayerId = useMemo(() => {
+    if (!highlight?.label) return null;
+    const want = highlight.label.trim().toLowerCase();
+    const exact = layers.find((l) => l.name.trim().toLowerCase() === want);
+    if (exact) return exact.id;
+    const bucket = inferSegmentType(highlight.label);
+    const byBucket = layers.find((l) => (l.segment_type || inferSegmentType(l.name)) === bucket);
+    return byBucket?.id || null;
+  }, [layers, highlight?.label]);
+
+  // Reset user-zoom flag whenever the selection or page changes — that's a
+  // signal the user wants to see the new match framed.
+  useEffect(() => { userZoomedRef.current = false; }, [highlight?.label, page, signedUrl]);
+
+  // Auto-frame the matched hits for the selected layer.
+  useEffect(() => {
+    if (userZoomedRef.current) return;
+    if (!selectedLayerId || !labelImg || !stageSize) return;
+    const hits = hitsByLayer.get(selectedLayerId);
+    if (!hits || hits.length === 0) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const h of hits) {
+      minX = Math.min(minX, h.rect[0] / labelImg.w);
+      minY = Math.min(minY, h.rect[1] / labelImg.h);
+      maxX = Math.max(maxX, h.rect[2] / labelImg.w);
+      maxY = Math.max(maxY, h.rect[3] / labelImg.h);
+    }
+    // Add ~12% padding on each side.
+    const padX = 0.12, padY = 0.12;
+    minX = Math.max(0, minX - padX); minY = Math.max(0, minY - padY);
+    maxX = Math.min(1, maxX + padX); maxY = Math.min(1, maxY + padY);
+    const bw = Math.max(0.001, maxX - minX);
+    const bh = Math.max(0.001, maxY - minY);
+    const z = clampZoom(Math.min(1 / bw, 1 / bh));
+    if (!fittedBox) { setZoom(z); return; }
+    // Pan offset so bbox center lands at stage center.
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const dx = (0.5 - cx) * fittedBox.w * z;
+    const dy = (0.5 - cy) * fittedBox.h * z;
+    setZoom(z);
+    setPan({ x: dx, y: dy });
+  }, [selectedLayerId, hitsByLayer, labelImg, stageSize, fittedBox]);
 
   return (
     <div className={`flex h-full min-h-0 ${className || ""}`}>
