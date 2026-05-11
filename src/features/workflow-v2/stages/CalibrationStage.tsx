@@ -50,6 +50,9 @@ function deriveScaleStatus(cal: Calibration | null, storedStatus?: ScaleStatus):
   return "auto-detected";
 }
 
+/** Warn when a loading step takes longer than this threshold. */
+const SLOW_STEP_THRESHOLD_MS = 3000;
+
 function classifyFromText(text: string): Discipline {
   const t = text.toUpperCase().slice(0, 800);
   if (/\bSTRUCTURAL\b|\bSTR[-_ ]/.test(t)) return "Structural";
@@ -114,7 +117,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
     try {
       const result = await fn();
       const elapsed = performance.now() - start;
-      if (elapsed > 3000) console.warn(`[CalibrationStage] step "${label}" took ${Math.round(elapsed)}ms`);
+      if (elapsed > SLOW_STEP_THRESHOLD_MS) console.warn(`[CalibrationStage] step "${label}" took ${Math.round(elapsed)}ms`);
       setStep(label, "done");
       return result;
     } catch (err: unknown) {
@@ -584,7 +587,7 @@ function DisciplineSection({
                     <Pill tone={statusPill.tone}>{statusPill.label}</Pill>
                     <Pill tone={toneCal}>{cal ? cal.confidence : "none"}</Pill>
                     {cal?.source === "grid_dimension" && <Pill tone="info">grid</Pill>}
-                    {cal?.source === "auto_dimension" && <Pill tone="info">auto-dim</Pill>}
+                    {cal?.source === "auto_dimension" && <Pill tone="info">auto-dimension</Pill>}
                     {reclassified && <Pill tone="info">reclassified</Pill>}
                     {cal?.scaleText && <span className="text-[11px] text-muted-foreground font-mono truncate">{cal.scaleText}</span>}
                   </div>
@@ -685,7 +688,8 @@ function TwoPointCalModal({
       .createSignedUrl(sheet.file_path, 3600)
       .then(({ data, error }) => {
         if (error || !data?.signedUrl) {
-          setUrlError("Could not load drawing preview. Use the px/ft input instead.");
+          const detail = error?.message ? ` (${error.message})` : "";
+          setUrlError(`Could not load drawing preview${detail}. Use the px/ft input instead.`);
         } else {
           setSignedUrl(data.signedUrl);
         }
@@ -709,12 +713,13 @@ function TwoPointCalModal({
     if (!ctx) return;
     ctx.clearRect(0, 0, displayW, displayH);
 
-    const scaleX = displayW / rendered.w;
-    const scaleY = displayH / rendered.h;
+    // displayRatio = display pixels per rendered pixel (used to map stored rendered coords → canvas coords)
+    const displayRatioX = displayW / rendered.w;
+    const displayRatioY = displayH / rendered.h;
 
     for (const [px, py] of points) {
-      const dx = px * scaleX;
-      const dy = py * scaleY;
+      const dx = px * displayRatioX;
+      const dy = py * displayRatioY;
       ctx.beginPath();
       ctx.arc(dx, dy, 7, 0, 2 * Math.PI);
       ctx.fillStyle = "rgba(239,68,68,0.85)";
@@ -726,8 +731,8 @@ function TwoPointCalModal({
     if (points.length === 2) {
       const [[x1r, y1r], [x2r, y2r]] = points;
       ctx.beginPath();
-      ctx.moveTo(x1r * scaleX, y1r * scaleY);
-      ctx.lineTo(x2r * scaleX, y2r * scaleY);
+      ctx.moveTo(x1r * displayRatioX, y1r * displayRatioY);
+      ctx.lineTo(x2r * displayRatioX, y2r * displayRatioY);
       ctx.strokeStyle = "rgba(239,68,68,0.7)";
       ctx.lineWidth = 2;
       ctx.setLineDash([5, 3]);
@@ -742,13 +747,13 @@ function TwoPointCalModal({
       return;
     }
     const rect = e.currentTarget.getBoundingClientRect();
-    const displayW = rect.width;
-    const displayH = rect.height;
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
-    // Convert display coords → rendered pixel coords
-    const px = rendered ? clickX * (rendered.w / displayW) : clickX;
-    const py = rendered ? clickY * (rendered.h / displayH) : clickY;
+    // Convert display coords → rendered pixel coords (rendered.w/h are at scale=1 = native PDF pixels)
+    const renderToDisplayX = rendered ? rendered.w / rect.width : 1;
+    const renderToDisplayY = rendered ? rendered.h / rect.height : 1;
+    const px = clickX * renderToDisplayX;
+    const py = clickY * renderToDisplayY;
     setPoints((prev) => [...prev, [px, py]]);
   };
 
