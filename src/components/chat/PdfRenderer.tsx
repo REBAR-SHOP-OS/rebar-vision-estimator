@@ -63,6 +63,8 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryTick, setRetryTick] = useState(0);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [pageRetryTick, setPageRetryTick] = useState(0);
 
   const resolvedUrl = url || file || "";
   const resolvedPage = currentPage ?? page ?? 1;
@@ -140,6 +142,7 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({
   useEffect(() => {
     if (!pdfDocRef.current || loading) return;
     let cancelled = false;
+    setPageError(null);
     onRenderStateChange?.({ status: "loading", error: null });
 
     const renderPage = async () => {
@@ -205,6 +208,7 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({
       } catch (err) {
         console.error("PDF render error:", err);
         const message = `Failed to render page ${resolvedPage}.`;
+        if (!cancelled) setPageError(message);
         onRenderStateChange?.({ status: "error", error: message });
         onError?.(message);
       }
@@ -212,7 +216,7 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({
 
     renderPage();
     return () => { cancelled = true; };
-  }, [resolvedPage, loading, scale, resolvedUrl]);
+  }, [resolvedPage, loading, scale, resolvedUrl, pageRetryTick]);
 
   if (error) {
     return (
@@ -224,6 +228,21 @@ const PdfRenderer: React.FC<PdfRendererProps> = ({
           className="px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider border border-destructive/50 hover:bg-destructive/10"
         >
           Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (pageError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-2 text-destructive text-sm">
+        <span>{pageError}</span>
+        <button
+          type="button"
+          onClick={() => { setPageError(null); setPageRetryTick((n) => n + 1); }}
+          className="px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider border border-destructive/50 hover:bg-destructive/10"
+        >
+          Retry page {resolvedPage}
         </button>
       </div>
     );
