@@ -402,6 +402,23 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
                     )}
                   </svg>
                 )}
+                {/* Selection callout — drives Stage 02 "selected segment" visual */}
+                {highlight?.label && (
+                  <div
+                    className="pointer-events-none absolute inset-0"
+                    style={{
+                      boxShadow: `inset 0 0 0 2px ${highlight.color || "hsl(24 95% 55%)"}`,
+                      animation: "pulse 1.6s ease-in-out infinite",
+                    }}
+                  >
+                    <div
+                      className="absolute left-1/2 top-2 -translate-x-1/2 px-2 py-0.5 text-[10px] font-mono uppercase tracking-widest text-background"
+                      style={{ background: highlight.color || "hsl(24 95% 55%)" }}
+                    >
+                      Selection: {highlight.label}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
