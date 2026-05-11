@@ -294,6 +294,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
         scale_status: derivedStatus,
         scale_reason: resolvedReason,
         diagnostics: cal?.diagnostics,
+        unmatchedTokens: scanUnmatchedMarkTokens(r.raw_text || ""),
         file_path: filePath,
         _relevant: relevant,
       };
