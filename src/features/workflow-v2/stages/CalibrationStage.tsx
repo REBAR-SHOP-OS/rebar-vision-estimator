@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { resolveScale, type Calibration, type CalibrationDiagnostics, type CalibrationReason, type Discipline } from "../lib/scale-resolver";
 import { detectDiscipline } from "@/lib/rebar-intake";
+import { DEFAULT_MARK_PATTERNS } from "@/lib/ocr-page-labels";
 import { CheckCircle2, RefreshCcw, Ruler, AlertTriangle, Loader2, MousePointerClick, X } from "lucide-react";
 import { toast } from "sonner";
 import PdfRenderer from "@/components/chat/PdfRenderer";
@@ -23,6 +24,7 @@ interface SheetRow {
   scale_status: ScaleStatus;
   scale_reason?: CalibrationReason;
   diagnostics?: CalibrationDiagnostics;
+  unmatchedTokens?: string[];
   file_path: string | null; // for two-point calibration modal
 }
 
