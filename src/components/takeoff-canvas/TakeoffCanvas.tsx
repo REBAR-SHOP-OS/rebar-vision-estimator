@@ -167,6 +167,57 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
 
   const layerColor = useCallback((l: CanvasLayer) => l.color || colorForSegmentType(l.segment_type), []);
 
+  // Auto-detect colored regions on the rendered page (Togal-style overlay).
+  useEffect(() => {
+    if (!pdfImg && !signedUrl) { setRegions([]); return; }
+    const src = isPdf ? pdfImg : signedUrl;
+    if (!src) { setRegions([]); return; }
+    const cacheKey = `${src}::${page}`;
+    const cached = regionCacheRef.current.get(cacheKey);
+    if (cached) { setRegions(cached); return; }
+    let alive = true;
+    const run = () => {
+      detectRegions(src, { maxDim: 1024 })
+        .then((r) => {
+          if (!alive) return;
+          regionCacheRef.current.set(cacheKey, r);
+          setRegions(r);
+        })
+        .catch(() => { if (alive) setRegions([]); });
+    };
+    const ric: ((cb: () => void) => number) | undefined =
+      (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
+    const handle = ric ? ric(run) : window.setTimeout(run, 0);
+    return () => {
+      alive = false;
+      const cic: ((h: number) => void) | undefined =
+        (window as unknown as { cancelIdleCallback?: (h: number) => void }).cancelIdleCallback;
+      if (ric && cic) cic(handle as number); else window.clearTimeout(handle as number);
+    };
+  }, [pdfImg, signedUrl, isPdf, page]);
+
+  // For each detected region, find the closest layer by hue (Δ < 25°).
+  // Regions with no layer match render as neutral "other regions".
+  const regionAssignments = useMemo(() => {
+    return regions.map((r) => {
+      let best: { layer: CanvasLayer; dist: number } | null = null;
+      for (const l of visibleLayers) {
+        const lh = parseHslHue(layerColor(l));
+        if (lh < 0) continue;
+        const d = hueDistance(r.hueDeg, lh);
+        if (best == null || d < best.dist) best = { layer: l, dist: d };
+      }
+      const layer = best && best.dist < 25 ? best.layer : null;
+      return { region: r, layer };
+    });
+  }, [regions, visibleLayers, layerColor]);
+
+  const highlightLabelLc = highlight?.label?.trim().toLowerCase() || null;
+  const hasMatchedSelection = useMemo(() => {
+    if (!highlightLabelLc) return false;
+    return regionAssignments.some(({ layer }) => layer && layer.name.trim().toLowerCase() === highlightLabelLc);
+  }, [regionAssignments, highlightLabelLc]);
+
   useEffect(() => {
     if (layers.length === 0) {
       if (activeLayer !== null) setActiveLayer(null);
