@@ -347,7 +347,7 @@ export function tryDetailScales(rawText?: string | null): DetailOverride[] {
   return out;
 }
 
-function buildScaleSearchWindow(rawText?: string | null): {
+function buildScaleSearchText(rawText?: string | null): {
   text: string;
   scannedSegments: Array<"full" | "start" | "middle" | "end">;
   ocrLength: number;
@@ -397,7 +397,7 @@ function collectScaleCandidates(rawText?: string | null): {
   candidates: ScaleCandidate[];
   diagnostics: Pick<CalibrationDiagnostics, "ocrLength" | "scannedLength" | "scannedSegments">;
 } {
-  const { text, scannedSegments, ocrLength } = buildScaleSearchWindow(rawText);
+  const { text, scannedSegments, ocrLength } = buildScaleSearchText(rawText);
   const candidates: ScaleCandidate[] = [];
   const capture = (
     matchText: string,
@@ -453,11 +453,13 @@ export function resolveScale(input: SheetScaleInputs): Calibration | null {
   };
 
   if (uniquePpf.length > 1) {
+    const sample = uniquePpf.slice(0, 3).map((c) => c.scaleText).join(", ");
+    const suffix = uniquePpf.length > 3 ? ", ..." : "";
     return attach({
       source: "title_block",
       pixelsPerFoot: 0,
       confidence: "low",
-      method: `Multiple competing sheet scales found (${uniquePpf.map((c) => c.scaleText).join(", ")})`,
+      method: `Multiple competing sheet scales found (${sample}${suffix})`,
       reviewState: "ambiguous",
       reason: "multiple scales detected",
       diagnostics: { ...baseDiagnostics, decision: "ambiguous" },

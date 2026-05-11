@@ -138,7 +138,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
   ): Promise<T> => {
     const start = performance.now();
     setStep(label, "loading");
-    let timeoutId: number | null = null;
+    let timeoutId: ReturnType<typeof window.setTimeout> | null = null;
     try {
       const result = await Promise.race([
         fn(),
@@ -488,13 +488,21 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
           </div>
           {anyError && (
             <div className="mt-2 space-y-1">
-              {(Object.entries(steps.errors) as Array<[keyof LoadSteps["errors"], string | undefined]>)
-                .filter(([, msg]) => !!msg)
-                .map(([key, msg]) => (
-                  <div key={key} className="text-[11px] text-[hsl(var(--status-blocked))]">
-                    {key}: {msg}
-                  </div>
-                ))}
+              {(() => {
+                const labels: Record<string, string> = {
+                  index: "Loading sheet index",
+                  revisions: "Loading sheet revisions",
+                  drawings: "Loading logical drawings",
+                  files: "Loading document versions",
+                };
+                return (Object.entries(steps.errors) as Array<[keyof LoadSteps["errors"], string | undefined]>)
+                  .filter(([, msg]) => !!msg)
+                  .map(([key, msg]) => (
+                    <div key={key} className="text-[11px] text-[hsl(var(--status-blocked))]">
+                      {labels[key]}: {msg}
+                    </div>
+                  ));
+              })()}
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-[hsl(var(--status-blocked))]">Retry failed step(s) from this stage.</span>
                 <Button size="sm" variant="outline" className="h-6 text-[11px]" onClick={load}>Retry</Button>
