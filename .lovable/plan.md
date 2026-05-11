@@ -1,75 +1,52 @@
+# Fix: Zoom + Pad-Footing Selection on the Takeoff Canvas
 
-## Goal
+## Why nothing is selected today
 
-When the sheet is shown in `TakeoffCanvas`, automatically detect Togal-style colored regions on the rendered page image and overlay a polygon for **every** candidate. The selected candidate's polygon glows; the others stay dim. Today the highlight is a border around the whole page — this scopes it to the actual segment region.
+The current overlay relies on `detectRegions()` (in `src/lib/region-segmentation.ts`), which only finds **already-colored fills** in the rendered raster. Construction sheets like the one in the screenshot are **black-and-white**, so detection returns zero regions → no pad footings are matched → no segment ever shows its colored box, and the fallback is just a full-page border.
 
-## Approach: client-side color-region detection
+The toolbar also has only Pan / Polygon / Erase + page nav — no zoom controls.
 
-The PDF page is already rasterized to an `<img>` (`pdfImg`) inside `TakeoffCanvas.tsx`. We will run a lightweight color-segmentation pass on that image in the browser, then store the resulting polygons + their dominant color per page. No edge function changes, no DB schema changes.
+## What changes
 
-Algorithm (in a new `src/lib/region-segmentation.ts`):
+### 1. Add zoom controls to the canvas toolbar
 
-1. Draw the rendered page to an offscreen `<canvas>` at ~1024px wide (downsample for speed).
-2. Read pixels. Filter out near-white (background) and near-black (linework/text) by luminance + saturation thresholds, leaving only the colored fill regions.
-3. Quantize each remaining pixel's color to a small palette (HSV hue buckets — ~12 bins).
-4. Run connected-component labeling per hue-bucket → list of blobs with `{ bucketHueDeg, pixelCount, bboxPx, contourPolygonNormalized }`.
-5. Reject blobs smaller than ~0.2% of page area (noise). Trace the outer contour with a Moore-neighbor walk and Douglas–Peucker simplify to ≤40 points. Output normalized 0..1 coordinates so it works with the existing SVG viewBox `0 0 1 1`.
-6. Return `Region[] = { id, color, polygon: [x,y][], areaPct, bboxNorm, centroidNorm }`.
+In `TakeoffCanvas.tsx`:
+- Add `zoom` (default 1) and `pan` (`{x,y}`) state.
+- New toolbar buttons under the existing tool stack: `+`, `−`, `Fit` (icons: `Plus`, `Minus`, `Maximize2`). Mouse-wheel + `Ctrl/Cmd` also zooms; double-click on Pan tool re-fits.
+- Apply `transform: translate() scale()` on the image-box wrapper (the existing `imageBoxRef` div). Polygon clicks already use `getBoundingClientRect()` so normalized coords stay correct after zoom.
+- Clamp zoom 0.5×–6×.
 
-This runs once per `(filePath, page)` after `pdfImg` and `imgSize` are set, cached in a `useRef` map. Time budget: <500ms for a 2K page on a modern laptop; runs off the main paint via `requestIdleCallback` fallback to `setTimeout(0)`.
+### 2. Replace color-detection highlighting with OCR-bbox highlighting
 
-## Mapping regions → candidates
+Drop reliance on `detectRegions` for the **selection highlight** (keep the file in place; it's still useful when a sheet does have colored fills, so we'll layer both: OCR-bbox first, then color regions as a backup).
 
-Inside `TakeoffCanvas`, after regions are computed we assign each layer/candidate a region:
+New flow in `TakeoffCanvas.tsx`:
+- When `highlight.label` or `layers` change, query `drawing_search_index` for OCR matches on the current `(source_file_id, page)`:
+  - Match the layer's `name` and any short bar/footing marks it contains (`F1`, `WF-1`, `P3`, etc., parsed by a small regex helper).
+  - Use existing `bbox_norm` (already normalized 0..1) to draw a colored rectangle per occurrence.
+- Render a new SVG group `<g class="ocr-hits">` with one `<rect>` per hit:
+  - Selected layer: `fillOpacity 0.45`, thick stroke, pulsing class.
+  - Other visible layers: `fillOpacity 0.18`, thin stroke.
+- The full-page border fallback only shows when neither OCR nor color regions match.
 
-- Each `CanvasLayer` already has a deterministic color from `colorForSegmentType(segment_type)`. Match a region to the layer whose color is closest in hue (`Δhue < 25°`). If multiple regions tie for the same layer, keep all of them.
-- Any region not matched to a layer is rendered as a neutral "other region" with low opacity (so users still see the segmentation worked).
-- If the page has no colored regions (e.g. structural B/W drawings), gracefully fall back to the current full-page highlight behavior — no error.
+### 3. Small UX touches
 
-## Rendering changes in `TakeoffCanvas.tsx`
+- Layer-panel click on Pan tool now **selects + highlights** the layer (doesn't force Polygon mode) so user can browse segments without entering draw mode.
+- Page nav respects zoom — switching pages resets zoom to fit.
 
-Inside the existing SVG (lines ~348–404), add a new group **before** the saved manual polygons:
+## Files
 
-```text
-<g class="auto-regions" pointer-events="none">
-  for each region:
-    <polygon points="..." fill={layerColor} fillOpacity={isHighlighted ? 0.55 : 0.18}
-             stroke={layerColor} strokeWidth={isHighlighted ? 0.008 : 0.003} />
-</g>
-```
-
-`isHighlighted` is true when `highlight?.label` matches that region's layer name (case-insensitive). The existing full-page inset border (lines 405–421) becomes a fallback: only render it when no region matched the current selection.
-
-Hook addition near the top of the component:
-
-```text
-const [regions, setRegions] = useState<Region[]>([]);
-useEffect(() => {
-  if (!pdfImg || !imgSize) return;
-  let alive = true;
-  detectRegions(pdfImg, { maxDim: 1024 }).then(r => alive && setRegions(r));
-  return () => { alive = false; };
-}, [pdfImg, imgSize?.w, imgSize?.h]);
-```
-
-## Files touched
-
-- **NEW** `src/lib/region-segmentation.ts` — pure helper: `detectRegions(imageUrl, opts): Promise<Region[]>`. No React, no Supabase.
-- **EDIT** `src/components/takeoff-canvas/TakeoffCanvas.tsx` — add `regions` state + effect, render the new `<g class="auto-regions">` group, keep the existing border as fallback. ~40 lines.
-
-No changes to: `ScopeStage.tsx`, `auto-segments` edge function, DB schema, `Candidate` shape, `takeoff_overlays` table.
+- EDIT `src/components/takeoff-canvas/TakeoffCanvas.tsx` — zoom state/transform, zoom buttons, OCR-hit fetch + render, click-to-highlight on Pan.
+- NEW `src/lib/ocr-hits.ts` — tiny helper: `fetchOcrHits(projectId, sourceFileId, page, queries) → { layerId, rects: BBoxNorm[] }[]` using `drawing_search_index`.
+- No DB changes. No changes to `auto-segments`, `region-segmentation.ts`, `ScopeStage.tsx`, `Candidate` shape, or `takeoff_overlays`.
 
 ## Out of scope
 
-- OCR-based label→region binding (would need spatial OCR plumbing).
-- Persisting detected regions in the DB.
-- Editing/refining detected regions in the UI.
-- Multi-page batch detection — only the currently-viewed page runs.
-- Performance heroics for very large pages beyond the 1024px downsample.
+- Auto-bar-schedule changes, segment inference, polygon-drawing UX changes other than the click-to-highlight tweak, multi-sheet batch highlighting, persisting OCR hits to DB.
 
 ## Verification
 
-- Open a colorful floor plan (e.g. the Togal-style reference) → each colored room gets an overlay polygon, the selected candidate's polygon is brighter than the rest.
-- Open a black-and-white structural drawing → no regions, current full-page highlight still works.
-- `bunx tsc --noEmit` passes.
-- No console errors; selecting candidates does not cause re-detection (cache by `pdfImg` URL).
+- B&W sheet with pad footings labeled `F1…Fn`: clicking "Pad Footings" in the scope panel paints a colored rectangle around every `F#` mark on the current page (matches the orange/teal reference).
+- Sheet already colored (Togal export): color-region overlay still shows as today.
+- `+` / `−` / wheel-zoom enlarge the sheet around the cursor; `Fit` restores. Polygon draw still lands on the right normalized coords after zoom.
+- `bunx tsc --noEmit` passes; no console errors when `drawing_search_index` is empty for a project.
