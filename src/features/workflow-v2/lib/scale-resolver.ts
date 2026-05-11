@@ -92,7 +92,8 @@ const ARCH_SCALE_RE =
 const RATIO_RE = /\b1\s*:\s*(\d+(?:\.\d+)?)\b/;
 /** Bare textual scale prefix: "SCALE: NTS" / "Scale 1/4 = 1'-0\"". */
 const SCALE_PREFIX_RE = /\bscale\b/i;
-const DETAIL_CONTEXT_RE = /\b(detail|section|enlarged|inset|typ\.?|blow[- ]?up|key plan)\b/i;
+const KEY_PLAN_RE = /\bkey\s+plan\b/i;
+const DETAIL_CONTEXT_RE = /\b(detail|section|enlarged|inset|typ\.?|blow[- ]?up)\b/i;
 const SHEET_CONTEXT_RE = /\b(scale|sheet|plan|foundation|framing|general|title|overall)\b/i;
 
 /** Parse imperial dimension annotations like 12'-6", 8', 6". Returns feet. */
@@ -388,6 +389,7 @@ function dedupeScaleCandidates(candidates: ScaleCandidate[]): ScaleCandidate[] {
 }
 
 function classifyCandidateContext(context: string): "sheet" | "detail" | "unknown" {
+  if (KEY_PLAN_RE.test(context)) return "detail";
   if (DETAIL_CONTEXT_RE.test(context)) return "detail";
   if (SHEET_CONTEXT_RE.test(context)) return "sheet";
   return "unknown";

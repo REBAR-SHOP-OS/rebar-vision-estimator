@@ -144,7 +144,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
       const result = await Promise.race([
         fn(controller.signal),
         new Promise<T>((_, reject) => {
-          timeoutId = window.setTimeout(() => {
+          timeoutId = setTimeout(() => {
             controller.abort();
             reject(new Error(`${label} timed out after ${Math.round(STEP_TIMEOUT_MS / 1000)}s`));
           }, STEP_TIMEOUT_MS);
@@ -161,7 +161,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
       console.error(`[CalibrationStage] ${label} failed`, err);
       throw err;
     } finally {
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      if (timeoutId !== null) clearTimeout(timeoutId);
     }
   };
 
@@ -257,8 +257,8 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
       const autoCal = resolveScale({ rawText: r.raw_text || "", discipline: override || detected });
       const cal = storedCal || autoCal;
       const derivedStatus = deriveScaleStatus(cal, storedStatuses[r.id]);
-      const unresolvedFromMetadata = metadataFailed && (derivedStatus === "ambiguous" || derivedStatus === "failed");
-      const resolvedReason = storedReasons[r.id] || cal?.reason || (unresolvedFromMetadata ? "metadata load failed" : undefined);
+      const unresolvedWithMetadataError = metadataFailed && (derivedStatus === "ambiguous" || derivedStatus === "failed");
+      const resolvedReason = storedReasons[r.id] || cal?.reason || (unresolvedWithMetadataError ? "metadata load failed" : undefined);
       const relevant = isRelevantSheet({ rawText: r.raw_text || "", sheetNumber, tableDiscipline, barMarks: r.bar_marks, fileName });
       return {
         id: r.id,
@@ -696,16 +696,28 @@ function DisciplineSection({
                       <summary className="text-[11px] text-muted-foreground cursor-pointer hover:text-foreground">
                         diagnostics
                       </summary>
-                      <div className="mt-1 text-[11px] text-muted-foreground font-mono space-y-0.5">
-                        <div>decision: {r.diagnostics.decision}</div>
-                        <div>ocr: {r.diagnostics.ocrLength} chars, scanned: {r.diagnostics.scannedLength} ({r.diagnostics.scannedSegments.join(", ")})</div>
+                      <dl className="mt-1 text-[11px] text-muted-foreground font-mono space-y-0.5">
+                        <div>
+                          <dt className="inline font-semibold">decision:</dt>{" "}
+                          <dd className="inline">{r.diagnostics.decision}</dd>
+                        </div>
+                        <div>
+                          <dt className="inline font-semibold">ocr:</dt>{" "}
+                          <dd className="inline">{r.diagnostics.ocrLength} chars, scanned: {r.diagnostics.scannedLength} ({r.diagnostics.scannedSegments.join(", ")})</dd>
+                        </div>
                         {r.diagnostics.matchedSheetScaleTexts.length > 0 && (
-                          <div>sheet scales: {r.diagnostics.matchedSheetScaleTexts.join(" | ")}</div>
+                          <div>
+                            <dt className="inline font-semibold">sheet scales:</dt>{" "}
+                            <dd className="inline">{r.diagnostics.matchedSheetScaleTexts.join(" | ")}</dd>
+                          </div>
                         )}
                         {r.diagnostics.matchedDetailScaleTexts.length > 0 && (
-                          <div>detail scales: {r.diagnostics.matchedDetailScaleTexts.join(" | ")}</div>
+                          <div>
+                            <dt className="inline font-semibold">detail scales:</dt>{" "}
+                            <dd className="inline">{r.diagnostics.matchedDetailScaleTexts.join(" | ")}</dd>
+                          </div>
                         )}
-                      </div>
+                      </dl>
                     </details>
                   )}
                 </div>
