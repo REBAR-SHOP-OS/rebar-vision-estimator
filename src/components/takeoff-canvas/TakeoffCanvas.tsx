@@ -77,6 +77,8 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
   const stageRef = useRef<HTMLDivElement>(null);
   const imageBoxRef = useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = useState<{ w: number; h: number } | null>(null);
+  const panDragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
 
   // Resolve project file id + signed URL.
   // Track stage size for fitted image box.
@@ -344,6 +346,19 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
     setZoom((z) => clampZoom(z * factor));
   };
 
+  // Pan drag — active whenever the Hand tool is selected.
+  const onStageMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (tool !== "pan" || e.button !== 0) return;
+    panDragRef.current = { startX: e.clientX, startY: e.clientY, baseX: pan.x, baseY: pan.y };
+    setIsPanning(true);
+  };
+  const onStageMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const d = panDragRef.current;
+    if (!d) return;
+    setPan({ x: d.baseX + (e.clientX - d.startX), y: d.baseY + (e.clientY - d.startY) });
+  };
+  const endPan = () => { panDragRef.current = null; setIsPanning(false); };
+
   // OCR label detection (on-demand + auto on first selection).
   const sourceUrlForOcr = isPdf ? pdfImg : signedUrl;
   const ocrCacheKey = sourceUrlForOcr ? `${sourceUrlForOcr}::${page}` : null;
@@ -360,13 +375,24 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
     // that Google Vision cannot fetch, so OCR is only available when the
     // underlying file is an image (PNG/JPG/etc.). For PDFs we silently no-op
     // here — users can still draw polygons manually.
-    if (isPdf) {
-      toast.info("Label auto-detect is available on image sheets. For PDFs, draw with the polygon tool (P).");
-      return;
-    }
     setOcrLoading(true);
     try {
-      const res = await detectPageLabels(signedUrl);
+      // For PDFs, the rendered page is a blob/data URL Vision can't fetch.
+      // Upload it to Storage once per page so we get a fetchable signed URL.
+      let urlForOcr = signedUrl;
+      if (isPdf && pdfImg && user) {
+        const blob = await (await fetch(pdfImg)).blob();
+        const objectPath = `${user.id}/${projectId}/pages/${sourceFileId || "sheet"}-p${page}.png`;
+        const up = await supabase.storage.from("blueprints").upload(objectPath, blob, {
+          upsert: true,
+          contentType: blob.type || "image/png",
+        });
+        if (up.error && !/already exists/i.test(up.error.message)) throw up.error;
+        const { data: signed } = await supabase.storage.from("blueprints").createSignedUrl(objectPath, 60 * 60);
+        if (!signed?.signedUrl) throw new Error("Could not sign rendered page URL");
+        urlForOcr = signed.signedUrl;
+      }
+      const res = await detectPageLabels(urlForOcr!);
       ocrCacheRef.current.set(ocrCacheKey, { hits: res.hits, w: res.imageWidth, h: res.imageHeight });
       setLabelHits(res.hits);
       setLabelImg({ w: res.imageWidth, h: res.imageHeight });
@@ -376,7 +402,7 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
     } finally {
       setOcrLoading(false);
     }
-  }, [ocrCacheKey, signedUrl, isPdf]);
+  }, [ocrCacheKey, signedUrl, isPdf, pdfImg, user, projectId, sourceFileId, page]);
 
   // When the sheet or page changes, restore cached hits (or clear).
   useEffect(() => {
@@ -385,6 +411,15 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
     if (cached) { setLabelHits(cached.hits); setLabelImg({ w: cached.w, h: cached.h }); }
     else { setLabelHits([]); setLabelImg(null); }
   }, [ocrCacheKey]);
+
+  // Auto-run OCR when the user selects a candidate (highlight) and we
+  // don't have hits cached for this page yet.
+  useEffect(() => {
+    if (!highlight?.label || !ocrCacheKey) return;
+    if (ocrCacheRef.current.has(ocrCacheKey)) return;
+    if (ocrLoading) return;
+    runOcr();
+  }, [highlight?.label, ocrCacheKey, runOcr, ocrLoading]);
 
   // Group label hits by the layer they belong to (via segment_type bucket).
   const hitsByLayer = useMemo(() => {
@@ -472,10 +507,14 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
           {/* Stage */}
           <div
             ref={stageRef}
-            className={`absolute inset-0 flex items-center justify-center p-2 overflow-hidden ${tool === "polygon" ? "cursor-crosshair" : tool === "erase" ? "cursor-not-allowed" : "cursor-default"}`}
+            className={`absolute inset-0 flex items-center justify-center p-2 overflow-hidden ${tool === "polygon" ? "cursor-crosshair" : tool === "erase" ? "cursor-not-allowed" : isPanning ? "cursor-grabbing" : "cursor-grab"}`}
             onClick={onStageClick}
             onDoubleClick={() => { if (tool === "polygon") finishDraft(); }}
             onWheel={onWheel}
+            onMouseDown={onStageMouseDown}
+            onMouseMove={onStageMouseMove}
+            onMouseUp={endPan}
+            onMouseLeave={endPan}
           >
             {(!signedUrl || (isPdf && !pdfImg)) ? (
               <div className="text-center text-xs text-muted-foreground">

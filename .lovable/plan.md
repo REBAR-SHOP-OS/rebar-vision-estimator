@@ -1,52 +1,45 @@
-# Fix: Zoom + Pad-Footing Selection on the Takeoff Canvas
+## Problem
 
-## Why nothing is selected today
+On the Takeoff Canvas (Stage 03):
+1. The **Hand / Pan** tool does nothing — there's `pan` state and a CSS `translate()` transform on the image box, but no mouse-drag handlers, so clicking the hand icon never moves the sheet.
+2. Selecting **Pad Footings (F-pads)** (or any candidate) shows no colored boxes around the F1/F2/… marks. The sheet is a B&W PDF, so color-region detection returns nothing. OCR-based label detection exists but is (a) only triggered manually via the ✨ button, and (b) hard-gated off for PDFs because Google Vision needs a fetchable URL, not a blob.
 
-The current overlay relies on `detectRegions()` (in `src/lib/region-segmentation.ts`), which only finds **already-colored fills** in the rendered raster. Construction sheets like the one in the screenshot are **black-and-white**, so detection returns zero regions → no pad footings are matched → no segment ever shows its colored box, and the fallback is just a full-page border.
+## Fix
 
-The toolbar also has only Pan / Polygon / Erase + page nav — no zoom controls.
+### 1. Pan tool — add real drag
 
-## What changes
+In `src/components/takeoff-canvas/TakeoffCanvas.tsx`:
 
-### 1. Add zoom controls to the canvas toolbar
+- Add `panningRef` (start `{x,y}` + initial pan) and `mousedown` / `mousemove` / `mouseup` / `mouseleave` handlers on the stage `<div ref={stageRef}>`.
+- Active only when `tool === "pan"`. Updates `pan` state which already feeds the `transform: translate(...) scale(...)` on `imageBoxRef`.
+- Cursor: `grab` when pan tool selected, `grabbing` while dragging.
+- Keep `Ctrl/Cmd + wheel` zoom, plus add plain mouse-wheel pan when zoomed > 1 (optional, low risk).
+- Reset `pan` on Fit (already there).
+
+### 2. Auto-highlight footings — add PDF OCR path
+
+OCR via `ocr-image` needs a publicly fetchable URL. PDFs render in the browser to a blob URL Vision can't fetch. Solution: upload the rendered page once to Storage and OCR the signed URL.
 
 In `TakeoffCanvas.tsx`:
-- Add `zoom` (default 1) and `pan` (`{x,y}`) state.
-- New toolbar buttons under the existing tool stack: `+`, `−`, `Fit` (icons: `Plus`, `Minus`, `Maximize2`). Mouse-wheel + `Ctrl/Cmd` also zooms; double-click on Pan tool re-fits.
-- Apply `transform: translate() scale()` on the image-box wrapper (the existing `imageBoxRef` div). Polygon clicks already use `getBoundingClientRect()` so normalized coords stay correct after zoom.
-- Clamp zoom 0.5×–6×.
 
-### 2. Replace color-detection highlighting with OCR-bbox highlighting
-
-Drop reliance on `detectRegions` for the **selection highlight** (keep the file in place; it's still useful when a sheet does have colored fills, so we'll layer both: OCR-bbox first, then color regions as a backup).
-
-New flow in `TakeoffCanvas.tsx`:
-- When `highlight.label` or `layers` change, query `drawing_search_index` for OCR matches on the current `(source_file_id, page)`:
-  - Match the layer's `name` and any short bar/footing marks it contains (`F1`, `WF-1`, `P3`, etc., parsed by a small regex helper).
-  - Use existing `bbox_norm` (already normalized 0..1) to draw a colored rectangle per occurrence.
-- Render a new SVG group `<g class="ocr-hits">` with one `<rect>` per hit:
-  - Selected layer: `fillOpacity 0.45`, thick stroke, pulsing class.
-  - Other visible layers: `fillOpacity 0.18`, thin stroke.
-- The full-page border fallback only shows when neither OCR nor color regions match.
-
-### 3. Small UX touches
-
-- Layer-panel click on Pan tool now **selects + highlights** the layer (doesn't force Polygon mode) so user can browse segments without entering draw mode.
-- Page nav respects zoom — switching pages resets zoom to fit.
+- In `runOcr`, when `isPdf && pdfImg`, fetch the blob, upload it to `blueprints` bucket at `${user.id}/${projectId}/pages/${sourceFileId || "sheet"}-p${page}.png` (RLS-safe path per project memory), `createSignedUrl`, and pass that URL to `detectPageLabels`. Cache the result in `ocrCacheRef` keyed by `${pdfImg}::${page}` so we only do it once per page-render.
+- Drop the `toast.info("…available on image sheets…")` early-return for PDFs.
+- **Auto-trigger** OCR when a `highlight` is set and we don't yet have hits for this page (small `useEffect` watching `highlight?.label`, `ocrCacheKey`, `pdfImg`/`signedUrl`). Show a subtle "Detecting marks…" spinner state on the ✨ button (already wired).
+- Keep current rendering: `hitsByLayer` already maps OCR marks (`F1`, `WF-1`, `P3`, …) to layers via `markBucket` and draws colored rectangles around each occurrence, with the selected candidate's layer at higher opacity.
 
 ## Files
 
-- EDIT `src/components/takeoff-canvas/TakeoffCanvas.tsx` — zoom state/transform, zoom buttons, OCR-hit fetch + render, click-to-highlight on Pan.
-- NEW `src/lib/ocr-hits.ts` — tiny helper: `fetchOcrHits(projectId, sourceFileId, page, queries) → { layerId, rects: BBoxNorm[] }[]` using `drawing_search_index`.
-- No DB changes. No changes to `auto-segments`, `region-segmentation.ts`, `ScopeStage.tsx`, `Candidate` shape, or `takeoff_overlays`.
+- EDIT `src/components/takeoff-canvas/TakeoffCanvas.tsx` only.
 
 ## Out of scope
 
-- Auto-bar-schedule changes, segment inference, polygon-drawing UX changes other than the click-to-highlight tweak, multi-sheet batch highlighting, persisting OCR hits to DB.
+- No DB/schema changes.
+- No changes to `ocr-page-labels.ts`, `region-segmentation.ts`, `ocr-image` edge function, candidate logic, or `auto-segments`.
+- No new bucket; reuses existing `blueprints` with the project-memory RLS path convention.
+- No changes to ScopeStage or layer-panel logic beyond what's described.
 
 ## Verification
 
-- B&W sheet with pad footings labeled `F1…Fn`: clicking "Pad Footings" in the scope panel paints a colored rectangle around every `F#` mark on the current page (matches the orange/teal reference).
-- Sheet already colored (Togal export): color-region overlay still shows as today.
-- `+` / `−` / wheel-zoom enlarge the sheet around the cursor; `Fit` restores. Polygon draw still lands on the right normalized coords after zoom.
-- `bunx tsc --noEmit` passes; no console errors when `drawing_search_index` is empty for a project.
+- B&W foundation PDF (e.g. CRU-1 S-1.0): clicking Pan + dragging moves the sheet when zoomed in. Selecting "Pad Footings (F-pads)" auto-runs OCR on the rendered page and shows orange boxes around every `F#` / `WF-#` mark, matching the Togal-style reference.
+- Already-colored image sheets keep working (color-region path unchanged).
+- `bunx tsc --noEmit` clean. No console errors when OCR returns 0 hits.
