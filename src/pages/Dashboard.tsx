@@ -228,6 +228,7 @@ const Dashboard: React.FC = () => {
         onShowHealth={() => setShowHealth(true)}
         onShowDiagnostics={() => setShowDiagnostics(true)}
         onShowOutcomes={() => setShowOutcomes(true)}
+        onDeleteProject={handleDeleteProject}
       />
     </div>
   );
