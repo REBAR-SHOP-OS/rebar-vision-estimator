@@ -107,6 +107,69 @@ function getPlaybook(projectType: string | null | undefined): Playbook {
   return PLAYBOOKS[(projectType || "").toLowerCase()] || PLAYBOOKS.commercial;
 }
 
+type DeterministicSeed = {
+  name: string;
+  segment_type: string;
+  level_label: string | null;
+  zone_label: string | null;
+  notes: string | null;
+  source: "drawing";
+  bucket: "Substructure";
+  confidence: number;
+};
+
+function extractSheetId(textBlock: string): string | null {
+  const match = textBlock.match(/^\[([^\]]+)\]/);
+  return match?.[1]?.trim() || null;
+}
+
+function pushDeterministicSeed(
+  seeds: DeterministicSeed[],
+  seen: Set<string>,
+  name: string,
+  segmentType: DeterministicSeed["segment_type"],
+  note: string,
+) {
+  const key = `${segmentType}:${name}`.toLowerCase();
+  if (seen.has(key)) return;
+  seen.add(key);
+  seeds.push({
+    name,
+    segment_type: segmentType,
+    level_label: null,
+    zone_label: null,
+    notes: note,
+    source: "drawing",
+    bucket: "Substructure",
+    confidence: 0.95,
+  });
+}
+
+function collectDeterministicDrawingSeeds(textBlocks: string[]): DeterministicSeed[] {
+  const seeds: DeterministicSeed[] = [];
+  const seen = new Set<string>();
+
+  for (const block of textBlocks) {
+    const upper = block.toUpperCase();
+    const sheetId = extractSheetId(block) || "unknown sheet";
+
+    for (const match of upper.match(/\bFW-?\d+[A-Z]?\b/g) || []) {
+      pushDeterministicSeed(seeds, seen, `Foundation Wall ${match}`, "wall", `Drawing tag ${match} detected on ${sheetId}`);
+    }
+
+    for (const match of upper.match(/\bWF-?\d+[A-Z]?\b/g) || []) {
+      pushDeterministicSeed(seeds, seen, `Wall Footing ${match}`, "footing", `Drawing tag ${match} detected on ${sheetId}`);
+    }
+
+    for (const match of upper.match(/\bF-?\d+[A-Z]?\b/g) || []) {
+      if (/^FW-?/i.test(match) || /^WF-?/i.test(match)) continue;
+      pushDeterministicSeed(seeds, seen, `Footing ${match}`, "footing", `Drawing tag ${match} detected on ${sheetId}`);
+    }
+  }
+
+  return seeds;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -219,6 +282,10 @@ serve(async (req) => {
       }
     }
 
+    const deterministicDrawingSeeds = collectDeterministicDrawingSeeds(
+      Object.values(drawingTextByDiscipline).flat(),
+    );
+
     // File discipline summary
     const filesByDiscipline: Record<string, string[]> = {};
     for (const fn of fileNames) {
@@ -294,9 +361,15 @@ Forbidden segment types for this project type: ${playbook.forbidden_types.join("
 Bar-mark conventions: ${playbook.bar_mark_hints}
 Emphasis: ${playbook.prompt_emphasis}`;
 
+    const deterministicSeedLines = deterministicDrawingSeeds.length > 0
+      ? deterministicDrawingSeeds.map((seed) => `  - ${seed.name} (${seed.segment_type}) — ${seed.notes}`).join("\n")
+      : "  (none)";
+
     const seedsSection = `
 ## SEEDS (use as candidates if you find evidence — never invent unrelated ones)
 Recommended scope from project classifier: ${recommendedScope.join(", ") || "(none)"}
+Deterministic drawing tags found before AI grouping:
+${deterministicSeedLines}
 Saved templates for this project type:
 ${templateSeeds.length > 0 ? templateSeeds.map((s) => `  - ${s.name} (${s.source})`).join("\n") : "  (none)"}`;
 
@@ -327,6 +400,7 @@ Rules:
   4. Transitions (S-6.0 details): Steps (TD.3), Corners (TD.13), Door/Wall Openings (Detail 5).
   5. Site Misc (S-6.5): Curbs, Bollards, Sign Bases / Menu Boards (TD.87/88).
 - **TAX SCAN (Commercial)**: ALWAYS attempt the Arch-vs-Struct overlay. Any interior wall on A-2.2 with no matching footing on S-1.0 → emit a "Slab Thickening" candidate (source=hidden_scope, note "TD.37"). Every exterior door in the door schedule → emit "Door Opening Trim" (Detail 5). Every site sign/bollard on S-6.5 → emit a Site Misc candidate.
+- **DETERMINISTIC TAGS WIN**: if the seed list already found F-# / FW# / WF# tags, preserve them as real candidates and only group or rename them more clearly.
 - **NEVER** suggest a segment whose type matches the playbook's forbidden_types list.
 - **HIDDEN SCOPE**: Items appearing ONLY in the "NON-STRUCTURAL SHEETS" block must be returned with source="hidden_scope" and a note pointing to the sheet_id.
 - **BAR LIST PARSING**: If a bar schedule is present, group bar marks by family (prefix) into segments matching the playbook's bar_mark_hints.
@@ -384,6 +458,12 @@ Return ONLY a JSON array of objects with fields:
       suggestions = [];
     }
 
+    for (const seed of deterministicDrawingSeeds) {
+      if (!existingSegNames.has(seed.name.toLowerCase())) {
+        suggestions.push(seed);
+      }
+    }
+
     // Always merge in playbook must-haves that the AI failed to produce, so a
     // residential project can't end up with zero candidates due to thin OCR.
     const aiNamesLower = new Set(suggestions.map((s: any) => String(s?.name || "").toLowerCase()));
@@ -430,7 +510,12 @@ Return ONLY a JSON array of objects with fields:
     return new Response(JSON.stringify({
       suggestions: filtered,
       playbook_used: project.project_type || "commercial",
-      seeds: { recommended_scope: recommendedScope, templates: templateSeeds.length, hidden_scope_pages: hiddenScopeText.length },
+      seeds: {
+        recommended_scope: recommendedScope,
+        templates: templateSeeds.length,
+        hidden_scope_pages: hiddenScopeText.length,
+        deterministic_drawing_tags: deterministicDrawingSeeds.length,
+      },
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
