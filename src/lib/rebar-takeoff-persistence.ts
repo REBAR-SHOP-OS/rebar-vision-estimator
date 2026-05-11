@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import type { CanonicalEstimateLine, CanonicalEstimateResultV1 } from "@/lib/verified-estimate/canonical-types";
 import { getMassKgPerM } from "@/lib/rebar-weights";
+import { promoteRebarEstimateVersion } from "@/lib/revision-lifecycle";
 
 const fromAny = (supabase: SupabaseClient<Database>, table: string) =>
   (supabase as any).from(table);
@@ -217,9 +218,18 @@ export async function persistRebarTakeoffFromCanonical(
     total_weight_kg: Number(params.result.quote.total_weight_kg || 0),
     assumptions_snapshot: assumptions,
     exclusions_snapshot: [],
+    is_current: false,
   }).select("id").single();
 
   if (estimateError) throw estimateError;
+
+  if (estimateVersion?.id) {
+    await promoteRebarEstimateVersion(supabase, {
+      rebarProjectId,
+      userId: params.userId,
+      newEstimateVersionId: estimateVersion.id,
+    });
+  }
 
   return {
     takeoffRunId: takeoffRun.id,
