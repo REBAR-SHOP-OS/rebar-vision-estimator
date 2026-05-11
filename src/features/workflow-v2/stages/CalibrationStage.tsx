@@ -696,7 +696,18 @@ function DisciplineSection({
                   </div>
                   <div className="text-[11px] text-muted-foreground mt-0.5">{cal?.method || "No scale text detected — enter px/ft manually."}</div>
                   {r.scale_reason && (
-                    <div className="text-[11px] text-[hsl(var(--status-blocked))] mt-0.5">{REASON_LABEL[r.scale_reason]}</div>
+                    <div className="text-[11px] text-[hsl(var(--status-blocked))] mt-0.5 flex items-center gap-2">
+                      <span>{REASON_LABEL[r.scale_reason]}</span>
+                      {r.scale_reason === "metadata load failed" && (
+                        <button
+                          className="underline hover:text-foreground"
+                          onClick={() => onRetryMetadata?.()}
+                          title="Re-fetch sheet metadata"
+                        >
+                          retry metadata
+                        </button>
+                      )}
+                    </div>
                   )}
                   {cal?.detailOverrides && cal.detailOverrides.length > 0 && (
                     <details className="mt-1">
