@@ -755,6 +755,15 @@ function DisciplineSection({
                             <dd className="inline">{r.diagnostics.matchedDetailScaleTexts.join(" | ")}</dd>
                           </div>
                         )}
+                        {r.unmatchedTokens && r.unmatchedTokens.length > 0 && (
+                          <div>
+                            <dt className="inline font-semibold">unmatched marks:</dt>{" "}
+                            <dd className="inline" title="Short alpha+digit tokens read by OCR that did not match any structural mark pattern">
+                              {r.unmatchedTokens.slice(0, 20).join(", ")}
+                              {r.unmatchedTokens.length > 20 ? `, +${r.unmatchedTokens.length - 20} more` : ""}
+                            </dd>
+                          </div>
+                        )}
                       </dl>
                     </details>
                   )}
