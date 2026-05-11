@@ -105,6 +105,26 @@ const REASON_LABEL: Record<CalibrationReason, string> = {
   "metadata load failed": "Metadata load failed",
 };
 
+/**
+ * Scan raw OCR text for short alpha+digit tokens that look like structural marks
+ * but did not match any DEFAULT_MARK_PATTERN. Useful for diagnosing why a
+ * footing/wall mark wasn't recognised on the same sheet being calibrated.
+ */
+function scanUnmatchedMarkTokens(rawText: string, limit = 30): string[] {
+  if (!rawText) return [];
+  const out = new Set<string>();
+  const tokens = rawText.split(/[\s,;:()\[\]\/\\]+/);
+  for (const raw of tokens) {
+    const t = (raw || "").trim().toUpperCase();
+    if (t.length < 2 || t.length > 10) continue;
+    if (!/[A-Z]/.test(t) || !/\d/.test(t)) continue;
+    if (DEFAULT_MARK_PATTERNS.some((p) => p.test(t))) continue;
+    out.add(t);
+    if (out.size >= limit) break;
+  }
+  return Array.from(out);
+}
+
 function requiresReview(row: SheetRow): boolean {
   if (row.scale_status === "ambiguous" || row.scale_status === "failed") return true;
   if (row.scale_status === "verified" || row.scale_status === "manual") return false;
