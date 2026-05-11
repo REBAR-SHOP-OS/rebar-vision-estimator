@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { resolveScale, type Calibration, type CalibrationDiagnostics, type CalibrationReason, type Discipline } from "../lib/scale-resolver";
 import { detectDiscipline } from "@/lib/rebar-intake";
+import { DEFAULT_MARK_PATTERNS } from "@/lib/ocr-page-labels";
 import { CheckCircle2, RefreshCcw, Ruler, AlertTriangle, Loader2, MousePointerClick, X } from "lucide-react";
 import { toast } from "sonner";
 import PdfRenderer from "@/components/chat/PdfRenderer";
@@ -23,6 +24,7 @@ interface SheetRow {
   scale_status: ScaleStatus;
   scale_reason?: CalibrationReason;
   diagnostics?: CalibrationDiagnostics;
+  unmatchedTokens?: string[];
   file_path: string | null; // for two-point calibration modal
 }
 
@@ -102,6 +104,26 @@ const REASON_LABEL: Record<CalibrationReason, string> = {
   "OCR incomplete": "OCR looks incomplete",
   "metadata load failed": "Metadata load failed",
 };
+
+/**
+ * Scan raw OCR text for short alpha+digit tokens that look like structural marks
+ * but did not match any DEFAULT_MARK_PATTERN. Useful for diagnosing why a
+ * footing/wall mark wasn't recognised on the same sheet being calibrated.
+ */
+function scanUnmatchedMarkTokens(rawText: string, limit = 30): string[] {
+  if (!rawText) return [];
+  const out = new Set<string>();
+  const tokens = rawText.split(/[\s,;:()\[\]\/\\]+/);
+  for (const raw of tokens) {
+    const t = (raw || "").trim().toUpperCase();
+    if (t.length < 2 || t.length > 10) continue;
+    if (!/[A-Z]/.test(t) || !/\d/.test(t)) continue;
+    if (DEFAULT_MARK_PATTERNS.some((p) => p.test(t))) continue;
+    out.add(t);
+    if (out.size >= limit) break;
+  }
+  return Array.from(out);
+}
 
 function requiresReview(row: SheetRow): boolean {
   if (row.scale_status === "ambiguous" || row.scale_status === "failed") return true;
@@ -272,6 +294,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
         scale_status: derivedStatus,
         scale_reason: resolvedReason,
         diagnostics: cal?.diagnostics,
+        unmatchedTokens: scanUnmatchedMarkTokens(r.raw_text || ""),
         file_path: filePath,
         _relevant: relevant,
       };
@@ -474,11 +497,12 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
                   {s === "done" && <CheckCircle2 className="w-3 h-3 text-[hsl(var(--status-supported))]" />}
                   {s === "error" && (
                     <button
-                      className="flex items-center gap-1 text-[hsl(var(--status-blocked))]"
+                      className="flex items-center gap-1 text-[hsl(var(--status-blocked))] hover:underline"
                       onClick={load}
-                      title={errMsg || "Retry all"}
+                      title={errMsg ? `${errMsg} — click to retry this step` : "Retry this step"}
                     >
                       <AlertTriangle className="w-3 h-3" />
+                      <span className="text-[10px] font-mono">retry</span>
                     </button>
                   )}
                   {s === "idle" && <span className="w-3 h-3 rounded-full border border-border inline-block" />}
@@ -546,6 +570,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
               onChangeDiscipline={setDiscipline}
               onAcceptScale={acceptScale}
               onMeasure={(r) => setTwoPointSheet(r)}
+              onRetryMetadata={load}
             />
             <DisciplineSection
               title="Architectural / Reference"
@@ -559,6 +584,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
               onChangeDiscipline={setDiscipline}
               onAcceptScale={acceptScale}
               onMeasure={(r) => setTwoPointSheet(r)}
+              onRetryMetadata={load}
             />
           </div>
         )}
@@ -621,7 +647,7 @@ const STATUS_PILL: Record<ScaleStatus, { tone: Parameters<typeof Pill>[0]["tone"
 // ── DisciplineSection ────────────────────────────────────────────────────────
 function DisciplineSection({
   title, subtitle, tone, rows, resolvedCount, verifiedCount, empty,
-  onUpdateOverride, onChangeDiscipline, onAcceptScale, onMeasure,
+  onUpdateOverride, onChangeDiscipline, onAcceptScale, onMeasure, onRetryMetadata,
 }: {
   title: string;
   subtitle: string;
@@ -634,6 +660,7 @@ function DisciplineSection({
   onChangeDiscipline: (id: string, value: Discipline) => void;
   onAcceptScale: (id: string) => void;
   onMeasure: (row: SheetRow) => void;
+  onRetryMetadata?: () => void;
 }) {
   const accent = tone === "primary" ? "border-l-2 border-l-primary pl-3" : "border-l-2 border-l-border pl-3 opacity-90";
   return (
@@ -672,7 +699,18 @@ function DisciplineSection({
                   </div>
                   <div className="text-[11px] text-muted-foreground mt-0.5">{cal?.method || "No scale text detected — enter px/ft manually."}</div>
                   {r.scale_reason && (
-                    <div className="text-[11px] text-[hsl(var(--status-blocked))] mt-0.5">{REASON_LABEL[r.scale_reason]}</div>
+                    <div className="text-[11px] text-[hsl(var(--status-blocked))] mt-0.5 flex items-center gap-2">
+                      <span>{REASON_LABEL[r.scale_reason]}</span>
+                      {r.scale_reason === "metadata load failed" && (
+                        <button
+                          className="underline hover:text-foreground"
+                          onClick={() => onRetryMetadata?.()}
+                          title="Re-fetch sheet metadata"
+                        >
+                          retry metadata
+                        </button>
+                      )}
+                    </div>
                   )}
                   {cal?.detailOverrides && cal.detailOverrides.length > 0 && (
                     <details className="mt-1">
@@ -715,6 +753,15 @@ function DisciplineSection({
                           <div>
                             <dt className="inline font-semibold">detail scales:</dt>{" "}
                             <dd className="inline">{r.diagnostics.matchedDetailScaleTexts.join(" | ")}</dd>
+                          </div>
+                        )}
+                        {r.unmatchedTokens && r.unmatchedTokens.length > 0 && (
+                          <div>
+                            <dt className="inline font-semibold">unmatched marks:</dt>{" "}
+                            <dd className="inline" title="Short alpha+digit tokens read by OCR that did not match any structural mark pattern">
+                              {r.unmatchedTokens.slice(0, 20).join(", ")}
+                              {r.unmatchedTokens.length > 20 ? `, +${r.unmatchedTokens.length - 20} more` : ""}
+                            </dd>
                           </div>
                         )}
                       </dl>
@@ -771,6 +818,10 @@ function DisciplineSection({
 }
 
 // ── Two-point calibration modal ──────────────────────────────────────────────
+/** Module-level cache for signed URLs (1h TTL — matches createSignedUrl). */
+const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
+const SIGNED_URL_TTL_MS = 55 * 60 * 1000; // refresh slightly before the 1h server expiry
+
 function TwoPointCalModal({
   sheet,
   onClose,
@@ -794,6 +845,11 @@ function TwoPointCalModal({
       setUrlError("No file linked to this sheet. Use the px/ft input instead.");
       return;
     }
+    const cached = signedUrlCache.get(sheet.file_path);
+    if (cached && cached.expiresAt > Date.now()) {
+      setSignedUrl(cached.url);
+      return;
+    }
     supabase.storage
       .from("blueprints")
       .createSignedUrl(sheet.file_path, 3600)
@@ -802,6 +858,7 @@ function TwoPointCalModal({
           const detail = error?.message ? ` (${error.message})` : "";
           setUrlError(`Could not load drawing preview${detail}. Use the px/ft input instead.`);
         } else {
+          signedUrlCache.set(sheet.file_path!, { url: data.signedUrl, expiresAt: Date.now() + SIGNED_URL_TTL_MS });
           setSignedUrl(data.signedUrl);
         }
       });
