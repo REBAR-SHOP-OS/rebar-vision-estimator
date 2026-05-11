@@ -570,6 +570,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
               onChangeDiscipline={setDiscipline}
               onAcceptScale={acceptScale}
               onMeasure={(r) => setTwoPointSheet(r)}
+              onRetryMetadata={load}
             />
             <DisciplineSection
               title="Architectural / Reference"
@@ -583,6 +584,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
               onChangeDiscipline={setDiscipline}
               onAcceptScale={acceptScale}
               onMeasure={(r) => setTwoPointSheet(r)}
+              onRetryMetadata={load}
             />
           </div>
         )}
