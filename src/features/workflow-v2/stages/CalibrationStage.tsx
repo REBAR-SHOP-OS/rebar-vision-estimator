@@ -3,13 +3,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { StageHeader, GateBanner, Pill, EmptyState, type StageProps } from "./_shared";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { resolveScale, type Calibration, type Discipline } from "../lib/scale-resolver";
+import { resolveScale, type Calibration, type CalibrationDiagnostics, type CalibrationReason, type Discipline } from "../lib/scale-resolver";
 import { detectDiscipline } from "@/lib/rebar-intake";
 import { CheckCircle2, RefreshCcw, Ruler, AlertTriangle, Loader2, MousePointerClick, X } from "lucide-react";
 import { toast } from "sonner";
 import PdfRenderer from "@/components/chat/PdfRenderer";
 
-export type ScaleStatus = "auto-detected" | "verified" | "manual" | "failed";
+export type ScaleStatus = "auto-detected" | "verified" | "manual" | "ambiguous" | "failed";
 
 interface SheetRow {
   id: string;
@@ -21,6 +21,8 @@ interface SheetRow {
   detectedDiscipline: Discipline;
   discipline: Discipline; // effective (override > detected)
   scale_status: ScaleStatus;
+  scale_reason?: CalibrationReason;
+  diagnostics?: CalibrationDiagnostics;
   file_path: string | null; // for two-point calibration modal
 }
 
@@ -45,6 +47,9 @@ function initialSteps(): LoadSteps {
 
 function deriveScaleStatus(cal: Calibration | null, storedStatus?: ScaleStatus): ScaleStatus {
   if (storedStatus === "verified" || storedStatus === "manual") return storedStatus;
+  if (storedStatus === "ambiguous" || storedStatus === "failed") return storedStatus;
+  if (cal?.reviewState === "ambiguous") return "ambiguous";
+  if (cal?.reviewState === "failed") return "failed";
   if (!cal || cal.pixelsPerFoot <= 0) return "failed";
   if (cal.source === "user") return "manual";
   return "auto-detected";
@@ -52,6 +57,7 @@ function deriveScaleStatus(cal: Calibration | null, storedStatus?: ScaleStatus):
 
 /** Warn when a loading step takes longer than this threshold. */
 const SLOW_STEP_THRESHOLD_MS = 3000;
+const STEP_TIMEOUT_MS = 15000;
 
 function classifyFromText(text: string): Discipline {
   const t = text.toUpperCase().slice(0, 800);
@@ -89,6 +95,24 @@ function isRelevantSheet(opts: { rawText: string; sheetNumber: string | null; ta
   return false;
 }
 
+const REASON_LABEL: Record<CalibrationReason, string> = {
+  "no scale text found": "No scale text found",
+  "multiple scales detected": "Multiple competing scales detected",
+  "detail scales found only": "Only detail scales were detected",
+  "OCR incomplete": "OCR looks incomplete",
+  "metadata load failed": "Metadata load failed",
+};
+
+function requiresReview(row: SheetRow): boolean {
+  if (row.scale_status === "ambiguous" || row.scale_status === "failed") return true;
+  if (row.scale_status === "verified" || row.scale_status === "manual") return false;
+  const cal = row.calibration;
+  if (!cal || cal.pixelsPerFoot <= 0) return true;
+  if (cal.confidence === "low") return true;
+  if (row.discipline === "Structural" && (cal.confidence !== "high" || (cal.detailOverrides?.length || 0) > 0)) return true;
+  return false;
+}
+
 export default function CalibrationStage({ projectId, state, goToStage }: StageProps) {
   const [sheets, setSheets] = useState<SheetRow[]>([]);
   const [steps, setSteps] = useState<LoadSteps>(initialSteps());
@@ -110,20 +134,34 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
   // Timing helper: logs a console warning if a step takes longer than 3 s.
   const timedFetch = async <T,>(
     label: keyof Omit<LoadSteps, "errors">,
-    fn: () => Promise<T>,
+    fn: (signal: AbortSignal) => Promise<T>,
   ): Promise<T> => {
     const start = performance.now();
     setStep(label, "loading");
+    let timeoutId: ReturnType<typeof window.setTimeout> | null = null;
+    const controller = new AbortController();
     try {
-      const result = await fn();
+      const result = await Promise.race([
+        fn(controller.signal),
+        new Promise<T>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            controller.abort();
+            reject(new Error(`${label} timed out after ${Math.round(STEP_TIMEOUT_MS / 1000)}s`));
+          }, STEP_TIMEOUT_MS);
+        }),
+      ]);
       const elapsed = performance.now() - start;
       if (elapsed > SLOW_STEP_THRESHOLD_MS) console.warn(`[CalibrationStage] step "${label}" took ${Math.round(elapsed)}ms`);
+      if (import.meta.env.DEV) console.debug(`[CalibrationStage] ${label} finished in ${Math.round(elapsed)}ms`);
       setStep(label, "done");
       return result;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setStep(label, "error", msg);
+      console.error(`[CalibrationStage] ${label} failed`, err);
       throw err;
+    } finally {
+      if (timeoutId !== null) clearTimeout(timeoutId);
     }
   };
 
@@ -142,12 +180,13 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
       bar_marks: string[] | null;
     }> = [];
     try {
-      indexRowsRaw = await timedFetch("index", async () => {
+      indexRowsRaw = await timedFetch("index", async (signal) => {
         const { data, error } = await supabase
           .from("drawing_search_index")
           .select("id, page_number, raw_text, sheet_revision_id, logical_drawing_id, document_version_id, bar_marks")
           .eq("project_id", projectId)
-          .order("page_number", { ascending: true });
+          .order("page_number", { ascending: true })
+          .abortSignal(signal);
         if (error) throw error;
         return (data || []) as typeof indexRowsRaw;
       });
@@ -155,7 +194,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
       return; // step error already set
     }
 
-    const indexRows = indexRowsRaw.map((r) => ({ ...r, raw_text: (r.raw_text || "").slice(0, 4096) }));
+    const indexRows = indexRowsRaw.map((r) => ({ ...r, raw_text: r.raw_text || "" }));
     const sheetRevIds = Array.from(new Set(indexRows.map((r) => r.sheet_revision_id).filter(Boolean) as string[]));
     const logicalIds = Array.from(new Set(indexRows.map((r) => r.logical_drawing_id).filter(Boolean) as string[]));
     const docVerIds = Array.from(new Set(indexRows.map((r) => r.document_version_id).filter(Boolean) as string[]));
@@ -170,21 +209,21 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
     let docData: DocRow[] = [];
 
     const [revResult, logicResult, docResult] = await Promise.allSettled([
-      timedFetch("revisions", async () => {
+      timedFetch("revisions", async (signal) => {
         if (!sheetRevIds.length) return [] as RevRow[];
-        const { data, error } = await supabase.from("sheet_revisions").select("id, sheet_number, discipline").in("id", sheetRevIds);
+        const { data, error } = await supabase.from("sheet_revisions").select("id, sheet_number, discipline").in("id", sheetRevIds).abortSignal(signal);
         if (error) throw error;
         return (data || []) as RevRow[];
       }),
-      timedFetch("drawings", async () => {
+      timedFetch("drawings", async (signal) => {
         if (!logicalIds.length) return [] as LogicRow[];
-        const { data, error } = await supabase.from("logical_drawings").select("id, sheet_id, discipline").in("id", logicalIds);
+        const { data, error } = await supabase.from("logical_drawings").select("id, sheet_id, discipline").in("id", logicalIds).abortSignal(signal);
         if (error) throw error;
         return (data || []) as LogicRow[];
       }),
-      timedFetch("files", async () => {
+      timedFetch("files", async (signal) => {
         if (!docVerIds.length) return [] as DocRow[];
-        const { data, error } = await supabase.from("document_versions").select("id, file_name, file_path").in("id", docVerIds);
+        const { data, error } = await supabase.from("document_versions").select("id, file_name, file_path").in("id", docVerIds).abortSignal(signal);
         if (error) throw error;
         return (data || []) as DocRow[];
       }),
@@ -201,6 +240,8 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
     const overrideMap = (state.local.disciplineOverride || {}) as Record<string, Discipline>;
     const storedCals = (state.local.calibration || {}) as Record<string, Calibration>;
     const storedStatuses = (state.local.scaleStatus || {}) as Record<string, ScaleStatus>;
+    const storedReasons = (state.local.scaleReason || {}) as Record<string, CalibrationReason | undefined>;
+    const metadataFailed = revResult.status === "rejected" || logicResult.status === "rejected" || docResult.status === "rejected";
 
     const allRows: Array<SheetRow & { _relevant: boolean }> = indexRows.map((r) => {
       const rev = r.sheet_revision_id ? revMap.get(r.sheet_revision_id) : undefined;
@@ -213,9 +254,11 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
       const detected = detectSheetDiscipline({ fileName, sheetNumber, rawText: r.raw_text, tableDiscipline });
       const override = overrideMap[r.id];
       const storedCal = storedCals[r.id];
-      const autoCal = resolveScale({ rawText: r.raw_text || "" });
+      const autoCal = resolveScale({ rawText: r.raw_text || "", discipline: override || detected });
       const cal = storedCal || autoCal;
-      const scaleStatus = deriveScaleStatus(cal, storedStatuses[r.id]);
+      const derivedStatus = deriveScaleStatus(cal, storedStatuses[r.id]);
+      const unresolvedWithMetadataError = metadataFailed && (derivedStatus === "ambiguous" || derivedStatus === "failed");
+      const resolvedReason = storedReasons[r.id] || cal?.reason || (unresolvedWithMetadataError ? "metadata load failed" : undefined);
       const relevant = isRelevantSheet({ rawText: r.raw_text || "", sheetNumber, tableDiscipline, barMarks: r.bar_marks, fileName });
       return {
         id: r.id,
@@ -226,7 +269,9 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
         ppfOverride: cal && cal.pixelsPerFoot > 0 ? cal.pixelsPerFoot.toFixed(2) : "",
         detectedDiscipline: detected,
         discipline: override || detected,
-        scale_status: scaleStatus,
+        scale_status: derivedStatus,
+        scale_reason: resolvedReason,
+        diagnostics: cal?.diagnostics,
         file_path: filePath,
         _relevant: relevant,
       };
@@ -242,11 +287,13 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
     // Persist auto-resolved px/ft and scale statuses.
     const calMap: Record<string, Calibration> = {};
     const statusMap: Record<string, ScaleStatus> = {};
+    const reasonMap: Record<string, CalibrationReason | undefined> = {};
     for (const r of rows) {
       if (r.calibration) calMap[r.id] = r.calibration;
       statusMap[r.id] = r.scale_status;
+      reasonMap[r.id] = r.scale_reason;
     }
-    if (Object.keys(calMap).length > 0) state.setLocal({ calibration: calMap, scaleStatus: statusMap });
+    if (Object.keys(calMap).length > 0) state.setLocal({ calibration: calMap, scaleStatus: statusMap, scaleReason: reasonMap });
   };
 
   useEffect(() => {
@@ -256,11 +303,13 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
   const persist = (next: SheetRow[]) => {
     const calMap: Record<string, Calibration> = {};
     const statusMap: Record<string, ScaleStatus> = {};
+    const reasonMap: Record<string, CalibrationReason | undefined> = {};
     for (const r of next) {
       if (r.calibration) calMap[r.id] = r.calibration;
       statusMap[r.id] = r.scale_status;
+      reasonMap[r.id] = r.scale_reason;
     }
-    state.setLocal({ calibration: calMap, scaleStatus: statusMap });
+    state.setLocal({ calibration: calMap, scaleStatus: statusMap, scaleReason: reasonMap });
   };
 
   const updateOverride = (id: string, value: string) => {
@@ -272,7 +321,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
           ? { source: "user", pixelsPerFoot: ppf, confidence: "user", method: "Estimator override" }
           : r.calibration;
         const scale_status = deriveScaleStatus(cal, "manual");
-        return { ...r, ppfOverride: value, calibration: cal, scale_status };
+        return { ...r, ppfOverride: value, calibration: cal, scale_status, scale_reason: undefined, diagnostics: cal?.diagnostics };
       });
       persist(next);
       return next;
@@ -282,7 +331,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
   const acceptScale = (id: string) => {
     setSheets((prev) => {
       const next = prev.map((r) =>
-        r.id === id ? { ...r, scale_status: "verified" as ScaleStatus } : r,
+        r.id === id ? { ...r, scale_status: "verified" as ScaleStatus, scale_reason: undefined } : r,
       );
       persist(next);
       return next;
@@ -299,7 +348,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
           confidence: "user",
           method: "Two-point measurement",
         };
-        return { ...r, calibration: cal, ppfOverride: ppf.toFixed(2), scale_status: "manual" as ScaleStatus };
+        return { ...r, calibration: cal, ppfOverride: ppf.toFixed(2), scale_status: "manual" as ScaleStatus, scale_reason: undefined };
       });
       persist(next);
       return next;
@@ -319,13 +368,15 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
   const gateRows = (structural.length + architectural.length > 0)
     ? [...structural, ...architectural]
     : sheets;
-  const isResolved = (r: SheetRow) => !!r.calibration && r.calibration.pixelsPerFoot > 0;
+  const isResolved = (r: SheetRow) => !!r.calibration && r.calibration.pixelsPerFoot > 0 && !requiresReview(r);
+  const isCalibrated = (r: SheetRow) => !!r.calibration && r.calibration.pixelsPerFoot > 0;
   const isVerifiedOrManual = (r: SheetRow) => r.scale_status === "verified" || r.scale_status === "manual";
-  const structuralResolved = structural.filter(isResolved).length;
-  const gateResolved = gateRows.filter(isResolved).length;
+  const structuralResolved = structural.filter(isCalibrated).length;
+  const gateResolved = gateRows.filter(isCalibrated).length;
   const verifiedCount = gateRows.filter(isVerifiedOrManual).length;
   const allConfirmable = gateRows.length > 0 && gateRows.every(isResolved);
   const hasVerified = verifiedCount > 0;
+  const unresolvedRequired = gateRows.filter((r) => !isResolved(r));
 
   const promoteAllToStructural = () => {
     const cur = (state.local.disciplineOverride || {}) as Record<string, Discipline>;
@@ -439,10 +490,27 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
               );
             })}
           </div>
-          {anyError && sheets.length === 0 && (
-            <div className="mt-2 flex items-center gap-2">
-              <span className="text-[11px] text-[hsl(var(--status-blocked))]">One or more steps failed. Partial data may be shown.</span>
-              <Button size="sm" variant="outline" className="h-6 text-[11px]" onClick={load}>Retry all</Button>
+          {anyError && (
+            <div className="mt-2 space-y-1">
+              {(() => {
+                const labels: Record<string, string> = {
+                  index: "Loading sheet index",
+                  revisions: "Loading sheet revisions",
+                  drawings: "Loading logical drawings",
+                  files: "Loading document versions",
+                };
+                return (Object.entries(steps.errors) as Array<[keyof LoadSteps["errors"], string | undefined]>)
+                  .filter(([, msg]) => !!msg)
+                  .map(([key, msg]) => (
+                    <div key={key} className="text-[11px] text-[hsl(var(--status-blocked))]">
+                      {labels[key]}: {msg}
+                    </div>
+                  ));
+              })()}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-[hsl(var(--status-blocked))]">Retry failed step(s) from this stage.</span>
+                <Button size="sm" variant="outline" className="h-6 text-[11px]" onClick={load}>Retry</Button>
+              </div>
             </div>
           )}
         </div>
@@ -484,7 +552,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
               subtitle="Required for takeoff — every Architectural sheet must also resolve to a usable px/ft. Structural still wins on conflicting dimensions."
               tone="muted"
               rows={reference}
-              resolvedCount={reference.filter(isResolved).length}
+              resolvedCount={reference.filter(isCalibrated).length}
               verifiedCount={reference.filter(isVerifiedOrManual).length}
               empty={<div className="text-[11px] text-muted-foreground px-1">No reference sheets.</div>}
               onUpdateOverride={updateOverride}
@@ -504,6 +572,14 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
               <span>All scales are auto-detected. Click <strong>Accept</strong> on at least one sheet to verify, or use <strong>Measure</strong> for two-point measurement.</span>
             </div>
           )}
+          {!allConfirmable && unresolvedRequired.length > 0 && (
+            <div className="flex items-center gap-2 text-[11px] text-[hsl(var(--status-blocked))]">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                {unresolvedRequired.length} required sheet{unresolvedRequired.length === 1 ? "" : "s"} still need verification or manual calibration.
+              </span>
+            </div>
+          )}
           <GateBanner
             tone={allConfirmable ? "warn" : "blocked"}
             title={allConfirmable
@@ -517,7 +593,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
                 : "Auto-scaled only — accept or measure at least one sheet to confirm geometry, then confirm."
               : gateRows.length === 0
                 ? "No discipline-tagged sheets. Reclassify at least one sheet, or confirm to proceed with the available pages."
-                : `Auto-scaled (${gateResolved}/${gateRows.length}). Override any sheet below if needed, then confirm.`}
+                : `Calibrated (${gateResolved}/${gateRows.length}). Resolve ambiguous/failed or review-required sheets, then confirm.`}
           />
         </div>
       )}
@@ -538,6 +614,7 @@ const STATUS_PILL: Record<ScaleStatus, { tone: Parameters<typeof Pill>[0]["tone"
   "auto-detected": { tone: "warn", label: "auto" },
   "verified": { tone: "supported", label: "verified" },
   "manual": { tone: "supported", label: "manual" },
+  "ambiguous": { tone: "blocked", label: "ambiguous" },
   "failed": { tone: "blocked", label: "failed" },
 };
 
@@ -578,6 +655,7 @@ function DisciplineSection({
             const reclassified = r.discipline !== r.detectedDiscipline;
             const statusPill = STATUS_PILL[r.scale_status];
             const canAccept = r.scale_status === "auto-detected" && !!cal && cal.pixelsPerFoot > 0;
+            const rowNeedsReview = requiresReview(r);
             return (
               <div key={r.id} className="border border-border bg-card px-3 py-2.5 flex items-center gap-3">
                 <Ruler className="w-4 h-4 text-muted-foreground shrink-0" />
@@ -589,9 +667,13 @@ function DisciplineSection({
                     {cal?.source === "grid_dimension" && <Pill tone="info">grid</Pill>}
                     {cal?.source === "auto_dimension" && <Pill tone="info">auto-dimension</Pill>}
                     {reclassified && <Pill tone="info">reclassified</Pill>}
+                    {rowNeedsReview && <Pill tone="blocked">needs review</Pill>}
                     {cal?.scaleText && <span className="text-[11px] text-muted-foreground font-mono truncate">{cal.scaleText}</span>}
                   </div>
                   <div className="text-[11px] text-muted-foreground mt-0.5">{cal?.method || "No scale text detected — enter px/ft manually."}</div>
+                  {r.scale_reason && (
+                    <div className="text-[11px] text-[hsl(var(--status-blocked))] mt-0.5">{REASON_LABEL[r.scale_reason]}</div>
+                  )}
                   {cal?.detailOverrides && cal.detailOverrides.length > 0 && (
                     <details className="mt-1">
                       <summary className="text-[11px] text-muted-foreground cursor-pointer hover:text-foreground">
@@ -607,6 +689,35 @@ function DisciplineSection({
                           </span>
                         ))}
                       </div>
+                    </details>
+                  )}
+                  {r.diagnostics && (
+                    <details className="mt-1">
+                      <summary className="text-[11px] text-muted-foreground cursor-pointer hover:text-foreground">
+                        diagnostics
+                      </summary>
+                      <dl className="mt-1 text-[11px] text-muted-foreground font-mono space-y-0.5">
+                        <div>
+                          <dt className="inline font-semibold">decision:</dt>{" "}
+                          <dd className="inline">{r.diagnostics.decision}</dd>
+                        </div>
+                        <div>
+                          <dt className="inline font-semibold">ocr:</dt>{" "}
+                          <dd className="inline">{r.diagnostics.ocrLength} chars, scanned: {r.diagnostics.scannedLength} ({r.diagnostics.scannedSegments.join(", ")})</dd>
+                        </div>
+                        {r.diagnostics.matchedSheetScaleTexts.length > 0 && (
+                          <div>
+                            <dt className="inline font-semibold">sheet scales:</dt>{" "}
+                            <dd className="inline">{r.diagnostics.matchedSheetScaleTexts.join(" | ")}</dd>
+                          </div>
+                        )}
+                        {r.diagnostics.matchedDetailScaleTexts.length > 0 && (
+                          <div>
+                            <dt className="inline font-semibold">detail scales:</dt>{" "}
+                            <dd className="inline">{r.diagnostics.matchedDetailScaleTexts.join(" | ")}</dd>
+                          </div>
+                        )}
+                      </dl>
                     </details>
                   )}
                 </div>

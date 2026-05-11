@@ -20,6 +20,25 @@ export type CalibrationSource =
   | "user";
 
 export type CalibrationConfidence = "high" | "medium" | "low" | "user";
+export type CalibrationState = "auto-detected" | "ambiguous" | "failed";
+export type CalibrationReason =
+  | "no scale text found"
+  | "multiple scales detected"
+  | "detail scales found only"
+  | "OCR incomplete"
+  | "metadata load failed";
+
+/** Sheet discipline classification. Drives "Structural wins" gating. */
+export type Discipline = "Structural" | "Architectural" | "Other";
+
+export interface CalibrationDiagnostics {
+  ocrLength: number;
+  scannedLength: number;
+  scannedSegments: Array<"full" | "start" | "middle" | "end">;
+  matchedSheetScaleTexts: string[];
+  matchedDetailScaleTexts: string[];
+  decision: "main-scale" | "detail-scale" | "ambiguous" | "failed";
+}
 
 export interface DetailOverride {
   tag: string;
@@ -35,6 +54,9 @@ export interface Calibration {
   confidence: CalibrationConfidence;
   method: string;
   detailOverrides?: DetailOverride[];
+  reviewState?: CalibrationState;
+  reason?: CalibrationReason;
+  diagnostics?: CalibrationDiagnostics;
 }
 
 export interface DimensionHint {
@@ -58,6 +80,7 @@ export interface SheetScaleInputs {
   dimensions?: DimensionHint[];
   knownObjects?: KnownObjectHint[];
   pageWidthPx?: number;
+  discipline?: Discipline;
 }
 
 const FT_PER_IN = 1 / 12;
@@ -69,6 +92,9 @@ const ARCH_SCALE_RE =
 const RATIO_RE = /\b1\s*:\s*(\d+(?:\.\d+)?)\b/;
 /** Bare textual scale prefix: "SCALE: NTS" / "Scale 1/4 = 1'-0\"". */
 const SCALE_PREFIX_RE = /\bscale\b/i;
+const KEY_PLAN_RE = /\bkey\s+plan\b/i;
+const DETAIL_CONTEXT_RE = /\b(detail|section|enlarged|inset|typ\.?|blow[- ]?up)\b/i;
+const SHEET_CONTEXT_RE = /\b(scale|sheet|plan|foundation|framing|general|title|overall)\b/i;
 
 /** Parse imperial dimension annotations like 12'-6", 8', 6". Returns feet. */
 export function parseImperialFeet(text: string): number | null {
@@ -141,6 +167,8 @@ export function tryTitleBlockText(rawText?: string | null): Calibration | null {
     pixelsPerFoot: 0,
     confidence: "low",
     method: "SCALE keyword found but value unparseable",
+    reviewState: "failed",
+    reason: "no scale text found",
   };
 }
 
@@ -320,33 +348,178 @@ export function tryDetailScales(rawText?: string | null): DetailOverride[] {
   return out;
 }
 
+function buildScaleSearchText(rawText?: string | null): {
+  text: string;
+  scannedSegments: Array<"full" | "start" | "middle" | "end">;
+  ocrLength: number;
+} {
+  const source = (rawText || "").replace(/\s+/g, " ").trim();
+  const ocrLength = source.length;
+  if (ocrLength <= 24000) return { text: source, scannedSegments: ["full"], ocrLength };
+
+  const chunk = 8000;
+  const start = source.slice(0, chunk);
+  const midStart = Math.max(0, Math.floor(ocrLength / 2) - Math.floor(chunk / 2));
+  const middle = source.slice(midStart, midStart + chunk);
+  const end = source.slice(Math.max(0, ocrLength - chunk));
+  return {
+    text: `${start}\n${middle}\n${end}`,
+    scannedSegments: ["start", "middle", "end"],
+    ocrLength,
+  };
+}
+
+type ScaleCandidate = {
+  scaleText: string;
+  pixelsPerFoot: number;
+  kind: "sheet" | "detail" | "unknown";
+  confidence: CalibrationConfidence;
+};
+
+function dedupeScaleCandidates(candidates: ScaleCandidate[]): ScaleCandidate[] {
+  const out: ScaleCandidate[] = [];
+  const seen = new Set<string>();
+  for (const c of candidates) {
+    const key = `${Math.round(c.pixelsPerFoot * 100)}::${c.scaleText.toUpperCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(c);
+  }
+  return out;
+}
+
+function classifyCandidateContext(context: string): "sheet" | "detail" | "unknown" {
+  if (KEY_PLAN_RE.test(context)) return "detail";
+  if (DETAIL_CONTEXT_RE.test(context)) return "detail";
+  if (SHEET_CONTEXT_RE.test(context)) return "sheet";
+  return "unknown";
+}
+
+function collectScaleCandidates(rawText?: string | null): {
+  candidates: ScaleCandidate[];
+  diagnostics: Pick<CalibrationDiagnostics, "ocrLength" | "scannedLength" | "scannedSegments">;
+} {
+  const { text, scannedSegments, ocrLength } = buildScaleSearchText(rawText);
+  const candidates: ScaleCandidate[] = [];
+  const capture = (
+    matchText: string,
+    ppf: number,
+    idx: number,
+    baseConfidence: CalibrationConfidence,
+  ) => {
+    const context = text.slice(Math.max(0, idx - 48), Math.min(text.length, idx + matchText.length + 48));
+    const kind = classifyCandidateContext(context);
+    const confidence = kind === "sheet" ? "high" : kind === "unknown" ? baseConfidence : "low";
+    candidates.push({ scaleText: matchText.trim(), pixelsPerFoot: ppf, kind, confidence });
+  };
+
+  const archGlobal = /(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*"?\s*=\s*1\s*'?\s*-?\s*0?\s*"?/gi;
+  let m: RegExpExecArray | null;
+  while ((m = archGlobal.exec(text)) !== null) {
+    const inchesOnPaper = Number(m[1]) / Number(m[2]);
+    if (inchesOnPaper > 0) capture(m[0], inchesOnPaper * 96, m.index, "medium");
+  }
+  const ratioGlobal = /\b1\s*:\s*(\d+(?:\.\d+)?)\b/g;
+  while ((m = ratioGlobal.exec(text)) !== null) {
+    const denom = Number(m[1]);
+    if (denom > 0) capture(m[0], pixelsPerFootFromRatio(denom), m.index, "medium");
+  }
+
+  return {
+    candidates: dedupeScaleCandidates(candidates),
+    diagnostics: { ocrLength, scannedLength: text.length, scannedSegments },
+  };
+}
+
 /** Try every layer in priority order. */
 export function resolveScale(input: SheetScaleInputs): Calibration | null {
-  const a = tryTitleBlockText(input.rawText);
   const detailOverrides = tryDetailScales(input.rawText);
+  const { candidates, diagnostics } = collectScaleCandidates(input.rawText);
+  const sheetCandidates = candidates.filter((c) => c.pixelsPerFoot > 0 && c.kind !== "detail");
+  const detailCandidates = candidates.filter((c) => c.kind === "detail");
+  const uniquePpf = Array.from(
+    new Map(sheetCandidates.map((c) => [Math.round(c.pixelsPerFoot), c])).values(),
+  );
+
+  const baseDiagnostics: CalibrationDiagnostics = {
+    ...diagnostics,
+    matchedSheetScaleTexts: sheetCandidates.map((c) => c.scaleText),
+    matchedDetailScaleTexts: [...detailCandidates.map((c) => c.scaleText), ...detailOverrides.map((d) => d.scaleText)],
+    decision: "failed",
+  };
+
   const attach = (cal: Calibration | null): Calibration | null => {
     if (!cal) return null;
-    return detailOverrides.length ? { ...cal, detailOverrides } : cal;
+    const withDetails = detailOverrides.length ? { ...cal, detailOverrides } : cal;
+    return withDetails.diagnostics ? withDetails : { ...withDetails, diagnostics: baseDiagnostics };
   };
-  if (a && a.pixelsPerFoot > 0 && a.confidence === "high") return attach(a);
+
+  if (uniquePpf.length > 1) {
+    const sample = uniquePpf.slice(0, 3).map((c) => c.scaleText).join(", ");
+    const suffix = uniquePpf.length > 3 ? ", ..." : "";
+    return attach({
+      source: "title_block",
+      pixelsPerFoot: 0,
+      confidence: "low",
+      method: `Multiple competing sheet scales found (${sample}${suffix})`,
+      reviewState: "ambiguous",
+      reason: "multiple scales detected",
+      diagnostics: { ...baseDiagnostics, decision: "ambiguous" },
+    });
+  }
+
+  if (uniquePpf.length === 1) {
+    const pick = uniquePpf[0];
+    return attach({
+      source: "title_block",
+      scaleText: pick.scaleText,
+      pixelsPerFoot: pick.pixelsPerFoot,
+      confidence: pick.confidence,
+      method: `Primary sheet scale ${pick.scaleText}`,
+      reviewState: "auto-detected",
+      diagnostics: { ...baseDiagnostics, decision: "main-scale" },
+    });
+  }
+
   const grid = tryGridDimension(input.rawText, input.pageWidthPx);
-  if (grid && grid.pixelsPerFoot > 0 && (grid.confidence === "high" || grid.confidence === "medium")) return attach(grid);
+  if (grid && grid.pixelsPerFoot > 0 && (grid.confidence === "high" || grid.confidence === "medium")) {
+    return attach({ ...grid, reviewState: "auto-detected", diagnostics: { ...baseDiagnostics, decision: "main-scale" } });
+  }
   const b = tryDimensionAnnotation(input.dimensions);
-  if (b && b.pixelsPerFoot > 0) return attach(b);
+  if (b && b.pixelsPerFoot > 0) {
+    return attach({ ...b, reviewState: "auto-detected", diagnostics: { ...baseDiagnostics, decision: "main-scale" } });
+  }
   const auto = tryAutoDimensionFromText(input.rawText);
-  if (auto && auto.pixelsPerFoot > 0) return attach(auto);
-  if (grid && grid.pixelsPerFoot > 0) return attach(grid);
+  if (auto && auto.pixelsPerFoot > 0) {
+    return attach({ ...auto, reviewState: "auto-detected", diagnostics: { ...baseDiagnostics, decision: "main-scale" } });
+  }
+  if (grid && grid.pixelsPerFoot > 0) {
+    return attach({ ...grid, reviewState: "auto-detected", diagnostics: { ...baseDiagnostics, decision: "main-scale" } });
+  }
   const c = tryKnownObject(input.knownObjects);
-  if (c) return attach(c);
-  if (a && a.pixelsPerFoot > 0) return attach(a);
-  // Last-resort deterministic default: 1/8" = 1'-0" @ 96 DPI = 12 px/ft.
-  // Guarantees every sheet has a usable px/ft so the estimator never has to
-  // hand-fill values just to unlock the calibration gate.
+  if (c) return attach({ ...c, reviewState: "auto-detected", diagnostics: { ...baseDiagnostics, decision: "main-scale" } });
+
+  if (detailOverrides.length > 0 || detailCandidates.length > 0) {
+    return attach({
+      source: "title_block",
+      pixelsPerFoot: 0,
+      confidence: "low",
+      method: "Detail scales found, but no clear primary sheet scale",
+      reviewState: "ambiguous",
+      reason: "detail scales found only",
+      diagnostics: { ...baseDiagnostics, decision: "detail-scale" },
+    });
+  }
+
+  const reason: CalibrationReason = baseDiagnostics.ocrLength < 120 ? "OCR incomplete" : "no scale text found";
   return attach({
-    source: "auto_dimension",
-    pixelsPerFoot: 12,
+    source: "title_block",
+    pixelsPerFoot: 0,
     confidence: "low",
-    method: "Default 1/8\" = 1'-0\" @ 96 DPI (auto-applied — verify if takeoff looks off)",
+    method: reason === "OCR incomplete" ? "OCR text too short to infer scale" : "No parseable sheet scale found",
+    reviewState: "failed",
+    reason,
+    diagnostics: { ...baseDiagnostics, decision: "failed" },
   });
 }
 
@@ -357,9 +530,6 @@ export function realFeetFromPixels(
   if (!calibration.pixelsPerFoot || calibration.pixelsPerFoot <= 0) return 0;
   return pixelLength / calibration.pixelsPerFoot;
 }
-
-/** Sheet discipline classification. Drives "Structural wins" gating. */
-export type Discipline = "Structural" | "Architectural" | "Other";
 
 export interface DisciplinedSheet {
   id: string;
