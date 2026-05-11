@@ -660,6 +660,7 @@ function DisciplineSection({
   onChangeDiscipline: (id: string, value: Discipline) => void;
   onAcceptScale: (id: string) => void;
   onMeasure: (row: SheetRow) => void;
+  onRetryMetadata?: () => void;
 }) {
   const accent = tone === "primary" ? "border-l-2 border-l-primary pl-3" : "border-l-2 border-l-border pl-3 opacity-90";
   return (
