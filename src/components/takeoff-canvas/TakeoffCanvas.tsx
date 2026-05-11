@@ -4,7 +4,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import PdfRenderer from "@/components/chat/PdfRenderer";
 import { colorForSegmentType, inferSegmentType } from "@/lib/segment-type";
 import { detectRegions, hueDistance, parseHslHue, type Region } from "@/lib/region-segmentation";
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Eye, EyeOff, Hand, Layers, Pencil, Trash2 } from "lucide-react";
+import { detectPageLabels, markBucket, type LabelHit } from "@/lib/ocr-page-labels";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Eye, EyeOff, Hand, Layers, Maximize2, Minus, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 /** A bucket / segment the canvas can paint a layer for. */
@@ -65,6 +66,14 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
   const [panelOpen, setPanelOpen] = useState(false);
   const [regions, setRegions] = useState<Region[]>([]);
   const regionCacheRef = useRef<Map<string, Region[]>>(new Map());
+  // OCR-based label hits (rects in normalised 0..1 coords).
+  const [labelHits, setLabelHits] = useState<LabelHit[]>([]);
+  const [labelImg, setLabelImg] = useState<{ w: number; h: number } | null>(null);
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const ocrCacheRef = useRef<Map<string, { hits: LabelHit[]; w: number; h: number }>>(new Map());
+  // Zoom + pan transform applied to the image-box wrapper.
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const stageRef = useRef<HTMLDivElement>(null);
   const imageBoxRef = useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = useState<{ w: number; h: number } | null>(null);
@@ -320,6 +329,87 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
     setPage(target);
   }, [highlight?.pageNumber, pageCount]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Reset zoom / pan when sheet or page changes.
+  useEffect(() => { setZoom(1); setPan({ x: 0, y: 0 }); }, [signedUrl, page]);
+
+  const clampZoom = (z: number) => Math.min(6, Math.max(0.5, z));
+  const zoomIn = () => setZoom((z) => clampZoom(z * 1.25));
+  const zoomOut = () => setZoom((z) => clampZoom(z / 1.25));
+  const zoomReset = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
+
+  const onWheel = (e: React.WheelEvent) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    setZoom((z) => clampZoom(z * factor));
+  };
+
+  // OCR label detection (on-demand + auto on first selection).
+  const sourceUrlForOcr = isPdf ? pdfImg : signedUrl;
+  const ocrCacheKey = sourceUrlForOcr ? `${sourceUrlForOcr}::${page}` : null;
+
+  const runOcr = useCallback(async () => {
+    if (!ocrCacheKey || !signedUrl) return;
+    const cached = ocrCacheRef.current.get(ocrCacheKey);
+    if (cached) {
+      setLabelHits(cached.hits);
+      setLabelImg({ w: cached.w, h: cached.h });
+      return;
+    }
+    // ocr-image requires a publicly fetchable URL. PDFs render to blob/data URLs
+    // that Google Vision cannot fetch, so OCR is only available when the
+    // underlying file is an image (PNG/JPG/etc.). For PDFs we silently no-op
+    // here — users can still draw polygons manually.
+    if (isPdf) {
+      toast.info("Label auto-detect is available on image sheets. For PDFs, draw with the polygon tool (P).");
+      return;
+    }
+    setOcrLoading(true);
+    try {
+      const res = await detectPageLabels(signedUrl);
+      ocrCacheRef.current.set(ocrCacheKey, { hits: res.hits, w: res.imageWidth, h: res.imageHeight });
+      setLabelHits(res.hits);
+      setLabelImg({ w: res.imageWidth, h: res.imageHeight });
+      if (res.hits.length === 0) toast.info("No structural marks detected on this page.");
+    } catch (e) {
+      toast.error(`Label detection failed: ${(e as Error)?.message || e}`);
+    } finally {
+      setOcrLoading(false);
+    }
+  }, [ocrCacheKey, signedUrl, isPdf]);
+
+  // When the sheet or page changes, restore cached hits (or clear).
+  useEffect(() => {
+    if (!ocrCacheKey) { setLabelHits([]); setLabelImg(null); return; }
+    const cached = ocrCacheRef.current.get(ocrCacheKey);
+    if (cached) { setLabelHits(cached.hits); setLabelImg({ w: cached.w, h: cached.h }); }
+    else { setLabelHits([]); setLabelImg(null); }
+  }, [ocrCacheKey]);
+
+  // Group label hits by the layer they belong to (via segment_type bucket).
+  const hitsByLayer = useMemo(() => {
+    const m = new Map<string, LabelHit[]>();
+    if (!labelHits.length || !labelImg) return m;
+    for (const h of labelHits) {
+      const bucket = markBucket(h.text);
+      if (!bucket) continue;
+      const layer = visibleLayers.find((l) => (l.segment_type || inferSegmentType(l.name)).toLowerCase() === bucket);
+      if (!layer) continue;
+      const arr = m.get(layer.id) || [];
+      arr.push(h);
+      m.set(layer.id, arr);
+    }
+    return m;
+  }, [labelHits, labelImg, visibleLayers]);
+
+  const hasLabelSelection = useMemo(() => {
+    if (!highlightLabelLc) return false;
+    for (const layer of visibleLayers) {
+      if (layer.name.trim().toLowerCase() === highlightLabelLc && (hitsByLayer.get(layer.id)?.length || 0) > 0) return true;
+    }
+    return false;
+  }, [hitsByLayer, highlightLabelLc, visibleLayers]);
+
   return (
     <div className={`flex h-full min-h-0 ${className || ""}`}>
       {/* Stage */}
@@ -345,6 +435,16 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
             <ToolBtn title="Pan / Select (V)" active={tool === "pan"} onClick={() => setTool("pan")}><Hand className="h-4 w-4" /></ToolBtn>
             <ToolBtn title="Polygon (P)" active={tool === "polygon"} onClick={() => setTool("polygon")}><Pencil className="h-4 w-4" /></ToolBtn>
             <ToolBtn title="Erase (E)" active={tool === "erase"} onClick={() => setTool("erase")}><Trash2 className="h-4 w-4" /></ToolBtn>
+            <div className="mt-1 flex flex-col items-center gap-0.5 border-t border-border pt-1">
+              <ToolBtn title="Zoom in (Ctrl + wheel)" active={false} onClick={zoomIn}><Plus className="h-4 w-4" /></ToolBtn>
+              <ToolBtn title="Zoom out" active={false} onClick={zoomOut}><Minus className="h-4 w-4" /></ToolBtn>
+              <ToolBtn title={`Fit (current ${Math.round(zoom * 100)}%)`} active={zoom !== 1} onClick={zoomReset}><Maximize2 className="h-4 w-4" /></ToolBtn>
+            </div>
+            <div className="mt-1 flex flex-col items-center gap-0.5 border-t border-border pt-1">
+              <ToolBtn title={ocrLoading ? "Detecting labels…" : "Auto-detect labels on this page"} active={labelHits.length > 0} onClick={runOcr}>
+                <Sparkles className={`h-4 w-4 ${ocrLoading ? "animate-pulse" : ""}`} />
+              </ToolBtn>
+            </div>
             {isPdf && pageCount > 1 && (
               <div className="mt-1 flex flex-col items-center gap-0.5 border-t border-border pt-1">
                 <button onClick={() => setPage((p) => Math.max(1, p - 1))} className="grid h-6 w-8 place-items-center rounded text-muted-foreground hover:bg-muted disabled:opacity-30" disabled={page <= 1}>
@@ -372,9 +472,10 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
           {/* Stage */}
           <div
             ref={stageRef}
-            className={`absolute inset-0 flex items-center justify-center p-2 ${tool === "polygon" ? "cursor-crosshair" : tool === "erase" ? "cursor-not-allowed" : "cursor-default"}`}
+            className={`absolute inset-0 flex items-center justify-center p-2 overflow-hidden ${tool === "polygon" ? "cursor-crosshair" : tool === "erase" ? "cursor-not-allowed" : "cursor-default"}`}
             onClick={onStageClick}
             onDoubleClick={() => { if (tool === "polygon") finishDraft(); }}
+            onWheel={onWheel}
           >
             {(!signedUrl || (isPdf && !pdfImg)) ? (
               <div className="text-center text-xs text-muted-foreground">
@@ -384,7 +485,12 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
               <div
                 ref={imageBoxRef}
                 className="relative block"
-                style={fittedBox ? { width: `${fittedBox.w}px`, height: `${fittedBox.h}px` } : { width: "100%", height: "100%" }}
+                style={{
+                  ...(fittedBox ? { width: `${fittedBox.w}px`, height: `${fittedBox.h}px` } : { width: "100%", height: "100%" }),
+                  transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                  transformOrigin: "center center",
+                  transition: "transform 80ms ease-out",
+                }}
               >
                 <img
                   src={(isPdf ? pdfImg : signedUrl) || undefined}
@@ -423,6 +529,37 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
                           vectorEffect="non-scaling-stroke"
                         />
                       );
+                    })}
+                    {/* OCR-detected mark rectangles, grouped by inferred layer */}
+                    {labelImg && visibleLayers.map((layer) => {
+                      const hits = hitsByLayer.get(layer.id) || [];
+                      if (!hits.length) return null;
+                      const color = layerColor(layer);
+                      const isSel = !!highlightLabelLc && layer.name.trim().toLowerCase() === highlightLabelLc;
+                      const fillOpacity = isSel ? 0.42 : 0.18;
+                      const strokeWidth = isSel ? 0.010 : 0.004;
+                      const pad = 0.012;
+                      return hits.map((h, i) => {
+                        const x1 = Math.max(0, h.rect[0] / labelImg.w - pad);
+                        const y1 = Math.max(0, h.rect[1] / labelImg.h - pad);
+                        const x2 = Math.min(1, h.rect[2] / labelImg.w + pad);
+                        const y2 = Math.min(1, h.rect[3] / labelImg.h + pad);
+                        return (
+                          <rect
+                            key={`hit-${layer.id}-${i}`}
+                            x={x1}
+                            y={y1}
+                            width={Math.max(0.001, x2 - x1)}
+                            height={Math.max(0.001, y2 - y1)}
+                            fill={color}
+                            fillOpacity={fillOpacity}
+                            stroke={color}
+                            strokeWidth={strokeWidth}
+                            vectorEffect="non-scaling-stroke"
+                            rx={0.004}
+                          />
+                        );
+                      });
                     })}
                     {/* Saved polygons grouped by layer */}
                     {visibleLayers.map((layer) => {
@@ -477,7 +614,7 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
                   </svg>
                 )}
                 {/* Selection callout — drives Stage 02 "selected segment" visual */}
-                {highlight?.label && !hasMatchedSelection && (
+                {highlight?.label && !hasMatchedSelection && !hasLabelSelection && (
                   <div
                     className="pointer-events-none absolute inset-0"
                     style={{
