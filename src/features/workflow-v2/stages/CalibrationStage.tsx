@@ -136,6 +136,20 @@ function requiresReview(row: SheetRow): boolean {
   return false;
 }
 
+/**
+ * Heuristic: does this sheet look like a cover/index page where calibration
+ * is meaningless (NTS schematics, drawing list, etc.)?
+ */
+function isLikelyCoverSheet(row: SheetRow): boolean {
+  const sn = (row.sheet_number || "").trim();
+  if (sn && /^[A-Z]{1,3}-?0\.0$/i.test(sn)) return true;
+  const txt = (row.raw_text || "").toUpperCase().slice(0, 800);
+  if (/COVER\s+(SHEET|PAGE)/.test(txt)) return true;
+  const noScale = !row.calibration || row.calibration.pixelsPerFoot <= 0;
+  if (noScale && /\bN\.?\s*T\.?\s*S\.?\b/.test(txt)) return true;
+  return false;
+}
+
 export default function CalibrationStage({ projectId, state, goToStage }: StageProps) {
   const [sheets, setSheets] = useState<SheetRow[]>([]);
   const [steps, setSteps] = useState<LoadSteps>(initialSteps());
@@ -143,6 +157,14 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
   const [hiddenCount, setHiddenCount] = useState(0);
   const [showAll, setShowAll] = useState<boolean>(!!state.local.calibrationShowAll);
   const [twoPointSheet, setTwoPointSheet] = useState<SheetRow | null>(null);
+  const notApplicable = (state.local.calibrationNotApplicable || {}) as Record<string, boolean>;
+  const isNotApplicable = (id: string) => !!notApplicable[id];
+  const toggleNotApplicable = (id: string, value: boolean) => {
+    const cur = (state.local.calibrationNotApplicable || {}) as Record<string, boolean>;
+    const next = { ...cur };
+    if (value) next[id] = true; else delete next[id];
+    state.setLocal({ calibrationNotApplicable: next });
+  };
   const [emptyState, setEmptyState] = useState<{ mode: "sheets" | "empty"; title?: string; hint?: string }>({
     mode: "empty",
     title: "Loading indexed sheets…",
@@ -423,9 +445,10 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
   const structural = sheets.filter((r) => r.discipline === "Structural");
   const reference = sheets.filter((r) => r.discipline !== "Structural");
   const architectural = sheets.filter((r) => r.discipline === "Architectural");
-  const gateRows = (structural.length + architectural.length > 0)
+  const gateRowsAll = (structural.length + architectural.length > 0)
     ? [...structural, ...architectural]
     : sheets;
+  const gateRows = gateRowsAll.filter((r) => !isNotApplicable(r.id));
   const isResolved = (r: SheetRow) => !!r.calibration && r.calibration.pixelsPerFoot > 0 && !requiresReview(r);
   const isCalibrated = (r: SheetRow) => !!r.calibration && r.calibration.pixelsPerFoot > 0;
   const isVerifiedOrManual = (r: SheetRow) => r.scale_status === "verified" || r.scale_status === "manual";
@@ -613,6 +636,9 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
               onAcceptScale={acceptScale}
               onMeasure={(r) => setTwoPointSheet(r)}
               onRetryMetadata={load}
+              isNotApplicable={isNotApplicable}
+              isLikelyCover={isLikelyCoverSheet}
+              onToggleNotApplicable={toggleNotApplicable}
             />
             <DisciplineSection
               title="Architectural / Reference"
@@ -627,6 +653,9 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
               onAcceptScale={acceptScale}
               onMeasure={(r) => setTwoPointSheet(r)}
               onRetryMetadata={load}
+              isNotApplicable={isNotApplicable}
+              isLikelyCover={isLikelyCoverSheet}
+              onToggleNotApplicable={toggleNotApplicable}
             />
           </div>
         )}
