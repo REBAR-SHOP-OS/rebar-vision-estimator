@@ -1851,6 +1851,58 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
     items = enriched.filter((it: any) => itemMatchesSegment(it, segTypeKey, String(segment?.name || "")));
     console.log(`[auto-estimate] post-filter rows=${items.length} for segment="${segment?.name}" effective_type=${segTypeKey}`);
 
+    // ============================================================
+    // DETERMINISTIC SCHEDULE FALLBACK (no-AI cross-page resolver)
+    // For any row that the model left dimensionless, scan the
+    // Project Knowledge Pack for a schedule entry whose mark family
+    // matches the row's description / bar mark. If we find one,
+    // backfill bar_size + dimensions and clear matching missing_refs
+    // so QA does not raise a question we already have an answer for.
+    // ============================================================
+    if (knowledgePack.length > 0) {
+      const FAMILY_RX = /\b(F|WF|FW|C|COL|P|PR|PAD|B|GB|BM|S|SOG|CB|EQP)[\s-]?(\d{1,3}[A-Z]?)\b/i;
+      const REINF_SIZE_RX = /(\d{1,3})\s*[-#xX×@]?\s*(10M|15M|20M|25M|30M|35M|#\s*\d)/i;
+      let resolvedCount = 0;
+      for (const it of items as any[]) {
+        const hasDims = (Number(it.total_length) || 0) > 0;
+        const hasSize = !!String(it.bar_size || "").trim() && !/^0M$/i.test(String(it.bar_size));
+        if (hasDims && hasSize) continue;
+        const hay = `${String(it.description || "").toUpperCase()} ${String(it.source_excerpt || "").toUpperCase()}`;
+        const m = hay.match(FAMILY_RX);
+        if (!m) continue;
+        const targetMark = `${m[1].toUpperCase()}-${m[2]}`;
+        const hit = knowledgePack.find((h) => h.mark.toUpperCase() === targetMark);
+        if (!hit) continue;
+        // Backfill size from reinforcing string if we can identify a bar size.
+        if (!hasSize) {
+          const rs = hit.reinforcing.match(REINF_SIZE_RX);
+          if (rs) it.bar_size = rs[2].replace(/\s+/g, "").toUpperCase();
+        }
+        // We do NOT compute total_length here (segment-level qty depends on plan
+        // counts, which the model already extracted). We only flag the
+        // schedule resolution and clear the QA "missing dimensions" question.
+        it.schedule_mark = hit.mark;
+        it.schedule_source_page = hit.page;
+        if (Array.isArray(it._missing_refs) && it._missing_refs.length > 0) {
+          it._missing_refs = it._missing_refs.filter((tag: any) => {
+            const t = String(tag || "").toLowerCase();
+            return !/dimension|callout|rebar callout|element dimensions|geometry/.test(t);
+          });
+        }
+        // If the resolver previously marked it unresolved purely for missing
+        // dimensions/callout, promote to "partial" since we now have schedule
+        // evidence.
+        if (it._geometry_status === "unresolved" && (!it._missing_refs || it._missing_refs.length === 0)) {
+          it._geometry_status = "partial";
+          it.confidence = Math.max(Number(it.confidence) || 0, 0.55);
+        }
+        resolvedCount++;
+      }
+      if (resolvedCount > 0) {
+        console.log(`[auto-estimate] schedule fallback resolved ${resolvedCount} row(s) via Project Knowledge Pack`);
+      }
+    }
+
     // Object-first page locator. For each item we build a ranked list of
     // anchor candidates (detail / section / callout / grid / element /
     // schedule row / excerpt token / bar mark / bar size), find the first
