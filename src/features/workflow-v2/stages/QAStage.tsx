@@ -245,6 +245,8 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     });
   };
 
+  const [reloadTick, setReloadTick] = useState(0);
+  const [lastReloadAt, setLastReloadAt] = useState<Date | null>(null);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -254,9 +256,10 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
       setIssues(data);
       setSelectedId((c) => data.find((i) => i.id === c)?.id || data[0]?.id || null);
       setLoading(false);
+      setLastReloadAt(new Date());
     })();
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, reloadTick]);
 
   const sel = issues.find((i) => i.id === selectedId);
 
@@ -619,7 +622,22 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
   return (
     <div className="h-full bg-background text-foreground">
-      <StageHeader kicker="Stage 04" title="QA Gate" subtitle="Compare revisions, validate anchors, and clear estimator questions" />
+      <StageHeader
+        kicker="Stage 04"
+        title="QA Gate"
+        subtitle="Compare revisions, validate anchors, and clear estimator questions"
+        right={
+          <button
+            onClick={() => setReloadTick((n) => n + 1)}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-border bg-card hover:bg-accent/40 text-[11px] uppercase tracking-[0.12em] disabled:opacity-50"
+            title={lastReloadAt ? `Last run: ${lastReloadAt.toLocaleTimeString()}` : "Re-run QA Gate"}
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            {loading ? "Re-running…" : "Re-run QA Gate"}
+          </button>
+        }
+      />
       <GateBanner
         tone={critCount > 0 ? "blocked" : "warn"}
         title={critCount > 0 ? "Critical QA issues require action" : warnCount > 0 ? "QA warnings remain open" : "No open QA blockers"}
