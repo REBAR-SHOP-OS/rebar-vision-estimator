@@ -616,38 +616,13 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
         ) : (
           <div className="space-y-5">
             <DisciplineSection
-              title="Structural"
-              subtitle="Required for takeoff — every sheet must resolve to a usable px/ft."
+              title="Sheets"
+              subtitle="All sheets in one list. Use the discipline dropdown on each row to reclassify. Structural always wins on conflicting dimensions."
               tone="primary"
-              rows={structural}
-              resolvedCount={structuralResolved}
-              verifiedCount={structural.filter(isVerifiedOrManual).length}
-              empty={
-                <div className="flex items-center gap-2 px-3 py-2.5 border border-[hsl(var(--status-inferred))]/40 bg-[hsl(var(--status-inferred))]/5 text-[12px]">
-                  <AlertTriangle className="w-4 h-4 text-[hsl(var(--status-inferred))]" />
-                  <span className="flex-1">No Structural sheets detected. Architectural sheets will be used for calibration; reclassify any sheet below if needed.</span>
-                  {sheets.length > 0 && (
-                    <Button size="sm" variant="outline" onClick={promoteAllToStructural}>Mark all as Structural</Button>
-                  )}
-                </div>
-              }
-              onUpdateOverride={updateOverride}
-              onChangeDiscipline={setDiscipline}
-              onAcceptScale={acceptScale}
-              onMeasure={(r) => setTwoPointSheet(r)}
-              onRetryMetadata={load}
-              isNotApplicable={isNotApplicable}
-              isLikelyCover={isLikelyCoverSheet}
-              onToggleNotApplicable={toggleNotApplicable}
-            />
-            <DisciplineSection
-              title="Architectural / Reference"
-              subtitle="Required for takeoff — every Architectural sheet must also resolve to a usable px/ft. Structural still wins on conflicting dimensions."
-              tone="muted"
-              rows={reference}
-              resolvedCount={reference.filter(isCalibrated).length}
-              verifiedCount={reference.filter(isVerifiedOrManual).length}
-              empty={<div className="text-[11px] text-muted-foreground px-1">No reference sheets.</div>}
+              rows={[...sheets].sort((a, b) => (a.page_number ?? 0) - (b.page_number ?? 0))}
+              resolvedCount={sheets.filter(isCalibrated).length}
+              verifiedCount={sheets.filter(isVerifiedOrManual).length}
+              empty={<div className="text-[11px] text-muted-foreground px-1">No sheets.</div>}
               onUpdateOverride={updateOverride}
               onChangeDiscipline={setDiscipline}
               onAcceptScale={acceptScale}
