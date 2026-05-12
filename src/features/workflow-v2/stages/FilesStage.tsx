@@ -211,7 +211,7 @@ export default function FilesStage({ projectId, state }: StageProps) {
     const { error: pipelineErr } = await supabase.functions.invoke("process-pipeline", { body: { project_id: projectId } });
     if (pipelineErr) {
       console.warn("process-pipeline failed after Stage 01 upload:", pipelineErr);
-      toast.warning("Files uploaded, but the project index status needs attention in Stage 01.");
+      toast.warning(`Files uploaded, but Stage 01 still needs attention: ${pipelineErr.message || "index status check failed."}`);
     }
   };
 
