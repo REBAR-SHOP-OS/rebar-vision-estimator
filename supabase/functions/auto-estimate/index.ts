@@ -1122,7 +1122,7 @@ serve(async (req) => {
     }
 
     // Gather context
-    const [segRes, projRes, filesRes, stdRes, existingRes, searchIndexRes, knowledgeRes, sheetMetaRes] = await Promise.all([
+    const [segRes, projRes, filesRes, stdRes, existingRes, searchIndexRes, knowledgeRes] = await Promise.all([
       supabase.from("segments").select("*").eq("id", segment_id).single(),
       supabase.from("projects").select("name, project_type, scope_items, description").eq("id", project_id).single(),
       supabase.from("project_files").select("id, file_name, file_type").eq("project_id", project_id).limit(20),
@@ -1130,7 +1130,6 @@ serve(async (req) => {
       supabase.from("estimate_items").select("id, description, bar_size, quantity_count, total_length, total_weight, confidence").eq("segment_id", segment_id).limit(200),
       supabase.from("drawing_search_index").select("raw_text, page_number, extracted_entities, document_version_id").eq("project_id", project_id).limit(80),
       supabase.from("agent_knowledge").select("title, content, file_name").eq("user_id", user.id).limit(50),
-      supabase.from("document_sheets").select("document_version_id,page_number,sheet_number,scale_raw,scale_ratio").eq("project_id", project_id).limit(200),
     ]);
 
     const segment = segRes.data;
@@ -1138,9 +1137,23 @@ serve(async (req) => {
     const files = filesRes.data || [];
     const standard = stdRes.data?.[0];
     const existing = existingRes.data || [];
+    // Per-page sheet metadata is now derived from drawing_search_index.extracted_entities.scale
+    // (persisted by the Calibration stage). The legacy `document_sheets` table never existed in
+    // this project's DB, so the previous lookup always returned empty. Reading from the search
+    // index keeps everything in one place.
     const sheetMetaByKey = new Map<string, any>();
-    for (const row of (sheetMetaRes.data || []) as any[]) {
-      sheetMetaByKey.set(`${row.document_version_id || ""}:${Number(row.page_number) || 0}`, row);
+    for (const row of (searchIndexRes.data || []) as any[]) {
+      const ee: any = row.extracted_entities || {};
+      const scale = ee.scale || {};
+      const tb = ee.title_block || {};
+      sheetMetaByKey.set(`${row.document_version_id || ""}:${Number(row.page_number) || 0}`, {
+        document_version_id: row.document_version_id,
+        page_number: row.page_number,
+        sheet_number: tb.sheet_number || tb.sheet_id || null,
+        scale_raw: scale.raw || tb.scale || tb.scale_raw || null,
+        scale_ratio: Number(scale.ratio || 0) || null,
+        pixels_per_foot: Number(scale.pixels_per_foot || 0) || null,
+      });
     }
 
     // ============================================================
