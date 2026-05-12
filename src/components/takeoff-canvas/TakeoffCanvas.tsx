@@ -188,6 +188,15 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
 
   const layerColor = useCallback((l: CanvasLayer) => l.color || colorForSegmentType(l.segment_type), []);
 
+  // Keep `activeLayer` in sync with the `layers` prop. Layers can arrive
+  // async (or change as the user adds/removes segments); without this the
+  // initial `useState(layers[0]?.id || null)` would leave activeLayer
+  // permanently null and silently break Polygon/Square/Circle clicks.
+  useEffect(() => {
+    if (layers.length === 0) { setActiveLayer(null); return; }
+    setActiveLayer((cur) => (cur && layers.some((l) => l.id === cur)) ? cur : layers[0].id);
+  }, [layers]);
+
   // Auto-detect colored regions on the rendered page (Togal-style overlay).
   useEffect(() => {
     if (!pdfImg && !signedUrl) { setRegions([]); return; }
