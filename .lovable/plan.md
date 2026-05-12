@@ -1,56 +1,61 @@
-# Stage 03 Calibration — Verification & Minor Polish
+# Add Undo / Redo to the Takeoff Canvas toolbar
 
-## What already exists (verified in code)
+## Goal
+Add **Undo** (↶) and **Redo** (↷) buttons to the left tool palette in `TakeoffCanvas.tsx` (the "layers" toolbar shown in the screenshot, above the page nav). They reverse and replay the user's last drawing/erase operations on overlay polygons.
 
-**A. Loading reliability** — `CalibrationStage.tsx`
-- `STEP_TIMEOUT_MS = 15000` per fetch via `timedFetch` + `AbortController`.
-- 4 explicit steps: `index → revisions / drawings / files` (latter 3 in parallel via `Promise.allSettled`).
-- Per-step pill (loading / done / error) with the exact error message and per-step Retry button + a global Retry. Loader never spins forever.
+## Scope
+Single file: `src/components/takeoff-canvas/TakeoffCanvas.tsx`. No DB schema changes, no other components touched. Minimal patch.
 
-**B. Scale parser** — `src/features/workflow-v2/lib/scale-resolver.ts`
-- Architectural (`1/8" = 1'-0"`) and engineering (`1:50`) scale parsing.
-- `collectScaleCandidates` classifies each match as `sheet` / `detail` / `unknown` using surrounding context (`SCALE/SHEET/PLAN` vs `DETAIL/SECTION/ENLARGED/KEY PLAN`).
-- Multiple competing sheet scales → `reviewState = "ambiguous"`, `reason = "multiple scales detected"`, `pixelsPerFoot = 0` (never silently picks one).
-- Detail-only matches → `"detail scales found only"` (never accepted as primary).
-- Fallback chain: title-block → grid-dimension (medium/high) → annotation → auto-dimension → known object, all attached with diagnostics.
+## Behavior
+Track per-session history of overlay edits (add / erase). Undo reverses the most recent op against the database; redo reapplies it.
 
-**C. OCR strategy**
-- `buildScaleSearchText` scans full text up to 24 000 chars, otherwise samples `start + middle + end` (8 KB each) — diagnostics record which segments were used.
+- **Add op** (square/circle stamp, polygon close): undo deletes that polygon by id; redo re-inserts (new id) and updates the history entry's id.
+- **Erase op**: undo re-inserts the previously-deleted polygon (new id); redo deletes it again.
+- Any new user edit clears the redo stack (standard editor behavior).
+- History is in-memory only (resets on remount / sheet change is fine — keep across page changes since polygons array is global).
+- Buttons disabled when their stack is empty or when no `user`/`projectId`. Show toast on DB error and do not advance the stack.
 
-**D. Manual calibration**
-- `TwoPointCalModal` renders the PDF page via `PdfRenderer`, lets the user click two points, enter real-world feet, and computes `px/ft`. Result is saved as `source: "user", confidence: "user", method: "Two-point measurement"`, status `manual`. Available from every sheet row regardless of auto-detection state.
+## Keyboard shortcuts
+- `Ctrl/Cmd + Z` → undo
+- `Ctrl/Cmd + Shift + Z` (and `Ctrl/Cmd + Y`) → redo
+- Skipped while typing in inputs (already the case — canvas has no inputs in scope).
 
-**E. Per-sheet status model**
-- `ScaleStatus = "auto-detected" | "verified" | "manual" | "ambiguous" | "failed"` rendered as a pill.
-- Reasons rendered below the row: `no scale text found`, `multiple scales detected`, `detail scales found only`, `OCR incomplete`, `metadata load failed` (the last is set automatically when the metadata fetches reject and the row is unresolved).
+## UI
+Insert a new bordered group in the existing left tool palette (after the Erase button, before Zoom group):
 
-**F. UX flow**
-- Load → discipline detection (`detectSheetDiscipline`) → auto scale → status pill → Accept / Measure / px-ft override → `Confirm calibration` button is disabled until every required (Structural + Architectural) row is resolved (`isResolved` = calibrated AND not `requiresReview`). Structural rows additionally require `confidence: high` and no detail-override conflicts.
+```text
+[ ↶ Undo ]   title="Undo (Ctrl+Z)"   disabled when undoStack empty
+[ ↷ Redo ]   title="Redo (Ctrl+Shift+Z)"  disabled when redoStack empty
+```
 
-**G. Structural safety**
-- `requiresReview` forces "needs review" on Structural rows whose confidence is not `high` or that have detail overrides. Detail-only / multi-scale results never auto-promote.
+Use `Undo2` and `Redo2` from `lucide-react` (already a project dependency), styled with the existing `ToolBtn` component for visual consistency.
 
-**H. Diagnostics**
-- Per-row `<details>` block prints decision, OCR length, scanned segments, matched sheet scales and matched detail scales. Console logs each step's elapsed ms and which step failed.
+## Technical details
 
-**Tests** — `src/test/scale-resolver.test.ts` covers: late-text scale, ambiguous multi-scale, detail-only, no-scale-text fallback.
+1. **State** (inside component):
+   ```ts
+   type HistoryOp =
+     | { kind: "add"; id: string; snapshot: Omit<ManualPolygon,"id"> }
+     | { kind: "erase"; snapshot: ManualPolygon };
+   const [undoStack, setUndoStack] = useState<HistoryOp[]>([]);
+   const [redoStack, setRedoStack] = useState<HistoryOp[]>([]);
+   ```
 
-## Conclusion
+2. **Record ops**:
+   - In `saveOverlayPolygon` after successful insert, push `{kind:"add", id:data.id, snapshot:{segment_id,page_number,polygon,color_hint,source_file_id}}` and clear redo stack.
+   - In `erasePolygon` after successful delete, push `{kind:"erase", snapshot: <the polygon row>}` and clear redo stack.
 
-Every item in the request (A–H, including the manual two-point tool and per-sheet status) is already implemented. **No code changes are required to satisfy the success criteria.**
+3. **Undo / redo helpers** that perform the inverse Supabase op against `takeoff_overlays`, mirror the same `setPolygons` mutation already used, then move the op between stacks (rewriting the `id` field on re-insert paths so subsequent redo/undo references the new row).
 
-## Optional polish (only if you want me to apply)
+4. **Keyboard listener**: extend the existing `useEffect` shortcut handler at line 325 to also handle Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y.
 
-1. **Per-step retry buttons** — today the warning-icon button retries all four steps; could wire each step icon to retry only that fetch.
-2. **`metadata load failed` retry hint** — show a one-click "Retry metadata" inline on rows whose status is downgraded by a metadata reject.
-3. **Cache signed URL in `TwoPointCalModal`** — currently re-requested every open; minor.
-4. **Add unit test** for `TwoPointCalModal` math (px → ft → ppf).
-5. **Surface `unmatchedTokens`** from `ocr-page-labels` inside the diagnostics `<details>` so estimators see why a footing/wall mark wasn't recognised on the same sheet they're calibrating.
+5. **Imports**: extend the `lucide-react` import to add `Undo2, Redo2`.
 
-Tell me which (if any) of 1–5 you want and I'll implement only those — otherwise Stage 03 is done.
+## Risks
+- DB latency: undo/redo is async; brief no-op feel until the round-trip completes. Acceptable — matches existing add/erase UX.
+- If a polygon was modified outside this component since the op (concurrent session), redo of an erase will create a new row with a fresh id — accepted.
 
-## Risks remaining
-
-- Auto-dimension fallback (assumes ANSI D + 96 DPI) can be off when sheets are exported at non-standard DPI; this is intentionally surfaced as `low` confidence and forces review on Structural sheets.
-- `metadata load failed` is non-fatal: rows still load from `drawing_search_index`, but sheet numbers/discipline/file paths may be missing until the user retries.
-- Two-point tool requires a `file_path` (PDF in `blueprints` bucket); for index rows without a linked document the modal degrades to "use the px/ft input instead".
+## Out of scope
+- Persisting history across page reloads.
+- Undoing the in-progress polygon `draft` (Esc already cancels it).
+- Refactoring `TakeoffCanvas` structure.
