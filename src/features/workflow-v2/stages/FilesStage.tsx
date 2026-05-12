@@ -100,7 +100,7 @@ export default function FilesStage({ projectId, state }: StageProps) {
 
   useEffect(() => { if (!selectedId && rows[0]) setSelectedId(rows[0].id); }, [rows, selectedId]);
   const sel = rows.find((r) => r.id === selectedId) || null;
-  const failedRows = rows.filter((row) => row.parse_status === "failed" || (row.parse_status === "indexed" && row.indexed_rows === 0));
+  const retryableRows = rows.filter((row) => row.parse_status === "failed" || (row.parse_status === "indexed" && row.indexed_rows === 0));
   const indexedRows = rows.filter((row) => row.parse_status === "indexed" && row.indexed_rows > 0);
   const parsingRows = rows.filter((row) => row.parse_status === "parsing");
 
@@ -284,14 +284,14 @@ export default function FilesStage({ projectId, state }: StageProps) {
                   {reindexing ? "Re-indexing..." : "Re-index All"}
                 </button>
               )}
-              {failedRows.length > 0 && (
+              {retryableRows.length > 0 && (
                 <button
-                  onClick={() => handleReindex(failedRows)}
+                  onClick={() => handleReindex(retryableRows)}
                   disabled={reindexing || uploading}
                   className="inline-flex items-center gap-2 px-3 h-8 text-[11px] font-semibold uppercase tracking-[0.12em] border border-[hsl(var(--status-inferred))]/50 text-[hsl(var(--status-inferred))] hover:bg-[hsl(var(--status-inferred))]/10 disabled:opacity-50"
                 >
                   {reindexing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                  {reindexing ? "Retrying..." : `Retry Failed (${failedRows.length})`}
+                  {reindexing ? "Retrying..." : `Retry Failed (${retryableRows.length})`}
                 </button>
               )}
               <button
@@ -321,9 +321,9 @@ export default function FilesStage({ projectId, state }: StageProps) {
                   {parsingRows.length} parsing/indexing
                 </span>
               )}
-              {failedRows.length > 0 && (
+              {retryableRows.length > 0 && (
                 <span className="text-[11px] px-2 py-1 border border-[hsl(var(--status-blocked))]/40 text-[hsl(var(--status-blocked))] bg-[hsl(var(--status-blocked))]/5">
-                  {failedRows.length} require retry
+                  {retryableRows.length} require retry
                 </span>
               )}
             </div>

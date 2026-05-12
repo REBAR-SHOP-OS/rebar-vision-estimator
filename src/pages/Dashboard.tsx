@@ -186,6 +186,7 @@ const Dashboard: React.FC = () => {
     if (uploadedCount > 0) {
       toast.success(`${uploadedCount} file${uploadedCount > 1 ? "s" : ""} uploaded`);
       let indexedCount = 0;
+      const failedIndexing: string[] = [];
       for (const file of filesToParse) {
         const result = await parseAndIndexFile(
           project.id,
@@ -194,11 +195,14 @@ const Dashboard: React.FC = () => {
         );
         if (result.status === "indexed") indexedCount++;
         if (result.status === "failed") {
-          toast.error(`Indexing failed for ${file.file_name}: ${result.error || "unknown error"}`);
+          failedIndexing.push(`${file.file_name}: ${result.error || "unknown error"}`);
         }
       }
       if (indexedCount > 0) {
         toast.success(`Indexed ${indexedCount} uploaded drawing${indexedCount > 1 ? "s" : ""}`);
+      }
+      if (failedIndexing.length > 0) {
+        toast.error(`Indexing failed for ${failedIndexing.length} file${failedIndexing.length > 1 ? "s" : ""}. Review Stage 01 for retry details.`);
       }
       if (legacyFallbackFileCount > 0) {
         toast.warning(

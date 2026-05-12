@@ -226,7 +226,7 @@ export async function parseAndIndexFile(
         response: indexResponse,
       });
       if (!outcome.ok) {
-        throw new Error(outcome.error);
+        throw new Error(`${file.file_name}: ${outcome.error}`);
       }
     } else if (pages.length === 0) {
       throw new Error("Parsing produced zero pages to index.");

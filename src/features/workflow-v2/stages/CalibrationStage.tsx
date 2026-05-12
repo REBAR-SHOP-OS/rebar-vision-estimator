@@ -143,11 +143,10 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
   const [hiddenCount, setHiddenCount] = useState(0);
   const [showAll, setShowAll] = useState<boolean>(!!state.local.calibrationShowAll);
   const [twoPointSheet, setTwoPointSheet] = useState<SheetRow | null>(null);
-  const [emptyState, setEmptyState] = useState(() => deriveCalibrationStageState({
-    fileCount: state.fileCount,
-    indexRowCount: 0,
-    documents: [],
-  }));
+  const [emptyState, setEmptyState] = useState<{ mode: "sheets" | "empty"; title?: string; hint?: string }>({
+    mode: "empty",
+    title: "Loading indexed sheets…",
+  });
 
   const loading = steps.index === "loading" || steps.revisions === "loading" || steps.drawings === "loading" || steps.files === "loading";
 
