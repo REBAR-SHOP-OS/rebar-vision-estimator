@@ -1392,6 +1392,83 @@ serve(async (req) => {
       }
     }
 
+    // ============================================================
+    // PROJECT KNOWLEDGE PACK (cross-page schedule + notes index)
+    // We scan EVERY OCR page (not just the segment-relevant ones)
+    // and pull rows that look like a structural schedule entry
+    // (mark + dimensions ± reinforcing). The estimator is told to
+    // resolve missing dims from this pack BEFORE asking the user.
+    // A deterministic post-AI resolver also uses this pack to
+    // backfill rows whose mark family matches.
+    // ============================================================
+    type ScheduleHit = {
+      mark: string;       // "F-1", "WF-2", "C3", etc. — uppercase
+      family: string;     // "F", "WF", "C", "P", "B", "GB"
+      dim1_mm: number;    // larger plan dimension
+      dim2_mm: number;    // smaller plan dimension
+      reinforcing: string;// best-effort verbatim ("5-15M E.W. T&B")
+      page: number;
+      excerpt: string;    // verbatim line
+    };
+    const knowledgePack: ScheduleHit[] = [];
+    {
+      // Mark families we recognise. Keep tight to avoid noise.
+      const MARK_RX = /\b(F|WF|FW|C|COL|P|PR|B|GB|BM|S|SOG|CB|EQP|PAD)[\s-]?(\d{1,3}[A-Z]?)\b/g;
+      // dims like 1200 X 1200, 1200x600, 2400 X 600 X 300
+      const DIM_RX = /(\d{3,5})\s*(?:mm)?\s*[xX×]\s*(\d{3,5})(?:\s*(?:mm)?\s*[xX×]\s*(\d{2,5}))?\s*(?:mm)?/;
+      // reinforcing like 5-15M, 2-20M E.W., 4#5, (3) 20M
+      const REINF_RX = /\(?\s*(\d{1,3})\s*[)\-#]?\s*(?:#\s*\d|[12345]?[05]M)\b[^\n]{0,40}/i;
+      const FAMILY_NORMAL: Record<string, string> = {
+        F: "F", WF: "WF", FW: "WF",
+        C: "C", COL: "C",
+        P: "P", PR: "P", PAD: "PAD",
+        B: "B", BM: "B", GB: "GB",
+        S: "S", SOG: "SOG", CB: "CB", EQP: "EQP",
+      };
+      for (const page of (searchIndexRes.data || []) as any[]) {
+        const text = String(page.raw_text || "");
+        if (text.length < 40) continue;
+        const pageNum = Number(page.page_number) || 0;
+        // Process line-by-line so excerpts stay short and traceable.
+        for (const rawLine of text.split(/\r?\n/)) {
+          const line = rawLine.trim();
+          if (line.length < 8 || line.length > 220) continue;
+          MARK_RX.lastIndex = 0;
+          const markMatch = MARK_RX.exec(line);
+          if (!markMatch) continue;
+          const dimMatch = line.match(DIM_RX);
+          if (!dimMatch) continue;
+          const fam = FAMILY_NORMAL[markMatch[1].toUpperCase()] || markMatch[1].toUpperCase();
+          const mark = `${fam}-${markMatch[2]}`;
+          const a = Number(dimMatch[1]);
+          const b = Number(dimMatch[2]);
+          if (!a || !b) continue;
+          const reinforcing = (line.match(REINF_RX)?.[0] || "").trim();
+          // Avoid duplicates per (mark,page)
+          if (knowledgePack.some((h) => h.mark === mark && h.page === pageNum)) continue;
+          knowledgePack.push({
+            mark,
+            family: fam,
+            dim1_mm: Math.max(a, b),
+            dim2_mm: Math.min(a, b),
+            reinforcing,
+            page: pageNum,
+            excerpt: line,
+          });
+        }
+      }
+      // Cap to ~80 entries to stay within prompt budget.
+      if (knowledgePack.length > 80) knowledgePack.length = 80;
+    }
+    const knowledgePackBlock = knowledgePack.length === 0
+      ? ""
+      : "=== PROJECT KNOWLEDGE PACK (schedules across ALL pages — search this BEFORE asking) ===\n"
+        + knowledgePack
+          .map((h) => `${h.mark} | ${h.dim1_mm}x${h.dim2_mm}mm${h.reinforcing ? ` | ${h.reinforcing}` : ""} | p${h.page}`)
+          .join("\n")
+        + "\n=== END PROJECT KNOWLEDGE PACK ===";
+    console.log(`[auto-estimate] knowledge pack: ${knowledgePack.length} schedule entr${knowledgePack.length === 1 ? "y" : "ies"} across ${new Set(knowledgePack.map((h) => h.page)).size} page(s)`);
+
     // If the segment-aware filter removed everything, refuse to estimate.
     // Generating against the full corpus is exactly the bug we are fixing.
     if (searchPages.length > 0 && relevantPages.length === 0) {
