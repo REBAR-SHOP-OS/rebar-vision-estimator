@@ -77,6 +77,34 @@ Deno.serve(async (req) => {
       await updateJob("processing", 20);
       await log("pipeline_files_found", { file_count: files.length });
 
+      const { data: documentVersions } = await supabase
+        .from("document_versions")
+        .select("id, parse_status, parse_error, pdf_metadata")
+        .eq("project_id", project_id);
+
+      const docVersionCount = documentVersions?.length || 0;
+      const failedParseRows = (documentVersions || []).filter((row) => row.parse_status === "failed");
+      const zeroIndexedRows = (documentVersions || []).filter((row) => {
+        if (row.parse_status !== "indexed") return false;
+        const verifiedRows = (row.pdf_metadata as Record<string, unknown> | null)?.indexing_diagnostics as Record<string, unknown> | undefined;
+        return Number(verifiedRows?.indexed_rows_verified ?? 0) === 0;
+      });
+
+      if (docVersionCount === 0) {
+        const errorMessage = "Files were uploaded, but no parse/index job was started for this project.";
+        await updateJob("failed", 0, {
+          file_count: files.length,
+          document_version_count: docVersionCount,
+        }, errorMessage);
+        await log("pipeline_parse_not_started", { file_count: files.length, document_version_count: docVersionCount });
+        return new Response(JSON.stringify({
+          error: errorMessage,
+          file_count: files.length,
+          document_version_count: docVersionCount,
+          job_id: jobId,
+        }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
       // Step 2: Check parsed document versions
       const { count: parsedCount } = await supabase
         .from("document_versions")
@@ -99,6 +127,35 @@ Deno.serve(async (req) => {
         .eq("project_id", project_id);
 
       const hasDrawings = (drawingCount || 0) > 0;
+
+      if (!hasDrawings && (failedParseRows.length > 0 || zeroIndexedRows.length > 0)) {
+        const latestFailure = failedParseRows[0]?.parse_error
+          || "Parsing completed without writing drawing_search_index rows for this project.";
+        await updateJob("failed", 0, {
+          file_count: files.length,
+          parsed_count: parsedCount || 0,
+          drawing_count: drawingCount || 0,
+          failed_parse_count: failedParseRows.length,
+          zero_indexed_count: zeroIndexedRows.length,
+        }, latestFailure);
+        await log("pipeline_indexing_failed", {
+          file_count: files.length,
+          parsed_count: parsedCount || 0,
+          drawing_count: drawingCount || 0,
+          failed_parse_count: failedParseRows.length,
+          zero_indexed_count: zeroIndexedRows.length,
+          error: latestFailure,
+        });
+        return new Response(JSON.stringify({
+          error: latestFailure,
+          file_count: files.length,
+          parsed_count: parsedCount || 0,
+          drawing_count: drawingCount || 0,
+          failed_parse_count: failedParseRows.length,
+          zero_indexed_count: zeroIndexedRows.length,
+          job_id: jobId,
+        }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
 
       if (hasDrawings) {
         await supabase.from("projects").update({ workflow_status: "drawings_indexed" }).eq("id", project_id);
@@ -165,6 +222,8 @@ Deno.serve(async (req) => {
         drawing_count: drawingCount || 0,
         estimate_count: estimateCount || 0,
         has_scope: hasScope,
+        failed_parse_count: failedParseRows.length,
+        zero_indexed_count: zeroIndexedRows.length,
       });
 
       await log("pipeline_complete", { linkage_score: finalScore, workflow_status: finalStatus });

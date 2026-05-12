@@ -16,6 +16,7 @@ import {
   inferRebarFileKind,
 } from "@/lib/rebar-intake";
 import { getCanonicalProjectFiles, type CanonicalProjectFileView } from "@/lib/rebar-read-model";
+import { summarizeIndexingOutcome, type PopulateSearchIndexResponse } from "@/lib/indexing-pipeline";
 
 interface FileRow {
   id: string;
@@ -153,7 +154,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
       }
 
       onProgress?.("Indexing...");
-      const { error: indexErr } = await supabase.functions.invoke("populate-search-index", {
+      const { data: indexData, error: indexErr } = await supabase.functions.invoke("populate-search-index", {
         body: {
           project_id: projectId,
           document_version_id: dvId,
@@ -164,11 +165,29 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
         },
       });
 
+      let verifiedRows = 0;
+      if (!indexErr && dvId) {
+        const { count } = await supabase
+          .from("drawing_search_index")
+          .select("id", { count: "exact", head: true })
+          .eq("project_id", projectId)
+          .eq("document_version_id", dvId);
+        verifiedRows = count || 0;
+      }
+
+      const indexingOutcome = summarizeIndexingOutcome({
+        requestedPages: pages.length,
+        verifiedRows,
+        response: (indexData || null) as PopulateSearchIndexResponse | null,
+      });
+
       if (dvId) {
         await supabase.from("document_versions").update({
           sha256,
           page_count: totalPages || pages.length,
           is_scanned: !hasText,
+          parse_status: !indexErr && indexingOutcome.ok ? "indexed" : "failed",
+          parse_error: !indexErr && indexingOutcome.ok ? null : indexingOutcome.error || indexErr?.message || "Indexing failed",
         }).eq("id", dvId);
       }
 
@@ -186,7 +205,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
         console.warn("Canonical file bridge sync failed after parsing:", bridgeErr);
       }
 
-      if (!indexErr) {
+      if (!indexErr && indexingOutcome.ok) {
         try {
           await (supabase as any)
             .from("document_registry")
@@ -198,7 +217,7 @@ export default function FilesTab({ projectId, onProjectRefresh }: { projectId: s
         }
       }
 
-      return !indexErr;
+      return !indexErr && indexingOutcome.ok;
     } catch (error) {
       console.warn(`Parse pipeline failed for ${fileName}:`, error);
       return false;

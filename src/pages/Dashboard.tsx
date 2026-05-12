@@ -14,6 +14,7 @@ import {
   createProjectWithCanonicalBridge,
   inferRebarFileKind,
 } from "@/lib/rebar-intake";
+import { parseAndIndexFile } from "@/lib/parse-file";
 
 const Dashboard: React.FC = () => {
   const { user, signOut } = useAuth();
@@ -137,6 +138,7 @@ const Dashboard: React.FC = () => {
 
     let uploadedCount = 0;
     let legacyFallbackFileCount = 0;
+    const filesToParse: Array<{ id: string; legacy_file_id: string; file_name: string; file_path: string }> = [];
 
     for (const file of files) {
       const path = `${user.id}/${project.id}/${Date.now()}_${file.name}`;
@@ -166,6 +168,12 @@ const Dashboard: React.FC = () => {
           checksumSha256,
         });
         uploadedCount++;
+        filesToParse.push({
+          id: fileRow.id,
+          legacy_file_id: fileRow.id,
+          file_name: file.name,
+          file_path: path,
+        });
 
         const fileBridgeHealthy = (fileRow as { canonicalBridgeHealthy?: boolean }).canonicalBridgeHealthy !== false;
         if (!fileBridgeHealthy) legacyFallbackFileCount++;
@@ -177,6 +185,25 @@ const Dashboard: React.FC = () => {
 
     if (uploadedCount > 0) {
       toast.success(`${uploadedCount} file${uploadedCount > 1 ? "s" : ""} uploaded`);
+      let indexedCount = 0;
+      const failedIndexing: string[] = [];
+      for (const file of filesToParse) {
+        const result = await parseAndIndexFile(
+          project.id,
+          file,
+          (msg) => toast.message(`${file.file_name}: ${msg}`),
+        );
+        if (result.status === "indexed") indexedCount++;
+        if (result.status === "failed") {
+          failedIndexing.push(`${file.file_name}: ${result.error || "unknown error"}`);
+        }
+      }
+      if (indexedCount > 0) {
+        toast.success(`Indexed ${indexedCount} uploaded drawing${indexedCount > 1 ? "s" : ""}`);
+      }
+      if (failedIndexing.length > 0) {
+        toast.error(`Indexing failed for ${failedIndexing.length} file${failedIndexing.length > 1 ? "s" : ""}. Review Stage 01 for retry details.`);
+      }
       if (legacyFallbackFileCount > 0) {
         toast.warning(
           `${legacyFallbackFileCount} file${legacyFallbackFileCount > 1 ? "s were" : " was"} saved through the legacy fallback path while canonical sync is unavailable.`,

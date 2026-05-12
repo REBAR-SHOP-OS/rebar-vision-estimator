@@ -12,6 +12,7 @@ import {
   inferRebarFileKind,
 } from "@/lib/rebar-intake";
 import { parseAndIndexFile } from "@/lib/parse-file";
+import type { IndexingDiagnostics } from "@/lib/indexing-pipeline";
 
 interface Row {
   id: string;
@@ -22,6 +23,10 @@ interface Row {
   file_size?: number | null;
   revision: string;
   status: "ready" | "review" | "blocked" | "changed";
+  parse_status: "pending" | "parsing" | "indexed" | "failed";
+  parse_error?: string | null;
+  indexed_rows: number;
+  page_count: number;
 }
 
 function inferRevision(name: string): string {
@@ -43,15 +48,61 @@ export default function FilesStage({ projectId, state }: StageProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [reindexing, setReindexing] = useState(false);
+  const [parseMeta, setParseMeta] = useState<Record<string, { parse_status: Row["parse_status"]; parse_error?: string | null; indexed_rows: number; page_count: number }>>({});
 
   const rows: Row[] = state.files.map((f) => ({
     ...f,
     revision: inferRevision(f.file_name),
     status: (state.local.fileStatus?.[f.id] as Row["status"]) || "review",
+    parse_status: parseMeta[f.legacy_file_id || f.id]?.parse_status || "pending",
+    parse_error: parseMeta[f.legacy_file_id || f.id]?.parse_error || null,
+    indexed_rows: parseMeta[f.legacy_file_id || f.id]?.indexed_rows || 0,
+    page_count: parseMeta[f.legacy_file_id || f.id]?.page_count || 0,
   }));
+
+  useEffect(() => {
+    let cancelled = false;
+    const legacyIds = state.files.map((file) => file.legacy_file_id || file.id).filter(Boolean) as string[];
+    if (legacyIds.length === 0) {
+      setParseMeta({});
+      return;
+    }
+
+    supabase
+      .from("document_versions")
+      .select("file_id, parse_status, parse_error, page_count, pdf_metadata")
+      .eq("project_id", projectId)
+      .in("file_id", legacyIds)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.warn("FilesStage parse status load failed:", error);
+          return;
+        }
+        const next: Record<string, { parse_status: Row["parse_status"]; parse_error?: string | null; indexed_rows: number; page_count: number }> = {};
+        for (const row of data || []) {
+          const diagnostics = ((row.pdf_metadata as Record<string, unknown> | null)?.indexing_diagnostics || null) as IndexingDiagnostics | null;
+          const status = row.parse_status === "indexed" || row.parse_status === "parsing" || row.parse_status === "failed"
+            ? row.parse_status
+            : "pending";
+          next[row.file_id] = {
+            parse_status: status,
+            parse_error: row.parse_error,
+            indexed_rows: Number(diagnostics?.indexed_rows_verified || 0),
+            page_count: Number(row.page_count || 0),
+          };
+        }
+        setParseMeta(next);
+      });
+
+    return () => { cancelled = true; };
+  }, [projectId, state.files]);
 
   useEffect(() => { if (!selectedId && rows[0]) setSelectedId(rows[0].id); }, [rows, selectedId]);
   const sel = rows.find((r) => r.id === selectedId) || null;
+  const retryableRows = rows.filter((row) => row.parse_status === "failed" || (row.parse_status === "indexed" && row.indexed_rows === 0));
+  const indexedRows = rows.filter((row) => row.parse_status === "indexed" && row.indexed_rows > 0);
+  const parsingRows = rows.filter((row) => row.parse_status === "parsing");
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const fl = e.target.files; if (!fl || !user) return;
@@ -157,6 +208,11 @@ export default function FilesStage({ projectId, state }: StageProps) {
     }
     if (inputRef.current) inputRef.current.value = "";
     state.refresh();
+    const { error: pipelineErr } = await supabase.functions.invoke("process-pipeline", { body: { project_id: projectId } });
+    if (pipelineErr) {
+      console.warn("process-pipeline failed after Stage 01 upload:", pipelineErr);
+      toast.warning(`Files uploaded, but Stage 01 still needs attention: ${pipelineErr.message || "index status check failed."}`);
+    }
   };
 
   const setStatus = (id: string, status: Row["status"]) => {
@@ -164,12 +220,12 @@ export default function FilesStage({ projectId, state }: StageProps) {
     state.setLocal({ fileStatus: { ...cur, [id]: status } });
   };
 
-  const handleReindexAll = async () => {
-    if (!user || rows.length === 0) return;
+  const handleReindex = async (targetRows: Row[]) => {
+    if (!user || targetRows.length === 0) return;
     setReindexing(true);
     let ok = 0;
     const ocrCachePatch: Record<string, { pages: any[]; indexed_at: string; file_name: string }> = {};
-    for (const r of rows) {
+    for (const r of targetRows) {
       try {
         const res = await parseAndIndexFile(projectId, {
           id: r.id,
@@ -203,6 +259,8 @@ export default function FilesStage({ projectId, state }: StageProps) {
         .catch((err) => console.warn("extract-dimensions re-warm error:", err));
     }
     state.refresh();
+    const { error: pipelineErr } = await supabase.functions.invoke("process-pipeline", { body: { project_id: projectId } });
+    if (pipelineErr) console.warn("process-pipeline failed after re-index:", pipelineErr);
   };
 
   return (
@@ -218,12 +276,22 @@ export default function FilesStage({ projectId, state }: StageProps) {
             <div className="flex items-center gap-2">
               {rows.length > 0 && (
                 <button
-                  onClick={handleReindexAll}
+                  onClick={() => handleReindex(rows)}
                   disabled={reindexing || uploading}
                   className="inline-flex items-center gap-2 px-3 h-8 text-[11px] font-semibold uppercase tracking-[0.12em] border border-border text-muted-foreground hover:bg-accent/40 disabled:opacity-50"
                 >
                   {reindexing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                   {reindexing ? "Re-indexing..." : "Re-index All"}
+                </button>
+              )}
+              {retryableRows.length > 0 && (
+                <button
+                  onClick={() => handleReindex(retryableRows)}
+                  disabled={reindexing || uploading}
+                  className="inline-flex items-center gap-2 px-3 h-8 text-[11px] font-semibold uppercase tracking-[0.12em] border border-[hsl(var(--status-inferred))]/50 text-[hsl(var(--status-inferred))] hover:bg-[hsl(var(--status-inferred))]/10 disabled:opacity-50"
+                >
+                  {reindexing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                  {reindexing ? "Retrying..." : `Retry Failed (${retryableRows.length})`}
                 </button>
               )}
               <button
@@ -245,6 +313,19 @@ export default function FilesStage({ projectId, state }: StageProps) {
               <span className="text-[11px] px-2 py-1 border border-[hsl(var(--status-inferred))]/40 text-[hsl(var(--status-inferred))] bg-[hsl(var(--status-inferred))]/5">
                 {rows.length} document{rows.length !== 1 && "s"} registered · awaiting routing decisions
               </span>
+              <span className="text-[11px] px-2 py-1 border border-[hsl(var(--status-supported))]/40 text-[hsl(var(--status-supported))] bg-[hsl(var(--status-supported))]/5">
+                {indexedRows.length} indexed with visible sheets
+              </span>
+              {parsingRows.length > 0 && (
+                <span className="text-[11px] px-2 py-1 border border-border text-muted-foreground bg-background">
+                  {parsingRows.length} parsing/indexing
+                </span>
+              )}
+              {retryableRows.length > 0 && (
+                <span className="text-[11px] px-2 py-1 border border-[hsl(var(--status-blocked))]/40 text-[hsl(var(--status-blocked))] bg-[hsl(var(--status-blocked))]/5">
+                  {retryableRows.length} require retry
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -285,9 +366,25 @@ export default function FilesStage({ projectId, state }: StageProps) {
                       {r.status === "blocked" && <Pill tone="bad">Blocked</Pill>}
                       {r.status === "changed" && <Pill tone="info">Changed</Pill>}
                     </td>
-                    <td className="px-3 text-[hsl(var(--status-supported))] flex items-center gap-1.5 h-[32px]">
-                      <CheckCircle2 className="w-3 h-3" /> Complete
-                    </td>
+                      <td className="px-3 h-[32px]">
+                        {r.parse_status === "indexed" && r.indexed_rows > 0 ? (
+                          <div className="text-[hsl(var(--status-supported))] flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3 h-3" /> {r.indexed_rows} indexed
+                          </div>
+                        ) : r.parse_status === "parsing" ? (
+                          <div className="text-muted-foreground flex items-center gap-1.5">
+                            <Loader2 className="w-3 h-3 animate-spin" /> Parsing…
+                          </div>
+                        ) : r.parse_status === "failed" || (r.parse_status === "indexed" && r.indexed_rows === 0) ? (
+                          <div className="text-[hsl(var(--status-blocked))] flex items-center gap-1.5" title={r.parse_error || "Indexing produced zero rows for this file."}>
+                            <AlertTriangle className="w-3 h-3" /> {r.parse_status === "failed" ? "Failed" : "0 rows"}
+                          </div>
+                        ) : (
+                          <div className="text-muted-foreground flex items-center gap-1.5">
+                            <FileText className="w-3 h-3" /> Pending
+                          </div>
+                        )}
+                      </td>
                     <td className="px-3 text-muted-foreground">{new Date(r.created_at).toLocaleDateString()}</td>
                   </tr>
                 ))}
@@ -311,10 +408,29 @@ export default function FilesStage({ projectId, state }: StageProps) {
                 <div className="grid grid-cols-2 gap-2 text-[12px]">
                   <Field label="Revision" value={sel.revision} />
                   <Field label="Status" value={sel.status} />
+                  <Field
+                    label="Parse"
+                    value={
+                      sel.parse_status === "indexed" && sel.indexed_rows > 0
+                        ? `${sel.indexed_rows} indexed row${sel.indexed_rows === 1 ? "" : "s"}`
+                        : sel.parse_status === "failed"
+                          ? "Failed"
+                          : sel.parse_status === "parsing"
+                            ? "Parsing…"
+                            : sel.indexed_rows === 0 && sel.parse_status === "indexed"
+                              ? "0 indexed rows"
+                              : "Pending"
+                    }
+                  />
                   <Field label="Size" value={sel.file_size ? `${Math.round(sel.file_size / 1024)} KB` : "—"} />
                   <Field label="Uploaded" value={new Date(sel.created_at).toLocaleDateString()} />
                 </div>
               </div>
+              {sel.parse_error && (
+                <div className="border border-[hsl(var(--status-blocked))]/40 bg-[hsl(var(--status-blocked))]/5 px-3 py-2 text-[11px] text-[hsl(var(--status-blocked))]">
+                  {sel.parse_error}
+                </div>
+              )}
               <div className="space-y-2">
                 <div className="ip-kicker">Route Action</div>
                 <div className="grid grid-cols-2 gap-2">
