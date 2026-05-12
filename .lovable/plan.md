@@ -1,61 +1,67 @@
-# Add Undo / Redo to the Takeoff Canvas toolbar
+# Fix: Takeoff Canvas overlay no longer marking (manual draws + OCR labels)
 
 ## Goal
-Add **Undo** (↶) and **Redo** (↷) buttons to the left tool palette in `TakeoffCanvas.tsx` (the "layers" toolbar shown in the screenshot, above the page nav). They reverse and replay the user's last drawing/erase operations on overlay polygons.
+Restore visible overlays in `TakeoffCanvas.tsx`:
+1. Manual tools (Polygon / Square / Circle) once again paint a colored shape on the active layer when the user clicks the sheet.
+2. Auto-detect labels (Sparkles) once again paints colored rectangles on detected structural marks.
 
-## Scope
-Single file: `src/components/takeoff-canvas/TakeoffCanvas.tsx`. No DB schema changes, no other components touched. Minimal patch.
+## Root causes (most likely)
 
-## Behavior
-Track per-session history of overlay edits (add / erase). Undo reverses the most recent op against the database; redo reapplies it.
+1. **`activeLayer` is initialized once from `layers[0]?.id || null` (line 63) and never resynced.** When `layers` arrives async or changes after mount, `activeLayer` stays `null`. With `activeLayer === null`:
+   - `onStageClick` (line 306) early-returns → square/circle/polygon clicks do nothing.
+   - The active-layer chip (line 685) never appears, so the user has no idea no layer is selected.
+   - `saveOverlayPolygon` early-returns (line 270).
 
-- **Add op** (square/circle stamp, polygon close): undo deletes that polygon by id; redo re-inserts (new id) and updates the history entry's id.
-- **Erase op**: undo re-inserts the previously-deleted polygon (new id); redo deletes it again.
-- Any new user edit clears the redo stack (standard editor behavior).
-- History is in-memory only (resets on remount / sheet change is fine — keep across page changes since polygons array is global).
-- Buttons disabled when their stack is empty or when no `user`/`projectId`. Show toast on DB error and do not advance the stack.
-
-## Keyboard shortcuts
-- `Ctrl/Cmd + Z` → undo
-- `Ctrl/Cmd + Shift + Z` (and `Ctrl/Cmd + Y`) → redo
-- Skipped while typing in inputs (already the case — canvas has no inputs in scope).
-
-## UI
-Insert a new bordered group in the existing left tool palette (after the Erase button, before Zoom group):
-
-```text
-[ ↶ Undo ]   title="Undo (Ctrl+Z)"   disabled when undoStack empty
-[ ↷ Redo ]   title="Redo (Ctrl+Shift+Z)"  disabled when redoStack empty
-```
-
-Use `Undo2` and `Redo2` from `lucide-react` (already a project dependency), styled with the existing `ToolBtn` component for visual consistency.
-
-## Technical details
-
-1. **State** (inside component):
+2. **OCR hits → layer bucket matching is too strict** (line 567):
    ```ts
-   type HistoryOp =
-     | { kind: "add"; id: string; snapshot: Omit<ManualPolygon,"id"> }
-     | { kind: "erase"; snapshot: ManualPolygon };
-   const [undoStack, setUndoStack] = useState<HistoryOp[]>([]);
-   const [redoStack, setRedoStack] = useState<HistoryOp[]>([]);
+   const layer = visibleLayers.find(
+     (l) => (l.segment_type || inferSegmentType(l.name)).toLowerCase() === bucket
+   );
+   ```
+   `markBucket` returns lowercase strings like `"wall" | "footing" | "pier" | "column"`, while `segment_type` / `inferSegmentType` typically return uppercase enum-like strings (`COLUMN`, `FOOTING`, …). The `.toLowerCase()` is on the layer side only; if the bucket is `"wall"` and the layer is `"WALL"`, after lowercasing we get `"wall" === "wall"` ✓ — but if bucket is `"column"` and layer.segment_type is `"COLUMN_PIER"` or similar, no match → no rectangle is drawn even though OCR returned hits.
+
+3. **No user feedback on a no-op click.** Combined with (1), the user sees nothing happen and concludes "overlay is broken".
+
+## Patch (single file: `src/components/takeoff-canvas/TakeoffCanvas.tsx`)
+
+1. **Sync `activeLayer` with `layers` prop.** Add a small effect:
+   ```ts
+   useEffect(() => {
+     if (layers.length === 0) { setActiveLayer(null); return; }
+     setActiveLayer((cur) => (cur && layers.some((l) => l.id === cur)) ? cur : layers[0].id);
+   }, [layers]);
    ```
 
-2. **Record ops**:
-   - In `saveOverlayPolygon` after successful insert, push `{kind:"add", id:data.id, snapshot:{segment_id,page_number,polygon,color_hint,source_file_id}}` and clear redo stack.
-   - In `erasePolygon` after successful delete, push `{kind:"erase", snapshot: <the polygon row>}` and clear redo stack.
+2. **Make `onStageClick` give feedback when no active layer is selected** (so the user sees why nothing happened):
+   ```ts
+   if (tool !== "pan" && tool !== "erase" && !activeLayer) {
+     toast.info("Pick a layer in the right panel first.");
+     return;
+   }
+   ```
 
-3. **Undo / redo helpers** that perform the inverse Supabase op against `takeoff_overlays`, mirror the same `setPolygons` mutation already used, then move the op between stacks (rewriting the `id` field on re-insert paths so subsequent redo/undo references the new row).
+3. **Loosen OCR-hit → layer matching** in `hitsByLayer` (line 561). Match by either the raw layer name OR any segment_type whose lowercase contains the bucket token, so e.g. bucket `"column"` matches a layer with `segment_type` `"COLUMN_PIER"`:
+   ```ts
+   const layer = visibleLayers.find((l) => {
+     const t = (l.segment_type || inferSegmentType(l.name) || "").toLowerCase();
+     const n = l.name.trim().toLowerCase();
+     return t === bucket || t.includes(bucket) || n.includes(bucket);
+   });
+   ```
 
-4. **Keyboard listener**: extend the existing `useEffect` shortcut handler at line 325 to also handle Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y.
+4. **No other behavior changes.** Undo/Redo, drawing geometry, region detection, zoom/pan, and storage paths are untouched. No DB/schema changes.
 
-5. **Imports**: extend the `lucide-react` import to add `Undo2, Redo2`.
+## Verification
+
+- Open a project with at least one segment / layer. Confirm the active-layer chip appears the moment you switch to Polygon / Square / Circle.
+- Click the page with Square tool → a colored square is saved and rendered (and an entry pushes onto undo stack).
+- Click Sparkles. After OCR completes, colored rectangles appear over `F.3 / WF-2A / P1 / C-9`-style marks for layers whose segment_type loosely matches.
+- With no layer selected (empty project), clicking with a draw tool now shows an informative toast instead of silently doing nothing.
 
 ## Risks
-- DB latency: undo/redo is async; brief no-op feel until the round-trip completes. Acceptable — matches existing add/erase UX.
-- If a polygon was modified outside this component since the op (concurrent session), redo of an erase will create a new row with a fresh id — accepted.
+- The looser bucket match could in theory map a label to a wrong layer when two layers share a substring (e.g. "RETAINING_WALL" and "ICF_WALL" both match `"wall"`). Acceptable: previous behavior was already to map all wall marks to the single matching wall layer, and `find` returns the first match.
 
 ## Out of scope
-- Persisting history across page reloads.
-- Undoing the in-progress polygon `draft` (Esc already cancels it).
-- Refactoring `TakeoffCanvas` structure.
+- Persisting undo/redo history.
+- Refactoring `TakeoffCanvas`.
+- Changing `markBucket` / OCR detection itself.

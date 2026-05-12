@@ -188,6 +188,15 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
 
   const layerColor = useCallback((l: CanvasLayer) => l.color || colorForSegmentType(l.segment_type), []);
 
+  // Keep `activeLayer` in sync with the `layers` prop. Layers can arrive
+  // async (or change as the user adds/removes segments); without this the
+  // initial `useState(layers[0]?.id || null)` would leave activeLayer
+  // permanently null and silently break Polygon/Square/Circle clicks.
+  useEffect(() => {
+    if (layers.length === 0) { setActiveLayer(null); return; }
+    setActiveLayer((cur) => (cur && layers.some((l) => l.id === cur)) ? cur : layers[0].id);
+  }, [layers]);
+
   // Auto-detect colored regions on the rendered page (Togal-style overlay).
   useEffect(() => {
     if (!pdfImg && !signedUrl) { setRegions([]); return; }
@@ -303,7 +312,12 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
   }, [user, activeLayer, layers, layerColor, projectId, page, sourceFileId]);
 
   const onStageClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!imageBoxRef.current || !activeLayer) return;
+    if (!imageBoxRef.current) return;
+    if (tool !== "pan" && tool !== "erase" && !activeLayer) {
+      toast.info("Pick a layer in the right panel first.");
+      return;
+    }
+    if (!activeLayer) return;
     const rect = imageBoxRef.current.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
@@ -564,7 +578,11 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
     for (const h of labelHits) {
       const bucket = markBucket(h.text);
       if (!bucket) continue;
-      const layer = visibleLayers.find((l) => (l.segment_type || inferSegmentType(l.name)).toLowerCase() === bucket);
+      const layer = visibleLayers.find((l) => {
+        const t = (l.segment_type || inferSegmentType(l.name) || "").toLowerCase();
+        const n = l.name.trim().toLowerCase();
+        return t === bucket || t.includes(bucket) || n.includes(bucket);
+      });
       if (!layer) continue;
       const arr = m.get(layer.id) || [];
       arr.push(h);
