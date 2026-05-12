@@ -245,6 +245,8 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     });
   };
 
+  const [reloadTick, setReloadTick] = useState(0);
+  const [lastReloadAt, setLastReloadAt] = useState<Date | null>(null);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -254,9 +256,10 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
       setIssues(data);
       setSelectedId((c) => data.find((i) => i.id === c)?.id || data[0]?.id || null);
       setLoading(false);
+      setLastReloadAt(new Date());
     })();
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, reloadTick]);
 
   const sel = issues.find((i) => i.id === selectedId);
 
