@@ -54,7 +54,7 @@ export interface WorkflowQaIssue {
     anchor_text?: string | null;
     anchor_kind?: string | null;
   } | null;
-  linked_item?: { id: string; description: string | null; bar_size: string | null; quantity_count: number; total_length: number; total_weight: number; missing_refs: string[]; source_file_id?: string | null; segment_id?: string | null; page_number?: number | null } | null;
+  linked_item?: { id: string; description: string | null; bar_size: string | null; quantity_count: number; total_length: number; total_weight: number; missing_refs: string[]; source_file_id?: string | null; segment_id?: string | null; page_number?: number | null; schedule_mark?: string | null; schedule_source_page?: number | null } | null;
   // Structured drawing location (used to prefix question text)
   location?: {
     source_sheet?: string | null;
@@ -757,9 +757,7 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
           source_file_id: item.source_file_id || iss.source_file_id || null,
           segment_id: item.segment_id || null,
           page_number: Number(ref?.page_number ?? aj.page_number ?? 0) || null,
-          // @ts-expect-error — extending linked_item with optional schedule fields
           schedule_mark: aj.schedule_mark || null,
-          // @ts-expect-error — extending linked_item with optional schedule fields
           schedule_source_page: aj.schedule_source_page || null,
         };
       }
