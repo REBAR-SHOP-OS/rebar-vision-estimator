@@ -480,10 +480,58 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
     setSheets((prev) => prev.map((r) => ({ ...r, discipline: "Structural" })));
   };
 
-  const confirmAll = () => {
+  const confirmAll = async () => {
     if (confirming) return;
     setConfirming(true);
     try {
+      // Persist per-sheet scale into drawing_search_index.extracted_entities.scale
+      // so the auto-estimate edge function can read it (it has no other table to
+      // pull calibration from). We merge into existing extracted_entities to
+      // preserve title_block, schedules, and other extractor output.
+      const writable = sheets.filter(
+        (r) => r.calibration && r.calibration.pixelsPerFoot > 0,
+      );
+      if (writable.length > 0) {
+        const ids = writable.map((r) => r.id);
+        const { data: existingRows, error: fetchErr } = await supabase
+          .from("drawing_search_index")
+          .select("id, extracted_entities")
+          .in("id", ids);
+        if (fetchErr) {
+          console.warn("CalibrationStage: failed to read existing extracted_entities:", fetchErr.message);
+        }
+        const existingById = new Map<string, Record<string, unknown>>(
+          (existingRows || []).map((r: { id: string; extracted_entities: Record<string, unknown> | null }) => [
+            r.id,
+            (r.extracted_entities || {}) as Record<string, unknown>,
+          ]),
+        );
+        const updates = writable.map((r) => {
+          const cal = r.calibration!;
+          const ee = { ...(existingById.get(r.id) || {}) } as Record<string, unknown>;
+          ee.scale = {
+            pixels_per_foot: cal.pixelsPerFoot,
+            ratio: cal.scaleRatio || null,
+            raw: cal.raw || null,
+            confidence: cal.confidence || null,
+            source: cal.source || null,
+            method: cal.method || null,
+            status: r.scale_status,
+            updated_at: new Date().toISOString(),
+          };
+          return { id: r.id, extracted_entities: ee };
+        });
+        // PostgREST upsert on PK preserves user_id/project_id rows.
+        const { error: upErr } = await supabase
+          .from("drawing_search_index")
+          .upsert(updates, { onConflict: "id" });
+        if (upErr) {
+          console.warn("CalibrationStage: failed to persist scale to drawing_search_index:", upErr.message);
+          toast.warning("Calibration saved locally — backend persist failed, takeoff may re-prompt for scale.");
+        } else {
+          console.log(`[calibration] persisted scale for ${updates.length} sheet(s)`);
+        }
+      }
       state.setLocal({ calibrationConfirmed: true, calibrationPrimary: "structural" });
       state.refresh();
       requestAnimationFrame(() => {
