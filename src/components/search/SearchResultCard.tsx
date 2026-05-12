@@ -94,10 +94,9 @@ const SearchResultCard: React.FC<Props> = ({ result, onClick, onRevisionChainCli
       )}
 
       {result.headline && (
-        <p
-          className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed"
-          dangerouslySetInnerHTML={{ __html: result.headline }}
-        />
+        <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+          {result.headline.replace(/<[^>]+>/g, "")}
+        </p>
       )}
 
       <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
