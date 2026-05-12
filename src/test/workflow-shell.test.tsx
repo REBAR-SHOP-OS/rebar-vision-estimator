@@ -95,4 +95,16 @@ describe("WorkflowShell", () => {
     expect(screen.getByText(/Estimator Confirmed/)).toBeInTheDocument();
     expect(screen.getByText(/Outputs Unlocked/)).toBeInTheDocument();
   });
+
+  it("uses one horizontal scroll shell and keeps the body on vertical-only scrolling", () => {
+    const { container } = render(
+      <WorkflowShell
+        projectId="8a182703-d47a-40f9-9d4e-111111111111"
+        project={{ name: "CRU-1 Architectural" }}
+      />,
+    );
+
+    expect(container.querySelector(".overflow-x-auto.overflow-y-hidden")).not.toBeNull();
+    expect(container.querySelector(".overflow-y-auto.overflow-x-visible")).not.toBeNull();
+  });
 });
