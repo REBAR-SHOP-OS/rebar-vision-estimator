@@ -578,7 +578,11 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
     for (const h of labelHits) {
       const bucket = markBucket(h.text);
       if (!bucket) continue;
-      const layer = visibleLayers.find((l) => (l.segment_type || inferSegmentType(l.name)).toLowerCase() === bucket);
+      const layer = visibleLayers.find((l) => {
+        const t = (l.segment_type || inferSegmentType(l.name) || "").toLowerCase();
+        const n = l.name.trim().toLowerCase();
+        return t === bucket || t.includes(bucket) || n.includes(bucket);
+      });
       if (!layer) continue;
       const arr = m.get(layer.id) || [];
       arr.push(h);
