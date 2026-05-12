@@ -944,6 +944,7 @@ function TwoPointCalModal({
   const [rendered, setRendered] = useState<{ url: string; w: number; h: number } | null>(null);
   const [points, setPoints] = useState<[number, number][]>([]);
   const [realDist, setRealDist] = useState("");
+  const [unit, setUnit] = useState<"ft" | "in" | "m" | "cm" | "mm">("ft");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
 
@@ -955,6 +956,7 @@ function TwoPointCalModal({
     setRendered(null);
     setPoints([]);
     setRealDist("");
+    setUnit("ft");
   }, [sheet.id, pageNumber]);
 
   // Fetch signed URL for the drawing file
@@ -1048,8 +1050,17 @@ function TwoPointCalModal({
       ? Math.sqrt(Math.pow(points[1][0] - points[0][0], 2) + Math.pow(points[1][1] - points[0][1], 2))
       : null;
 
-  const parsedFt = parseFloat(realDist);
+  const UNIT_TO_FT: Record<typeof unit, number> = {
+    ft: 1,
+    in: 1 / 12,
+    m: 3.28084,
+    cm: 0.0328084,
+    mm: 0.00328084,
+  };
+  const parsedVal = parseFloat(realDist);
+  const parsedFt = parsedVal > 0 ? parsedVal * UNIT_TO_FT[unit] : 0;
   const computedPpf = pixelDist && parsedFt > 0 ? pixelDist / parsedFt : null;
+  const unitPlaceholder: Record<typeof unit, string> = { ft: "e.g. 10", in: "e.g. 120", m: "e.g. 3", cm: "e.g. 300", mm: "e.g. 3000" };
 
   const label = `Page ${sheet.page_number ?? "—"}${sheet.sheet_number ? ` · ${sheet.sheet_number}` : ""}`;
 
@@ -1122,17 +1133,28 @@ function TwoPointCalModal({
           {points.length === 2 && (
             <>
               <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground shrink-0">
-                Known distance (ft)
+                Known distance
                 <input
                   type="number"
                   min="0.1"
-                  step="0.5"
+                  step="any"
                   value={realDist}
                   onChange={(e) => setRealDist(e.target.value)}
                   className="w-24 h-7 px-2 border border-border bg-background text-[12px] tabular-nums"
-                  placeholder="e.g. 10"
+                  placeholder={unitPlaceholder[unit]}
                   autoFocus
                 />
+                <select
+                  value={unit}
+                  onChange={(e) => setUnit(e.target.value as typeof unit)}
+                  className="h-7 px-1.5 border border-border bg-background text-[12px]"
+                >
+                  <option value="ft">ft</option>
+                  <option value="in">in</option>
+                  <option value="m">m</option>
+                  <option value="cm">cm</option>
+                  <option value="mm">mm</option>
+                </select>
               </label>
               {computedPpf && (
                 <span className="text-[12px] font-mono text-muted-foreground tabular-nums">
