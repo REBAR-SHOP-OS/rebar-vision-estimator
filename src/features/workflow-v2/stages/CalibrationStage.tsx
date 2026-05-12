@@ -500,36 +500,46 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
         if (fetchErr) {
           console.warn("CalibrationStage: failed to read existing extracted_entities:", fetchErr.message);
         }
-        const existingById = new Map<string, Record<string, unknown>>(
-          (existingRows || []).map((r: { id: string; extracted_entities: Record<string, unknown> | null }) => [
-            r.id,
-            (r.extracted_entities || {}) as Record<string, unknown>,
-          ]),
-        );
-        const updates = writable.map((r) => {
-          const cal = r.calibration!;
+        const existingById = new Map<string, Record<string, unknown>>();
+        for (const row of (existingRows || []) as Array<{ id: string; extracted_entities: unknown }>) {
+          const ee = row.extracted_entities;
+          existingById.set(row.id, (ee && typeof ee === "object" ? (ee as Record<string, unknown>) : {}));
+        }
+        let okCount = 0;
+        for (const r of writable) {
+          const cal = r.calibration as unknown as {
+            pixelsPerFoot: number;
+            confidence?: string;
+            source?: string;
+            method?: string;
+            scaleRatio?: number;
+            raw?: string;
+            diagnostics?: { scaleRatio?: number; raw?: string } | undefined;
+          };
           const ee = { ...(existingById.get(r.id) || {}) } as Record<string, unknown>;
           ee.scale = {
             pixels_per_foot: cal.pixelsPerFoot,
-            ratio: cal.scaleRatio || null,
-            raw: cal.raw || null,
+            ratio: cal.scaleRatio || cal.diagnostics?.scaleRatio || null,
+            raw: cal.raw || cal.diagnostics?.raw || null,
             confidence: cal.confidence || null,
             source: cal.source || null,
             method: cal.method || null,
             status: r.scale_status,
             updated_at: new Date().toISOString(),
           };
-          return { id: r.id, extracted_entities: ee };
-        });
-        // PostgREST upsert on PK preserves user_id/project_id rows.
-        const { error: upErr } = await supabase
-          .from("drawing_search_index")
-          .upsert(updates, { onConflict: "id" });
-        if (upErr) {
-          console.warn("CalibrationStage: failed to persist scale to drawing_search_index:", upErr.message);
-          toast.warning("Calibration saved locally — backend persist failed, takeoff may re-prompt for scale.");
-        } else {
-          console.log(`[calibration] persisted scale for ${updates.length} sheet(s)`);
+          const { error: upErr } = await supabase
+            .from("drawing_search_index")
+            .update({ extracted_entities: ee as never })
+            .eq("id", r.id);
+          if (upErr) {
+            console.warn(`[calibration] persist failed for sheet ${r.id}:`, upErr.message);
+          } else {
+            okCount++;
+          }
+        }
+        console.log(`[calibration] persisted scale for ${okCount}/${writable.length} sheet(s)`);
+        if (okCount === 0 && writable.length > 0) {
+          toast.warning("Calibration saved locally — backend persist failed; takeoff may re-prompt for scale.");
         }
       }
       state.setLocal({ calibrationConfirmed: true, calibrationPrimary: "structural" });
