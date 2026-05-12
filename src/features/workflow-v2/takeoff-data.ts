@@ -781,7 +781,35 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
     if (!iss.location_label && iss.sheet_id) iss.location_label = `Item ${String(iss.sheet_id).slice(0, 8)}`;
   }
 
-  return [...legacyIssues, ...canonicalIssues];
+  // Drop legacy questions whose answer is already in the linked row.
+  // The estimator commonly asks for "rebar callout" / "element dimensions"
+  // even after the OCR excerpt or row already contains them. Surfacing
+  // these wastes the engineer's time and points the overlay nowhere useful.
+  const filteredLegacy = legacyIssues.filter((iss) => !legacyIssueAlreadyAnswered(iss));
+  return [...filteredLegacy, ...canonicalIssues];
+}
+
+// Returns true when the issue's missing_refs are already satisfied by data
+// present on the linked estimate row (callout in excerpt, length resolved, etc.).
+function legacyIssueAlreadyAnswered(iss: WorkflowQaIssue): boolean {
+  const li = iss.linked_item;
+  if (!li) return false;
+  const missing = (li.missing_refs || []).map((m) => String(m).toLowerCase().trim()).filter(Boolean);
+  if (missing.length === 0) return false;
+  const excerpt = String(iss.location?.source_excerpt || iss.description || "").toLowerCase();
+  const rawDescription = String(iss.raw_description || "").toLowerCase();
+  const haystack = `${excerpt} ${rawDescription} ${String(li.description || "").toLowerCase()}`;
+  // Callout patterns: "15M x 457mm", "10M @ 300mm", "(2) 20M", "10M VERTICAL"
+  const calloutRx = /\b\d{1,2}m\s*(?:x|×|@|cont|vert|horiz|long|bars?|u\.n\.o)/i;
+  const dimRx = /\b\d{2,5}\s*mm\b|\b\d+(?:\.\d+)?\s*m\b/i;
+  const hasCallout = Boolean(li.bar_size) && calloutRx.test(haystack);
+  const hasDim = (Number(li.total_length) || 0) > 0 || dimRx.test(haystack);
+  const stillMissing = missing.filter((tok) => {
+    if (/callout|mark|rebar/.test(tok) && hasCallout) return false;
+    if (/dimension|length|height|width|geometry|run|perimeter/.test(tok) && hasDim) return false;
+    return true;
+  });
+  return stillMissing.length === 0;
 }
 
 export async function getWorkflowQaCounts(projectId: string) {
