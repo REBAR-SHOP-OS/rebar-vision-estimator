@@ -114,6 +114,14 @@ function isPageLikeAnchor(value: string | null | undefined): boolean {
   return !s || /^(?:p|page)?\s*\d+$/i.test(s);
 }
 
+// Bare measurements ("457MM", "406 mm", "12'", "3.5m") are not real anchors —
+// they appear all over a sheet and routinely land the overlay on the wrong row.
+function isBareMeasurementAnchor(value: string | null | undefined): boolean {
+  const s = String(value || "").trim();
+  if (!s) return true;
+  return /^\(?\d+(?:[.,]\d+)?\)?\s*(?:mm|cm|m|ft|in|"|')?\s*$/i.test(s);
+}
+
 type AnchorKind = "trusted" | "detail" | "section" | "callout" | "grid" | "element" | "schedule" | "excerpt" | "ocr";
 function buildAnchorCandidates(sel: WorkflowQaIssue | undefined | null): Array<{ value: string; kind: AnchorKind; score: number }> {
   const loc = sel?.location || {};
@@ -121,6 +129,9 @@ function buildAnchorCandidates(sel: WorkflowQaIssue | undefined | null): Array<{
   const push = (value: string | null | undefined, kind: AnchorKind, score: number) => {
     const s = String(value || "").trim();
     if (isPageLikeAnchor(s)) return;
+    // Skip bare numbers/measurements — they match too many tokens on a sheet
+    // and produce overlays that point at unrelated callouts.
+    if (isBareMeasurementAnchor(s)) return;
     candidates.push({ value: s, kind, score });
   };
   // 1. TRUSTED anchor emitted by the estimator pipeline. This is the token
@@ -128,7 +139,12 @@ function buildAnchorCandidates(sel: WorkflowQaIssue | undefined | null): Array<{
   //    so we always try it first before any viewer-side inference.
   const trustedText = sel?.locator?.anchor_text || null;
   const trustedConf = Number(sel?.locator?.anchor_confidence ?? 0);
-  if (trustedText) push(trustedText, "trusted", Math.max(0.95, trustedConf || 0.95));
+  // Only trust pipeline-provided anchors when the pipeline marked them "exact".
+  // Approximate-mode anchors are typically OCR-token guesses (e.g. "457MM")
+  // and produce wrong-place overlays.
+  if (trustedText && sel?.locator?.anchor_mode === "exact") {
+    push(trustedText, "trusted", Math.max(0.95, trustedConf || 0.95));
+  }
   push(loc.detail_reference, "detail", 0.99);
   push(loc.section_reference, "section", 0.98);
   push(loc.callout_tag, "callout", 0.97);
