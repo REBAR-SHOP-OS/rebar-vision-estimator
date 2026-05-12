@@ -1638,6 +1638,8 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
                   authority_section: { type: ["string", "null"] },
                   authority_page: { type: ["number", "null"] },
                   authority_quote: { type: ["string", "null"] },
+                  schedule_mark: { type: ["string", "null"] },
+                  schedule_source_page: { type: ["number", "null"] },
                 },
                 required: [
                   "description",
@@ -1651,7 +1653,9 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
                   "source_excerpt",
                   "authority_section",
                   "authority_page",
-                  "authority_quote"
+                  "authority_quote",
+                  "schedule_mark",
+                  "schedule_source_page"
                 ],
                 additionalProperties: false,
               },
