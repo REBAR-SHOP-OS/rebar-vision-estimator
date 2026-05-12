@@ -6,7 +6,7 @@ import { colorForSegmentType, inferSegmentType } from "@/lib/segment-type";
 import { detectRegions, hueDistance, parseHslHue, type Region } from "@/lib/region-segmentation";
 import { detectPageLabels, markBucket, type LabelHit } from "@/lib/ocr-page-labels";
 import { createManualShapePolygon, type ManualShape } from "@/lib/takeoff-manual-shapes";
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Circle, Eye, EyeOff, Hand, Layers, Maximize2, Minus, Pencil, Plus, Sparkles, Square, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Circle, Eye, EyeOff, Hand, Layers, Maximize2, Minus, Pencil, Plus, Redo2, Sparkles, Square, Trash2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 
 /** A bucket / segment the canvas can paint a layer for. */
@@ -64,6 +64,12 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
   const [tool, setTool] = useState<Tool>("pan");
   const [draft, setDraft] = useState<Array<[number, number]>>([]);
   const [polygons, setPolygons] = useState<ManualPolygon[]>([]);
+  // Undo / redo history of overlay edits in the current session.
+  type HistoryOp =
+    | { kind: "add"; id: string; snapshot: Omit<ManualPolygon, "id"> }
+    | { kind: "erase"; snapshot: ManualPolygon };
+  const [undoStack, setUndoStack] = useState<HistoryOp[]>([]);
+  const [redoStack, setRedoStack] = useState<HistoryOp[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [regions, setRegions] = useState<Region[]>([]);
   const regionCacheRef = useRef<Map<string, Region[]>>(new Map());
@@ -283,6 +289,15 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
       return false;
     }
     setPolygons((prev) => [...prev, data as unknown as ManualPolygon]);
+    const inserted = data as unknown as ManualPolygon;
+    setUndoStack((s) => [...s, { kind: "add", id: inserted.id, snapshot: {
+      segment_id: inserted.segment_id,
+      page_number: inserted.page_number,
+      polygon: inserted.polygon,
+      color_hint: inserted.color_hint,
+      source_file_id: inserted.source_file_id ?? null,
+    } }]);
+    setRedoStack([]);
     if (switchToPan) setTool("pan");
     return true;
   }, [user, activeLayer, layers, layerColor, projectId, page, sourceFileId]);
@@ -313,17 +328,109 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
   }, [user, activeLayer, draft, saveOverlayPolygon]);
 
   const erasePolygon = async (id: string) => {
+    const target = polygons.find((p) => p.id === id);
     const { error } = await supabase.from("takeoff_overlays" as never).delete().eq("id", id);
     if (error) {
       toast.error(`Could not delete polygon: ${error.message}`);
       return;
     }
     setPolygons((prev) => prev.filter((p) => p.id !== id));
+    if (target) {
+      setUndoStack((s) => [...s, { kind: "erase", snapshot: target }]);
+      setRedoStack([]);
+    }
   };
+
+  // Re-insert a polygon snapshot (used by undo of erase / redo of add).
+  const reinsertSnapshot = useCallback(async (snap: Omit<ManualPolygon, "id">): Promise<ManualPolygon | null> => {
+    if (!user) return null;
+    const { data, error } = await supabase
+      .from("takeoff_overlays" as never)
+      .insert({
+        user_id: user.id,
+        project_id: projectId,
+        segment_id: snap.segment_id,
+        page_number: snap.page_number,
+        polygon: snap.polygon,
+        color_hint: snap.color_hint,
+        source_file_id: snap.source_file_id ?? null,
+      } as never)
+      .select("id,segment_id,page_number,polygon,color_hint,source_file_id")
+      .single();
+    if (error || !data) {
+      toast.error(`Could not restore polygon: ${error?.message || "unknown error"}`);
+      return null;
+    }
+    const row = data as unknown as ManualPolygon;
+    setPolygons((prev) => [...prev, row]);
+    return row;
+  }, [user, projectId]);
+
+  const deleteById = useCallback(async (id: string): Promise<boolean> => {
+    const { error } = await supabase.from("takeoff_overlays" as never).delete().eq("id", id);
+    if (error) {
+      toast.error(`Could not undo: ${error.message}`);
+      return false;
+    }
+    setPolygons((prev) => prev.filter((p) => p.id !== id));
+    return true;
+  }, []);
+
+  const handleUndo = useCallback(async () => {
+    if (undoStack.length === 0) return;
+    const op = undoStack[undoStack.length - 1];
+    if (op.kind === "add") {
+      const ok = await deleteById(op.id);
+      if (!ok) return;
+      setUndoStack((s) => s.slice(0, -1));
+      setRedoStack((s) => [...s, op]);
+    } else {
+      const row = await reinsertSnapshot({
+        segment_id: op.snapshot.segment_id,
+        page_number: op.snapshot.page_number,
+        polygon: op.snapshot.polygon,
+        color_hint: op.snapshot.color_hint,
+        source_file_id: op.snapshot.source_file_id ?? null,
+      });
+      if (!row) return;
+      setUndoStack((s) => s.slice(0, -1));
+      setRedoStack((s) => [...s, { kind: "erase", snapshot: row }]);
+    }
+  }, [undoStack, deleteById, reinsertSnapshot]);
+
+  const handleRedo = useCallback(async () => {
+    if (redoStack.length === 0) return;
+    const op = redoStack[redoStack.length - 1];
+    if (op.kind === "add") {
+      const row = await reinsertSnapshot(op.snapshot);
+      if (!row) return;
+      setRedoStack((s) => s.slice(0, -1));
+      setUndoStack((s) => [...s, { kind: "add", id: row.id, snapshot: op.snapshot }]);
+    } else {
+      const ok = await deleteById(op.snapshot.id);
+      if (!ok) return;
+      setRedoStack((s) => s.slice(0, -1));
+      setUndoStack((s) => [...s, op]);
+    }
+  }, [redoStack, deleteById, reinsertSnapshot]);
 
   // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const typing = tag === "INPUT" || tag === "TEXTAREA" || (target?.isContentEditable ?? false);
+      if (!typing && (e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
+        e.preventDefault();
+        if (e.shiftKey) void handleRedo();
+        else void handleUndo();
+        return;
+      }
+      if (!typing && (e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) {
+        e.preventDefault();
+        void handleRedo();
+        return;
+      }
       if (e.key === "Escape") setDraft([]);
       if (e.key === "Enter" && draft.length >= 3) finishDraft();
       if (e.key === "v" || e.key === "V") setTool("pan");
@@ -334,7 +441,7 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [draft, finishDraft]);
+  }, [draft, finishDraft, handleUndo, handleRedo]);
 
   const polysByLayer = useMemo(() => {
     const m = new Map<string, ManualPolygon[]>();
@@ -547,6 +654,10 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
             <ToolBtn title="Square stamp (R)" active={tool === "square"} onClick={() => setTool("square")}><Square className="h-4 w-4" /></ToolBtn>
             <ToolBtn title="Circle stamp (C)" active={tool === "circle"} onClick={() => setTool("circle")}><Circle className="h-4 w-4" /></ToolBtn>
             <ToolBtn title="Erase (E)" active={tool === "erase"} onClick={() => setTool("erase")}><Trash2 className="h-4 w-4" /></ToolBtn>
+            <div className="mt-1 flex flex-col items-center gap-0.5 border-t border-border pt-1">
+              <ToolBtn title="Undo (Ctrl+Z)" active={false} disabled={undoStack.length === 0} onClick={() => void handleUndo()}><Undo2 className="h-4 w-4" /></ToolBtn>
+              <ToolBtn title="Redo (Ctrl+Shift+Z)" active={false} disabled={redoStack.length === 0} onClick={() => void handleRedo()}><Redo2 className="h-4 w-4" /></ToolBtn>
+            </div>
             <div className="mt-1 flex flex-col items-center gap-0.5 border-t border-border pt-1">
               <ToolBtn title="Zoom in (Ctrl + wheel)" active={false} onClick={zoomIn}><Plus className="h-4 w-4" /></ToolBtn>
               <ToolBtn title="Zoom out" active={false} onClick={zoomOut}><Minus className="h-4 w-4" /></ToolBtn>
@@ -852,12 +963,13 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
   );
 }
 
-function ToolBtn({ children, title, active, onClick }: { children: React.ReactNode; title: string; active: boolean; onClick: () => void }) {
+function ToolBtn({ children, title, active, onClick, disabled }: { children: React.ReactNode; title: string; active: boolean; onClick: () => void; disabled?: boolean }) {
   return (
     <button
       title={title}
       onClick={onClick}
-      className={`grid h-8 w-8 place-items-center rounded transition-colors ${active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+      disabled={disabled}
+      className={`grid h-8 w-8 place-items-center rounded transition-colors ${active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"} ${disabled ? "opacity-30 cursor-not-allowed hover:bg-transparent hover:text-muted-foreground" : ""}`}
     >
       {children}
     </button>
