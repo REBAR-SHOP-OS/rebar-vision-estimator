@@ -1,51 +1,48 @@
 ## Goal
+Make the QA Gate trustworthy again by:
+- stopping stale legacy questions from surfacing as current blockers,
+- preventing overlays from pointing to the wrong page/place,
+- suppressing questions when the row already has enough drawing-backed dimensions/callouts.
 
-Two small UX fixes to the Calibration stage (`src/features/workflow-v2/stages/CalibrationStage.tsx` only):
+## Plan
+1. **Repair QA source selection and fallback behavior**
+   - Update the workflow QA loader so canonical takeoff warnings are preferred when available.
+   - Handle missing canonical bridge-table access gracefully instead of silently falling back to legacy-only data.
+   - If the backend is missing the existing bridge tables referenced by the app, apply the already-defined bridge migration so canonical lookups work again.
 
-1. Treat info-only sheets (schedules, loading info, general notes) like cover sheets — eligible for **Mark N/A** so they don't block the calibration gate.
-2. Let the two-point measurement modal accept the known distance in **ft, in, m, cm, or mm** instead of ft only.
+2. **Filter stale or invalid legacy QA issues**
+   - Tighten `loadWorkflowQaIssues` so legacy `validation_issues` are excluded when the linked estimate row already contains resolved/usable geometry, bar callout, or a saved engineer answer.
+   - Ignore issues that were generated from synthetic placeholder assumptions when the underlying row now has better data.
+   - De-duplicate overlapping warnings/errors for the same estimate item so the QA rail shows the current unresolved issue, not historical leftovers.
 
-No backend, schema, or scale-resolver changes.
+3. **Fix page/file/anchor resolution for the overlay**
+   - Make the viewer trust only anchors that match the selected issue’s real file and page.
+   - Reject approximate excerpt matches when they land on a different page or when the anchor is too generic.
+   - Prefer structured location fields and trusted anchor metadata over loose OCR token matching; if confidence is too low, show no pointer rather than a wrong pointer.
 
----
+4. **Tighten unresolved-question generation**
+   - Update the estimator QA issue generation so it does not ask for dimensions/callouts that are already present in `assumptions_json` or derived from explicit drawing text.
+   - Keep unresolved questions limited to genuinely missing raw drawing inputs.
+   - Prevent synthetic fallback estimates from creating misleading “confirm this” questions unless no stronger source exists.
 
-## 1. Expand `isLikelyCoverSheet` → suggest N/A for info-only sheets
+5. **Validate against this live project and add regression coverage**
+   - Verify the current project’s open QA list shrinks to real unresolved items.
+   - Confirm selected issues open on the correct page and either point precisely or show no pointer.
+   - Add targeted tests for stale legacy filtering, page-safe overlay selection, and “don’t ask when data already exists” behavior.
 
-Extend the existing heuristic so the same "looks like cover → Mark N/A" affordance covers schedule / notes / legend pages. Match when **any** of these are true:
+## Technical details
+- Likely files:
+  - `src/features/workflow-v2/takeoff-data.ts`
+  - `src/features/workflow-v2/stages/QAStage.tsx`
+  - `src/lib/rebar-read-model.ts`
+  - `supabase/functions/auto-estimate/index.ts`
+  - focused test files under `src/test/`
+- Minimal-change approach:
+  - keep the existing workflow and UI,
+  - patch only the QA loading, filtering, and anchor selection logic,
+  - only touch backend schema if the existing canonical bridge tables are actually missing from the hosted backend.
 
-- Existing rules (sheet number `*-0.0`, `COVER SHEET/PAGE`, NTS-only with no scale).
-- Sheet number prefix `G-` / `GN-` (general notes) when no parseable scale.
-- Raw text (first ~800 chars, uppercased) contains one of: `LOADING INFORMATION`, `GENERAL NOTES`, `DRAWING INDEX`, `DRAWING LIST`, `LEGEND`, `ABBREVIATIONS`, `BAR SCHEDULE`, `BEAM SCHEDULE`, `COLUMN SCHEDULE`, `REBAR DEVELOPMENT SCHEDULE`, `STEEL SCHEDULE`, `LINTEL SCHEDULE` — AND the sheet has no parseable scale (`!row.calibration || row.calibration.pixelsPerFoot <= 0`).
-
-Rename helper to `isLikelyNonScaledSheet` (keep call sites working) and update the existing `"looks like cover"` warning pill copy to `"info-only sheet"` when triggered by a schedule/notes match (use a small enum returned from the helper, or a second helper `getNonScaledReason()` returning `"cover" | "schedule" | "notes" | null`). Keep cover wording for cover matches.
-
-No behavior change for sheets that already have a confident scale.
-
-## 2. Multi-unit input in `TwoPointCalModal`
-
-Replace the ft-only input with a number input + a unit `<Select>` (units: `ft`, `in`, `m`, `cm`, `mm`).
-
-- Add `const [unit, setUnit] = useState<"ft"|"in"|"m"|"cm"|"mm">("ft")`.
-- Reset `unit` alongside `realDist`/`points` in the existing `useEffect` keyed on `sheet.id` / `pageNumber`.
-- Compute feet from the entered value:
-  - `ft`: value
-  - `in`: value / 12
-  - `m`: value * 3.28084
-  - `cm`: value * 0.0328084
-  - `mm`: value * 0.00328084
-- Use the converted feet value in the existing `computedPpf = pixelDist / feet` calculation.
-- Update the label `Known distance (ft)` → `Known distance` and place the Select to the right of the number input. Keep the `= XX.XX px/ft` readout (always reported in px/ft because that's what downstream code consumes).
-- Placeholder adapts to unit (e.g. `e.g. 10` for ft/m, `e.g. 120` for in/cm, `e.g. 3000` for mm).
-
-Use the existing shadcn `Select` (already imported in the file) with the project's standard sentinel pattern only if needed; otherwise plain `<select>` styled like surrounding controls is fine to keep the diff minimal.
-
-## Files touched
-
-- `src/features/workflow-v2/stages/CalibrationStage.tsx` (only file)
-
-## Verification
-
-- A sheet whose first page is the `LOADING INFORMATION / STEEL BEAM SCHEDULE / REBAR DEVELOPMENT SCHEDULE` layout (matches uploaded image) shows the `Mark N/A` chip with reason "info-only sheet" and stops blocking the gate when applied.
-- Cover sheets still show the existing "looks like cover" wording.
-- Two-point modal: pick a 3000 mm dimension on a sheet → enter `3000`, choose `mm` → `computedPpf` matches `pixelDist / (3000 * 0.00328084)` and the Apply button reports the same px/ft as before for the equivalent ft input.
-- No regressions in `gateRows` counts; sheets already verified are unaffected.
+## Expected result
+- The QA Gate shows fewer, more accurate blockers.
+- Wrong-page and wrong-location overlay jumps stop.
+- Items that already have the needed dimensions/callouts no longer appear as questions.
