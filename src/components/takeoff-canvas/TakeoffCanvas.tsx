@@ -289,6 +289,15 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
       return false;
     }
     setPolygons((prev) => [...prev, data as unknown as ManualPolygon]);
+    const inserted = data as unknown as ManualPolygon;
+    setUndoStack((s) => [...s, { kind: "add", id: inserted.id, snapshot: {
+      segment_id: inserted.segment_id,
+      page_number: inserted.page_number,
+      polygon: inserted.polygon,
+      color_hint: inserted.color_hint,
+      source_file_id: inserted.source_file_id ?? null,
+    } }]);
+    setRedoStack([]);
     if (switchToPan) setTool("pan");
     return true;
   }, [user, activeLayer, layers, layerColor, projectId, page, sourceFileId]);
@@ -319,13 +328,91 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
   }, [user, activeLayer, draft, saveOverlayPolygon]);
 
   const erasePolygon = async (id: string) => {
+    const target = polygons.find((p) => p.id === id);
     const { error } = await supabase.from("takeoff_overlays" as never).delete().eq("id", id);
     if (error) {
       toast.error(`Could not delete polygon: ${error.message}`);
       return;
     }
     setPolygons((prev) => prev.filter((p) => p.id !== id));
+    if (target) {
+      setUndoStack((s) => [...s, { kind: "erase", snapshot: target }]);
+      setRedoStack([]);
+    }
   };
+
+  // Re-insert a polygon snapshot (used by undo of erase / redo of add).
+  const reinsertSnapshot = useCallback(async (snap: Omit<ManualPolygon, "id">): Promise<ManualPolygon | null> => {
+    if (!user) return null;
+    const { data, error } = await supabase
+      .from("takeoff_overlays" as never)
+      .insert({
+        user_id: user.id,
+        project_id: projectId,
+        segment_id: snap.segment_id,
+        page_number: snap.page_number,
+        polygon: snap.polygon,
+        color_hint: snap.color_hint,
+        source_file_id: snap.source_file_id ?? null,
+      } as never)
+      .select("id,segment_id,page_number,polygon,color_hint,source_file_id")
+      .single();
+    if (error || !data) {
+      toast.error(`Could not restore polygon: ${error?.message || "unknown error"}`);
+      return null;
+    }
+    const row = data as unknown as ManualPolygon;
+    setPolygons((prev) => [...prev, row]);
+    return row;
+  }, [user, projectId]);
+
+  const deleteById = useCallback(async (id: string): Promise<boolean> => {
+    const { error } = await supabase.from("takeoff_overlays" as never).delete().eq("id", id);
+    if (error) {
+      toast.error(`Could not undo: ${error.message}`);
+      return false;
+    }
+    setPolygons((prev) => prev.filter((p) => p.id !== id));
+    return true;
+  }, []);
+
+  const handleUndo = useCallback(async () => {
+    if (undoStack.length === 0) return;
+    const op = undoStack[undoStack.length - 1];
+    if (op.kind === "add") {
+      const ok = await deleteById(op.id);
+      if (!ok) return;
+      setUndoStack((s) => s.slice(0, -1));
+      setRedoStack((s) => [...s, op]);
+    } else {
+      const row = await reinsertSnapshot({
+        segment_id: op.snapshot.segment_id,
+        page_number: op.snapshot.page_number,
+        polygon: op.snapshot.polygon,
+        color_hint: op.snapshot.color_hint,
+        source_file_id: op.snapshot.source_file_id ?? null,
+      });
+      if (!row) return;
+      setUndoStack((s) => s.slice(0, -1));
+      setRedoStack((s) => [...s, { kind: "erase", snapshot: row }]);
+    }
+  }, [undoStack, deleteById, reinsertSnapshot]);
+
+  const handleRedo = useCallback(async () => {
+    if (redoStack.length === 0) return;
+    const op = redoStack[redoStack.length - 1];
+    if (op.kind === "add") {
+      const row = await reinsertSnapshot(op.snapshot);
+      if (!row) return;
+      setRedoStack((s) => s.slice(0, -1));
+      setUndoStack((s) => [...s, { kind: "add", id: row.id, snapshot: op.snapshot }]);
+    } else {
+      const ok = await deleteById(op.snapshot.id);
+      if (!ok) return;
+      setRedoStack((s) => s.slice(0, -1));
+      setUndoStack((s) => [...s, op]);
+    }
+  }, [redoStack, deleteById, reinsertSnapshot]);
 
   // Keyboard shortcuts
   useEffect(() => {
