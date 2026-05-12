@@ -12,11 +12,21 @@ serve(async (req) => {
   }
 
   try {
-    const { user_id } = await req.json();
-    if (!user_id) throw new Error("user_id is required");
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+    // Require authenticated caller; derive user_id from JWT (ignore body)
+    const authHeader = req.headers.get("Authorization");
+    const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!);
+    const { data: { user } } = await anonClient.auth.getUser(authHeader?.replace("Bearer ", "") ?? "");
+    if (!user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const user_id = user.id;
+
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Fetch all outcomes for this user
