@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -397,6 +397,20 @@ export default function TakeoffStage({ projectId, state, goToStage }: StageProps
     })();
     return () => { cancelled = true; };
   }, [projectId, segRunning, generating]);
+
+  // Auto-trigger takeoff generation once when arriving at Stage 04 with calibration
+  // confirmed, segments approved, and no rows yet. Mirrors clicking "Generate Takeoff".
+  const autoGenFiredRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (loading || generating) return;
+    if (rows.length > 0) return;
+    if (!state.local.calibrationConfirmed) return;
+    if (allSegments.length === 0) return;
+    if (autoGenFiredRef.current === projectId) return;
+    autoGenFiredRef.current = projectId;
+    handleGenerate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, loading, generating, rows.length, allSegments.length, state.local.calibrationConfirmed]);
 
   useEffect(() => {
     const focus = state.local.takeoffFocus as {
