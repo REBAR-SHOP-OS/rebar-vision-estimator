@@ -757,6 +757,10 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
           source_file_id: item.source_file_id || iss.source_file_id || null,
           segment_id: item.segment_id || null,
           page_number: Number(ref?.page_number ?? aj.page_number ?? 0) || null,
+          // @ts-expect-error — extending linked_item with optional schedule fields
+          schedule_mark: aj.schedule_mark || null,
+          // @ts-expect-error — extending linked_item with optional schedule fields
+          schedule_source_page: aj.schedule_source_page || null,
         };
       }
       if (!iss.source_file_id && item?.source_file_id) iss.source_file_id = item.source_file_id;
