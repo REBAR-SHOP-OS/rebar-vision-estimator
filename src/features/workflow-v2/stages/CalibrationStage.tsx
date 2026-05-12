@@ -137,17 +137,30 @@ function requiresReview(row: SheetRow): boolean {
 }
 
 /**
- * Heuristic: does this sheet look like a cover/index page where calibration
- * is meaningless (NTS schematics, drawing list, etc.)?
+ * Heuristic: does this sheet look like a non-scaled page (cover, drawing
+ * index, schedules, general notes, legends) where two-point calibration is
+ * meaningless? Returns the reason so the UI can show the right pill copy.
  */
-function isLikelyCoverSheet(row: SheetRow): boolean {
-  const sn = (row.sheet_number || "").trim();
-  if (sn && /^[A-Z]{1,3}-?0\.0$/i.test(sn)) return true;
+type NonScaledReason = "cover" | "schedule" | "notes" | null;
+function getNonScaledReason(row: SheetRow): NonScaledReason {
+  const sn = (row.sheet_number || "").trim().toUpperCase();
   const txt = (row.raw_text || "").toUpperCase().slice(0, 800);
-  if (/COVER\s+(SHEET|PAGE)/.test(txt)) return true;
   const noScale = !row.calibration || row.calibration.pixelsPerFoot <= 0;
-  if (noScale && /\bN\.?\s*T\.?\s*S\.?\b/.test(txt)) return true;
-  return false;
+
+  if (sn && /^[A-Z]{1,3}-?0\.0$/.test(sn)) return "cover";
+  if (/COVER\s+(SHEET|PAGE)/.test(txt)) return "cover";
+  if (noScale && /\bN\.?\s*T\.?\s*S\.?\b/.test(txt) && !/SCHEDULE|NOTES|LEGEND|INDEX/.test(txt)) return "cover";
+
+  if (noScale) {
+    if (/^(G|GN)-/.test(sn)) return "notes";
+    if (/(GENERAL\s+NOTES|ABBREVIATIONS|LEGEND)/.test(txt)) return "notes";
+    if (/(DRAWING\s+(INDEX|LIST))/.test(txt)) return "cover";
+    if (/(LOADING\s+INFORMATION|BAR\s+SCHEDULE|BEAM\s+SCHEDULE|COLUMN\s+SCHEDULE|REBAR\s+DEVELOPMENT\s+SCHEDULE|STEEL\s+SCHEDULE|LINTEL\s+SCHEDULE)/.test(txt)) return "schedule";
+  }
+  return null;
+}
+function isLikelyCoverSheet(row: SheetRow): boolean {
+  return getNonScaledReason(row) !== null;
 }
 
 export default function CalibrationStage({ projectId, state, goToStage }: StageProps) {
