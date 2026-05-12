@@ -626,7 +626,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
         kicker="Stage 04"
         title="QA Gate"
         subtitle="Compare revisions, validate anchors, and clear estimator questions"
-        actions={
+        right={
           <button
             onClick={() => setReloadTick((n) => n + 1)}
             disabled={loading}
