@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { getCanonicalProjectFiles, type CanonicalProjectFileView } from "@/lib/rebar-read-model";
+import { getCurrentVerifiedEstimate } from "@/lib/verified-estimate/verified-estimate-store";
 import { getWorkflowEstimatorSignoff, getWorkflowQaCounts, getWorkflowTakeoffRowCount } from "./takeoff-data";
 
 export interface WorkflowState {
@@ -20,6 +21,8 @@ export interface WorkflowState {
   qaOpen: number;
   qaCriticalOpen: number;
   estimatorConfirmed: boolean;
+  canonicalExportStatus: "unknown" | "draft" | "verified" | "blocked";
+  exportBlockedReasons: string[];
   refresh: () => void;
 }
 
@@ -31,6 +34,16 @@ function readLocal(pid: string) {
 function writeLocal(pid: string, patch: Record<string, unknown>) {
   const cur = readLocal(pid);
   localStorage.setItem(LS_KEY(pid), JSON.stringify({ ...cur, ...patch }));
+}
+
+function normalizeCanonicalExportStatus(status: unknown): WorkflowState["canonicalExportStatus"] {
+  return status === "draft" || status === "verified" || status === "blocked" ? status : "unknown";
+}
+
+function normalizeBlockedReasons(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((reason): reason is string => typeof reason === "string" && reason.length > 0)
+    : [];
 }
 
 function mergeWorkflowFiles(
@@ -85,6 +98,8 @@ export function useWorkflowState(projectId: string): WorkflowState & {
   const [takeoffRows, setTakeoffRows] = useState(0);
   const [approvedScopeItems, setApprovedScopeItems] = useState<string[]>([]);
   const [serverEstimatorConfirmed, setServerEstimatorConfirmed] = useState(false);
+  const [canonicalExportStatus, setCanonicalExportStatus] = useState<WorkflowState["canonicalExportStatus"]>("unknown");
+  const [exportBlockedReasons, setExportBlockedReasons] = useState<string[]>([]);
   const [local, setLocalState] = useState<Record<string, unknown>>(() => readLocal(projectId));
   const [tick, setTick] = useState(0);
 
@@ -93,7 +108,7 @@ export function useWorkflowState(projectId: string): WorkflowState & {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [canonicalFiles, f, projectRes, takeoffRowCount, qaCounts, estimatorSignoff] = await Promise.all([
+      const [canonicalFiles, f, projectRes, takeoffRowCount, qaCounts, estimatorSignoff, verifiedEstimate] = await Promise.all([
         getCanonicalProjectFiles(supabase, projectId).catch((error) => {
           console.warn("Failed to load canonical workflow files:", error);
           return [] as CanonicalProjectFileView[];
@@ -103,6 +118,7 @@ export function useWorkflowState(projectId: string): WorkflowState & {
         getWorkflowTakeoffRowCount(projectId),
         getWorkflowQaCounts(projectId),
         getWorkflowEstimatorSignoff(projectId),
+        getCurrentVerifiedEstimate(supabase, projectId),
       ]);
       if (cancelled) return;
       setFiles(mergeWorkflowFiles(canonicalFiles, f.data || []));
@@ -114,6 +130,8 @@ export function useWorkflowState(projectId: string): WorkflowState & {
       setQaOpen(qaCounts.open);
       setQaCriticalOpen(qaCounts.critical);
       setServerEstimatorConfirmed(estimatorSignoff);
+      setCanonicalExportStatus(normalizeCanonicalExportStatus(verifiedEstimate?.status));
+      setExportBlockedReasons(normalizeBlockedReasons(verifiedEstimate?.blocked_reasons));
     })();
     return () => { cancelled = true; };
   }, [projectId, tick]);
@@ -140,6 +158,8 @@ export function useWorkflowState(projectId: string): WorkflowState & {
     qaOpen,
     qaCriticalOpen,
     estimatorConfirmed: !!local.estimatorConfirmed || serverEstimatorConfirmed,
+    canonicalExportStatus,
+    exportBlockedReasons,
     refresh,
     setLocal,
     local,
