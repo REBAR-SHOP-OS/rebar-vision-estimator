@@ -963,12 +963,13 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
   );
 }
 
-function ToolBtn({ children, title, active, onClick }: { children: React.ReactNode; title: string; active: boolean; onClick: () => void }) {
+function ToolBtn({ children, title, active, onClick, disabled }: { children: React.ReactNode; title: string; active: boolean; onClick: () => void; disabled?: boolean }) {
   return (
     <button
       title={title}
       onClick={onClick}
-      className={`grid h-8 w-8 place-items-center rounded transition-colors ${active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+      disabled={disabled}
+      className={`grid h-8 w-8 place-items-center rounded transition-colors ${active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"} ${disabled ? "opacity-30 cursor-not-allowed hover:bg-transparent hover:text-muted-foreground" : ""}`}
     >
       {children}
     </button>
