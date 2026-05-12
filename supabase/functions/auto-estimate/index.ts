@@ -1554,6 +1554,7 @@ Rules:
 - Bar sizes: use metric (10M, 15M, 20M, 25M, 30M, 35M) or imperial (#3..#8).
 - WIRE MESH (WWM): if mesh designations appear, set item_type="wwm", bar_size=mesh designation. Leave area=0 unless slab dimensions are literally given.
 - Always include the bar mark (BSxx, Bxxxx) in the description verbatim when present — the resolver keys off it.
+- CROSS-PAGE LOOKUP (mandatory): Before you leave total_length=0 or list "element dimensions" / "rebar callout" in any output, you MUST search the PROJECT KNOWLEDGE PACK below for a schedule entry whose mark family matches the item (F-, WF-, C-, P-, B-, GB-, etc.). If a row matches, set "schedule_mark" to that mark (e.g. "F-1") and "schedule_source_page" to its page number, and use its dimensions/reinforcing. Only emit "missing_refs" or leave dims at 0 when no entry on any page resolves the question.
 - Quote the source phrase from OCR in the description so provenance can be checked, e.g. "17 10M BS80 @300 DWL.".
 - ${scopeHint ? `SCOPE RESTRICTION: ${scopeHint}` : ""}
 - Do NOT duplicate items already estimated: ${existingDesc || "none yet"}.`;
@@ -1594,6 +1595,8 @@ ${manualText}
 === END ASSUMPTION AUTHORITY ===
 
 ${drawingTextContext ? `=== DRAWING TEXT ===\n${drawingTextContext}\n=== END DRAWING TEXT ===` : "NO DRAWING TEXT AVAILABLE. DO NOT ESTIMATE. Return an empty JSON array []."}
+
+${knowledgePackBlock}
 
 Generate estimate items for this segment. Base quantities on the ACTUAL drawing data if available, not assumptions.
 
