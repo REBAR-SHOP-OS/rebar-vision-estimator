@@ -60,19 +60,17 @@ export default function WorkflowShell({ projectId, project }: Props) {
   // Broadcast current stage status so the global AppSidebar can mirror it.
   useEffect(() => { setStageStatus(status); }, [status]);
 
-  const StageBody = () => {
-    const props = { projectId, state, goToStage: (stage: StageKey) => setActive(stage) };
-    switch (active) {
-      case "files": return <FilesStage {...props} />;
-      case "scope": return <ScopeStage {...props} />;
-      case "calibration": return <CalibrationStage {...props} />;
-      case "takeoff": return <TakeoffStage {...props} />;
-      case "qa": return <QAStage {...props} />;
-      case "assistant": return <AssistantStage {...props} />;
-      case "confirm": return <ConfirmStage {...props} />;
-      case "outputs": return <OutputsStage {...props} />;
-    }
-  };
+  const stageProps = { projectId, state, goToStage: (stage: StageKey) => setActive(stage) };
+  const stageBody =
+    active === "files" ? <FilesStage {...stageProps} /> :
+    active === "scope" ? <ScopeStage {...stageProps} /> :
+    active === "calibration" ? <CalibrationStage {...stageProps} /> :
+    active === "takeoff" ? <TakeoffStage {...stageProps} /> :
+    active === "qa" ? <QAStage {...stageProps} /> :
+    active === "assistant" ? <AssistantStage {...stageProps} /> :
+    active === "confirm" ? <ConfirmStage {...stageProps} /> :
+    active === "outputs" ? <OutputsStage {...stageProps} /> :
+    null;
 
   const kpis = [
     { label: "Files", value: state.fileCount, tone: "default" as const },
@@ -161,7 +159,7 @@ export default function WorkflowShell({ projectId, project }: Props) {
         {/* Body */}
         <div className="flex-1 min-h-0 overflow-auto" style={{ background: "hsl(var(--background))" }}>
           <div className="h-full min-w-[1200px]">
-            <StageBody />
+            {stageBody}
           </div>
         </div>
 
