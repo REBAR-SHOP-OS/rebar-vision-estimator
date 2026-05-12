@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { resolveScale, type Calibration, type CalibrationDiagnostics, type CalibrationReason, type Discipline } from "../lib/scale-resolver";
 import { detectDiscipline } from "@/lib/rebar-intake";
 import { DEFAULT_MARK_PATTERNS } from "@/lib/ocr-page-labels";
-import { CheckCircle2, RefreshCcw, Ruler, AlertTriangle, Loader2, MousePointerClick, X } from "lucide-react";
+import { CheckCircle2, RefreshCcw, Ruler, AlertTriangle, Loader2, MousePointerClick, X, ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
 import { toast } from "sonner";
 import PdfRenderer from "@/components/chat/PdfRenderer";
 import { deriveCalibrationStageState } from "./calibration-stage-state";
@@ -945,8 +945,10 @@ function TwoPointCalModal({
   const [points, setPoints] = useState<[number, number][]>([]);
   const [realDist, setRealDist] = useState("");
   const [unit, setUnit] = useState<"ft" | "in" | "m" | "cm" | "mm">("ft");
+  const [zoom, setZoom] = useState(1);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
 
   const pageNumber = sheet.page_number ?? 1;
 
@@ -957,6 +959,7 @@ function TwoPointCalModal({
     setPoints([]);
     setRealDist("");
     setUnit("ft");
+    setZoom(1);
   }, [sheet.id, pageNumber]);
 
   // Fetch signed URL for the drawing file
@@ -1077,7 +1080,51 @@ function TwoPointCalModal({
           </button>
         </DialogHeader>
 
-        <div className="flex-1 overflow-auto relative bg-muted/30">
+        <div
+          ref={viewportRef}
+          className="flex-1 overflow-auto relative bg-muted/30"
+          onWheel={(e) => {
+            if (!rendered) return;
+            if (!(e.ctrlKey || e.metaKey)) return;
+            e.preventDefault();
+            setZoom((z) => Math.max(0.25, Math.min(8, z * (e.deltaY < 0 ? 1.15 : 1 / 1.15))));
+          }}
+        >
+          {rendered && (
+            <div className="sticky top-2 z-10 ml-2 inline-flex items-center gap-1 bg-background/90 backdrop-blur border border-border rounded-sm px-1 py-1 shadow-sm">
+              <button
+                type="button"
+                title="Zoom out"
+                onClick={() => setZoom((z) => Math.max(0.25, z / 1.25))}
+                className="p-1 hover:bg-muted text-foreground"
+              ><ZoomOut className="w-3.5 h-3.5" /></button>
+              <button
+                type="button"
+                title="Reset to 100%"
+                onClick={() => setZoom(1)}
+                className="px-1.5 text-[11px] font-mono tabular-nums hover:bg-muted text-foreground min-w-[3.25rem]"
+              >{Math.round(zoom * 100)}%</button>
+              <button
+                type="button"
+                title="Zoom in"
+                onClick={() => setZoom((z) => Math.min(8, z * 1.25))}
+                className="p-1 hover:bg-muted text-foreground"
+              ><ZoomIn className="w-3.5 h-3.5" /></button>
+              <button
+                type="button"
+                title="Fit to width"
+                onClick={() => {
+                  const vp = viewportRef.current;
+                  const img = imgRef.current;
+                  if (!vp || !img) return;
+                  // natural display width at zoom=1 is the img.clientWidth at current zoom; back it out.
+                  const naturalDisplayW = img.clientWidth / zoom;
+                  if (naturalDisplayW > 0) setZoom(Math.max(0.25, Math.min(8, vp.clientWidth / naturalDisplayW)));
+                }}
+                className="p-1 hover:bg-muted text-foreground"
+              ><Maximize2 className="w-3.5 h-3.5" /></button>
+            </div>
+          )}
           {urlError ? (
             <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground px-8 text-center">
               <AlertTriangle className="w-8 h-8" />
@@ -1103,7 +1150,10 @@ function TwoPointCalModal({
               />
             </div>
           ) : (
-            <div className="relative inline-block max-w-full">
+            <div
+              className="relative inline-block"
+              style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }}
+            >
               <img
                 ref={imgRef}
                 src={rendered.url}
