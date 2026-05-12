@@ -1,42 +1,39 @@
-# Fix Scale Calibration page flicker
+## Issues
 
-## Root cause
+1. **Modal renders the wrong page** — In `TwoPointCalModal` (`src/features/workflow-v2/stages/CalibrationStage.tsx`), `<PdfRenderer>` is hard-coded to `currentPage={1}`, so every two-point measurement (Page 3, Page 4, Page 13, Page 16…) shows page 1 of the PDF.
+2. **Cover sheets demand calibration they don't need** — Sheets like `S-0.0` (COVER SHEET / "SCALE = N.T.S") fail scale detection and block the calibration gate, even though no takeoff happens there.
 
-In `src/features/workflow-v2/WorkflowShell.tsx`, the active stage is rendered through a **component declared inside the parent render function**:
+## Fix
 
-```tsx
-const StageBody = () => {
-  const props = { projectId, state, goToStage: ... };
-  switch (active) {
-    case "calibration": return <CalibrationStage {...props} />;
-    ...
-  }
-};
-...
-<StageBody />
-```
+### 1. Render the correct page in the two-point modal
+- Pass `currentPage={sheet.page_number ?? 1}` to `<PdfRenderer>`.
+- Reset `rendered` and `points` whenever `sheet.id` (or `sheet.page_number`) changes so a previously-rendered page doesn't leak across openings.
 
-Because `StageBody` is a brand-new function reference on every render of `WorkflowShell`, React treats it as a different component type each time and **unmounts + remounts `CalibrationStage` on every parent re-render**.
+### 2. Allow marking a sheet as "Not applicable" (cover / NTS)
+- Add a per-sheet action `Mark as N/A` next to **Accept / Measure** in the row UI inside `DisciplineSection`.
+- Store N/A sheet IDs in workflow local state: `state.local.calibrationNotApplicable: Record<string, true>`.
+- A sheet flagged N/A:
+  - is excluded from `gateRows` (does not block confirm),
+  - renders with a muted `n/a` pill instead of `auto / failed / ambiguous`,
+  - shows an `Undo` action to clear the flag.
+- Auto-suggest N/A for obvious cover pages — do NOT silently apply, just pre-highlight the row and surface the chip. Heuristic helper `isLikelyCoverSheet(row)` near `requiresReview`:
+  - `sheet_number` matches `/^[A-Z]{1,3}-?0\.0$/i` (e.g. `S-0.0`, `G0.0`), OR
+  - `raw_text` (uppercased, first 800 chars) contains `COVER SHEET` or `COVER PAGE`, OR
+  - `raw_text` contains `N\.?T\.?S\.?` AND no parseable scale was detected (`calibration?.pixelsPerFoot` falsy).
 
-`WorkflowShell` re-renders frequently (KPI memo, `setStageStatus` effect, `useWorkflowState` returning a new object each tick). Every remount of `CalibrationStage`:
+### 3. Gate / banner updates
+- `gateRows` filter excludes N/A sheets before counting `gateResolved` / `verifiedCount` / `unresolvedRequired`.
+- Bottom GateBanner copy unchanged; counts come from filtered `gateRows`.
 
-1. Resets `sheets`, `steps`, `emptyState` to initial values → UI shows the "Loading sheets…" / spinner overlay.
-2. Re-fires the `useEffect(load, [projectId, showAll])` → re-queries `drawing_search_index`, `sheet_revisions`, `logical_drawings`, `document_versions`.
-3. When the queries resolve, sheets render, then the next parent render remounts again → visible flicker.
+## Out of scope
+- No changes to scale resolver, OCR pipeline, or DB schema.
+- No backend persistence of the N/A flag beyond the existing per-project `state.local` blob.
+- No styling changes outside the new pill + button.
 
-This matches the screenshot (steps still spinning, "Loading sheets…" overlay) and the repeated reloads that look like flicker.
-
-## Fix (minimum patch)
-
-Edit only `src/features/workflow-v2/WorkflowShell.tsx`:
-
-1. Delete the inline `StageBody` component.
-2. Inline the `switch (active)` directly inside the JSX where `<StageBody />` is rendered, returning the chosen stage element. This keeps the same `CalibrationStage` instance mounted across re-renders, so its `sheets` / `steps` state survives and `load()` only runs when `projectId` or `showAll` actually change.
-
-No changes to `CalibrationStage.tsx`, `useWorkflowState.ts`, data fetching, styling, or behavior. Other stages benefit identically (Takeoff, QA, etc. were also remounting).
+## Files touched
+- `src/features/workflow-v2/stages/CalibrationStage.tsx` (only file)
 
 ## Verification
-
-- Reload `/app/project/.../` → Stage 03 should mount once, run the 4 loading steps once, then render the sheet list with no spinner blink.
-- Switching tabs (Files ↔ Scope ↔ Calibration) still works because the inline `switch` selects a different element when `active` changes (intended remount).
-- Existing Vitest suite (`calibration-stage-state`, `scale-resolver`, `two-point-calibration`) is unaffected.
+- Open Stage 03, click **Measure** on Page 3 / 4 / 13 / 16 → modal title and rendered page match.
+- Cover sheet (`S-0.0`) shows a suggested **Mark as N/A** chip; clicking it removes the sheet from the blocking count and lets **Confirm calibration** enable when the rest are resolved.
+- **Undo** restores the prior status.

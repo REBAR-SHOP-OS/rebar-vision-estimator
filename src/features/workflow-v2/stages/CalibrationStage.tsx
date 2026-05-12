@@ -136,6 +136,20 @@ function requiresReview(row: SheetRow): boolean {
   return false;
 }
 
+/**
+ * Heuristic: does this sheet look like a cover/index page where calibration
+ * is meaningless (NTS schematics, drawing list, etc.)?
+ */
+function isLikelyCoverSheet(row: SheetRow): boolean {
+  const sn = (row.sheet_number || "").trim();
+  if (sn && /^[A-Z]{1,3}-?0\.0$/i.test(sn)) return true;
+  const txt = (row.raw_text || "").toUpperCase().slice(0, 800);
+  if (/COVER\s+(SHEET|PAGE)/.test(txt)) return true;
+  const noScale = !row.calibration || row.calibration.pixelsPerFoot <= 0;
+  if (noScale && /\bN\.?\s*T\.?\s*S\.?\b/.test(txt)) return true;
+  return false;
+}
+
 export default function CalibrationStage({ projectId, state, goToStage }: StageProps) {
   const [sheets, setSheets] = useState<SheetRow[]>([]);
   const [steps, setSteps] = useState<LoadSteps>(initialSteps());
@@ -143,6 +157,14 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
   const [hiddenCount, setHiddenCount] = useState(0);
   const [showAll, setShowAll] = useState<boolean>(!!state.local.calibrationShowAll);
   const [twoPointSheet, setTwoPointSheet] = useState<SheetRow | null>(null);
+  const notApplicable = (state.local.calibrationNotApplicable || {}) as Record<string, boolean>;
+  const isNotApplicable = (id: string) => !!notApplicable[id];
+  const toggleNotApplicable = (id: string, value: boolean) => {
+    const cur = (state.local.calibrationNotApplicable || {}) as Record<string, boolean>;
+    const next = { ...cur };
+    if (value) next[id] = true; else delete next[id];
+    state.setLocal({ calibrationNotApplicable: next });
+  };
   const [emptyState, setEmptyState] = useState<{ mode: "sheets" | "empty"; title?: string; hint?: string }>({
     mode: "empty",
     title: "Loading indexed sheets…",
@@ -423,9 +445,10 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
   const structural = sheets.filter((r) => r.discipline === "Structural");
   const reference = sheets.filter((r) => r.discipline !== "Structural");
   const architectural = sheets.filter((r) => r.discipline === "Architectural");
-  const gateRows = (structural.length + architectural.length > 0)
+  const gateRowsAll = (structural.length + architectural.length > 0)
     ? [...structural, ...architectural]
     : sheets;
+  const gateRows = gateRowsAll.filter((r) => !isNotApplicable(r.id));
   const isResolved = (r: SheetRow) => !!r.calibration && r.calibration.pixelsPerFoot > 0 && !requiresReview(r);
   const isCalibrated = (r: SheetRow) => !!r.calibration && r.calibration.pixelsPerFoot > 0;
   const isVerifiedOrManual = (r: SheetRow) => r.scale_status === "verified" || r.scale_status === "manual";
@@ -613,6 +636,9 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
               onAcceptScale={acceptScale}
               onMeasure={(r) => setTwoPointSheet(r)}
               onRetryMetadata={load}
+              isNotApplicable={isNotApplicable}
+              isLikelyCover={isLikelyCoverSheet}
+              onToggleNotApplicable={toggleNotApplicable}
             />
             <DisciplineSection
               title="Architectural / Reference"
@@ -627,6 +653,9 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
               onAcceptScale={acceptScale}
               onMeasure={(r) => setTwoPointSheet(r)}
               onRetryMetadata={load}
+              isNotApplicable={isNotApplicable}
+              isLikelyCover={isLikelyCoverSheet}
+              onToggleNotApplicable={toggleNotApplicable}
             />
           </div>
         )}
@@ -690,6 +719,7 @@ const STATUS_PILL: Record<ScaleStatus, { tone: Parameters<typeof Pill>[0]["tone"
 function DisciplineSection({
   title, subtitle, tone, rows, resolvedCount, verifiedCount, empty,
   onUpdateOverride, onChangeDiscipline, onAcceptScale, onMeasure, onRetryMetadata,
+  isNotApplicable, isLikelyCover, onToggleNotApplicable,
 }: {
   title: string;
   subtitle: string;
@@ -703,6 +733,9 @@ function DisciplineSection({
   onAcceptScale: (id: string) => void;
   onMeasure: (row: SheetRow) => void;
   onRetryMetadata?: () => void;
+  isNotApplicable: (id: string) => boolean;
+  isLikelyCover: (row: SheetRow) => boolean;
+  onToggleNotApplicable: (id: string, value: boolean) => void;
 }) {
   const accent = tone === "primary" ? "border-l-2 border-l-primary pl-3" : "border-l-2 border-l-border pl-3 opacity-90";
   return (
@@ -725,18 +758,36 @@ function DisciplineSection({
             const statusPill = STATUS_PILL[r.scale_status];
             const canAccept = r.scale_status === "auto-detected" && !!cal && cal.pixelsPerFoot > 0;
             const rowNeedsReview = requiresReview(r);
+            const naFlag = isNotApplicable(r.id);
+            const suggestNa = !naFlag && isLikelyCover(r);
             return (
-              <div key={r.id} className="border border-border bg-card px-3 py-2.5 flex items-center gap-3">
+              <div
+                key={r.id}
+                className={`border bg-card px-3 py-2.5 flex items-center gap-3 ${
+                  naFlag
+                    ? "border-border opacity-60"
+                    : suggestNa
+                      ? "border-[hsl(var(--status-inferred))]/50"
+                      : "border-border"
+                }`}
+              >
                 <Ruler className="w-4 h-4 text-muted-foreground shrink-0" />
                 <div className="min-w-0 flex-1">
                   <div className="text-[12px] font-semibold flex items-center gap-2 flex-wrap">
                     <span>Page {r.page_number ?? "—"}{r.sheet_number ? ` · ${r.sheet_number}` : ""}</span>
-                    <Pill tone={statusPill.tone}>{statusPill.label}</Pill>
-                    <Pill tone={toneCal}>{cal ? cal.confidence : "none"}</Pill>
+                    {naFlag ? (
+                      <Pill tone="info">n/a</Pill>
+                    ) : (
+                      <>
+                        <Pill tone={statusPill.tone}>{statusPill.label}</Pill>
+                        <Pill tone={toneCal}>{cal ? cal.confidence : "none"}</Pill>
+                      </>
+                    )}
                     {cal?.source === "grid_dimension" && <Pill tone="info">grid</Pill>}
                     {cal?.source === "auto_dimension" && <Pill tone="info">auto-dimension</Pill>}
                     {reclassified && <Pill tone="info">reclassified</Pill>}
-                    {rowNeedsReview && <Pill tone="blocked">needs review</Pill>}
+                    {!naFlag && rowNeedsReview && <Pill tone="blocked">needs review</Pill>}
+                    {suggestNa && <Pill tone="warn">looks like cover</Pill>}
                     {cal?.scaleText && <span className="text-[11px] text-muted-foreground font-mono truncate">{cal.scaleText}</span>}
                   </div>
                   <div className="text-[11px] text-muted-foreground mt-0.5">{cal?.method || "No scale text detected — enter px/ft manually."}</div>
@@ -815,6 +866,7 @@ function DisciplineSection({
                   onChange={(e) => onChangeDiscipline(r.id, e.target.value as Discipline)}
                   className="h-7 px-1.5 border border-border bg-background text-[11px]"
                   title="Discipline"
+                  disabled={naFlag}
                 >
                   <option value="Structural">Structural</option>
                   <option value="Architectural">Architectural</option>
@@ -827,9 +879,10 @@ function DisciplineSection({
                     onChange={(e) => onUpdateOverride(r.id, e.target.value)}
                     className="w-20 h-7 px-2 border border-border bg-background text-[12px] tabular-nums"
                     placeholder="—"
+                    disabled={naFlag}
                   />
                 </label>
-                {canAccept && (
+                {!naFlag && canAccept && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -840,16 +893,39 @@ function DisciplineSection({
                     Accept
                   </Button>
                 )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-[11px] gap-1 shrink-0"
-                  onClick={() => onMeasure(r)}
-                  title="Click two points on the drawing to measure a known distance"
-                >
-                  <MousePointerClick className="w-3 h-3" />
-                  Measure
-                </Button>
+                {!naFlag && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[11px] gap-1 shrink-0"
+                    onClick={() => onMeasure(r)}
+                    title="Click two points on the drawing to measure a known distance"
+                  >
+                    <MousePointerClick className="w-3 h-3" />
+                    Measure
+                  </Button>
+                )}
+                {naFlag ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-[11px] shrink-0"
+                    onClick={() => onToggleNotApplicable(r.id, false)}
+                    title="Restore this sheet to the calibration gate"
+                  >
+                    Undo N/A
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant={suggestNa ? "outline" : "ghost"}
+                    className="h-7 text-[11px] shrink-0"
+                    onClick={() => onToggleNotApplicable(r.id, true)}
+                    title="Mark this sheet as not applicable for calibration (cover sheet, NTS, schematic)"
+                  >
+                    Mark N/A
+                  </Button>
+                )}
               </div>
             );
           })}
@@ -880,6 +956,16 @@ function TwoPointCalModal({
   const [realDist, setRealDist] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+
+  const pageNumber = sheet.page_number ?? 1;
+
+  // Reset rendered + points whenever the target sheet/page changes so we don't
+  // leak the previously-rendered page across openings.
+  useEffect(() => {
+    setRendered(null);
+    setPoints([]);
+    setRealDist("");
+  }, [sheet.id, pageNumber]);
 
   // Fetch signed URL for the drawing file
   useEffect(() => {
@@ -1010,7 +1096,7 @@ function TwoPointCalModal({
               </div>
               <PdfRenderer
                 url={signedUrl}
-                currentPage={1}
+                currentPage={pageNumber}
                 scale={1}
                 onPageRendered={handlePageRendered}
               />
