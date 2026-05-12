@@ -312,7 +312,12 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
   }, [user, activeLayer, layers, layerColor, projectId, page, sourceFileId]);
 
   const onStageClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!imageBoxRef.current || !activeLayer) return;
+    if (!imageBoxRef.current) return;
+    if (tool !== "pan" && tool !== "erase" && !activeLayer) {
+      toast.info("Pick a layer in the right panel first.");
+      return;
+    }
+    if (!activeLayer) return;
     const rect = imageBoxRef.current.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
