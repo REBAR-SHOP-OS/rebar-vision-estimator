@@ -1117,9 +1117,9 @@ function TwoPointCalModal({
                   const vp = viewportRef.current;
                   const img = imgRef.current;
                   if (!vp || !img) return;
-                  // natural display width at zoom=1 is the img.clientWidth at current zoom; back it out.
-                  const naturalDisplayW = img.clientWidth / zoom;
-                  if (naturalDisplayW > 0) setZoom(Math.max(0.25, Math.min(8, vp.clientWidth / naturalDisplayW)));
+                  // img.clientWidth is the layout width (CSS transforms don't change it).
+                  const layoutW = img.clientWidth;
+                  if (layoutW > 0) setZoom(Math.max(0.25, Math.min(8, (vp.clientWidth - 16) / layoutW)));
                 }}
                 className="p-1 hover:bg-muted text-foreground"
               ><Maximize2 className="w-3.5 h-3.5" /></button>
