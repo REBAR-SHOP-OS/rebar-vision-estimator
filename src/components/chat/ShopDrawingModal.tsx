@@ -127,8 +127,8 @@ export default function ShopDrawingModal({ open, onOpenChange, quoteResult, elem
       const accessToken = session?.access_token;
       if (!accessToken) {
         toast.error("You must be signed in to generate shop drawings.");
-        setIsGenerating(false);
         timers.forEach(clearTimeout);
+        setPhase("options");
         return;
       }
       const resp = await fetch(SHOP_DRAWING_URL, {
