@@ -239,7 +239,7 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
       setEmptyState(deriveCalibrationStageState({
         fileCount: state.fileCount,
         indexRowCount: 0,
-        documents: documents || [],
+        documents: (documents || []) as unknown as Parameters<typeof deriveCalibrationStageState>[0]["documents"],
         latestJob: jobs?.[0] || null,
       }));
       setSheets([]);
