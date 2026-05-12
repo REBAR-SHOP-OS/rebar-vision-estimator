@@ -949,6 +949,9 @@ function TwoPointCalModal({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const panRef = useRef<{ active: boolean; moved: boolean; startX: number; startY: number; scrollLeft: number; scrollTop: number; pointerId: number }>({
+    active: false, moved: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0, pointerId: -1,
+  });
 
   const pageNumber = sheet.page_number ?? 1;
 
@@ -1033,6 +1036,11 @@ function TwoPointCalModal({
   }, [points, rendered]);
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Suppress the click that ends a drag-pan gesture.
+    if (panRef.current.moved) {
+      panRef.current.moved = false;
+      return;
+    }
     if (points.length >= 2) {
       setPoints([]); // reset on 3rd click
       return;
@@ -1083,6 +1091,53 @@ function TwoPointCalModal({
         <div
           ref={viewportRef}
           className="flex-1 overflow-auto relative bg-muted/30"
+          onPointerDown={(e) => {
+            if (!rendered) return;
+            // Ignore non-primary buttons; allow middle-button always.
+            if (e.button !== 0 && e.button !== 1) return;
+            const vp = viewportRef.current;
+            if (!vp) return;
+            panRef.current = {
+              active: true,
+              moved: false,
+              startX: e.clientX,
+              startY: e.clientY,
+              scrollLeft: vp.scrollLeft,
+              scrollTop: vp.scrollTop,
+              pointerId: e.pointerId,
+            };
+          }}
+          onPointerMove={(e) => {
+            const p = panRef.current;
+            if (!p.active) return;
+            const dx = e.clientX - p.startX;
+            const dy = e.clientY - p.startY;
+            if (!p.moved && Math.hypot(dx, dy) < 4) return;
+            const vp = viewportRef.current;
+            if (!vp) return;
+            if (!p.moved) {
+              p.moved = true;
+              try { (e.currentTarget as HTMLDivElement).setPointerCapture(p.pointerId); } catch { /* noop */ }
+              vp.style.cursor = "grabbing";
+            }
+            vp.scrollLeft = p.scrollLeft - dx;
+            vp.scrollTop = p.scrollTop - dy;
+          }}
+          onPointerUp={(e) => {
+            const p = panRef.current;
+            if (p.active) {
+              try { (e.currentTarget as HTMLDivElement).releasePointerCapture(p.pointerId); } catch { /* noop */ }
+              p.active = false;
+              const vp = viewportRef.current;
+              if (vp) vp.style.cursor = "";
+            }
+          }}
+          onPointerCancel={() => {
+            panRef.current.active = false;
+            panRef.current.moved = false;
+            const vp = viewportRef.current;
+            if (vp) vp.style.cursor = "";
+          }}
           onWheel={(e) => {
             if (!rendered) return;
             if (!(e.ctrlKey || e.metaKey)) return;
