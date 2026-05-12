@@ -12,6 +12,7 @@ import {
   inferRebarFileKind,
 } from "@/lib/rebar-intake";
 import { parseAndIndexFile } from "@/lib/parse-file";
+import type { IndexingDiagnostics } from "@/lib/indexing-pipeline";
 
 interface Row {
   id: string;
@@ -80,14 +81,14 @@ export default function FilesStage({ projectId, state }: StageProps) {
         }
         const next: Record<string, { parse_status: Row["parse_status"]; parse_error?: string | null; indexed_rows: number; page_count: number }> = {};
         for (const row of data || []) {
-          const diagnostics = (row.pdf_metadata as Record<string, any> | null)?.indexing_diagnostics as Record<string, any> | undefined;
+          const diagnostics = ((row.pdf_metadata as Record<string, unknown> | null)?.indexing_diagnostics || null) as IndexingDiagnostics | null;
           const status = row.parse_status === "indexed" || row.parse_status === "parsing" || row.parse_status === "failed"
             ? row.parse_status
             : "pending";
           next[row.file_id] = {
             parse_status: status,
             parse_error: row.parse_error,
-            indexed_rows: Number(diagnostics?.indexed_rows_verified ?? 0),
+            indexed_rows: Number(diagnostics?.indexed_rows_verified || 0),
             page_count: Number(row.page_count || 0),
           };
         }

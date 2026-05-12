@@ -7,6 +7,7 @@ const corsHeaders = {
 };
 
 const EXTRACTION_VERSION = "2026.05.07";
+const UNCLASSIFIED_DISCIPLINE = "unclassified";
 
 const COMMON_WORDS = new Set([
   "OF","IN","AT","TO","AS","IS","IT","OR","ON","IF","NO","DO","UP","BY","AN","BE","SO","WE","HE","ME",
@@ -773,7 +774,7 @@ Deno.serve(async (req) => {
       const barMarks = extractBarMarks(rawText);
       const sheetId = tb.sheet_number || null;
       const discipline = tb.discipline || null;
-      const disciplineKey = (discipline || "unclassified").toLowerCase();
+      const disciplineKey = (discipline || UNCLASSIFIED_DISCIPLINE).toLowerCase();
       disciplineCounts[disciplineKey] = (disciplineCounts[disciplineKey] || 0) + 1;
       const drawingType = tb.drawing_type || null;
       const sheetClass = classifySheet(sheetId, discipline, drawingType, rawText);

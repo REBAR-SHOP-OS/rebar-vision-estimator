@@ -2,7 +2,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 import { auditIndexedPages } from "@/features/workflow-v2/accuracy-audit";
-import { summarizeIndexingOutcome, type PopulateSearchIndexResponse } from "@/lib/indexing-pipeline";
+import { summarizeIndexingOutcome, type IndexingDiagnostics, type PopulateSearchIndexResponse } from "@/lib/indexing-pipeline";
 
 export type ParseStatus = "pending" | "parsing" | "indexed" | "failed";
 
@@ -47,9 +47,15 @@ export async function parseAndIndexFile(
     .eq("file_id", legacyFileId)
     .maybeSingle();
 
-  let dvId: string | null = existingDv?.id || null;
-  const currentStatus = (existingDv as any)?.parse_status as ParseStatus | undefined;
-  const currentPdfMetadata = ((existingDv as any)?.pdf_metadata || {}) as Record<string, any>;
+  const typedExistingDv = (existingDv || null) as {
+    id: string;
+    parse_status?: ParseStatus;
+    pdf_metadata?: Record<string, unknown> | null;
+  } | null;
+  let dvId: string | null = typedExistingDv?.id || null;
+  const currentStatus = typedExistingDv?.parse_status;
+  const currentPdfMetadata = (typedExistingDv?.pdf_metadata || {}) as Record<string, unknown>;
+  const currentDiagnostics = (currentPdfMetadata.indexing_diagnostics || {}) as IndexingDiagnostics;
 
   if (!opts?.force && currentStatus === "indexed") {
     return { status: "indexed", pages_indexed: 0, document_version_id: dvId, skipped: true };
@@ -84,8 +90,8 @@ export async function parseAndIndexFile(
       pdf_metadata: {
         ...currentPdfMetadata,
         indexing_diagnostics: {
-          ...(currentPdfMetadata.indexing_diagnostics || {}),
-          upload_received_at: currentPdfMetadata.indexing_diagnostics?.upload_received_at || runStartedAt,
+          ...currentDiagnostics,
+          upload_received_at: currentDiagnostics.upload_received_at || runStartedAt,
           parse_started_at: runStartedAt,
           project_id: projectId,
           file_id: legacyFileId,
@@ -242,8 +248,8 @@ export async function parseAndIndexFile(
           total_pages_reported: totalPages || pages.length || null,
           pages_indexed: pages.length,
           indexing_diagnostics: {
-            ...(currentPdfMetadata.indexing_diagnostics || {}),
-            upload_received_at: currentPdfMetadata.indexing_diagnostics?.upload_received_at || runStartedAt,
+            ...currentDiagnostics,
+            upload_received_at: currentDiagnostics.upload_received_at || runStartedAt,
             parse_started_at: runStartedAt,
             ocr_completed_at: new Date().toISOString(),
             project_id: projectId,
@@ -284,8 +290,8 @@ export async function parseAndIndexFile(
         pdf_metadata: {
           ...currentPdfMetadata,
           indexing_diagnostics: {
-            ...(currentPdfMetadata.indexing_diagnostics || {}),
-            upload_received_at: currentPdfMetadata.indexing_diagnostics?.upload_received_at || runStartedAt,
+            ...currentDiagnostics,
+            upload_received_at: currentDiagnostics.upload_received_at || runStartedAt,
             parse_started_at: runStartedAt,
             project_id: projectId,
             file_id: legacyFileId,

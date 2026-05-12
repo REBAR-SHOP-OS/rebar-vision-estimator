@@ -10,6 +10,25 @@ export interface PopulateSearchIndexResponse {
   discipline_counts?: Record<string, number> | null;
 }
 
+export interface IndexingDiagnostics {
+  upload_received_at?: string;
+  parse_started_at?: string;
+  ocr_completed_at?: string;
+  project_id?: string;
+  file_id?: string;
+  document_version_id?: string | null;
+  source?: string;
+  status?: "parsing" | "indexed" | "failed";
+  requested_pages?: number;
+  indexed_rows_reported?: number;
+  indexed_rows_verified?: number;
+  skipped_pages?: number;
+  discipline_counts?: Record<string, number>;
+  conflicts?: string[];
+  quality_issues?: string[];
+  failure_reason?: string | null;
+}
+
 export interface IndexingOutcomeSummary {
   ok: boolean;
   reportedRows: number;
