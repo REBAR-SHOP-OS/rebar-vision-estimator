@@ -957,6 +957,16 @@ function TwoPointCalModal({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
 
+  const pageNumber = sheet.page_number ?? 1;
+
+  // Reset rendered + points whenever the target sheet/page changes so we don't
+  // leak the previously-rendered page across openings.
+  useEffect(() => {
+    setRendered(null);
+    setPoints([]);
+    setRealDist("");
+  }, [sheet.id, pageNumber]);
+
   // Fetch signed URL for the drawing file
   useEffect(() => {
     if (!sheet.file_path) {
@@ -1086,7 +1096,7 @@ function TwoPointCalModal({
               </div>
               <PdfRenderer
                 url={signedUrl}
-                currentPage={1}
+                currentPage={pageNumber}
                 scale={1}
                 onPageRendered={handlePageRendered}
               />
