@@ -435,6 +435,72 @@ function Tag({ children }: { children: React.ReactNode }) {
   );
 }
 
+// In-memory cache so we don't re-fetch / re-render PDF page 1 on every dashboard mount.
+const thumbCache = new Map<string, string>();
+
+function ProjectThumbnail({ projectId }: { projectId: string }) {
+  const [imgUrl, setImgUrl] = useState<string | null>(() => thumbCache.get(projectId) ?? null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [errored, setErrored] = useState(false);
+
+  useEffect(() => {
+    if (imgUrl) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("project_files")
+        .select("file_path, file_type, file_name")
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled || error || !data?.file_path) { setErrored(true); return; }
+      const isImage = /^image\//i.test(data.file_type || "") || /\.(png|jpe?g|webp|gif)$/i.test(data.file_name || "");
+      const isPdf = /pdf/i.test(data.file_type || "") || /\.pdf$/i.test(data.file_name || "");
+      const { data: signed } = await supabase.storage.from("blueprints").createSignedUrl(data.file_path, 3600);
+      if (cancelled || !signed?.signedUrl) { setErrored(true); return; }
+      if (isImage) {
+        thumbCache.set(projectId, signed.signedUrl);
+        setImgUrl(signed.signedUrl);
+      } else if (isPdf) {
+        setPdfUrl(signed.signedUrl);
+      } else {
+        setErrored(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectId, imgUrl]);
+
+  if (errored && !imgUrl) return null;
+
+  return (
+    <>
+      {imgUrl && (
+        <img
+          src={imgUrl}
+          alt=""
+          loading="lazy"
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+      )}
+      {!imgUrl && pdfUrl && (
+        <div className="absolute -left-[9999px] top-0 h-1 w-1 overflow-hidden" aria-hidden="true">
+          <PdfRenderer
+            url={pdfUrl}
+            currentPage={1}
+            scale={0.5}
+            onPageRendered={(dataUrl) => {
+              thumbCache.set(projectId, dataUrl);
+              setImgUrl(dataUrl);
+            }}
+            onError={() => setErrored(true)}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
 function ShortcutButton({
   onClick,
   icon,
