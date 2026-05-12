@@ -747,7 +747,9 @@ function DisciplineSection({
             const canAccept = r.scale_status === "auto-detected" && !!cal && cal.pixelsPerFoot > 0;
             const rowNeedsReview = requiresReview(r);
             const naFlag = isNotApplicable(r.id);
-            const suggestNa = !naFlag && isLikelyCover(r);
+            const naReason = naFlag ? null : getNonScaledReason(r);
+            const suggestNa = !!naReason;
+            const naLabel = naReason === "schedule" ? "info-only sheet" : naReason === "notes" ? "notes / legend" : "looks like cover";
             return (
               <div
                 key={r.id}
@@ -775,7 +777,7 @@ function DisciplineSection({
                     {cal?.source === "auto_dimension" && <Pill tone="info">auto-dimension</Pill>}
                     {reclassified && <Pill tone="info">reclassified</Pill>}
                     {!naFlag && rowNeedsReview && <Pill tone="blocked">needs review</Pill>}
-                    {suggestNa && <Pill tone="warn">looks like cover</Pill>}
+                    {suggestNa && <Pill tone="warn">{naLabel}</Pill>}
                     {cal?.scaleText && <span className="text-[11px] text-muted-foreground font-mono truncate">{cal.scaleText}</span>}
                   </div>
                   <div className="text-[11px] text-muted-foreground mt-0.5">{cal?.method || "No scale text detected — enter px/ft manually."}</div>
