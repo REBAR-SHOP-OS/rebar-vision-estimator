@@ -54,7 +54,7 @@ export interface WorkflowQaIssue {
     anchor_text?: string | null;
     anchor_kind?: string | null;
   } | null;
-  linked_item?: { id: string; description: string | null; bar_size: string | null; quantity_count: number; total_length: number; total_weight: number; missing_refs: string[]; source_file_id?: string | null; segment_id?: string | null; page_number?: number | null } | null;
+  linked_item?: { id: string; description: string | null; bar_size: string | null; quantity_count: number; total_length: number; total_weight: number; missing_refs: string[]; source_file_id?: string | null; segment_id?: string | null; page_number?: number | null; schedule_mark?: string | null; schedule_source_page?: number | null } | null;
   // Structured drawing location (used to prefix question text)
   location?: {
     source_sheet?: string | null;
@@ -757,6 +757,8 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
           source_file_id: item.source_file_id || iss.source_file_id || null,
           segment_id: item.segment_id || null,
           page_number: Number(ref?.page_number ?? aj.page_number ?? 0) || null,
+          schedule_mark: aj.schedule_mark || null,
+          schedule_source_page: aj.schedule_source_page || null,
         };
       }
       if (!iss.source_file_id && item?.source_file_id) iss.source_file_id = item.source_file_id;
@@ -794,6 +796,16 @@ export async function loadWorkflowQaIssues(projectId: string): Promise<WorkflowQ
 function legacyIssueAlreadyAnswered(iss: WorkflowQaIssue): boolean {
   const li = iss.linked_item;
   if (!li) return false;
+  // If the deterministic resolver (or the model itself) tied this row back
+  // to a schedule entry on the drawings, treat the question as answered:
+  // dimensions/callouts come from the schedule mark, not from the engineer.
+  const refs = Array.isArray(iss.source_refs) ? iss.source_refs[0] : null;
+  const aj = (refs && typeof refs === "object" ? (refs as any).assumptions_json : null) || null;
+  const scheduleMark = (li as any).schedule_mark
+    || (refs as any)?.schedule_mark
+    || aj?.schedule_mark
+    || null;
+  if (scheduleMark) return true;
   const missing = (li.missing_refs || []).map((m) => String(m).toLowerCase().trim()).filter(Boolean);
   if (missing.length === 0) return false;
   const excerpt = String(iss.location?.source_excerpt || iss.description || "").toLowerCase();

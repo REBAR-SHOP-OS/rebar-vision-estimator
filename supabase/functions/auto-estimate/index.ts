@@ -1122,7 +1122,7 @@ serve(async (req) => {
     }
 
     // Gather context
-    const [segRes, projRes, filesRes, stdRes, existingRes, searchIndexRes, knowledgeRes, sheetMetaRes] = await Promise.all([
+    const [segRes, projRes, filesRes, stdRes, existingRes, searchIndexRes, knowledgeRes] = await Promise.all([
       supabase.from("segments").select("*").eq("id", segment_id).single(),
       supabase.from("projects").select("name, project_type, scope_items, description").eq("id", project_id).single(),
       supabase.from("project_files").select("id, file_name, file_type").eq("project_id", project_id).limit(20),
@@ -1130,7 +1130,6 @@ serve(async (req) => {
       supabase.from("estimate_items").select("id, description, bar_size, quantity_count, total_length, total_weight, confidence").eq("segment_id", segment_id).limit(200),
       supabase.from("drawing_search_index").select("raw_text, page_number, extracted_entities, document_version_id").eq("project_id", project_id).limit(80),
       supabase.from("agent_knowledge").select("title, content, file_name").eq("user_id", user.id).limit(50),
-      supabase.from("document_sheets").select("document_version_id,page_number,sheet_number,scale_raw,scale_ratio").eq("project_id", project_id).limit(200),
     ]);
 
     const segment = segRes.data;
@@ -1138,9 +1137,23 @@ serve(async (req) => {
     const files = filesRes.data || [];
     const standard = stdRes.data?.[0];
     const existing = existingRes.data || [];
+    // Per-page sheet metadata is now derived from drawing_search_index.extracted_entities.scale
+    // (persisted by the Calibration stage). The legacy `document_sheets` table never existed in
+    // this project's DB, so the previous lookup always returned empty. Reading from the search
+    // index keeps everything in one place.
     const sheetMetaByKey = new Map<string, any>();
-    for (const row of (sheetMetaRes.data || []) as any[]) {
-      sheetMetaByKey.set(`${row.document_version_id || ""}:${Number(row.page_number) || 0}`, row);
+    for (const row of (searchIndexRes.data || []) as any[]) {
+      const ee: any = row.extracted_entities || {};
+      const scale = ee.scale || {};
+      const tb = ee.title_block || {};
+      sheetMetaByKey.set(`${row.document_version_id || ""}:${Number(row.page_number) || 0}`, {
+        document_version_id: row.document_version_id,
+        page_number: row.page_number,
+        sheet_number: tb.sheet_number || tb.sheet_id || null,
+        scale_raw: scale.raw || tb.scale || tb.scale_raw || null,
+        scale_ratio: Number(scale.ratio || 0) || null,
+        pixels_per_foot: Number(scale.pixels_per_foot || 0) || null,
+      });
     }
 
     // ============================================================
@@ -1379,6 +1392,83 @@ serve(async (req) => {
       }
     }
 
+    // ============================================================
+    // PROJECT KNOWLEDGE PACK (cross-page schedule + notes index)
+    // We scan EVERY OCR page (not just the segment-relevant ones)
+    // and pull rows that look like a structural schedule entry
+    // (mark + dimensions ± reinforcing). The estimator is told to
+    // resolve missing dims from this pack BEFORE asking the user.
+    // A deterministic post-AI resolver also uses this pack to
+    // backfill rows whose mark family matches.
+    // ============================================================
+    type ScheduleHit = {
+      mark: string;       // "F-1", "WF-2", "C3", etc. — uppercase
+      family: string;     // "F", "WF", "C", "P", "B", "GB"
+      dim1_mm: number;    // larger plan dimension
+      dim2_mm: number;    // smaller plan dimension
+      reinforcing: string;// best-effort verbatim ("5-15M E.W. T&B")
+      page: number;
+      excerpt: string;    // verbatim line
+    };
+    const knowledgePack: ScheduleHit[] = [];
+    {
+      // Mark families we recognise. Keep tight to avoid noise.
+      const MARK_RX = /\b(F|WF|FW|C|COL|P|PR|B|GB|BM|S|SOG|CB|EQP|PAD)[\s-]?(\d{1,3}[A-Z]?)\b/g;
+      // dims like 1200 X 1200, 1200x600, 2400 X 600 X 300
+      const DIM_RX = /(\d{3,5})\s*(?:mm)?\s*[xX×]\s*(\d{3,5})(?:\s*(?:mm)?\s*[xX×]\s*(\d{2,5}))?\s*(?:mm)?/;
+      // reinforcing like 5-15M, 2-20M E.W., 4#5, (3) 20M
+      const REINF_RX = /\(?\s*(\d{1,3})\s*[)\-#]?\s*(?:#\s*\d|[12345]?[05]M)\b[^\n]{0,40}/i;
+      const FAMILY_NORMAL: Record<string, string> = {
+        F: "F", WF: "WF", FW: "WF",
+        C: "C", COL: "C",
+        P: "P", PR: "P", PAD: "PAD",
+        B: "B", BM: "B", GB: "GB",
+        S: "S", SOG: "SOG", CB: "CB", EQP: "EQP",
+      };
+      for (const page of (searchIndexRes.data || []) as any[]) {
+        const text = String(page.raw_text || "");
+        if (text.length < 40) continue;
+        const pageNum = Number(page.page_number) || 0;
+        // Process line-by-line so excerpts stay short and traceable.
+        for (const rawLine of text.split(/\r?\n/)) {
+          const line = rawLine.trim();
+          if (line.length < 8 || line.length > 220) continue;
+          MARK_RX.lastIndex = 0;
+          const markMatch = MARK_RX.exec(line);
+          if (!markMatch) continue;
+          const dimMatch = line.match(DIM_RX);
+          if (!dimMatch) continue;
+          const fam = FAMILY_NORMAL[markMatch[1].toUpperCase()] || markMatch[1].toUpperCase();
+          const mark = `${fam}-${markMatch[2]}`;
+          const a = Number(dimMatch[1]);
+          const b = Number(dimMatch[2]);
+          if (!a || !b) continue;
+          const reinforcing = (line.match(REINF_RX)?.[0] || "").trim();
+          // Avoid duplicates per (mark,page)
+          if (knowledgePack.some((h) => h.mark === mark && h.page === pageNum)) continue;
+          knowledgePack.push({
+            mark,
+            family: fam,
+            dim1_mm: Math.max(a, b),
+            dim2_mm: Math.min(a, b),
+            reinforcing,
+            page: pageNum,
+            excerpt: line,
+          });
+        }
+      }
+      // Cap to ~80 entries to stay within prompt budget.
+      if (knowledgePack.length > 80) knowledgePack.length = 80;
+    }
+    const knowledgePackBlock = knowledgePack.length === 0
+      ? ""
+      : "=== PROJECT KNOWLEDGE PACK (schedules across ALL pages — search this BEFORE asking) ===\n"
+        + knowledgePack
+          .map((h) => `${h.mark} | ${h.dim1_mm}x${h.dim2_mm}mm${h.reinforcing ? ` | ${h.reinforcing}` : ""} | p${h.page}`)
+          .join("\n")
+        + "\n=== END PROJECT KNOWLEDGE PACK ===";
+    console.log(`[auto-estimate] knowledge pack: ${knowledgePack.length} schedule entr${knowledgePack.length === 1 ? "y" : "ies"} across ${new Set(knowledgePack.map((h) => h.page)).size} page(s)`);
+
     // If the segment-aware filter removed everything, refuse to estimate.
     // Generating against the full corpus is exactly the bug we are fixing.
     if (searchPages.length > 0 && relevantPages.length === 0) {
@@ -1464,6 +1554,7 @@ Rules:
 - Bar sizes: use metric (10M, 15M, 20M, 25M, 30M, 35M) or imperial (#3..#8).
 - WIRE MESH (WWM): if mesh designations appear, set item_type="wwm", bar_size=mesh designation. Leave area=0 unless slab dimensions are literally given.
 - Always include the bar mark (BSxx, Bxxxx) in the description verbatim when present — the resolver keys off it.
+- CROSS-PAGE LOOKUP (mandatory): Before you leave total_length=0 or list "element dimensions" / "rebar callout" in any output, you MUST search the PROJECT KNOWLEDGE PACK below for a schedule entry whose mark family matches the item (F-, WF-, C-, P-, B-, GB-, etc.). If a row matches, set "schedule_mark" to that mark (e.g. "F-1") and "schedule_source_page" to its page number, and use its dimensions/reinforcing. Only emit "missing_refs" or leave dims at 0 when no entry on any page resolves the question.
 - Quote the source phrase from OCR in the description so provenance can be checked, e.g. "17 10M BS80 @300 DWL.".
 - ${scopeHint ? `SCOPE RESTRICTION: ${scopeHint}` : ""}
 - Do NOT duplicate items already estimated: ${existingDesc || "none yet"}.`;
@@ -1505,6 +1596,8 @@ ${manualText}
 
 ${drawingTextContext ? `=== DRAWING TEXT ===\n${drawingTextContext}\n=== END DRAWING TEXT ===` : "NO DRAWING TEXT AVAILABLE. DO NOT ESTIMATE. Return an empty JSON array []."}
 
+${knowledgePackBlock}
+
 Generate estimate items for this segment. Base quantities on the ACTUAL drawing data if available, not assumptions.
 
 ${fewShot}
@@ -1545,6 +1638,8 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
                   authority_section: { type: ["string", "null"] },
                   authority_page: { type: ["number", "null"] },
                   authority_quote: { type: ["string", "null"] },
+                  schedule_mark: { type: ["string", "null"] },
+                  schedule_source_page: { type: ["number", "null"] },
                 },
                 required: [
                   "description",
@@ -1558,7 +1653,9 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
                   "source_excerpt",
                   "authority_section",
                   "authority_page",
-                  "authority_quote"
+                  "authority_quote",
+                  "schedule_mark",
+                  "schedule_source_page"
                 ],
                 additionalProperties: false,
               },
@@ -1753,6 +1850,58 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
     });
     items = enriched.filter((it: any) => itemMatchesSegment(it, segTypeKey, String(segment?.name || "")));
     console.log(`[auto-estimate] post-filter rows=${items.length} for segment="${segment?.name}" effective_type=${segTypeKey}`);
+
+    // ============================================================
+    // DETERMINISTIC SCHEDULE FALLBACK (no-AI cross-page resolver)
+    // For any row that the model left dimensionless, scan the
+    // Project Knowledge Pack for a schedule entry whose mark family
+    // matches the row's description / bar mark. If we find one,
+    // backfill bar_size + dimensions and clear matching missing_refs
+    // so QA does not raise a question we already have an answer for.
+    // ============================================================
+    if (knowledgePack.length > 0) {
+      const FAMILY_RX = /\b(F|WF|FW|C|COL|P|PR|PAD|B|GB|BM|S|SOG|CB|EQP)[\s-]?(\d{1,3}[A-Z]?)\b/i;
+      const REINF_SIZE_RX = /(\d{1,3})\s*[-#xX×@]?\s*(10M|15M|20M|25M|30M|35M|#\s*\d)/i;
+      let resolvedCount = 0;
+      for (const it of items as any[]) {
+        const hasDims = (Number(it.total_length) || 0) > 0;
+        const hasSize = !!String(it.bar_size || "").trim() && !/^0M$/i.test(String(it.bar_size));
+        if (hasDims && hasSize) continue;
+        const hay = `${String(it.description || "").toUpperCase()} ${String(it.source_excerpt || "").toUpperCase()}`;
+        const m = hay.match(FAMILY_RX);
+        if (!m) continue;
+        const targetMark = `${m[1].toUpperCase()}-${m[2]}`;
+        const hit = knowledgePack.find((h) => h.mark.toUpperCase() === targetMark);
+        if (!hit) continue;
+        // Backfill size from reinforcing string if we can identify a bar size.
+        if (!hasSize) {
+          const rs = hit.reinforcing.match(REINF_SIZE_RX);
+          if (rs) it.bar_size = rs[2].replace(/\s+/g, "").toUpperCase();
+        }
+        // We do NOT compute total_length here (segment-level qty depends on plan
+        // counts, which the model already extracted). We only flag the
+        // schedule resolution and clear the QA "missing dimensions" question.
+        it.schedule_mark = hit.mark;
+        it.schedule_source_page = hit.page;
+        if (Array.isArray(it._missing_refs) && it._missing_refs.length > 0) {
+          it._missing_refs = it._missing_refs.filter((tag: any) => {
+            const t = String(tag || "").toLowerCase();
+            return !/dimension|callout|rebar callout|element dimensions|geometry/.test(t);
+          });
+        }
+        // If the resolver previously marked it unresolved purely for missing
+        // dimensions/callout, promote to "partial" since we now have schedule
+        // evidence.
+        if (it._geometry_status === "unresolved" && (!it._missing_refs || it._missing_refs.length === 0)) {
+          it._geometry_status = "partial";
+          it.confidence = Math.max(Number(it.confidence) || 0, 0.55);
+        }
+        resolvedCount++;
+      }
+      if (resolvedCount > 0) {
+        console.log(`[auto-estimate] schedule fallback resolved ${resolvedCount} row(s) via Project Knowledge Pack`);
+      }
+    }
 
     // Object-first page locator. For each item we build a ranked list of
     // anchor candidates (detail / section / callout / grid / element /
@@ -1949,6 +2098,9 @@ Output the JSON array now. Extract literally from the OCR; do not guess geometry
         authority_quote: item.authority_quote || null,
         assumption_rule_id: item.assumption_rule_id || null,
         citation_missing: citationMissing,
+        schedule_mark: item.schedule_mark || null,
+        schedule_source_page: item.schedule_source_page || null,
+        resolved_by: item.schedule_mark ? "schedule_lookup" : null,
         waste_tier: wasteTier,
         waste_factor_source: standard?.waste_factors ? "standards_profile" : "rsic_default",
       },

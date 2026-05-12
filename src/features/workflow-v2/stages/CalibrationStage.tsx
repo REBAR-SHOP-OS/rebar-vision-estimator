@@ -480,10 +480,68 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
     setSheets((prev) => prev.map((r) => ({ ...r, discipline: "Structural" })));
   };
 
-  const confirmAll = () => {
+  const confirmAll = async () => {
     if (confirming) return;
     setConfirming(true);
     try {
+      // Persist per-sheet scale into drawing_search_index.extracted_entities.scale
+      // so the auto-estimate edge function can read it (it has no other table to
+      // pull calibration from). We merge into existing extracted_entities to
+      // preserve title_block, schedules, and other extractor output.
+      const writable = sheets.filter(
+        (r) => r.calibration && r.calibration.pixelsPerFoot > 0,
+      );
+      if (writable.length > 0) {
+        const ids = writable.map((r) => r.id);
+        const { data: existingRows, error: fetchErr } = await supabase
+          .from("drawing_search_index")
+          .select("id, extracted_entities")
+          .in("id", ids);
+        if (fetchErr) {
+          console.warn("CalibrationStage: failed to read existing extracted_entities:", fetchErr.message);
+        }
+        const existingById = new Map<string, Record<string, unknown>>();
+        for (const row of (existingRows || []) as Array<{ id: string; extracted_entities: unknown }>) {
+          const ee = row.extracted_entities;
+          existingById.set(row.id, (ee && typeof ee === "object" ? (ee as Record<string, unknown>) : {}));
+        }
+        let okCount = 0;
+        for (const r of writable) {
+          const cal = r.calibration as unknown as {
+            pixelsPerFoot: number;
+            confidence?: string;
+            source?: string;
+            method?: string;
+            scaleRatio?: number;
+            raw?: string;
+            diagnostics?: { scaleRatio?: number; raw?: string } | undefined;
+          };
+          const ee = { ...(existingById.get(r.id) || {}) } as Record<string, unknown>;
+          ee.scale = {
+            pixels_per_foot: cal.pixelsPerFoot,
+            ratio: cal.scaleRatio || cal.diagnostics?.scaleRatio || null,
+            raw: cal.raw || cal.diagnostics?.raw || null,
+            confidence: cal.confidence || null,
+            source: cal.source || null,
+            method: cal.method || null,
+            status: r.scale_status,
+            updated_at: new Date().toISOString(),
+          };
+          const { error: upErr } = await supabase
+            .from("drawing_search_index")
+            .update({ extracted_entities: ee as never })
+            .eq("id", r.id);
+          if (upErr) {
+            console.warn(`[calibration] persist failed for sheet ${r.id}:`, upErr.message);
+          } else {
+            okCount++;
+          }
+        }
+        console.log(`[calibration] persisted scale for ${okCount}/${writable.length} sheet(s)`);
+        if (okCount === 0 && writable.length > 0) {
+          toast.warning("Calibration saved locally — backend persist failed; takeoff may re-prompt for scale.");
+        }
+      }
       state.setLocal({ calibrationConfirmed: true, calibrationPrimary: "structural" });
       state.refresh();
       requestAnimationFrame(() => {
