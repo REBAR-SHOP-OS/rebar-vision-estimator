@@ -46,6 +46,10 @@ export default function WorkflowShell({ projectId, project }: Props) {
   const displayCustomerName = project.customer_name || project.canonicalProject?.customerName || project.client_name;
 
   const calibrationConfirmed = !!state.local.calibrationConfirmed;
+  const outputsBlocked = state.estimatorConfirmed && state.canonicalExportStatus === "blocked";
+  const outputsReady = state.estimatorConfirmed && state.canonicalExportStatus === "verified";
+  const outputsOpen = state.estimatorConfirmed && !outputsBlocked && !outputsReady;
+
   const status = useMemo(() => ({
     files: state.fileCount > 0 ? "complete" : "pending",
     scope: state.scopeAccepted > 0 ? "complete" : state.fileCount > 0 ? "active" : "locked",
@@ -54,8 +58,8 @@ export default function WorkflowShell({ projectId, project }: Props) {
     qa: !calibrationConfirmed ? "locked" : state.takeoffRows > 0 ? (state.qaCriticalOpen > 0 ? "blocked" : "active") : "locked",
     assistant: state.takeoffRows > 0 || state.fileCount > 0 ? "active" : "locked",
     confirm: !calibrationConfirmed ? "locked" : state.estimatorConfirmed ? "complete" : (state.qaCriticalOpen === 0 && state.takeoffRows > 0) ? "active" : "locked",
-    outputs: !calibrationConfirmed ? "locked" : state.estimatorConfirmed ? "active" : "locked",
-  }) as Record<StageKey, "complete" | "active" | "locked" | "blocked" | "pending">, [state, calibrationConfirmed]);
+    outputs: !calibrationConfirmed ? "locked" : !state.estimatorConfirmed ? "locked" : outputsBlocked ? "blocked" : "active",
+  }) as Record<StageKey, "complete" | "active" | "locked" | "blocked" | "pending">, [state, calibrationConfirmed, outputsBlocked]);
 
   // Broadcast current stage status so the global AppSidebar can mirror it.
   useEffect(() => { setStageStatus(status); }, [status]);
@@ -78,7 +82,11 @@ export default function WorkflowShell({ projectId, project }: Props) {
     { label: "Takeoff Rows", value: state.takeoffRows, tone: "default" as const },
     { label: "QA Critical", value: state.qaCriticalOpen, tone: state.qaCriticalOpen > 0 ? "bad" : "ok" as const },
     { label: "QA Open", value: state.qaOpen, tone: state.qaOpen > 0 ? "warn" : "ok" as const },
-    { label: "Outputs", value: state.estimatorConfirmed ? "READY" : "LOCKED", tone: state.estimatorConfirmed ? "ok" : "default" as const },
+    {
+      label: "Outputs",
+      value: !state.estimatorConfirmed ? "LOCKED" : outputsBlocked ? "BLOCKED" : outputsReady ? "READY" : outputsOpen ? "OPEN" : "LOCKED",
+      tone: !state.estimatorConfirmed ? "default" : outputsBlocked ? "bad" : outputsReady ? "ok" : "warn" as const,
+    },
   ];
 
   return (
@@ -172,9 +180,15 @@ export default function WorkflowShell({ projectId, project }: Props) {
             <span>QA <span className={state.qaCriticalOpen > 0 ? "text-[hsl(var(--status-blocked))]" : "text-foreground"}>{state.qaCriticalOpen} CRIT · {state.qaOpen} OPEN</span></span>
           </div>
           <div className="flex items-center gap-2">
-            {state.estimatorConfirmed
-              ? <span className="text-primary flex items-center gap-1.5"><CheckCircle2 className="w-3 h-3" /> Estimator Confirmed · Outputs Unlocked</span>
-              : <span className="flex items-center gap-1.5"><Circle className="w-3 h-3" /> Awaiting Estimator Confirmation</span>}
+            {!state.estimatorConfirmed ? (
+              <span className="flex items-center gap-1.5"><Circle className="w-3 h-3" /> Awaiting Estimator Confirmation</span>
+            ) : outputsBlocked ? (
+              <span className="text-[hsl(var(--status-blocked))] flex items-center gap-1.5"><AlertTriangle className="w-3 h-3" /> Canonical Verification Blocked · Exports Still Locked</span>
+            ) : outputsReady ? (
+              <span className="text-primary flex items-center gap-1.5"><CheckCircle2 className="w-3 h-3" /> Estimator Confirmed · Outputs Unlocked</span>
+            ) : (
+              <span className="flex items-center gap-1.5"><Circle className="w-3 h-3" /> Estimator Confirmed · Refresh Canonical Estimate</span>
+            )}
           </div>
         </footer>
       </div>
