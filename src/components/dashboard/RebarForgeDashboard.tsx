@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import {
   Activity,
@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import PdfRenderer from "@/components/chat/PdfRenderer";
 
 export interface DashboardProject {
   id: string;
@@ -377,6 +379,7 @@ function ProjectCard({ project, onClick, onDelete }: { project: DashboardProject
             backgroundSize: "16px 16px",
           }}
         />
+        <ProjectThumbnail projectId={project.id} />
         <span
           role="button"
           tabIndex={0}
