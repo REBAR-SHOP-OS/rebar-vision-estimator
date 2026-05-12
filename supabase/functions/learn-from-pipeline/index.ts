@@ -28,20 +28,25 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const body = await req.json().catch(() => ({}));
-    const singleLeadId = body.lead_id || null;
-    const userId = body.user_id;
+    const localUrl = Deno.env.get("SUPABASE_URL")!;
+    const localKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    if (!userId) {
-      return new Response(JSON.stringify({ error: "user_id is required" }), {
-        status: 400,
+    // Require authenticated caller; derive userId from JWT
+    const authHeader = req.headers.get("Authorization");
+    const anonClient = createClient(localUrl, Deno.env.get("SUPABASE_ANON_KEY")!);
+    const { data: { user } } = await anonClient.auth.getUser(authHeader?.replace("Bearer ", "") ?? "");
+    if (!user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    const userId = user.id;
+
+    const body = await req.json().catch(() => ({}));
+    const singleLeadId = body.lead_id || null;
 
     const rebarClient = createClient(REBAR_URL, REBAR_ANON_KEY);
-    const localUrl = Deno.env.get("SUPABASE_URL")!;
-    const localKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const localClient = createClient(localUrl, localKey);
 
     // Fetch leads — either single or all in learning stages
