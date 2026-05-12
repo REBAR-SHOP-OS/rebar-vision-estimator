@@ -417,6 +417,20 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
   // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const typing = tag === "INPUT" || tag === "TEXTAREA" || (target?.isContentEditable ?? false);
+      if (!typing && (e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
+        e.preventDefault();
+        if (e.shiftKey) void handleRedo();
+        else void handleUndo();
+        return;
+      }
+      if (!typing && (e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) {
+        e.preventDefault();
+        void handleRedo();
+        return;
+      }
       if (e.key === "Escape") setDraft([]);
       if (e.key === "Enter" && draft.length >= 3) finishDraft();
       if (e.key === "v" || e.key === "V") setTool("pan");
@@ -427,7 +441,7 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [draft, finishDraft]);
+  }, [draft, finishDraft, handleUndo, handleRedo]);
 
   const polysByLayer = useMemo(() => {
     const m = new Map<string, ManualPolygon[]>();
@@ -640,6 +654,10 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
             <ToolBtn title="Square stamp (R)" active={tool === "square"} onClick={() => setTool("square")}><Square className="h-4 w-4" /></ToolBtn>
             <ToolBtn title="Circle stamp (C)" active={tool === "circle"} onClick={() => setTool("circle")}><Circle className="h-4 w-4" /></ToolBtn>
             <ToolBtn title="Erase (E)" active={tool === "erase"} onClick={() => setTool("erase")}><Trash2 className="h-4 w-4" /></ToolBtn>
+            <div className="mt-1 flex flex-col items-center gap-0.5 border-t border-border pt-1">
+              <ToolBtn title="Undo (Ctrl+Z)" active={false} disabled={undoStack.length === 0} onClick={() => void handleUndo()}><Undo2 className="h-4 w-4" /></ToolBtn>
+              <ToolBtn title="Redo (Ctrl+Shift+Z)" active={false} disabled={redoStack.length === 0} onClick={() => void handleRedo()}><Redo2 className="h-4 w-4" /></ToolBtn>
+            </div>
             <div className="mt-1 flex flex-col items-center gap-0.5 border-t border-border pt-1">
               <ToolBtn title="Zoom in (Ctrl + wheel)" active={false} onClick={zoomIn}><Plus className="h-4 w-4" /></ToolBtn>
               <ToolBtn title="Zoom out" active={false} onClick={zoomOut}><Minus className="h-4 w-4" /></ToolBtn>
