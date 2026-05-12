@@ -1,0 +1,2 @@
+REVOKE EXECUTE ON FUNCTION public.search_drawings(uuid, text, jsonb, integer) FROM anon, public;
+REVOKE EXECUTE ON FUNCTION public.upsert_search_index(uuid, uuid, uuid, uuid, uuid, integer, text, jsonb, text[], text, text, text) FROM anon, public;

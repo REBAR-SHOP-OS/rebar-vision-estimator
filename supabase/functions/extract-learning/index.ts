@@ -12,12 +12,27 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, userId, manualInsight } = await req.json();
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+    // Require authenticated caller; derive userId from JWT
+    const authHeader = req.headers.get("Authorization");
+    const anonClient = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!);
+    const { data: { user } } = await anonClient.auth.getUser(authHeader?.replace("Bearer ", "") ?? "");
+    if (!user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const userId = user.id;
+
+    const { messages, manualInsight } = await req.json();
 
     // manualInsight bypasses extraction — goes straight to dedup
     const hasManual = typeof manualInsight === "string" && manualInsight.trim().length > 0;
 
-    if (!userId || (!hasManual && (!messages || messages.length < 3))) {
+    if (!hasManual && (!messages || messages.length < 3)) {
       return new Response(JSON.stringify({ skipped: true, reason: "Not enough data" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -26,8 +41,6 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     let learningText: string;
