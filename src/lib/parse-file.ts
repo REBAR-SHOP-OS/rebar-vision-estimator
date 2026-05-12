@@ -2,6 +2,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 import { auditIndexedPages } from "@/features/workflow-v2/accuracy-audit";
+import { summarizeIndexingOutcome, type PopulateSearchIndexResponse } from "@/lib/indexing-pipeline";
 
 export type ParseStatus = "pending" | "parsing" | "indexed" | "failed";
 
@@ -37,16 +38,18 @@ export async function parseAndIndexFile(
   if (!user) return { status: "failed", pages_indexed: 0, document_version_id: null, error: "Not authenticated" };
 
   const legacyFileId = file.legacy_file_id || file.id;
+  const runStartedAt = new Date().toISOString();
 
   // 1. Locate or create document_versions row
   const { data: existingDv } = await supabase
     .from("document_versions")
-    .select("id, parse_status")
+    .select("id, parse_status, pdf_metadata")
     .eq("file_id", legacyFileId)
     .maybeSingle();
 
   let dvId: string | null = existingDv?.id || null;
   const currentStatus = (existingDv as any)?.parse_status as ParseStatus | undefined;
+  const currentPdfMetadata = ((existingDv as any)?.pdf_metadata || {}) as Record<string, any>;
 
   if (!opts?.force && currentStatus === "indexed") {
     return { status: "indexed", pages_indexed: 0, document_version_id: dvId, skipped: true };
@@ -62,10 +65,36 @@ export async function parseAndIndexFile(
       sha256: `pending_${Date.now()}_${legacyFileId}`,
       source_system: "upload",
       parse_status: "parsing" as any,
+      pdf_metadata: {
+        indexing_diagnostics: {
+          upload_received_at: runStartedAt,
+          parse_started_at: runStartedAt,
+          project_id: projectId,
+          file_id: legacyFileId,
+          source: "parseAndIndexFile",
+          status: "parsing",
+        },
+      },
     } as any).select("id").single();
     dvId = newDv?.id || null;
   } else {
-    await supabase.from("document_versions").update({ parse_status: "parsing", parse_error: null } as any).eq("id", dvId);
+    await supabase.from("document_versions").update({
+      parse_status: "parsing",
+      parse_error: null,
+      pdf_metadata: {
+        ...currentPdfMetadata,
+        indexing_diagnostics: {
+          ...(currentPdfMetadata.indexing_diagnostics || {}),
+          upload_received_at: currentPdfMetadata.indexing_diagnostics?.upload_received_at || runStartedAt,
+          parse_started_at: runStartedAt,
+          project_id: projectId,
+          file_id: legacyFileId,
+          document_version_id: dvId,
+          source: "parseAndIndexFile",
+          status: "parsing",
+        },
+      },
+    } as any).eq("id", dvId);
   }
 
   try {
@@ -158,9 +187,11 @@ export async function parseAndIndexFile(
     );
 
     let pagesIndexed = 0;
+    let verifiedRows = 0;
+    let indexResponse: PopulateSearchIndexResponse | null = null;
     if (pages.length > 0 && dvId) {
       onProgress?.(`Indexing ${file.file_name}`);
-      const { data: indexed } = await supabase.functions.invoke("populate-search-index", {
+      const { data: indexed, error: indexErr } = await supabase.functions.invoke("populate-search-index", {
         body: {
           project_id: projectId,
           document_version_id: dvId,
@@ -171,7 +202,28 @@ export async function parseAndIndexFile(
           is_ocr: needsRasterOcr,
         },
       });
-      pagesIndexed = (indexed as any)?.indexed ?? pages.length;
+      if (indexErr) throw indexErr;
+      indexResponse = (indexed || null) as PopulateSearchIndexResponse | null;
+      pagesIndexed = Number(indexResponse?.indexed ?? 0);
+
+      const { count, error: rowCountErr } = await supabase
+        .from("drawing_search_index")
+        .select("id", { count: "exact", head: true })
+        .eq("project_id", projectId)
+        .eq("document_version_id", dvId);
+      if (rowCountErr) throw rowCountErr;
+      verifiedRows = count || 0;
+
+      const outcome = summarizeIndexingOutcome({
+        requestedPages: pages.length,
+        verifiedRows,
+        response: indexResponse,
+      });
+      if (!outcome.ok) {
+        throw new Error(outcome.error);
+      }
+    } else if (pages.length === 0) {
+      throw new Error("Parsing produced zero pages to index.");
     }
 
     if (dvId) {
@@ -183,11 +235,30 @@ export async function parseAndIndexFile(
         page_count: pages.length || null,
         is_scanned: needsRasterOcr || !hasText,
         pdf_metadata: {
+          ...currentPdfMetadata,
           ...(extraction?.pdf_metadata || {}),
           extraction_audit: extractionAudit,
           ocr_strategy: needsRasterOcr ? "adaptive_high_dpi_with_target_crops" : "vector_text",
           total_pages_reported: totalPages || pages.length || null,
           pages_indexed: pages.length,
+          indexing_diagnostics: {
+            ...(currentPdfMetadata.indexing_diagnostics || {}),
+            upload_received_at: currentPdfMetadata.indexing_diagnostics?.upload_received_at || runStartedAt,
+            parse_started_at: runStartedAt,
+            ocr_completed_at: new Date().toISOString(),
+            project_id: projectId,
+            file_id: legacyFileId,
+            document_version_id: dvId,
+            requested_pages: pages.length,
+            indexed_rows_reported: pagesIndexed,
+            indexed_rows_verified: verifiedRows,
+            skipped_pages: Number(indexResponse?.skipped ?? 0),
+            discipline_counts: indexResponse?.discipline_counts || {},
+            conflicts: indexResponse?.conflicts || [],
+            quality_issues: indexResponse?.quality_issues || [],
+            failure_reason: null,
+            status: "indexed",
+          },
         },
       } as any).eq("id", dvId);
     }
@@ -210,6 +281,19 @@ export async function parseAndIndexFile(
       await supabase.from("document_versions").update({
         parse_status: "failed",
         parse_error: msg.slice(0, 500),
+        pdf_metadata: {
+          ...currentPdfMetadata,
+          indexing_diagnostics: {
+            ...(currentPdfMetadata.indexing_diagnostics || {}),
+            upload_received_at: currentPdfMetadata.indexing_diagnostics?.upload_received_at || runStartedAt,
+            parse_started_at: runStartedAt,
+            project_id: projectId,
+            file_id: legacyFileId,
+            document_version_id: dvId,
+            failure_reason: msg.slice(0, 500),
+            status: "failed",
+          },
+        },
       } as any).eq("id", dvId);
     }
     return { status: "failed", pages_indexed: 0, document_version_id: dvId, error: msg };

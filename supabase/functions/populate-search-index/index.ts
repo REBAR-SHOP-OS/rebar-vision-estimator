@@ -697,6 +697,15 @@ Deno.serve(async (req) => {
       });
     }
 
+    console.info("[populate-search-index] request received", {
+      project_id,
+      document_version_id: document_version_id || null,
+      pipeline_file_id: pipeline_file_id || legacy_file_id || null,
+      page_count: pages.length,
+      source_system: source_system || "upload",
+      is_ocr: Boolean(is_ocr),
+    });
+
     const bridgeLookupFileId = legacy_file_id || pipeline_file_id || null;
 
     let rebarProjectFileId: string | null = null;
@@ -715,6 +724,7 @@ Deno.serve(async (req) => {
         .select("id, project_id")
         .eq("sha256", doc_sha256)
         .eq("user_id", userId)
+        .eq("project_id", project_id)
         .limit(1)
         .maybeSingle();
 
@@ -737,6 +747,8 @@ Deno.serve(async (req) => {
     let skipped = 0;
     const conflicts: string[] = [];
     const qualityIssues: string[] = [];
+    const errors: string[] = [];
+    const disciplineCounts: Record<string, number> = {};
     // Cross-page reconciliation accumulator: tracks every bar mark sighting and
     // its sheet category so we can flag (a) marks only seen on non-rebar sheets
     // and (b) marks with conflicting sizes across rebar sheets.
@@ -761,6 +773,8 @@ Deno.serve(async (req) => {
       const barMarks = extractBarMarks(rawText);
       const sheetId = tb.sheet_number || null;
       const discipline = tb.discipline || null;
+      const disciplineKey = (discipline || "unclassified").toLowerCase();
+      disciplineCounts[disciplineKey] = (disciplineCounts[disciplineKey] || 0) + 1;
       const drawingType = tb.drawing_type || null;
       const sheetClass = classifySheet(sheetId, discipline, drawingType, rawText);
       // Record sightings of every bar mark seen on this page for the
@@ -919,6 +933,7 @@ Deno.serve(async (req) => {
 
       if (error) {
         console.error(`Index page ${page.page_number} error:`, error);
+        errors.push(`Page ${page.page_number || "?"}: ${error.message || String(error)}`);
       } else {
         const { data: latest } = await supabase
           .from("drawing_search_index")
@@ -1060,8 +1075,26 @@ Deno.serve(async (req) => {
         .eq("id", rebarProjectFileId);
     }
 
+    console.info("[populate-search-index] indexing completed", {
+      project_id,
+      document_version_id: document_version_id || null,
+      indexed,
+      skipped,
+      total: pages.length,
+      discipline_counts: disciplineCounts,
+      errors,
+    });
+
     return new Response(
-      JSON.stringify({ indexed, skipped, total: pages.length, conflicts, quality_issues: qualityIssues }),
+      JSON.stringify({
+        indexed,
+        skipped,
+        total: pages.length,
+        conflicts,
+        quality_issues: qualityIssues,
+        errors,
+        discipline_counts: disciplineCounts,
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {

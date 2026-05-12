@@ -9,6 +9,7 @@ import { DEFAULT_MARK_PATTERNS } from "@/lib/ocr-page-labels";
 import { CheckCircle2, RefreshCcw, Ruler, AlertTriangle, Loader2, MousePointerClick, X } from "lucide-react";
 import { toast } from "sonner";
 import PdfRenderer from "@/components/chat/PdfRenderer";
+import { deriveCalibrationStageState } from "./calibration-stage-state";
 
 export type ScaleStatus = "auto-detected" | "verified" | "manual" | "ambiguous" | "failed";
 
@@ -142,6 +143,11 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
   const [hiddenCount, setHiddenCount] = useState(0);
   const [showAll, setShowAll] = useState<boolean>(!!state.local.calibrationShowAll);
   const [twoPointSheet, setTwoPointSheet] = useState<SheetRow | null>(null);
+  const [emptyState, setEmptyState] = useState(() => deriveCalibrationStageState({
+    fileCount: state.fileCount,
+    indexRowCount: 0,
+    documents: [],
+  }));
 
   const loading = steps.index === "loading" || steps.revisions === "loading" || steps.drawings === "loading" || steps.files === "loading";
 
@@ -217,6 +223,36 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
     }
 
     const indexRows = indexRowsRaw.map((r) => ({ ...r, raw_text: r.raw_text || "" }));
+    if (indexRows.length === 0) {
+      const [{ data: documents }, { data: jobs }] = await Promise.all([
+        supabase
+          .from("document_versions")
+          .select("file_name, parse_status, parse_error, pdf_metadata")
+          .eq("project_id", projectId)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("processing_jobs")
+          .select("status, error_message")
+          .eq("project_id", projectId)
+          .order("created_at", { ascending: false })
+          .limit(1),
+      ]);
+      setEmptyState(deriveCalibrationStageState({
+        fileCount: state.fileCount,
+        indexRowCount: 0,
+        documents: documents || [],
+        latestJob: jobs?.[0] || null,
+      }));
+      setSheets([]);
+      setHiddenCount(0);
+      return;
+    }
+
+    setEmptyState(deriveCalibrationStageState({
+      fileCount: state.fileCount,
+      indexRowCount: indexRows.length,
+      documents: [],
+    }));
     const sheetRevIds = Array.from(new Set(indexRows.map((r) => r.sheet_revision_id).filter(Boolean) as string[]));
     const logicalIds = Array.from(new Set(indexRows.map((r) => r.logical_drawing_id).filter(Boolean) as string[]));
     const docVerIds = Array.from(new Set(indexRows.map((r) => r.document_version_id).filter(Boolean) as string[]));
@@ -547,7 +583,14 @@ export default function CalibrationStage({ projectId, state, goToStage }: StageP
             <div className="text-[12px]">Loading sheets…</div>
           </div>
         ) : sheets.length === 0 ? (
-          <EmptyState title="No indexed sheets yet" hint="Upload and parse drawings in Stage 01 first." />
+          <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+            <EmptyState title={emptyState.title || "No indexed sheets yet"} hint={emptyState.hint} />
+            {goToStage && (
+              <Button variant="outline" size="sm" onClick={() => goToStage("files")}>
+                Review Stage 01
+              </Button>
+            )}
+          </div>
         ) : (
           <div className="space-y-5">
             <DisciplineSection
