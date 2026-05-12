@@ -1,39 +1,51 @@
-## Issues
+## Goal
 
-1. **Modal renders the wrong page** — In `TwoPointCalModal` (`src/features/workflow-v2/stages/CalibrationStage.tsx`), `<PdfRenderer>` is hard-coded to `currentPage={1}`, so every two-point measurement (Page 3, Page 4, Page 13, Page 16…) shows page 1 of the PDF.
-2. **Cover sheets demand calibration they don't need** — Sheets like `S-0.0` (COVER SHEET / "SCALE = N.T.S") fail scale detection and block the calibration gate, even though no takeoff happens there.
+Two small UX fixes to the Calibration stage (`src/features/workflow-v2/stages/CalibrationStage.tsx` only):
 
-## Fix
+1. Treat info-only sheets (schedules, loading info, general notes) like cover sheets — eligible for **Mark N/A** so they don't block the calibration gate.
+2. Let the two-point measurement modal accept the known distance in **ft, in, m, cm, or mm** instead of ft only.
 
-### 1. Render the correct page in the two-point modal
-- Pass `currentPage={sheet.page_number ?? 1}` to `<PdfRenderer>`.
-- Reset `rendered` and `points` whenever `sheet.id` (or `sheet.page_number`) changes so a previously-rendered page doesn't leak across openings.
+No backend, schema, or scale-resolver changes.
 
-### 2. Allow marking a sheet as "Not applicable" (cover / NTS)
-- Add a per-sheet action `Mark as N/A` next to **Accept / Measure** in the row UI inside `DisciplineSection`.
-- Store N/A sheet IDs in workflow local state: `state.local.calibrationNotApplicable: Record<string, true>`.
-- A sheet flagged N/A:
-  - is excluded from `gateRows` (does not block confirm),
-  - renders with a muted `n/a` pill instead of `auto / failed / ambiguous`,
-  - shows an `Undo` action to clear the flag.
-- Auto-suggest N/A for obvious cover pages — do NOT silently apply, just pre-highlight the row and surface the chip. Heuristic helper `isLikelyCoverSheet(row)` near `requiresReview`:
-  - `sheet_number` matches `/^[A-Z]{1,3}-?0\.0$/i` (e.g. `S-0.0`, `G0.0`), OR
-  - `raw_text` (uppercased, first 800 chars) contains `COVER SHEET` or `COVER PAGE`, OR
-  - `raw_text` contains `N\.?T\.?S\.?` AND no parseable scale was detected (`calibration?.pixelsPerFoot` falsy).
+---
 
-### 3. Gate / banner updates
-- `gateRows` filter excludes N/A sheets before counting `gateResolved` / `verifiedCount` / `unresolvedRequired`.
-- Bottom GateBanner copy unchanged; counts come from filtered `gateRows`.
+## 1. Expand `isLikelyCoverSheet` → suggest N/A for info-only sheets
 
-## Out of scope
-- No changes to scale resolver, OCR pipeline, or DB schema.
-- No backend persistence of the N/A flag beyond the existing per-project `state.local` blob.
-- No styling changes outside the new pill + button.
+Extend the existing heuristic so the same "looks like cover → Mark N/A" affordance covers schedule / notes / legend pages. Match when **any** of these are true:
+
+- Existing rules (sheet number `*-0.0`, `COVER SHEET/PAGE`, NTS-only with no scale).
+- Sheet number prefix `G-` / `GN-` (general notes) when no parseable scale.
+- Raw text (first ~800 chars, uppercased) contains one of: `LOADING INFORMATION`, `GENERAL NOTES`, `DRAWING INDEX`, `DRAWING LIST`, `LEGEND`, `ABBREVIATIONS`, `BAR SCHEDULE`, `BEAM SCHEDULE`, `COLUMN SCHEDULE`, `REBAR DEVELOPMENT SCHEDULE`, `STEEL SCHEDULE`, `LINTEL SCHEDULE` — AND the sheet has no parseable scale (`!row.calibration || row.calibration.pixelsPerFoot <= 0`).
+
+Rename helper to `isLikelyNonScaledSheet` (keep call sites working) and update the existing `"looks like cover"` warning pill copy to `"info-only sheet"` when triggered by a schedule/notes match (use a small enum returned from the helper, or a second helper `getNonScaledReason()` returning `"cover" | "schedule" | "notes" | null`). Keep cover wording for cover matches.
+
+No behavior change for sheets that already have a confident scale.
+
+## 2. Multi-unit input in `TwoPointCalModal`
+
+Replace the ft-only input with a number input + a unit `<Select>` (units: `ft`, `in`, `m`, `cm`, `mm`).
+
+- Add `const [unit, setUnit] = useState<"ft"|"in"|"m"|"cm"|"mm">("ft")`.
+- Reset `unit` alongside `realDist`/`points` in the existing `useEffect` keyed on `sheet.id` / `pageNumber`.
+- Compute feet from the entered value:
+  - `ft`: value
+  - `in`: value / 12
+  - `m`: value * 3.28084
+  - `cm`: value * 0.0328084
+  - `mm`: value * 0.00328084
+- Use the converted feet value in the existing `computedPpf = pixelDist / feet` calculation.
+- Update the label `Known distance (ft)` → `Known distance` and place the Select to the right of the number input. Keep the `= XX.XX px/ft` readout (always reported in px/ft because that's what downstream code consumes).
+- Placeholder adapts to unit (e.g. `e.g. 10` for ft/m, `e.g. 120` for in/cm, `e.g. 3000` for mm).
+
+Use the existing shadcn `Select` (already imported in the file) with the project's standard sentinel pattern only if needed; otherwise plain `<select>` styled like surrounding controls is fine to keep the diff minimal.
 
 ## Files touched
+
 - `src/features/workflow-v2/stages/CalibrationStage.tsx` (only file)
 
 ## Verification
-- Open Stage 03, click **Measure** on Page 3 / 4 / 13 / 16 → modal title and rendered page match.
-- Cover sheet (`S-0.0`) shows a suggested **Mark as N/A** chip; clicking it removes the sheet from the blocking count and lets **Confirm calibration** enable when the rest are resolved.
-- **Undo** restores the prior status.
+
+- A sheet whose first page is the `LOADING INFORMATION / STEEL BEAM SCHEDULE / REBAR DEVELOPMENT SCHEDULE` layout (matches uploaded image) shows the `Mark N/A` chip with reason "info-only sheet" and stops blocking the gate when applied.
+- Cover sheets still show the existing "looks like cover" wording.
+- Two-point modal: pick a 3000 mm dimension on a sheet → enter `3000`, choose `mm` → `computedPpf` matches `pixelDist / (3000 * 0.00328084)` and the Apply button reports the same px/ft as before for the equivalent ft input.
+- No regressions in `gateRows` counts; sheets already verified are unaffected.

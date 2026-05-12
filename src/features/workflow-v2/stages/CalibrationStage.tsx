@@ -137,17 +137,30 @@ function requiresReview(row: SheetRow): boolean {
 }
 
 /**
- * Heuristic: does this sheet look like a cover/index page where calibration
- * is meaningless (NTS schematics, drawing list, etc.)?
+ * Heuristic: does this sheet look like a non-scaled page (cover, drawing
+ * index, schedules, general notes, legends) where two-point calibration is
+ * meaningless? Returns the reason so the UI can show the right pill copy.
  */
-function isLikelyCoverSheet(row: SheetRow): boolean {
-  const sn = (row.sheet_number || "").trim();
-  if (sn && /^[A-Z]{1,3}-?0\.0$/i.test(sn)) return true;
+type NonScaledReason = "cover" | "schedule" | "notes" | null;
+function getNonScaledReason(row: SheetRow): NonScaledReason {
+  const sn = (row.sheet_number || "").trim().toUpperCase();
   const txt = (row.raw_text || "").toUpperCase().slice(0, 800);
-  if (/COVER\s+(SHEET|PAGE)/.test(txt)) return true;
   const noScale = !row.calibration || row.calibration.pixelsPerFoot <= 0;
-  if (noScale && /\bN\.?\s*T\.?\s*S\.?\b/.test(txt)) return true;
-  return false;
+
+  if (sn && /^[A-Z]{1,3}-?0\.0$/.test(sn)) return "cover";
+  if (/COVER\s+(SHEET|PAGE)/.test(txt)) return "cover";
+  if (noScale && /\bN\.?\s*T\.?\s*S\.?\b/.test(txt) && !/SCHEDULE|NOTES|LEGEND|INDEX/.test(txt)) return "cover";
+
+  if (noScale) {
+    if (/^(G|GN)-/.test(sn)) return "notes";
+    if (/(GENERAL\s+NOTES|ABBREVIATIONS|LEGEND)/.test(txt)) return "notes";
+    if (/(DRAWING\s+(INDEX|LIST))/.test(txt)) return "cover";
+    if (/(LOADING\s+INFORMATION|BAR\s+SCHEDULE|BEAM\s+SCHEDULE|COLUMN\s+SCHEDULE|REBAR\s+DEVELOPMENT\s+SCHEDULE|STEEL\s+SCHEDULE|LINTEL\s+SCHEDULE)/.test(txt)) return "schedule";
+  }
+  return null;
+}
+function isLikelyCoverSheet(row: SheetRow): boolean {
+  return getNonScaledReason(row) !== null;
 }
 
 export default function CalibrationStage({ projectId, state, goToStage }: StageProps) {
@@ -734,7 +747,9 @@ function DisciplineSection({
             const canAccept = r.scale_status === "auto-detected" && !!cal && cal.pixelsPerFoot > 0;
             const rowNeedsReview = requiresReview(r);
             const naFlag = isNotApplicable(r.id);
-            const suggestNa = !naFlag && isLikelyCover(r);
+            const naReason = naFlag ? null : getNonScaledReason(r);
+            const suggestNa = !!naReason;
+            const naLabel = naReason === "schedule" ? "info-only sheet" : naReason === "notes" ? "notes / legend" : "looks like cover";
             return (
               <div
                 key={r.id}
@@ -762,7 +777,7 @@ function DisciplineSection({
                     {cal?.source === "auto_dimension" && <Pill tone="info">auto-dimension</Pill>}
                     {reclassified && <Pill tone="info">reclassified</Pill>}
                     {!naFlag && rowNeedsReview && <Pill tone="blocked">needs review</Pill>}
-                    {suggestNa && <Pill tone="warn">looks like cover</Pill>}
+                    {suggestNa && <Pill tone="warn">{naLabel}</Pill>}
                     {cal?.scaleText && <span className="text-[11px] text-muted-foreground font-mono truncate">{cal.scaleText}</span>}
                   </div>
                   <div className="text-[11px] text-muted-foreground mt-0.5">{cal?.method || "No scale text detected — enter px/ft manually."}</div>
@@ -929,6 +944,7 @@ function TwoPointCalModal({
   const [rendered, setRendered] = useState<{ url: string; w: number; h: number } | null>(null);
   const [points, setPoints] = useState<[number, number][]>([]);
   const [realDist, setRealDist] = useState("");
+  const [unit, setUnit] = useState<"ft" | "in" | "m" | "cm" | "mm">("ft");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
 
@@ -940,6 +956,7 @@ function TwoPointCalModal({
     setRendered(null);
     setPoints([]);
     setRealDist("");
+    setUnit("ft");
   }, [sheet.id, pageNumber]);
 
   // Fetch signed URL for the drawing file
@@ -1033,8 +1050,17 @@ function TwoPointCalModal({
       ? Math.sqrt(Math.pow(points[1][0] - points[0][0], 2) + Math.pow(points[1][1] - points[0][1], 2))
       : null;
 
-  const parsedFt = parseFloat(realDist);
+  const UNIT_TO_FT: Record<typeof unit, number> = {
+    ft: 1,
+    in: 1 / 12,
+    m: 3.28084,
+    cm: 0.0328084,
+    mm: 0.00328084,
+  };
+  const parsedVal = parseFloat(realDist);
+  const parsedFt = parsedVal > 0 ? parsedVal * UNIT_TO_FT[unit] : 0;
   const computedPpf = pixelDist && parsedFt > 0 ? pixelDist / parsedFt : null;
+  const unitPlaceholder: Record<typeof unit, string> = { ft: "e.g. 10", in: "e.g. 120", m: "e.g. 3", cm: "e.g. 300", mm: "e.g. 3000" };
 
   const label = `Page ${sheet.page_number ?? "—"}${sheet.sheet_number ? ` · ${sheet.sheet_number}` : ""}`;
 
@@ -1107,17 +1133,28 @@ function TwoPointCalModal({
           {points.length === 2 && (
             <>
               <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground shrink-0">
-                Known distance (ft)
+                Known distance
                 <input
                   type="number"
                   min="0.1"
-                  step="0.5"
+                  step="any"
                   value={realDist}
                   onChange={(e) => setRealDist(e.target.value)}
                   className="w-24 h-7 px-2 border border-border bg-background text-[12px] tabular-nums"
-                  placeholder="e.g. 10"
+                  placeholder={unitPlaceholder[unit]}
                   autoFocus
                 />
+                <select
+                  value={unit}
+                  onChange={(e) => setUnit(e.target.value as typeof unit)}
+                  className="h-7 px-1.5 border border-border bg-background text-[12px]"
+                >
+                  <option value="ft">ft</option>
+                  <option value="in">in</option>
+                  <option value="m">m</option>
+                  <option value="cm">cm</option>
+                  <option value="mm">mm</option>
+                </select>
               </label>
               {computedPpf && (
                 <span className="text-[12px] font-mono text-muted-foreground tabular-nums">
