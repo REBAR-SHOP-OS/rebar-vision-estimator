@@ -289,7 +289,12 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
 
   useEffect(() => {
     let cancelled = false;
-    const fileId = sel?.source_file_id || sel?.linked_item?.source_file_id || null;
+    // Fallback chain: explicit issue file → linked estimate item file → first
+    // project file. The last fallback prevents the "Drawing source is missing"
+    // dead-end when an issue was created without a file id but the project
+    // clearly has drawings (the locator still carries the page number).
+    const fallbackFileId = state?.files?.[0]?.id || null;
+    const fileId = sel?.source_file_id || sel?.linked_item?.source_file_id || fallbackFileId;
     if (!fileId) {
       setPreviewUrl(null); setPreviewKind(null); setPdfImg(null);
       setPdfPageCount(1); setPreviewName("");
@@ -335,7 +340,7 @@ export default function QAStage({ projectId, state, goToStage }: StageProps) {
     // Intentionally only depend on the source file id — switching between
     // issues that share the same drawing must NOT reload the PDF.
      
-  }, [sel?.source_file_id, sel?.linked_item?.source_file_id]);
+  }, [sel?.source_file_id, sel?.linked_item?.source_file_id, state?.files?.[0]?.id]);
 
   useEffect(() => {
     if (previewKind !== "pdf" || !previewUrl) return;
