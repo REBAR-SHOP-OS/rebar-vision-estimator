@@ -6,7 +6,7 @@ import { colorForSegmentType, inferSegmentType } from "@/lib/segment-type";
 import { detectRegions, hueDistance, parseHslHue, type Region } from "@/lib/region-segmentation";
 import { detectPageLabels, markBucket, type LabelHit } from "@/lib/ocr-page-labels";
 import { createManualShapePolygon, type ManualShape } from "@/lib/takeoff-manual-shapes";
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Circle, Eye, EyeOff, Hand, Layers, Maximize2, Minus, Pencil, Plus, Sparkles, Square, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Circle, Eye, EyeOff, Hand, Layers, Maximize2, Minus, Pencil, Plus, Redo2, Sparkles, Square, Trash2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 
 /** A bucket / segment the canvas can paint a layer for. */
@@ -64,6 +64,12 @@ export default function TakeoffCanvas({ projectId, layers, filePath, fileName, e
   const [tool, setTool] = useState<Tool>("pan");
   const [draft, setDraft] = useState<Array<[number, number]>>([]);
   const [polygons, setPolygons] = useState<ManualPolygon[]>([]);
+  // Undo / redo history of overlay edits in the current session.
+  type HistoryOp =
+    | { kind: "add"; id: string; snapshot: Omit<ManualPolygon, "id"> }
+    | { kind: "erase"; snapshot: ManualPolygon };
+  const [undoStack, setUndoStack] = useState<HistoryOp[]>([]);
+  const [redoStack, setRedoStack] = useState<HistoryOp[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [regions, setRegions] = useState<Region[]>([]);
   const regionCacheRef = useRef<Map<string, Region[]>>(new Map());
