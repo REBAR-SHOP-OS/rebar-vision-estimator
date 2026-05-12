@@ -159,7 +159,7 @@ export default function WorkflowShell({ projectId, project }: Props) {
         {/* Body */}
         <div className="flex-1 min-h-0 overflow-auto" style={{ background: "hsl(var(--background))" }}>
           <div className="h-full min-w-[1200px]">
-            <StageBody />
+            {stageBody}
           </div>
         </div>
 
