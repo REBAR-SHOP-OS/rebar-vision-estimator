@@ -1,6 +1,29 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createCorsHeaders, createJsonHeaders } from "../_shared/cors.ts";
 
+function normalizeBaseUrl(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/\/+$/, "");
+}
+
+function resolvePublicAppUrl(req: Request) {
+  const candidates = [
+    Deno.env.get("PUBLIC_APP_URL"),
+    Deno.env.get("ALLOWED_ORIGIN"),
+    req.headers.get("origin"),
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeBaseUrl(candidate);
+    if (normalized && /^https?:\/\//i.test(normalized)) {
+      return normalized;
+    }
+  }
+
+  return "https://rebar-vision-estimator.lovable.app";
+}
+
 Deno.serve(async (req) => {
   const corsHeaders = createCorsHeaders(req);
   const jsonHeaders = createJsonHeaders(req);
@@ -90,7 +113,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const shareUrl = `https://rebar-vision-estimator.lovable.app/review/${share_token}`;
+    const shareUrl = `${resolvePublicAppUrl(req)}/review/${share_token}`;
 
     try {
       const totalWeight = review_data?.total_weight_lbs
