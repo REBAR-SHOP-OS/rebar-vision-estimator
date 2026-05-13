@@ -31,6 +31,23 @@ const ReviewPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
+  const updateShareStatus = async (nextStatus: "viewed" | "commented") => {
+    if (!token) return null;
+
+    const { data, error } = await reviewClient.rpc("update_review_share_status", {
+      p_share_token: token,
+      p_next_status: nextStatus,
+    });
+
+    if (error) throw error;
+
+    if (data) {
+      setShare(data);
+    }
+
+    return data;
+  };
+
   useEffect(() => {
     if (token) loadShareData();
   }, [token, reviewClient]);
@@ -50,19 +67,20 @@ const ReviewPage: React.FC = () => {
         return;
       }
 
-      setShare(shareData);
-
+      let activeShare = shareData;
       if (shareData.status === "pending") {
-        await reviewClient
-          .from("review_shares")
-          .update({ status: "viewed" })
-          .eq("id", shareData.id);
+        const viewedShare = await updateShareStatus("viewed");
+        if (viewedShare) {
+          activeShare = viewedShare;
+        }
+      } else {
+        setShare(shareData);
       }
 
       const { data: commentsData } = await reviewClient
         .from("review_comments")
         .select("*")
-        .eq("share_id", shareData.id)
+        .eq("share_id", activeShare.id)
         .order("created_at", { ascending: true });
 
       setComments(commentsData || []);
@@ -88,10 +106,7 @@ const ReviewPage: React.FC = () => {
 
       if (insertErr) throw insertErr;
 
-      await reviewClient
-        .from("review_shares")
-        .update({ status: "commented" })
-        .eq("id", share.id);
+      await updateShareStatus("commented");
 
       setSubmitted(true);
       setCommentText("");
