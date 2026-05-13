@@ -12,6 +12,12 @@ import ReviewReport from "@/components/review/ReviewReport";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
+function isExpired(expiresAt: string | null | undefined) {
+  if (!expiresAt) return false;
+  const ts = new Date(expiresAt).getTime();
+  return Number.isFinite(ts) && ts <= Date.now();
+}
+
 const ReviewPage: React.FC = () => {
   const { token } = useParams<{ token: string }>();
   const reviewClient = useMemo(() => createClient(supabaseUrl, supabaseAnonKey, {
@@ -44,7 +50,7 @@ const ReviewPage: React.FC = () => {
         .eq("share_token", token)
         .single();
 
-      if (shareErr || !shareData) {
+      if (shareErr || !shareData || isExpired(shareData.expires_at)) {
         setError("This review link is invalid or has expired.");
         setLoading(false);
         return;
