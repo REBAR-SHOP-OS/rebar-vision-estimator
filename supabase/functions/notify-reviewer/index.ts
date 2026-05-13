@@ -1,11 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { createCorsHeaders, createJsonHeaders } from "../_shared/cors.ts";
 
 Deno.serve(async (req) => {
+  const corsHeaders = createCorsHeaders(req);
+  const jsonHeaders = createJsonHeaders(req);
+
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -25,7 +24,7 @@ Deno.serve(async (req) => {
     if (!recipient_email || !notification_type) {
       return new Response(
         JSON.stringify({ error: "recipient_email and notification_type are required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        { status: 400, headers: jsonHeaders },
       );
     }
 
@@ -35,7 +34,7 @@ Deno.serve(async (req) => {
     if (authHeader !== `Bearer ${supabaseKey}`) {
       return new Response(
         JSON.stringify({ error: "Forbidden" }),
-        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        { status: 403, headers: jsonHeaders },
       );
     }
 
@@ -138,13 +137,13 @@ Deno.serve(async (req) => {
 
     return new Response(
       JSON.stringify({ success: true, results }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { headers: jsonHeaders },
     );
   } catch (err) {
     console.error("notify-reviewer error:", err);
     return new Response(
       JSON.stringify({ error: (err as Error).message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { status: 500, headers: jsonHeaders },
     );
   }
 });
