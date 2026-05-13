@@ -111,6 +111,7 @@ Edge functions live in `supabase/functions/`. Shared utilities are in `supabase/
 | `GOOGLE_VISION_SA_KEY_V2` | Google Cloud service-account JSON for OCR |
 | `LOVABLE_API_KEY` | Lovable AI Gateway key for LLM estimation |
 | `ALLOWED_ORIGIN` | Restrict CORS to your production URL (optional, defaults to `*`) |
+| `PUBLIC_APP_URL` | Canonical public app URL used in review-share links |
 | `ODOO_URL` | Odoo instance URL (optional) |
 | `ODOO_DATABASE` | Odoo database name (optional) |
 | `ODOO_USERNAME` | Odoo login user (optional) |
